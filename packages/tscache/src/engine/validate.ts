@@ -1,0 +1,119 @@
+import { ConfigError } from "../errors";
+import {
+  type CacheConfig,
+  DTYPES,
+  type Dtype,
+  type ResolvedCacheConfig,
+} from "../types";
+
+export const DEFAULT_GAP_SPLIT_K = 4;
+export const DEFAULT_SEGMENT_SLOT_CAP = 32_768;
+
+function fail(message: string): never {
+  throw new ConfigError(message);
+}
+
+function requirePositiveSafeInteger(value: unknown, what: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    fail(`${what} must be a positive integer, got ${String(value)}`);
+  }
+  return value;
+}
+
+function validateId(id: unknown): string {
+  if (typeof id !== "string" || id.length === 0) {
+    fail(`id must be a non-empty string, got ${String(id)}`);
+  }
+  return id;
+}
+
+function validateAlignmentOffset(offset: unknown, interval: number): number {
+  if (offset === undefined) return 0;
+  if (
+    typeof offset !== "number" ||
+    !Number.isSafeInteger(offset) ||
+    offset < 0 ||
+    offset >= interval
+  ) {
+    fail(
+      `alignmentOffset must be an integer in [0, interval), got ${String(offset)} for interval ${interval}`,
+    );
+  }
+  return offset;
+}
+
+function validateFields(
+  fields: CacheConfig["fields"],
+): Readonly<Record<string, Dtype>> {
+  if (fields === undefined || fields === null || typeof fields !== "object") {
+    fail("fields must be an object mapping field names to dtypes");
+  }
+  const names = Object.keys(fields);
+  if (names.length === 0) fail("fields must declare at least one field");
+  for (const name of names) {
+    if (name.length === 0) fail("field names must be non-empty strings");
+    const dtype = fields[name];
+    if (!DTYPES.includes(dtype as Dtype)) {
+      fail(
+        `field "${name}" has unknown dtype ${String(dtype)}; expected one of ${DTYPES.join(", ")}`,
+      );
+    }
+  }
+  return Object.freeze({ ...fields });
+}
+
+function validateVersion(version: unknown): string | undefined {
+  if (version === undefined) return undefined;
+  if (typeof version !== "string" || version.length === 0) {
+    fail(`version must be a non-empty string when set, got ${String(version)}`);
+  }
+  return version;
+}
+
+function validateFinalizedUntil(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    fail(
+      `finalizedUntil must be a finite number when set, got ${String(value)}`,
+    );
+  }
+  return value;
+}
+
+function validateWarnFlag(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") {
+    fail(`warnOnOverlapDiff must be a boolean when set, got ${String(value)}`);
+  }
+  return value;
+}
+
+/**
+ * Validates a consumer CacheConfig and applies documented defaults.
+ * Throws ConfigError naming the first offending field. The result is frozen
+ * and holds a defensive copy of `fields`.
+ */
+export function resolveCacheConfig(config: CacheConfig): ResolvedCacheConfig {
+  const id = validateId(config.id);
+  const interval = requirePositiveSafeInteger(config.interval, "interval");
+  const version = validateVersion(config.version);
+  const finalizedUntil = validateFinalizedUntil(config.finalizedUntil);
+  const resolved: ResolvedCacheConfig = {
+    id,
+    interval,
+    alignmentOffset: validateAlignmentOffset(config.alignmentOffset, interval),
+    fields: validateFields(config.fields),
+    gapSplitK:
+      config.gapSplitK === undefined
+        ? DEFAULT_GAP_SPLIT_K
+        : requirePositiveSafeInteger(config.gapSplitK, "gapSplitK"),
+    segmentSlotCap:
+      config.segmentSlotCap === undefined
+        ? DEFAULT_SEGMENT_SLOT_CAP
+        : requirePositiveSafeInteger(config.segmentSlotCap, "segmentSlotCap"),
+    warnOnOverlapDiff: validateWarnFlag(config.warnOnOverlapDiff),
+    ...(version !== undefined ? { version } : {}),
+    ...(finalizedUntil !== undefined ? { finalizedUntil } : {}),
+  };
+  return Object.freeze(resolved);
+}
