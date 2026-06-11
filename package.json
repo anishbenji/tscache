@@ -9,13 +9,17 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "typecheck": "tsc -p packages/tscache"
+    "typecheck": "tsc -p packages/tscache",
+    "build": "bun run --filter tscache build"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.3",
     "@biomejs/biome": "^2.4.16",
     "@commitlint/cli": "^21.0.2",
     "@commitlint/config-conventional": "^21.0.2",
     "lefthook": "^2.1.9",
+    "publint": "^0.3.21",
+    "tsdown": "^0.22.2",
     "typescript": "^6.0.3"
   }
 }

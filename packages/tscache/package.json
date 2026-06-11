@@ -6,14 +6,29 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/entries/index.ts",
-    "./worker": "./src/entries/worker.ts",
-    "./engine": "./src/entries/engine.ts",
-    "./fetcher": "./src/entries/fetcher.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "default": "./dist/worker.js"
+    },
+    "./engine": {
+      "types": "./dist/engine.d.ts",
+      "default": "./dist/engine.js"
+    },
+    "./fetcher": {
+      "types": "./dist/fetcher.d.ts",
+      "default": "./dist/fetcher.js"
+    }
   },
   "files": [
     "dist"
   ],
+  "scripts": {
+    "build": "tsdown"
+  },
   "keywords": [
     "time-series",
     "cache",
