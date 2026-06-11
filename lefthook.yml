@@ -1,0 +1,29 @@
+# Hook staging per starter prompt §4: pre-commit stays sub-second;
+# heavyweight checks run pre-push; `bun run ci` is the full superset.
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome
+      run: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true
+    - name: gitleaks
+      run: gitleaks git --staged --pre-commit --redact
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: bunx commitlint --edit {1}
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: typecheck
+      run: bun run typecheck
+    - name: biome-full
+      run: bunx biome check .
+    - name: knip
+      run: bunx knip
+    - name: fallow
+      run: fallow audit
+    - name: tests
+      run: bunx vitest run --passWithNoTests
