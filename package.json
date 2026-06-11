@@ -1,0 +1,17 @@
+{
+  "name": "tscache-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "typecheck": "tsc -p packages/tscache"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

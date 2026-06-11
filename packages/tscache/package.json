@@ -1,0 +1,24 @@
+{
+  "name": "tscache",
+  "version": "0.0.0",
+  "description": "Browser time-series cache: SharedWorker multi-tab sharing, worker-side fetch orchestration, coverage tracking with real-gap awareness",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/entries/index.ts",
+    "./worker": "./src/entries/worker.ts",
+    "./engine": "./src/entries/engine.ts",
+    "./fetcher": "./src/entries/fetcher.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "time-series",
+    "cache",
+    "sharedworker",
+    "ohlcv",
+    "charts"
+  ]
+}
