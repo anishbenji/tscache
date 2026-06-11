@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [],
+      "project": []
+    },
+    "packages/tscache": {
+      "entry": ["src/entries/*.ts"],
+      "project": ["src/**/*.ts"]
+    }
+  },
+  // Consumed by tsdown's attw integration, not imported anywhere.
+  "ignoreDependencies": ["@arethetypeswrong/cli"]
+}
