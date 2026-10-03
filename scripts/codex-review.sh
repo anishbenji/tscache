@@ -88,7 +88,17 @@ if $print_only; then
 fi
 
 echo "codex $kind $round (effort $effort) → $out" >&2
-codex exec -s read-only -C "$root" -c "model_reasoning_effort=\"$effort\"" \
-  -o "$out" - <<<"$prompt" >"$out_dir/$kind-$round.log" 2>&1
+# A model-capacity error is transient, not a review result: retry it.
+for attempt in 1 2 3; do
+  set +e
+  codex exec -s read-only -C "$root" -c "model_reasoning_effort=\"$effort\"" \
+    -o "$out" - <<<"$prompt" >"$out_dir/$kind-$round.log" 2>&1
+  status=$?
+  set -e
+  grep -q 'at capacity' "$out_dir/$kind-$round.log" || break
+  echo "model at capacity (attempt $attempt); retrying in 60s" >&2
+  sleep 60
+done
+[[ $status -eq 0 ]] || { echo "codex exited $status; see $out_dir/$kind-$round.log" >&2; exit "$status"; }
 grep -m1 '^session id:' "$out_dir/$kind-$round.log" >&2 || true
 echo "$out"
