@@ -41,6 +41,8 @@ Do steps 1–2 yourself; T3 Code (a Claude thread) can do the rest with your app
 | 3 | Claude thread | Review loop — prompt E (below) | ✓ | ✓ |
 | 4 | You | Read `docs/reviews/step-NN.md`, run `bun run ci`, `git switch main && git merge --no-ff feat/NN-slug` | ✓ | ✓ |
 
+Keep tooling off step branches. Changes to hooks, scripts, agent configuration or this workflow go on their own `chore/NN-slug` branch from `main` with their own review loop, so a step review covers only the step's code.
+
 ## Review loop
 
 The reviewer reads only committed history (`git diff main...feat/NN-slug`), so commit before each round.
@@ -49,8 +51,10 @@ The reviewer reads only committed history (`git diff main...feat/NN-slug`), so c
 2. **Adversarial review**, for steps in the schedule below: `scripts/codex-review.sh NN --adversarial "<focus>"` (effort xhigh). Output: `.reviews/step-NN/adversarial-K.md`.
 3. **Validate every finding** before acting on it: reproduce it with a failing test, or confirm it by reading the code and the cited doc section. A finding that does not survive validation is rejected with the evidence.
 4. **Triage.** Accepted findings are fixed in small commits, test first where behaviour changes. Rejections take one sentence citing the doc section. "Decision concerns" are never acted on — they go to the user. Record the round in `docs/reviews/step-NN.md` and commit it as `docs(review): step NN round K triage`.
-5. **Re-review.** Run the script again. Later rounds read the triage file, check that accepted fixes landed, and may contest a rejection with a reason.
-6. **Settled** when a round reports no new finding and re-raises nothing, or only re-raises rejections that the triage answers with a doc citation. Stop after four rounds without settling and escalate to the user.
+5. **Re-review** when the round had a P0 or P1, accepted or contested. Run the script again. Later rounds read the triage file, check that accepted fixes landed, and may contest a rejection with a reason.
+6. **Settled** when a round reports no P0 or P1, new or re-raised. That round's P2s and nits are still triaged (fixed or rejected) but do not trigger another round. A re-raised rejection that the triage answers with a doc citation does not block settling.
+7. **Convergence check.** If the same area draws findings in two consecutive rounds, the fixes are not converging: stop patching, then redesign the area or escalate to the user, and record which in the triage. More rounds on a design that keeps leaking only produce more patches.
+8. **Cap.** Stop after four rounds without settling and escalate to the user.
 
 The Claude thread runs the loop without stopping between rounds, then reports the final triage to the user. Each round uses a fresh Codex session, so the reviewer carries no context from writing the contract tests or from earlier rounds beyond the triage file.
 

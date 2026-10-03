@@ -17,7 +17,7 @@ The per-step pipeline, the review loop, copy-paste prompts and the adversarial-r
 
 ## Process
 
-- **Commit plan:** starter §11, steps ①–⑭. One branch per step (`feat/NN-slug`, or `chore/NN-slug` for tooling) cut from `main`; the user merges after review.
+- **Commit plan:** starter §11, steps ①–⑭. One branch per step (`feat/NN-slug`, or `chore/NN-slug` for tooling) cut from `main`; the user merges after review. Tooling and workflow changes go on their own `chore/` branch, never on a step branch.
 - **TDD (hybrid, user-confirmed 2026-06-11; contract-test authorship added 2026-10-03):** strict test-first for engine logic (`coverage`, `segment/`, `engine/` — steps ③–⑧). For those steps the failing tests are written by Codex from the architecture doc and Claude implements against them. Pragmatic tests-with-commit for scaffolding, RPC wiring and examples.
 - **Commits:** small Conventional Commits; the repo is green after every commit (`bun run ci`). Contract tests land in the same commit as the code that makes them pass. Local-only — no GitHub remote, no Actions.
 - **Never bypass git hooks** (`--no-verify`, `LEFTHOOK=0`). If a hook fails, fix the cause.
