@@ -220,7 +220,8 @@ const BUN_TEST = "never run 'bun test' — Vitest runs under Node. Use 'bun run 
 const HOOK_BYPASS = "git hooks must not be bypassed. Fix the failing check instead.";
 
 // Text triggers, used where argv cannot be resolved (dynamic or unparseable).
-const BUN_TEST_TEXT = /\bbun\b[\s\S]*\btest\b/;
+// Order-independent: `echo test | xargs bun` names the subcommand first.
+const hasBunTest = (src: string) => /\bbun\b/.test(src) && /\btest\b/.test(src);
 const HOOK_BYPASS_TEXT = /--no-v|hookspath|lefthook(=|_exclude|_skip|\s+uninstall)/i;
 const SHORT_N_TEXT = /(^|[\s='"])-[a-zA-Z]*n\b/;
 
@@ -326,10 +327,13 @@ function bunSubcommand(args: string[]): string | undefined {
   return args[k];
 }
 
-/** Text-trigger fallback for input whose argv the guard cannot resolve. */
-function checkText(src: string): string | null {
-  if (BUN_TEST_TEXT.test(src)) return BUN_TEST;
-  if (HOOK_BYPASS_TEXT.test(src)) return HOOK_BYPASS;
+/**
+ * Text-trigger fallback for input whose argv the guard cannot resolve.
+ * Unparseable input is broader still: any mention of Lefthook blocks.
+ */
+function checkText(src: string, unparseable = false): string | null {
+  if (hasBunTest(src)) return BUN_TEST;
+  if (HOOK_BYPASS_TEXT.test(src) || (unparseable && /lefthook/i.test(src))) return HOOK_BYPASS;
   if (/\bgit\b/.test(src) && SHORT_N_TEXT.test(src)) return HOOK_BYPASS;
   return null;
 }
@@ -374,7 +378,7 @@ function check(argv: string[], src: string): string | null {
   if (isDynamic(words[0] as string)) return checkText(src);
   if (cmd === "bun") {
     if (bunSubcommand(args) === "test") return BUN_TEST;
-    if ((stdinArgs || args.some(isDynamic)) && BUN_TEST_TEXT.test(src)) return BUN_TEST;
+    if ((stdinArgs || args.some(isDynamic)) && hasBunTest(src)) return BUN_TEST;
     return null;
   }
   if (cmd === "git") return checkGit(args, src, stdinArgs);
@@ -404,7 +408,7 @@ function checkSource(src: string, root: string = src): string | null {
   try {
     commands = parse(src);
   } catch {
-    return checkText(root);
+    return checkText(root, true);
   }
   for (const argv of commands) {
     const hit = check(argv, root);

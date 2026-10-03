@@ -130,6 +130,10 @@ expect block "printf -v X %s $hp=/dev/null; git -c \"\$X\" commit -m x"
 expect block "CMD='bun test'; sh -c \"\$CMD\""
 expect block "CMD='git commit -n -m x'; eval \"\$CMD\""
 expect block "CMD='bun test'; env -S \"\$CMD\""
+expect block "echo test | xargs bun"
+expect block "X=test; bun \$X"
+expect block "\$(echo test) | xargs bun"
+expect block $'lefthook run pre-commit --no-tty\necho "'
 expect allow "git commit -m \"\$MSG\""
 expect allow $'git commit -m "$(cat <<\'EOF\'\nfix: stop lefthook from skipping bun test; see -n note\nEOF\n)"'
 expect allow "git push origin \"\$BRANCH\""
