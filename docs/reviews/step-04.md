@@ -17,7 +17,7 @@ Host `bun run ci` passed (404 tests).
 
 None. Codex's `dense-segment.test.ts` and `segment-payload.test.ts` are unchanged. Implementer tests were added alongside: `segment-payload.decode.test.ts` (decoder cases the contract left open) and `segment-field-names.test.ts` (prototype-named fields).
 
-Spec ambiguities Codex reported while writing the tests. Each has an implemented choice and a test, pending the user's confirmation:
+Spec ambiguities Codex reported while writing the tests. Each has an implemented choice and a test, and is now part of §4.2 (user-confirmed 2026-10-04):
 
 - Payload fields in a different order from the schema: accepted; re-encoding restores schema order.
 - Non-zero values under absent mask bits: ignored; re-encoding writes zeros.
