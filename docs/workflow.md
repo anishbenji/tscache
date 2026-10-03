@@ -18,10 +18,16 @@ The primary driver is **T3 Code**, with one Claude thread and separate Codex thr
 
 ## One-time setup
 
-1. **Trust the project in Codex** so `.codex/config.toml` loads: accept the trust prompt the first time Codex opens this repository. Untrusted projects ignore the project `.codex/` directory.
-2. **Git hooks** are already installed by Lefthook. If they go missing: `bunx lefthook install`.
-3. **T3 Code:** check that Codex threads offer GPT-6.1 Sol, and that Claude threads pick up `CLAUDE.md` (ask the thread to quote the first rule in `AGENTS.md`). If T3 does not load project settings, the guard hook will not run there; the rule still applies through `AGENTS.md`.
-4. **Claude Code CLI (fallback only):** on first launch in this repository, accept the prompt to install the `openai-codex` marketplace and `codex` plugin, then run `/codex:setup`.
+Do steps 1–2 yourself; T3 Code (a Claude thread) can do the rest with your approval.
+
+1. **Install the Codex CLI on your `PATH`.** T3 Code and ChatGPT.app each bundle a private copy that the terminal and the Claude Code plugin cannot see. Use `brew install --cask codex` (native binary) or `bun add -g @openai/codex` (Node launcher; needs `node` on `PATH`). Check with `codex --version`; sign in with ChatGPT on first run if asked.
+2. **Trust the project in Codex** so `.codex/config.toml` loads. Untrusted projects ignore the project `.codex/` directory, and T3 Code may never show the prompt. In a terminal: `cd ~/code/tscache && codex`, choose **Trust and continue**, then quit. Codex records this in `~/.codex/config.toml` as `[projects."<repo path>"]` with `trust_level = "trusted"`; check with `grep -A1 'code/tscache' ~/.codex/config.toml`.
+3. **Toolchain:** Node ≥ 22.12, Bun and `gitleaks` (`brew install gitleaks`) must be on `PATH` — Lefthook and `scripts/ci.sh` call `gitleaks` directly. Fallow is a pinned devDependency (`bun run fallow`), installed by `bun install`.
+4. **Git hooks** are installed by Lefthook. If they go missing: `bunx lefthook install`. Exercise the pre-push set without pushing: `bunx lefthook run pre-push`.
+5. **Codex plugin for the Claude Code CLI (fallback only):** `claude plugin marketplace add openai/codex-plugin-cc`, then `claude plugin install codex@openai-codex`; confirm with `claude plugin list`, then run `/codex:setup` once inside Claude Code.
+6. **Before step ⑨** (first browser tests): `bunx playwright install chromium`.
+7. **T3 Code:** open threads at the repository root. Check that Codex threads offer GPT-6.1 Sol and that Claude threads load the project settings — asking a Claude thread to run `bun test --help` must be blocked. If it runs, T3 is not loading `.claude/settings.json`; the rule still applies through `AGENTS.md`.
+8. **Final check:** `bun run ci` passes.
 
 ## Per-step loop
 
