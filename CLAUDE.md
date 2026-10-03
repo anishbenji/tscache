@@ -1,22 +1,7 @@
-# tscache — Working Rules
+@AGENTS.md
 
-Read `starter-prompt.md` (normative design register) and `docs/architecture.md` (approved API surface) before any work. Decisions in starter §3 are **locked — never relitigate silently**. Open/new decisions go to the user with alternatives + pros/cons.
+## Claude-specific notes
 
-## Process
-
-- **No implementation without sign-off.** Architecture/API changes are reviewed first. As of 2026-06-11 the architecture doc is awaiting approval; implementation (starter §11 commits ①–⑭) is gated on it.
-- **TDD (hybrid, user-confirmed):** strict test-first for engine logic (`coverage`, `segment/`, `engine/`); pragmatic tests-with-commit for scaffolding, RPC wiring, examples.
-- **Commits:** small, Conventional Commits, repo green after every commit (`bun run ci` once it exists). Local-only — no GitHub remote, no Actions.
-- **Docs:** all repo artifacts (docs, ADRs, README, TSDoc) in normal professional prose regardless of chat output mode.
-- **code-review-graph:** build the graph at commit ② (first real source), refresh after each commit step, graph-first exploration thereafter.
-
-## Toolchain hard rules
-
-- **Never `bun test`** — Vitest runs under Node (≥22.12). Bun for everything else (workspaces, scripts).
-- Build: tsdown (ESM-only, `isolatedDeclarations: true`). **tsup is EOL — do not use.** `tsc --noEmit` is the authoritative type check; tsgo optional pre-push only.
-- Hook staging: pre-commit = Biome (staged) + gitleaks + commitlint (sub-second); pre-push = tsc + full Biome + Knip + `fallow audit` + Vitest; `bun run ci` = superset incl. build + publint/attw + Playwright + bench smoke.
-- Multi-tab tests: standalone Playwright, one `BrowserContext` + multiple pages (Vitest browser mode cannot share a SharedWorker across tabs).
-
-## Resolved decisions (user-confirmed 2026-06-11)
-
-Name `tscache` unscoped, MIT · `interval` **required, no default** (deviation from starter §9.2 proposal, deliberate) · `alignmentOffset` included (default 0) · K=4, slot cap 32 768 · git-cliff · ESM-only · examples mapping per starter §7 · overlap warning = event + dev console. New decision points **N1–N8 all resolved 2026-06-11** — register in `docs/architecture.md` §8. Highlights: ranges inclusive both ends, unaligned get/invalidate snap outward, internal math on slot indices; three-scope events (client/cache/request, requestId `clientId:seq`); `put()` returns warnings; `./fetcher` subpath; auth error detected by marker `code === 'tscache:auth-invalid'`, never instanceof.
+- `.claude/hooks/guard-bash.sh` blocks `bun test` and git-hook bypasses. If it blocks a command, use the correct command; do not work around it.
+- **Claude Code CLI only:** the Codex plugin is enabled for this repo. Use `/codex:review --base main --background`, `/codex:adversarial-review --base main --background <focus>`, then `/codex:status` and `/codex:result`. Never enable the review gate (`/codex:setup --enable-review-gate`) — it loops and drains usage. In T3 Code the plugin is not used; the reviewer is a separate Codex thread (see `docs/workflow.md`).
+- When triaging a Codex review, follow `docs/reviews/README.md` and escalate any "Decision concerns" to the user instead of acting on them.

@@ -1,0 +1,66 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun run *)",
+      "Bash(bunx vitest *)",
+      "Bash(bunx biome *)",
+      "Bash(bunx tsc *)",
+      "Bash(bunx knip*)",
+      "Bash(bunx playwright test*)",
+      "Bash(fallow *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git branch --show-current)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git switch *)"
+    ],
+    "ask": [
+      "Bash(bun add *)",
+      "Bash(bun remove *)",
+      "Bash(bun install*)",
+      "Bash(bun update*)",
+      "Bash(git merge *)",
+      "Bash(git rebase *)",
+      "Bash(git reset *)",
+      "Bash(git restore *)",
+      "Bash(git checkout *)",
+      "Bash(git clean *)",
+      "Bash(git branch -D *)",
+      "Bash(git push*)",
+      "Bash(rm -rf *)"
+    ],
+    "deny": [
+      "Bash(bun test)",
+      "Bash(bun test *)",
+      "Read(./.env)",
+      "Read(./.env.*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-bash.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "extraKnownMarketplaces": {
+    "openai-codex": {
+      "source": {
+        "source": "github",
+        "repo": "openai/codex-plugin-cc"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "codex@openai-codex": true
+  }
+}

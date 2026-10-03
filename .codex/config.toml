@@ -1,0 +1,5 @@
+# Codex defaults for this repo (reviewer and contract-test author).
+# Codex loads project-level config only when it trusts this project.
+# Raise effort to "xhigh" for adversarial reviews (docs/workflow.md).
+model = "gpt-6.1-sol"
+model_reasoning_effort = "high"
