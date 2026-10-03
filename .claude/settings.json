@@ -7,7 +7,7 @@
       "Bash(bunx tsc *)",
       "Bash(bunx knip*)",
       "Bash(bunx playwright test*)",
-      "Bash(fallow *)",
+      "Bash(bunx fallow *)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",

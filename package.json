@@ -14,6 +14,7 @@
     "test": "vitest run --passWithNoTests",
     "build": "bun run --filter tscache build",
     "knip": "knip",
+    "fallow": "fallow audit",
     "changelog": "git-cliff -o CHANGELOG.md",
     "ci": "bash scripts/ci.sh"
   },
@@ -23,6 +24,7 @@
     "@commitlint/cli": "^21.0.2",
     "@commitlint/config-conventional": "^21.0.2",
     "@playwright/test": "^1.60.0",
+    "fallow": "^3.31.0",
     "git-cliff": "^2.13.1",
     "knip": "^6.16.1",
     "lefthook": "^2.1.9",
