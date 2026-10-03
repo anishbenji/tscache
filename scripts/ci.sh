@@ -5,6 +5,10 @@ set -euo pipefail
 
 bun install --frozen-lockfile
 bash .claude/hooks/guard-bash.test.sh
+# Backstop for skipped git hooks: re-run the commit-time checks over every
+# commit on the branch, however a hook was bypassed.
+gitleaks git --log-opts="main..HEAD" --redact --no-banner .
+bunx commitlint --from main --to HEAD
 bunx biome ci .
 bunx tsc -p packages/tscache
 bunx knip
