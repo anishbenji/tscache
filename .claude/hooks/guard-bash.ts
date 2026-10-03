@@ -260,6 +260,17 @@ const GIT_LONG_WITH_VALUE = new Set([
 // word elsewhere is a value: `git config core.hooksPath list` sets it.
 const GIT_CONFIG_READ_FLAGS = new Set(["--get", "--get-all", "--get-regexp", "-l", "--list", "--unset", "--unset-all"]);
 const GIT_CONFIG_READ_SUBCOMMANDS = new Set(["get", "list", "unset"]);
+const GIT_CONFIG_OPTS_WITH_VALUE = new Set(["-f", "--file", "--blob", "--type", "--default", "--comment", "--value"]);
+
+/** First `git config` operand, skipping options and their values. */
+function firstConfigOperand(rest: string[]): string | undefined {
+  for (let j = 0; j < rest.length; j++) {
+    const a = rest[j] as string;
+    if (!a.startsWith("-")) return a;
+    if (GIT_CONFIG_OPTS_WITH_VALUE.has(a)) j++;
+  }
+  return undefined;
+}
 
 function checkGit(args: string[]): string | null {
   let k = 0;
@@ -273,7 +284,7 @@ function checkGit(args: string[]): string | null {
   const rest = args.slice(k + 1);
   // `git config core.hooksPath <path>` sets it; reads and unsets are fine.
   if (sub === "config" && rest.some((a) => HOOKS_PATH.test(a))) {
-    const firstOperand = rest.find((a) => !a.startsWith("-"));
+    const firstOperand = firstConfigOperand(rest);
     const reads =
       rest.some((a) => GIT_CONFIG_READ_FLAGS.has(a)) ||
       (firstOperand !== undefined && GIT_CONFIG_READ_SUBCOMMANDS.has(firstOperand));
@@ -325,8 +336,7 @@ function checkBun(args: string[]): string | null {
   if (sub === "test") return BUN_TEST;
   if (sub === "x" || sub === "run" || sub === "exec") {
     const rest = args.slice(k + 1);
-    while (rest[0]?.startsWith("-")) rest.shift();
-    return check(rest);
+    return check(rest.slice(bunSubcommand(rest)));
   }
   return null;
 }
