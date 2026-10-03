@@ -158,3 +158,19 @@ Fifteen P1 findings: nine fail-opens and six false positives. This was the sixth
 | A1-13 | P1 | False positive: `git branch --no-verbose`, `git config --get core.hooksPath` | accepted | Only `--no-veri…` counts, and config reads and unsets pass (81a4cc1). |
 | A1-14 | P1 | False positive: search-string assignment naming `core.hooksPath` | accepted | Only `GIT_CONFIG*` assignments are checked (81a4cc1). |
 | A1-15 | P1 | False positive: `command -v` treated as execution | accepted | Fixed in 81a4cc1. |
+
+### Round A2 — reviewer verdict: merge after fixes
+
+First round on the literal-only design (81a4cc1), scoped to that threat model. Host `bun run ci` passed. The reviewer confirmed A1's out-of-scope rejections justified. All nine findings were in scope and reproduced; all fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| A2-1 | P1 | CI backstop: gitleaks skips merge diffs, so a secret added in a merge resolution escapes | accepted | Confirmed: `git log -p` over the step merge shows 66 diffs without `-m`, 94 with. Fixed in 88cf228. |
+| A2-2 | P1 | `LEFTHOOK_BIN=/usr/bin/true` makes every hook succeed | accepted | Any `LEFTHOOK_*` variable other than the output ones now blocks (1974a61). |
+| A2-3 | P1 | Heredoc interpreter behind an assignment or wrapper (`CI=1 bash <<EOF`) | accepted | Interpreter resolved with the same prefix walk as every command (1974a61). |
+| A2-4 | P1 | `env -S` quoting: bypass and false positive | accepted | The value is split with shell-like quoting (1974a61). |
+| A2-5 | P1 | `git config --comment --get core.hooksPath <dir>` writes but passed (re-raises S-11) | accepted | Config classified in one pass; option values are never flags (1974a61). |
+| A2-6 | P1 | `--` before `eval` and `bash -c` bodies hid them | accepted | Terminator consumed (1974a61). |
+| A2-7 | P1 | False positive: clustered `command -vv` (re-raises A1-15) | accepted | Fixed in 1974a61. |
+| A2-8 | P1 | False positive: single-key read `git config core.hooksPath` | accepted | Legacy single-operand form is a read (1974a61). |
+| A2-9 | P1 | False positive: `-c user.note=core.hooksPath` | accepted | `-c` and `--config-env` match the key only (1974a61). |
