@@ -21,12 +21,16 @@ plain=$(printf '%s' "$cmd" | tr -d "\"'\\\\")
 lower=$(printf '%s' "$plain" | tr '[:upper:]' '[:lower:]')
 nl=$'\n'
 
-# `bun test` in command position: start of a line, after a shell operator or
-# backtick, or behind a wrapper (sudo, env, bash -c, ...). Plain mentions in
-# commit messages and docs pass.
+# `bun test` in command position: start of a line, after a shell operator,
+# or behind a wrapper (sudo, env, bash -c, ...). Plain mentions in commit
+# messages and docs pass. Backtick substitution is checked on text with
+# single-quoted spans removed, since the shell runs nothing inside them.
 wrapper="(sudo|env|command|exec|time|nohup|xargs|-c)[[:space:]][^;&|${nl}]*"
-bun_test="(^|[;&|(\`${nl}]|${wrapper})[[:space:]]*([^[:space:];&|]*/)?bun[[:space:]]+test([[:space:];&|)\`]|\$)"
-if [[ $plain =~ $bun_test ]]; then
+bun_word="[[:space:]]*([^[:space:];&|]*/)?bun[[:space:]]+test([[:space:];&|)\`]|\$)"
+bun_test="(^|[;&|(${nl}]|${wrapper})${bun_word}"
+bun_subst="\`${bun_word}"
+outside_single=$(printf '%s' "$cmd" | sed "s/'[^']*'//g" | tr -d '"\\')
+if [[ $plain =~ $bun_test || $outside_single =~ $bun_subst ]]; then
   block "never run 'bun test' — Vitest runs under Node. Use 'bun run test' or 'bunx vitest run'."
 fi
 
