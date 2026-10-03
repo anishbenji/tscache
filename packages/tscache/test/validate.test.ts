@@ -151,10 +151,8 @@ describe("resolveCacheConfig — rejections (ConfigError naming the offender)", 
       /warnOnOverlapDiff/,
     ],
   ])("rejects %s", (_label, overrides, pattern) => {
-    expect(() => resolveCacheConfig(invalid(overrides))).toThrowError(
-      ConfigError,
-    );
-    expect(() => resolveCacheConfig(invalid(overrides))).toThrowError(pattern);
+    expect(() => resolveCacheConfig(invalid(overrides))).toThrow(ConfigError);
+    expect(() => resolveCacheConfig(invalid(overrides))).toThrow(pattern);
   });
 
   it("gapSplitK of 1 and segmentSlotCap of 1 are legal minima", () => {
