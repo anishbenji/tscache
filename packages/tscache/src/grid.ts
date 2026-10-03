@@ -54,9 +54,17 @@ export function slotOf(t: number, g: Grid): number {
   return floorSlot(t, g);
 }
 
-/** Timestamp of a slot. */
+/**
+ * Timestamp of a slot: alignmentOffset + slot * interval.
+ *
+ * For a negative slot the product alone can pass -2^53 before the positive
+ * offset brings the sum back, so it is regrouped as
+ * (slot + 1) * interval + (alignmentOffset - interval): both terms then
+ * share the result's sign and neither exceeds it in magnitude.
+ */
 export function msOf(slot: number, g: Grid): number {
-  return g.alignmentOffset + slot * g.interval;
+  if (slot >= 0) return g.alignmentOffset + slot * g.interval;
+  return (slot + 1) * g.interval + (g.alignmentOffset - g.interval);
 }
 
 /**

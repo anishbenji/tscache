@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAligned, slotOf, snapOut } from "../src/grid";
+import { isAligned, msOf, slotOf, snapOut, toMs } from "../src/grid";
 
 // Implementer tests (not contract tests): exactness near ±2^53, where the
 // literal formula (t - alignmentOffset) % interval leaves exact-integer range.
@@ -15,6 +15,13 @@ describe("grid arithmetic stays exact near ±2^53", () => {
     expect(slotOf(-MAX + 3, grid)).toBe((-MAX + 3 - 2) / 3);
   });
 
+  it("maps a negative slot back to its exact timestamp", () => {
+    const grid = { interval: 3, alignmentOffset: 2 };
+    expect(msOf(slotOf(-MAX, grid), grid)).toBe(-MAX);
+    const enclosing = toMs(snapOut({ start: -MAX, end: -MAX }, grid), grid);
+    expect(enclosing).toEqual({ start: -MAX, end: -MAX });
+  });
+
   it("agrees with BigInt arithmetic across intervals and offsets at both extremes", () => {
     for (const interval of [1, 2, 3, 7, 60_000, 86_400_000]) {
       for (const alignmentOffset of [0, 1, interval - 1]) {
@@ -26,6 +33,8 @@ describe("grid arithmetic stays exact near ±2^53", () => {
             const diff = BigInt(t) - BigInt(alignmentOffset);
             const aligned = diff % BigInt(interval) === 0n;
             expect(isAligned(t, grid)).toBe(aligned);
+            // Round trip: slot * interval alone may leave exact range.
+            if (aligned) expect(msOf(slotOf(t, grid), grid)).toBe(t);
             // floor division on BigInt (which truncates toward zero)
             const q = diff / BigInt(interval);
             const floor = !aligned && diff < 0n ? q - 1n : q;
