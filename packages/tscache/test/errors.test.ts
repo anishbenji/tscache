@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   AUTH_INVALID_CODE,
   AuthInvalidError,
@@ -62,6 +62,13 @@ describe("auth-invalid marker detection (cross-bundle safe)", () => {
   it("AuthInvalidError instances carry the marker code", () => {
     expect(new AuthInvalidError("401").code).toBe(AUTH_INVALID_CODE);
     expect(AUTH_INVALID_CODE).toBe("tscache:auth-invalid");
+  });
+
+  it("types the marker as the literal from architecture §2.6", () => {
+    expectTypeOf(
+      new AuthInvalidError("401").code,
+    ).toEqualTypeOf<"tscache:auth-invalid">();
+    expectTypeOf(AUTH_INVALID_CODE).toEqualTypeOf<"tscache:auth-invalid">();
   });
 
   it("detects by marker, not instanceof — duplicate-class copies still match", () => {

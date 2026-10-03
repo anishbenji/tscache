@@ -70,7 +70,7 @@ export class ProtocolMismatchError extends TscacheError {
 }
 
 /** Marker for cross-bundle auth-failure detection (N6/N8). */
-export const AUTH_INVALID_CODE = "tscache:auth-invalid";
+export const AUTH_INVALID_CODE: "tscache:auth-invalid" = "tscache:auth-invalid";
 
 /**
  * Distinguished auth-failure signal — fetchers THROW this from fetch() (N8).
@@ -78,7 +78,7 @@ export const AUTH_INVALID_CODE = "tscache:auth-invalid";
  * separate bundle and may carry its own copy of the class.
  */
 export class AuthInvalidError extends TscacheError {
-  readonly code: string = AUTH_INVALID_CODE;
+  readonly code: typeof AUTH_INVALID_CODE = AUTH_INVALID_CODE;
 }
 
 /** Cross-bundle-safe check used by the orchestrator on fetcher throws. */
