@@ -45,10 +45,14 @@ function validateAlignmentOffset(offset: unknown, interval: number): number {
   return r < 0 ? r + interval : Math.abs(r);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function validateFields(
   fields: CacheConfig["fields"],
 ): Readonly<Record<string, Dtype>> {
-  if (fields === undefined || fields === null || typeof fields !== "object") {
+  if (!isPlainObject(fields)) {
     fail("fields must be an object mapping field names to dtypes");
   }
   const names = Object.keys(fields);
@@ -97,6 +101,11 @@ function validateWarnFlag(value: unknown): boolean {
  * and holds a defensive copy of `fields`.
  */
 export function resolveCacheConfig(config: CacheConfig): ResolvedCacheConfig {
+  // Untyped callers (plain JS, RPC params) can pass anything; keep the
+  // ConfigError contract (architecture §2.6) instead of a TypeError.
+  if (!isPlainObject(config)) {
+    fail(`config must be an object, got ${String(config)}`);
+  }
   const id = validateId(config.id);
   const interval = requirePositiveSafeInteger(config.interval, "interval");
   const version = validateVersion(config.version);

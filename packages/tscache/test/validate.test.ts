@@ -136,6 +136,7 @@ describe("resolveCacheConfig — rejections (ConfigError naming the offender)", 
     ],
     ["missing fields", { fields: undefined }, /fields/],
     ["empty fields", { fields: {} }, /fields/],
+    ["array fields", { fields: ["f64"] }, /fields/],
     ["unknown dtype", { fields: { x: "f128" } }, /f128/],
     ["empty field name", { fields: { "": "f64" } }, /field/],
     ["zero gapSplitK", { gapSplitK: 0 }, /gapSplitK/],
@@ -153,6 +154,17 @@ describe("resolveCacheConfig — rejections (ConfigError naming the offender)", 
   ])("rejects %s", (_label, overrides, pattern) => {
     expect(() => resolveCacheConfig(invalid(overrides))).toThrow(ConfigError);
     expect(() => resolveCacheConfig(invalid(overrides))).toThrow(pattern);
+  });
+
+  it.each([
+    ["null", null],
+    ["undefined", undefined],
+    ["a string", "candles-1m"],
+    ["an array", [minimal]],
+  ])("rejects %s as the whole config with ConfigError", (_label, config) => {
+    const call = () => resolveCacheConfig(config as unknown as CacheConfig);
+    expect(call).toThrow(ConfigError);
+    expect(call).toThrow(/config must be an object/);
   });
 
   it("gapSplitK of 1 and segmentSlotCap of 1 are legal minima", () => {
