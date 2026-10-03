@@ -11,7 +11,7 @@ The primary driver is **T3 Code**: one Claude thread per step, plus a Codex thre
 | `AGENTS.md` | Codex natively; Claude through `CLAUDE.md` | Shared rules, roles, review rules |
 | `CLAUDE.md` | Claude | Imports `AGENTS.md`, plus Claude-only notes |
 | `.claude/settings.json` | Claude Code, and Agent SDK hosts that load project settings | Permissions, Bash guard hook, Codex plugin |
-| `.claude/hooks/guard-bash.sh`, `guard-bash.ts` | Claude | Blocks `bun test` and git-hook bypasses; threat model in the `.ts` header, regression cases in `guard-bash.test.sh` |
+| `.claude/hooks/guard-bash.sh`, `guard-bash.ts` | Claude | Tripwire for literal `bun test` and git-hook bypasses; threat model in the `.ts` header, regression cases in `guard-bash.test.sh`. `bun run ci` is the backstop |
 | `.codex/config.toml` | Codex, once the project is trusted | Pins `gpt-6.1-sol` at high effort |
 | `docs/review-checklist.md` | Reviewer | Invariants every review checks, and the findings format |
 | `scripts/codex-review.sh` | Claude | Runs `bun run ci`, then a headless read-only Codex review (prompts C and D live here) |
