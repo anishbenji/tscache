@@ -38,7 +38,11 @@ function validateAlignmentOffset(offset: unknown, interval: number): number {
   if (typeof offset !== "number" || !Number.isSafeInteger(offset)) {
     fail(`alignmentOffset must be an integer, got ${String(offset)}`);
   }
-  return ((offset % interval) + interval) % interval;
+  // Add interval only to a negative remainder: `r + interval` then stays below
+  // interval, so the result is exact even when interval nears 2^53.
+  // Math.abs turns a -0 remainder into 0.
+  const r = offset % interval;
+  return r < 0 ? r + interval : Math.abs(r);
 }
 
 function validateFields(

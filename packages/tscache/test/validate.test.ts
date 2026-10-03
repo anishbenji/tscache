@@ -66,6 +66,22 @@ describe("resolveCacheConfig — valid input", () => {
     expect((t - r.alignmentOffset) % 60_000).toBe(0);
   });
 
+  it("normalizes without leaving exact-integer range at huge intervals", () => {
+    const interval = Number.MAX_SAFE_INTEGER;
+    const r = (alignmentOffset: number) =>
+      resolveCacheConfig({ ...minimal, interval, alignmentOffset })
+        .alignmentOffset;
+    expect(r(2)).toBe(2);
+    expect(r(interval - 1)).toBe(interval - 1);
+    expect(r(-1)).toBe(interval - 1);
+    expect(r(-interval)).toBe(0);
+  });
+
+  it("normalizes a negative multiple of interval to +0", () => {
+    const r = resolveCacheConfig({ ...minimal, alignmentOffset: -60_000 });
+    expect(Object.is(r.alignmentOffset, 0)).toBe(true);
+  });
+
   it("returns a frozen config with a defensive copy of fields", () => {
     const fields = { close: "f64" } as const;
     const r = resolveCacheConfig({ ...minimal, fields: { ...fields } });
