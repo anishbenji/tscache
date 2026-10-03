@@ -1,6 +1,6 @@
 # Step 04 — DenseSegment and bitmask
 
-Branch: `feat/04-dense-segment` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in review · Verdict after triage: pending
+Branch: `feat/04-dense-segment` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: escalated at the round cap · Verdict after triage: pending the user's decision
 
 The internal contract for this step (`segment/`) was approved by the user as N10 and N11 (N12 added in round 2) and recorded in architecture §4.2 before the contract tests were written (4f3c573). N11 (what a put removes) is provisional.
 
@@ -30,6 +30,16 @@ Host `bun run ci` passed (417 tests). The reviewer confirmed all four earlier fi
 |---|---|---|---|---|
 | R3-1 | P1 | Clearing an authority range far from the extent throws a false slot-cap error | accepted | Reproduced with a failing test. The surviving-extent scan started at the authority's edge, outside the buffers, where the mask index aliased an existing point. An authority that misses the extent now returns the extent unchanged, which keeps both scans inside it. Fixed in 8cc0c57. |
 | R3-2 | P1 | A batch with an extra field and a non-enumerable schema field passes validation | accepted | Reproduced with a failing test. Batch fields are now matched by their enumerable own names, the same set a spread or structured clone would carry. Fixed in 8cc0c57. |
+
+## Round 4 — reviewer verdict: block
+
+Host `bun run ci` passed (424 tests). The reviewer confirmed the other five findings fixed and the contract tests unchanged.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P0 | A failure while copying a later field into new buffers corrupts earlier fields (re-raises R2-1) | accepted | Reproduced with a failing test that makes the second field's copy throw. Growth installed each field's buffer as it went. All buffers are now built and filled first, then installed in an assignment-only step. Fixed in 768115a. |
+
+Round 4 is the cap in `docs/workflow.md`, and this finding re-raises R2-1, so the loop stops here and goes to the user: the fix is in and tested, but no review round has confirmed it.
 
 ## Contract-test changes
 
