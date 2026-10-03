@@ -119,9 +119,10 @@ function parse(src: string): Command[] {
       const text = body.join("\n");
       // A heredoc fed to a shell with no -c is its script; otherwise only
       // substitutions in an unquoted heredoc run.
-      const owner = doc.owner[0];
-      const shell = owner !== undefined && SHELLS.has(basename(owner));
-      if (shell && !doc.owner.some((a) => /^-[a-z]*c[a-z]*$/.test(a))) nested(text);
+      const start = commandStart(doc.owner);
+      const owner = doc.owner[start.k];
+      const shell = !start.lookup && !start.split && owner !== undefined && SHELLS.has(basename(owner));
+      if (shell && !doc.owner.slice(start.k + 1).some((a) => /^-[a-z]*c[a-z]*$/.test(a))) nested(text);
       else if (doc.expand) {
         for (const m of text.matchAll(/\$\(([^)]*)\)|`([^`]*)`/g)) nested(m[1] ?? m[2] ?? "");
       }
@@ -238,11 +239,17 @@ const WRAPPERS: Record<string, Set<string>> = {
 const EXPORTERS = new Set(["export", "declare", "typeset", "readonly", "local"]);
 const GIT_OPTS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"]);
 const HOOKS_PATH = /core\.hookspath/i;
+const HOOKS_PATH_KEY = /^core\.hookspath$/i;
+const configKey = (keyValue: string) => keyValue.split("=")[0] ?? "";
+// Lefthook variables that only change output. Any other LEFTHOOK_* variable
+// (LEFTHOOK_BIN, LEFTHOOK_CONFIG, LEFTHOOK_EXCLUDE, ...) can change or skip
+// what the hooks run, so it fails closed.
+const LEFTHOOK_OUTPUT_VARS = new Set(["LEFTHOOK_VERBOSE", "LEFTHOOK_QUIET", "LEFTHOOK_OUTPUT"]);
 
 /** Literal assignments that turn hooks off. */
 function checkAssignment(name: string, value: string): string | null {
-  if (name === "LEFTHOOK" && /^(0|false)$/i.test(value)) return HOOK_BYPASS;
-  if (name === "LEFTHOOK_EXCLUDE" || name === "LEFTHOOK_SKIP") return HOOK_BYPASS;
+  if (name === "LEFTHOOK") return /^(0|false)$/i.test(value) ? HOOK_BYPASS : null;
+  if (name.startsWith("LEFTHOOK_") && !LEFTHOOK_OUTPUT_VARS.has(name)) return HOOK_BYPASS;
   if (name.startsWith("GIT_CONFIG") && HOOKS_PATH.test(value)) return HOOK_BYPASS;
   return null;
 }
@@ -255,41 +262,53 @@ const GIT_LONG_WITH_VALUE = new Set([
   "--fixup", "--squash", "--reuse-message", "--reedit-message", "--push-option",
   "--receive-pack", "--exec", "--repo", "--pathspec-from-file", "--grep",
 ]);
-// `git config` forms that only read or remove a key: legacy flags anywhere,
-// or a subcommand word as the first operand (`git config get <key>`). A bare
-// word elsewhere is a value: `git config core.hooksPath list` sets it.
+// `git config` forms that only read or remove a key: a legacy flag, or a
+// subcommand word as the first operand (`git config get <key>`). A bare word
+// elsewhere is a value: `git config core.hooksPath list` sets it.
 const GIT_CONFIG_READ_FLAGS = new Set(["--get", "--get-all", "--get-regexp", "-l", "--list", "--unset", "--unset-all"]);
 const GIT_CONFIG_READ_SUBCOMMANDS = new Set(["get", "list", "unset"]);
 const GIT_CONFIG_OPTS_WITH_VALUE = new Set(["-f", "--file", "--blob", "--type", "--default", "--comment", "--value"]);
 
-/** First `git config` operand, skipping options and their values. */
-function firstConfigOperand(rest: string[]): string | undefined {
+/**
+ * Whether `git config <rest>` writes core.hooksPath. One pass separates
+ * options, their values and operands, so a value is never read as a flag.
+ */
+function configWritesHooksPath(rest: string[]): boolean {
+  const operands: string[] = [];
   for (let j = 0; j < rest.length; j++) {
     const a = rest[j] as string;
-    if (!a.startsWith("-")) return a;
-    if (GIT_CONFIG_OPTS_WITH_VALUE.has(a)) j++;
+    if (a === "--") {
+      operands.push(...rest.slice(j + 1));
+      break;
+    }
+    if (!a.startsWith("-")) operands.push(a);
+    else if (GIT_CONFIG_READ_FLAGS.has(a)) return false;
+    else if (GIT_CONFIG_OPTS_WITH_VALUE.has(a)) j++;
   }
-  return undefined;
+  const [first, second] = operands;
+  if (first === undefined || GIT_CONFIG_READ_SUBCOMMANDS.has(first)) return false;
+  if (first === "set") return HOOKS_PATH_KEY.test(second ?? "");
+  // Legacy form: `<key>` alone reads, `<key> <value>` writes.
+  return HOOKS_PATH_KEY.test(first) && second !== undefined;
 }
 
 function checkGit(args: string[]): string | null {
   let k = 0;
   while (k < args.length && (args[k] as string).startsWith("-")) {
     const opt = args[k] as string;
-    const value = GIT_OPTS_WITH_VALUE.has(opt) ? (args[k + 1] ?? "") : "";
-    if (HOOKS_PATH.test(opt) || HOOKS_PATH.test(value)) return HOOK_BYPASS;
+    // `-c <key>=<value>`, `--config-env <key>=<var>` or `--config-env=…`:
+    // match the key, not a value that merely names it.
+    const setting =
+      opt === "-c" || opt === "--config-env" ? (args[k + 1] ?? "")
+      : opt.startsWith("--config-env=") ? opt.slice("--config-env=".length)
+      : "";
+    if (HOOKS_PATH_KEY.test(configKey(setting))) return HOOK_BYPASS;
     k += GIT_OPTS_WITH_VALUE.has(opt) ? 2 : 1;
   }
   const sub = args[k];
   const rest = args.slice(k + 1);
   // `git config core.hooksPath <path>` sets it; reads and unsets are fine.
-  if (sub === "config" && rest.some((a) => HOOKS_PATH.test(a))) {
-    const firstOperand = firstConfigOperand(rest);
-    const reads =
-      rest.some((a) => GIT_CONFIG_READ_FLAGS.has(a)) ||
-      (firstOperand !== undefined && GIT_CONFIG_READ_SUBCOMMANDS.has(firstOperand));
-    if (!reads) return HOOK_BYPASS;
-  }
+  if (sub === "config" && configWritesHooksPath(rest)) return HOOK_BYPASS;
 
   for (let j = 0; j < rest.length; j++) {
     const a = rest[j] as string;
@@ -341,19 +360,19 @@ function checkBun(args: string[]): string | null {
   return null;
 }
 
-function check(argv: string[]): string | null {
+/**
+ * Walks leading assignments, keywords and wrappers to the command word.
+ * `lookup` marks `command -v` (runs nothing); `split` is the argv that
+ * `env -S` builds from its value plus the remaining arguments.
+ */
+function commandStart(argv: string[]): { k: number; lookup?: boolean; split?: string[] } {
   let k = 0;
   for (;;) {
     const w = argv[k];
-    if (w === undefined) return null;
-    const assignment = ASSIGNMENT.exec(w);
+    if (w === undefined) return { k };
     const name = basename(w);
     const wrapper = WRAPPERS[name];
-    if (assignment) {
-      const hit = checkAssignment(assignment[1] as string, assignment[2] as string);
-      if (hit) return hit;
-      k++;
-    } else if (KEYWORDS.has(w)) {
+    if (ASSIGNMENT.test(w) || KEYWORDS.has(w)) {
       k++;
     } else if (w === "function") {
       k += 2; // `function name { … }`
@@ -363,20 +382,39 @@ function check(argv: string[]): string | null {
       k++;
       while (argv[k]?.startsWith("-")) {
         const opt = argv[k] as string;
-        // `command -v/-V` only looks a command up.
-        if (name === "command" && /^-[vV]$/.test(opt)) return null;
-        // `env -S 'cmd args'` (or -S'…') splits its value into words and
-        // runs them followed by the remaining arguments, kept whole.
+        // `command -v`, `-V`, `-vv`, `-pv` only look a command up.
+        if (name === "command" && /^-[pvV]*[vV][pvV]*$/.test(opt)) return { k, lookup: true };
+        // `env -S 'cmd args'` (or -S'…') splits its value with shell-like
+        // quoting and runs it followed by the remaining arguments, kept whole.
         if (name === "env" && opt.startsWith("-S")) {
           const attached = opt.length > 2;
           const value = attached ? opt.slice(2) : (argv[k + 1] ?? "");
-          return check([...value.split(/\s+/).filter(Boolean), ...argv.slice(k + (attached ? 1 : 2))]);
+          let words: string[];
+          try {
+            words = parse(value).flat();
+          } catch {
+            return { k, lookup: true }; // unparseable: out of scope
+          }
+          return { k, split: [...words, ...argv.slice(k + (attached ? 1 : 2))] };
         }
         k += wrapper.has(opt) ? 2 : 1;
       }
       if (name === "timeout") k++; // the duration
-    } else break;
+    } else return { k };
   }
+}
+
+function check(argv: string[]): string | null {
+  const start = commandStart(argv);
+  for (const w of argv.slice(0, start.k)) {
+    const m = ASSIGNMENT.exec(w);
+    const hit = m && checkAssignment(m[1] as string, m[2] as string);
+    if (hit) return hit;
+  }
+  if (start.lookup) return null;
+  if (start.split) return check(start.split);
+  const k = start.k;
+  if (argv[k] === undefined) return null;
   const cmd = basename(argv[k] as string);
   const args = argv.slice(k + 1);
 
@@ -390,10 +428,12 @@ function check(argv: string[]): string | null {
       if (hit) return hit;
     }
   }
-  if (cmd === "eval") return checkSource(args.join(" "));
+  // A `--` terminator before an eval or `-c` body is consumed by bash.
+  if (cmd === "eval") return checkSource((args[0] === "--" ? args.slice(1) : args).join(" "));
   if (SHELLS.has(cmd)) {
     const flag = args.findIndex((a) => /^-[a-z]*c[a-z]*$/.test(a));
-    if (flag >= 0 && args[flag + 1] !== undefined) return checkSource(args[flag + 1] as string);
+    const body = args[flag + 1] === "--" ? args[flag + 2] : args[flag + 1];
+    if (flag >= 0 && body !== undefined) return checkSource(body);
   }
   return null;
 }
