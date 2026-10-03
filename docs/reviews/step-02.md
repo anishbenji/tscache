@@ -52,6 +52,7 @@ No coverage tool is installed (adding `@vitest/coverage-v8` would be a dependenc
 
 - The built `./fetcher` entry imports a shared chunk holding all seven error classes (2.3 kB). N6's purpose holds — no DOM or client code — and `sideEffects: false` lets bundlers drop the unused classes, but an unbundled fetcher loads the whole chunk. Splitting `AuthInvalidError` into its own module would make the entry minimal; optional follow-up.
 - `isAuthInvalidError` returns `boolean`, not a type guard; worth revisiting when the orchestrator (step ⑪) consumes it.
+- After 291a9df, Claude Code's background security review reported four more guard issues (summary only: a control regression, a fail-open, a parser differential, one more). They were not investigated or fixed, per the user's decision to stop the guard at the round cap. Likely in the same class as the documented limits (for example, a bypass flag produced by command substitution is invisible to argv checks, where the earlier text-matching guard caught it). Open for the user's call.
 
 ### Before merging
 
