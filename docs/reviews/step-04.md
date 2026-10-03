@@ -1,8 +1,69 @@
 # Step 04 — DenseSegment and bitmask
 
-Branch: `feat/04-dense-segment` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: in review (rounds past the cap authorized by the user) · Verdict after triage: pending
+Branch: `feat/04-dense-segment` · Reviewer: GPT-6.1 Sol (high) · Rounds: 5 · Status: settled · Verdict after triage: merge
 
 The internal contract for this step (`segment/`) was approved by the user as N10 and N11 (N12 added in round 2) and recorded in architecture §4.2 before the contract tests were written (4f3c573). N11 (what a put removes) is provisional.
+
+## Merge request
+
+### Summary
+
+Step ④ of the commit plan: the `Segment` interface, `DenseSegment` (consecutive slots, one typed array per field, a one-bit-per-slot presence mask) and the payload codec (`transferPayload`, `segmentFromPayload`). The modules are internal and have no consumers yet; the put, read and invalidation paths (steps ⑤–⑦) build on them. No package entry exports them, so the built package is unchanged.
+
+One public behaviour changes: `segmentSlotCap` above 2^31 − 1 is now rejected with `ConfigError` (N12).
+
+### Commits
+
+| Group | Commits |
+|---|---|
+| Contract | 4f3c573 N10, N11 and architecture §4.2 · 70d1a6c decoder cases |
+| Code with contract tests | fa5b906 |
+| Review fixes | bd92e48 prototype-named fields · 27ace69, 768115a allocation before mutation · 621dbd8 slot cap bound · 8cc0c57 scan bounds and field-name matching |
+| Triage | 0ef1e33, aea7c84, 64baaf7, 6decc7e, 9d6153d, this file |
+
+### Decisions taken with the user (2026-10-04)
+
+- N10: the `Segment` interface in slot terms; an invalid payload throws plain `TscacheError`; field data is little-endian with no byte swapping.
+- N11 (provisional, revisit at step ⑤): a write that states its range replaces it; a `put` without a range only adds or overwrites. Recorded with the design intent that the cache exists to avoid refetching data that does not change.
+- N12: `segmentSlotCap` is at most 2^31 − 1.
+- §4.2 details: a failed `mergeFrom` changes nothing; decoding copies the payload's buffers; payload fields may come in any order; values under absent mask bits are ignored; a span past the last safe-integer timestamp is rejected.
+
+### Review outcome
+
+Five rounds raised seven findings (five P0, two P1), all reproduced or confirmed, accepted and fixed with regression tests. Round 5 had no findings. No rejections and no decision concerns. The loop reached its four-round cap with a P0 in round 4; the user authorized further rounds, and one more settled it.
+
+None of the findings was in ordinary behaviour (storing, reading, replacing, encoding, decoding). They were field names colliding with `Object.prototype` members, failures injected during buffer growth, slot caps above 2^31, and an authority range far outside the extent.
+
+### Confidence
+
+High for ordinary behaviour: the 178 contract tests were written by Codex from §4.2 before the code and are unchanged, including seeded upsert/replace sequences and payload round trips checked against a row model. High for the fixed edge cases, each pinned by a test that failed before its fix. Medium for failure atomicity in general: it took two fixes (rounds 2 and 4) and is now structured as a build phase followed by an assignment-only commit, which round 5 confirmed, but JavaScript can run out of memory at any allocation and only the reachable paths are tested. `bun run ci` passes on 768115a with 425 tests.
+
+### Blast radius
+
+- **Package consumers:** `segmentSlotCap` above 2^31 − 1 now throws `ConfigError`. The default is 32 768 and a segment that size could not be allocated, so no working configuration is affected. Nothing else public changes; `dist/` is unchanged.
+- **Later steps:** ⑤–⑦ depend on the §4.2 contract, in particular upsert versus replace, the slot cap error, and results being copies.
+- **Persistence and SSR later:** the payload layout in §4.2 (mask bit order, zeroed absent slots, schema field order, little-endian) becomes the format those features read. Changing it after data is persisted would need a `format` bump.
+
+### Test coverage
+
+No coverage tool is installed. By inspection:
+
+| Module | Covered | Not covered |
+|---|---|---|
+| `segment/dense.ts` | Empty and single-point segments; lookup, slice clipping and copies; all eight dtypes with assignment conversion; upsert and replace including clearing and extent shrinking; growth in both directions; the slot cap at and past the limit; every malformed-input rejection, each checked to leave the segment unchanged; allocation and copy failures; prototype-named fields; distant authority ranges; safe-integer slot extremes | Performance is unmeasured (bench files start at step ⑥). Slicing and scanning are per-slot loops; fine at the default cap, to be benchmarked |
+| `segment/payload.ts` | Mask length and bit order at counts 1, 7, 8, 9, 16, 17; trailing bits; zeroed absent slots; field order; fresh buffers; structured cloning and transfer; little-endian bytes for every dtype; every decode rejection; round trips | Decoding on a big-endian platform (none is supported) |
+
+### Residual notes
+
+- N11 is provisional and should be revisited when step ⑤ wires `put`.
+- Buffer growth doubles capacity up to the slot cap; the policy is internal and untuned until benchmarks exist.
+
+### Before merging
+
+```sh
+bun run ci
+git switch main && git merge --no-ff feat/04-dense-segment
+```
 
 ## Round 1 — reviewer verdict: block
 
@@ -40,6 +101,10 @@ Host `bun run ci` passed (424 tests). The reviewer confirmed the other five find
 | R4-1 | P0 | A failure while copying a later field into new buffers corrupts earlier fields (re-raises R2-1) | accepted | Reproduced with a failing test that makes the second field's copy throw. Growth installed each field's buffer as it went. All buffers are now built and filled first, then installed in an assignment-only step. Fixed in 768115a. |
 
 Round 4 is the cap in `docs/workflow.md`, and this finding re-raises R2-1, so the loop stopped here and went to the user, who authorized further rounds at the implementer's discretion (2026-10-04).
+
+## Round 5 — reviewer verdict: merge
+
+Host `bun run ci` passed (425 tests). No findings. The reviewer confirmed every finding from rounds 1–4 fixed and the contract tests unchanged, and reported 2,000 in-memory merge checks passing in its own probes.
 
 ## Contract-test changes
 
