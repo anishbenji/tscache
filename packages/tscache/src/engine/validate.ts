@@ -27,19 +27,18 @@ function validateId(id: unknown): string {
   return id;
 }
 
+/**
+ * Any integer offset is accepted (architecture §2.2 only requires
+ * `(t - alignmentOffset) % interval === 0`) and normalized into
+ * [0, interval): the grid is unchanged, and configs naming the same grid
+ * resolve identically. Integers only, because timestamps are integers.
+ */
 function validateAlignmentOffset(offset: unknown, interval: number): number {
   if (offset === undefined) return 0;
-  if (
-    typeof offset !== "number" ||
-    !Number.isSafeInteger(offset) ||
-    offset < 0 ||
-    offset >= interval
-  ) {
-    fail(
-      `alignmentOffset must be an integer in [0, interval), got ${String(offset)} for interval ${interval}`,
-    );
+  if (typeof offset !== "number" || !Number.isSafeInteger(offset)) {
+    fail(`alignmentOffset must be an integer, got ${String(offset)}`);
   }
-  return offset;
+  return ((offset % interval) + interval) % interval;
 }
 
 function validateFields(

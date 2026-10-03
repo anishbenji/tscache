@@ -65,6 +65,7 @@ export interface CacheConfig {
 export interface ResolvedCacheConfig {
   id: string;
   interval: number;
+  /** Normalized into [0, interval); names the same grid as the input. */
   alignmentOffset: number;
   fields: Readonly<Record<string, Dtype>>;
   gapSplitK: number;

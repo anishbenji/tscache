@@ -52,6 +52,20 @@ describe("resolveCacheConfig — valid input", () => {
     expect(r.finalizedUntil).toBe(1_750_000_000_000);
   });
 
+  it.each([
+    ["negative", -1_000, 59_000],
+    ["equal to interval", 60_000, 0],
+    ["above interval", 125_000, 5_000],
+    ["below -interval", -125_000, 55_000],
+  ])("normalizes a %s alignmentOffset to the same grid in [0, interval)", (_label, offset, normalized) => {
+    const r = resolveCacheConfig({ ...minimal, alignmentOffset: offset });
+    expect(r.alignmentOffset).toBe(normalized);
+    // Same grid: a timestamp aligned under the raw offset stays aligned.
+    const t = 1_700_000_000_000 - (1_700_000_000_000 % 60_000) + normalized;
+    expect((t - offset) % 60_000).toBe(0);
+    expect((t - r.alignmentOffset) % 60_000).toBe(0);
+  });
+
   it("returns a frozen config with a defensive copy of fields", () => {
     const fields = { close: "f64" } as const;
     const r = resolveCacheConfig({ ...minimal, fields: { ...fields } });
@@ -92,11 +106,16 @@ describe("resolveCacheConfig — rejections (ConfigError naming the offender)", 
     ["NaN interval", { interval: Number.NaN }, /interval/],
     ["Infinity interval", { interval: Number.POSITIVE_INFINITY }, /interval/],
     ["unsafe-integer interval", { interval: 2 ** 53 + 2 }, /interval/],
-    ["negative alignmentOffset", { alignmentOffset: -1 }, /alignmentOffset/],
     ["fractional alignmentOffset", { alignmentOffset: 0.5 }, /alignmentOffset/],
+    ["NaN alignmentOffset", { alignmentOffset: Number.NaN }, /alignmentOffset/],
     [
-      "alignmentOffset >= interval",
-      { alignmentOffset: 60_000 },
+      "Infinity alignmentOffset",
+      { alignmentOffset: Number.POSITIVE_INFINITY },
+      /alignmentOffset/,
+    ],
+    [
+      "unsafe-integer alignmentOffset",
+      { alignmentOffset: 2 ** 53 + 2 },
       /alignmentOffset/,
     ],
     ["missing fields", { fields: undefined }, /fields/],
