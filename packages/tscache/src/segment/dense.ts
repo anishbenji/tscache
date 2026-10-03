@@ -180,19 +180,9 @@ export class DenseSegment implements Segment {
 
   /** Rejects malformed input before anything is written (programming errors). */
   #assertPoints(points: Columns, authority: SlotRange | undefined): void {
-    const { slots, fields } = points;
+    const { slots } = points;
     assertAscending(slots);
-    if (Object.keys(fields).length !== this.#columns.length) {
-      throw new RangeError("point fields must be exactly the schema's fields");
-    }
-    for (const column of this.#columns) {
-      const values = getOwn(fields, column.name);
-      if (values === undefined || values.length !== slots.length) {
-        throw new RangeError(
-          `point field "${column.name}" must hold ${slots.length} values`,
-        );
-      }
-    }
+    this.#assertFields(points);
     if (authority === undefined || slots.length === 0) return;
     const first = slots[0] as number;
     const last = slots[slots.length - 1] as number;
@@ -203,26 +193,61 @@ export class DenseSegment implements Segment {
     }
   }
 
+  /** The batch must carry exactly the schema's fields, one value per slot. */
+  #assertFields(points: Columns): void {
+    const { slots, fields } = points;
+    // Enumerable own names only: the same set a spread or a structured
+    // clone of the batch would carry.
+    const names = new Set(Object.keys(fields));
+    if (names.size !== this.#columns.length) {
+      throw new RangeError("point fields must be exactly the schema's fields");
+    }
+    for (const column of this.#columns) {
+      const values = names.has(column.name)
+        ? getOwn(fields, column.name)
+        : undefined;
+      if (values === undefined || values.length !== slots.length) {
+        throw new RangeError(
+          `point field "${column.name}" must hold ${slots.length} values`,
+        );
+      }
+    }
+  }
+
   /** Tight extent of the points that survive clearing `authority`. */
   #keptExtent(authority: SlotRange | undefined): SlotRange | undefined {
     const extent = this.#extent;
     if (extent === undefined) return undefined;
-    if (authority === undefined) return { ...extent };
+    // An authority that misses the extent removes nothing. Returning here
+    // also keeps the scans below inside the extent, where the mask is valid.
+    if (
+      authority === undefined ||
+      authority.start > extent.end ||
+      authority.end < extent.start
+    ) {
+      return { ...extent };
+    }
     const left = extent.start < authority.start;
     const right = extent.end > authority.end;
     if (!left && !right) return undefined;
-    // extent.start and extent.end are present, so each scan terminates.
-    let start = extent.start;
-    if (!left) {
-      start = authority.end + 1;
-      while (!this.#has(start)) start++;
-    }
-    let end = extent.end;
-    if (!right) {
-      end = authority.start - 1;
-      while (!this.#has(end)) end--;
-    }
-    return { start, end };
+    return {
+      start: left ? extent.start : this.#firstPresentFrom(authority.end + 1),
+      end: right ? extent.end : this.#lastPresentUpTo(authority.start - 1),
+    };
+  }
+
+  /** First present slot at or after `slot`; the caller guarantees one exists. */
+  #firstPresentFrom(slot: number): number {
+    let s = slot;
+    while (!this.#has(s)) s++;
+    return s;
+  }
+
+  /** Last present slot at or before `slot`; the caller guarantees one exists. */
+  #lastPresentUpTo(slot: number): number {
+    let s = slot;
+    while (!this.#has(s)) s--;
+    return s;
   }
 
   /** Removes the points inside `authority`, zeroing their storage. */
