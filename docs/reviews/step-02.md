@@ -174,3 +174,54 @@ First round on the literal-only design (81a4cc1), scoped to that threat model. H
 | A2-7 | P1 | False positive: clustered `command -vv` (re-raises A1-15) | accepted | Fixed in 1974a61. |
 | A2-8 | P1 | False positive: single-key read `git config core.hooksPath` | accepted | Legacy single-operand form is a read (1974a61). |
 | A2-9 | P1 | False positive: `-c user.note=core.hooksPath` | accepted | `-c` and `--config-env` match the key only (1974a61). |
+
+### Background security reviews after A2
+
+| # | Finding | Decision | Resolution |
+|---|---|---|---|
+| S-12 | `env -S` with an unparseable value skipped the check (with details) | accepted | Falls back to whitespace splitting; `\_` read as env's escaped space. Fixed in b00e29a. |
+| S-13–S-18 | Five parser differentials and one fail-open (summaries only) | accepted as residual | Not investigated: they arrived with every guard commit, the non-convergence the loop rules stop on. Closed by the freeze below. |
+
+### Round A3 — reviewer verdict: merge after fixes
+
+Second round on the literal-only design; host `bun run ci` passed, and no CI-backstop defect was found. Ten P1s, all literal spellings: seven bypasses (backslash-newline inside double quotes, `$'\400'` wrapping to NUL, clustered `env -iu`, fd-prefixed heredocs, spliced heredoc delimiters, `env -S bash <<EOF`, shell options between `-c` and its body) and three false positives (`bash /dev/null <<EOF`, `bash -n -c`, `;` inside `env -S`). The guard leaked in two consecutive rounds of its new design, so under the convergence rule this was escalated. **User decision (2026-10-03): freeze the guard as-is** (8295548). All ten are accepted as residual risk: none is a spelling an agent types by accident, closing them means reimplementing bash's grammar, and `bun run ci` catches any hook bypass before merge. The guard header lists them as out of scope, the guard is excluded from adversarial review, and it changes only in response to an accident actually observed.
+
+## Merge request: `chore/02-guard-threat-model` → `main`
+
+### Summary
+
+Resolves the guard findings left open when step ② merged, by narrowing the guard rather than hardening it, and adds the control that actually protects `main`: `bun run ci` now re-runs gitleaks (including merge diffs) and commitlint over every commit on the branch, so a skipped hook is caught before merge however it was done. The guard is now a frozen tripwire for literal `bun test` and hook-bypass flags, with its threat model in its header. The review script retries Codex capacity errors.
+
+### What changed
+
+| Area | Change |
+|---|---|
+| CI backstop | 0251ad9 gitleaks + commitlint over `main..HEAD`; 88cf228 gitleaks scans merge diffs (`-m`) |
+| Guard | 81a4cc1 literal-only redesign (run-time values, stdin, aliases and unparseable input out of scope; a crash lets the command through); fixes in 73ba4b3, d1b6a41, 38c6a7f, 1974a61, b00e29a; frozen in 8295548. f0520d2, 7ea1e6b and 4a0fe84 are the superseded run-time-value attempt, kept for the record |
+| Review tooling | 176e27f Codex capacity retry |
+| Docs | Workflow file table, adversarial schedule note, `AGENTS.md` CI line, `CLAUDE.md` guard note; triage above |
+
+### Confidence
+
+High that `main` is protected: the backstop is tool-based, independent of how a hook was skipped, and verified (commitlint rejects a bad message; the gitleaks range includes the step-② merge patch). Medium for the guard, by design: it catches the common accidents, pinned by 160 command cases plus a crash check, and has documented residual gaps.
+
+### Blast radius
+
+- **Every Claude Bash call** passes through the guard. Its false-positive surface shrank: all six A1 false positives and the A2 ones are fixed. A guard crash now lets the command through with a warning instead of blocking all Bash.
+- **`bun run ci`** gains two stages. Both scan only `main..HEAD`; on `main` they check nothing. A future GitHub Actions port needs full history (`fetch-depth: 0`) for the range.
+- **Library code:** untouched.
+
+### Test coverage
+
+The guard suite (160 command cases plus a crash check) runs in `bun run ci` and pins three sides: literal forms block, ordinary commands pass, and out-of-scope forms pass by design. The backstop was verified by hand (a bad commit message fails commitlint; the merge-diff count rises from 66 to 94 with `-m`); there is no automated test that commits a secret, since that would put one in history.
+
+### Residual risk
+
+The A3 bypasses and S-13–S-18 are open by decision. Any of them can only skip a hook, and the backstop catches the result before merge.
+
+### Before merging
+
+```sh
+bun run ci
+git switch main && git merge --no-ff chore/02-guard-threat-model
+```
