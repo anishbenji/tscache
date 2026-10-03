@@ -15,7 +15,7 @@ export interface Grid {
   alignmentOffset: number;
 }
 
-/** Inclusive on both ends; integer slot indices; slots may be negative. */
+/** Inclusive on both ends; safe-integer slot indices; slots may be negative. */
 export interface SlotRange {
   start: number;
   end: number;
@@ -35,8 +35,12 @@ function floorSlot(t: number, g: Grid): number {
   return r >= g.alignmentOffset - g.interval ? q - 1 : q - 2;
 }
 
-/** True when `t` lies exactly on the grid. NaN and ±Infinity are not. */
+/**
+ * True when `t` is a safe integer lying exactly on the grid. Anything
+ * outside the supported domain (fractions, NaN, |t| >= 2^53) is not.
+ */
 export function isAligned(t: number, g: Grid): boolean {
+  if (!Number.isSafeInteger(t)) return false;
   const r = t % g.interval;
   return r === g.alignmentOffset || r === g.alignmentOffset - g.interval;
 }
@@ -73,9 +77,11 @@ export function msOf(slot: number, g: Grid): number {
  * legal: one slot when aligned, the two surrounding slots otherwise.
  */
 export function snapOut(r: Range, g: Grid): SlotRange {
-  if (!Number.isFinite(r.start) || !Number.isFinite(r.end)) {
+  // Also false for NaN and ±Infinity.
+  const supported = (t: number) => Math.abs(t) <= Number.MAX_SAFE_INTEGER;
+  if (!supported(r.start) || !supported(r.end)) {
     throw new InvalidRangeError(
-      `range endpoints must be finite numbers, got [${r.start}, ${r.end}]`,
+      `range endpoints must be finite and within ±(2^53 - 1), got [${r.start}, ${r.end}]`,
     );
   }
   if (r.start > r.end) {
@@ -83,11 +89,22 @@ export function snapOut(r: Range, g: Grid): SlotRange {
       `range start ${r.start} is after its end ${r.end}`,
     );
   }
-  const end = floorSlot(r.end, g);
-  return {
+  const floorEnd = floorSlot(r.end, g);
+  const slots = {
     start: floorSlot(r.start, g),
-    end: isAligned(r.end, g) ? end : end + 1,
+    end: isAligned(r.end, g) ? floorEnd : floorEnd + 1,
   };
+  // Snapping outward can step past the last grid point that is a safe
+  // integer; such a slot has no exact timestamp to report back.
+  if (
+    !Number.isSafeInteger(msOf(slots.start, g)) ||
+    !Number.isSafeInteger(msOf(slots.end, g))
+  ) {
+    throw new InvalidRangeError(
+      `range [${r.start}, ${r.end}] snaps to grid points beyond ±(2^53 - 1)`,
+    );
+  }
+  return slots;
 }
 
 /** Slot range → inclusive ms Range (GetResult.coverage and misses). */

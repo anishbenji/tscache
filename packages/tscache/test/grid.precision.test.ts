@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { InvalidRangeError } from "../src/errors";
 import { isAligned, msOf, slotOf, snapOut, toMs } from "../src/grid";
 
 // Implementer tests (not contract tests): exactness near ±2^53, where the
@@ -38,10 +39,16 @@ describe("grid arithmetic stays exact near ±2^53", () => {
             // floor division on BigInt (which truncates toward zero)
             const q = diff / BigInt(interval);
             const floor = !aligned && diff < 0n ? q - 1n : q;
-            if (Number.isSafeInteger(Number(floor))) {
-              expect(BigInt(snapOut({ start: t, end: t }, grid).start)).toBe(
-                floor,
-              );
+            const ceil = aligned ? floor : floor + 1n;
+            const ms = (slot: bigint) =>
+              slot * BigInt(interval) + BigInt(alignmentOffset);
+            const snap = () => snapOut({ start: t, end: t }, grid);
+            if (ms(floor) < -BigInt(MAX) || ms(ceil) > BigInt(MAX)) {
+              // The outward snap leaves the supported range.
+              expect(snap).toThrow(InvalidRangeError);
+            } else {
+              expect(BigInt(snap().start)).toBe(floor);
+              expect(BigInt(snap().end)).toBe(ceil);
             }
           }
         }

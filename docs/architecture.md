@@ -405,17 +405,20 @@ entries/
 
 Internal modules: not exported from any package entry. Contract tests (step ③) pin this surface.
 
+**Supported domain: safe integers.** Timestamps and slot indices are safe integers (|x| ≤ 2^53 − 1), so every `± 1` on a slot and every ms↔slot conversion is exact. Values outside the domain are rejected at the boundary as described below (user-confirmed 2026-10-03).
+
 ```ts
 // grid.ts — every ms↔slot conversion in the codebase goes through here (N1).
 /** Built from ResolvedCacheConfig: interval a positive safe integer,
  *  alignmentOffset in [0, interval). */
 interface Grid { interval: number; alignmentOffset: number }
-/** Inclusive on both ends; integer slot indices; start <= end. Slots may be
- *  negative (timestamps before the grid origin). */
+/** Inclusive on both ends; safe-integer slot indices; start <= end. Slots
+ *  may be negative (timestamps before the grid origin). */
 interface SlotRange { start: number; end: number }
 
-/** True when t lies exactly on the grid: (t - alignmentOffset) % interval === 0
- *  (exact for integer t up to 2^53). */
+/** True when t is a safe integer lying exactly on the grid:
+ *  (t - alignmentOffset) % interval === 0. False for anything else,
+ *  including fractions, NaN and |t| >= 2^53. */
 function isAligned(t: number, g: Grid): boolean;
 /** Slot of an aligned timestamp. Throws RangeError if t is not aligned —
  *  callers validate first (put validation reports PutError 'misaligned'). */
@@ -425,7 +428,9 @@ function msOf(slot: number, g: Grid): number;
 /** get/invalidate input → slots, snapped OUTWARD: start floors to the slot at
  *  or before it, end ceils to the slot at or after it. Never narrower than the
  *  input. Throws InvalidRangeError if either endpoint is not a finite number
- *  or start > end. start === end is legal (one slot if aligned, else two). */
+ *  within ±(2^53 − 1), if start > end, or if the outward snap lands on a grid
+ *  point beyond ±(2^53 − 1). start === end is legal (one slot if aligned,
+ *  else two). */
 function snapOut(r: Range, g: Grid): SlotRange;
 /** Slot range → inclusive ms Range (GetResult.coverage and misses). */
 function toMs(r: SlotRange, g: Grid): Range;
@@ -450,7 +455,7 @@ class CoverageIndex {
 }
 ```
 
-`CoverageIndex` methods throw `RangeError` for a malformed `SlotRange` (non-integer endpoints or start > end): a programming error, never reachable from consumer input, which `snapOut`/`slotOf` validate. Out of step ③ by design: excluding the volatile region (`t >= finalizedUntil`) from coverage is the engine's job (step ⑦); flank coalescing of misses is the orchestrator's (step ⑪).
+`CoverageIndex` methods throw `RangeError` for a malformed `SlotRange` (endpoints that are not safe integers, or start > end): a programming error, never reachable from consumer input, which `snapOut`/`slotOf` validate. Out of step ③ by design: excluding the volatile region (`t >= finalizedUntil`) from coverage is the engine's job (step ⑦); flank coalescing of misses is the orchestrator's (step ⑪).
 
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 

@@ -10,11 +10,14 @@
 
 import type { SlotRange } from "./grid";
 
-/** Malformed ranges are programming errors: consumer input is validated in grid.ts. */
+/**
+ * Malformed ranges are programming errors: consumer input is validated in
+ * grid.ts. Requiring safe integers keeps every `± 1` below exact.
+ */
 function assertSlotRange(r: SlotRange): void {
-  if (!Number.isInteger(r.start) || !Number.isInteger(r.end)) {
+  if (!Number.isSafeInteger(r.start) || !Number.isSafeInteger(r.end)) {
     throw new RangeError(
-      `slot range endpoints must be integers, got [${r.start}, ${r.end}]`,
+      `slot range endpoints must be safe integers, got [${r.start}, ${r.end}]`,
     );
   }
   if (r.start > r.end) {
