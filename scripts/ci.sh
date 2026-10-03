@@ -4,6 +4,7 @@
 set -euo pipefail
 
 bun install --frozen-lockfile
+bash .claude/hooks/guard-bash.test.sh
 bunx biome ci .
 bunx tsc -p packages/tscache
 bunx knip

@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Regression cases for guard-bash.sh. Run: bash .claude/hooks/guard-bash.test.sh
+set -uo pipefail
+
+guard="$(dirname "$0")/guard-bash.sh"
+failures=0
+
+# expect <block|allow> <command>
+expect() {
+  local want=$1 cmd=$2 got
+  if CMD="$cmd" bun -e 'process.stdout.write(JSON.stringify({ tool_input: { command: process.env.CMD } }))' |
+    bash "$guard" 2>/dev/null; then
+    got=allow
+  else
+    got=block
+  fi
+  if [[ $got != "$want" ]]; then
+    echo "FAIL: expected $want, got $got: $(printf '%q' "$cmd")" >&2
+    failures=$((failures + 1))
+  fi
+}
+
+nv="--no-""verify" # split so this file's own text never trips the guard
+lh="LEFTHOOK""=0"
+
+expect block "bun test"
+expect block "bun test --help"
+expect block "cd packages/tscache && bun test"
+expect block "(bun test)"
+expect block $'echo ready\nbun test'
+expect allow "bun run test"
+expect allow "bunx vitest run"
+expect allow "git commit -m 'never run bun test'"
+
+expect block "git commit $nv -m x"
+expect block "git push $nv"
+expect block "git commit -n -m x"
+expect block "git commit -anm x"
+expect block "$lh git commit -m x"
+expect block "export $lh"
+expect block $'echo hi\nexport '"$lh"
+expect block "git -c core.hooksPath=/dev/null commit -m x"
+expect allow "rg -- \"$nv\" AGENTS.md"
+expect allow "grep -n $lh docs/workflow.md"
+expect allow "git log -n 3"
+expect allow $'git commit -F - <<\'EOF\'\ndocs: forbid '"$nv"$'\nEOF'
+
+if [[ $failures -gt 0 ]]; then
+  echo "$failures guard case(s) failed" >&2
+  exit 1
+fi
+echo "guard-bash: all cases pass"
