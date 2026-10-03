@@ -362,13 +362,14 @@ Settled persistence notes (roadmap §3.7): write-behind only (dirty-segment set,
 
 ## 4. Module layout — `packages/tscache/src`
 
-Dependency rule: `engine/*`, `coverage`, `segment/*` import nothing from `rpc/`, `client/`, or `orchestrator/` and contain no DOM/worker references. Arrows point at importers.
+Dependency rule: `engine/*`, `grid`, `coverage`, `segment/*` import nothing from `rpc/`, `client/`, or `orchestrator/` and contain no DOM/worker references. Arrows point at importers.
 
 ```
 types.ts            public shared types (Range, Dtype, CacheConfig, GetResult, Miss, events)
 errors.ts           §2.6 taxonomy
-coverage.ts         coverage index: sorted disjoint ranges, binary search,
-                    splice on merge, subtraction (invalidate), miss computation
+grid.ts             ms↔slot conversion — the single fencepost site (N1, N9)
+coverage.ts         coverage index on slot ranges: sorted disjoint ranges, binary
+                    search, splice on merge, subtraction (invalidate), miss computation
 segment/
   types.ts          Segment interface: lookup / slice / mergeFrom / transferPayload
   dense.ts          DenseSegment: implicit timestamps, presence bitmask, typed arrays
@@ -399,6 +400,66 @@ entries/
 ```
 
 `package.json` exports: `.`, `./worker`, `./engine` (locked) + `./fetcher` (N6, accepted 2026-06-11). ESM-only (resolved decision #6). `tsconfig` strict with `isolatedDeclarations: true`.
+
+### 4.1 Internal contracts — `grid.ts` and `coverage.ts` (N9, approved 2026-10-03)
+
+Internal modules: not exported from any package entry. Contract tests (step ③) pin this surface.
+
+**Supported domain: safe integers.** Timestamps and slot indices are safe integers (|x| ≤ 2^53 − 1), so every `± 1` on a slot and every ms↔slot conversion is exact. Values outside the domain are rejected at the boundary as described below (user-confirmed 2026-10-03).
+
+```ts
+// grid.ts — every ms↔slot conversion in the codebase goes through here (N1).
+/** Built from ResolvedCacheConfig: interval a positive safe integer,
+ *  alignmentOffset in [0, interval). */
+interface Grid { interval: number; alignmentOffset: number }
+/** Inclusive on both ends; safe-integer slot indices; start <= end. Slots
+ *  may be negative (timestamps before the grid origin). */
+interface SlotRange { start: number; end: number }
+
+/** True when t is a safe integer lying exactly on the grid:
+ *  (t - alignmentOffset) % interval === 0 in exact integer arithmetic, for
+ *  every safe-integer t (the literal floating-point expression is not the
+ *  definition: its subtraction can round near ±2^53). False for anything
+ *  else, including fractions, NaN and |t| >= 2^53. */
+function isAligned(t: number, g: Grid): boolean;
+/** Slot of an aligned timestamp. Throws RangeError if t is not aligned —
+ *  callers validate first (put validation reports PutError 'misaligned'). */
+function slotOf(t: number, g: Grid): number;
+/** Timestamp of a slot: alignmentOffset + slot * interval. */
+function msOf(slot: number, g: Grid): number;
+/** get/invalidate input → slots, snapped OUTWARD: start floors to the slot at
+ *  or before it, end ceils to the slot at or after it. Never narrower than the
+ *  input. Throws InvalidRangeError if either endpoint is not a finite number
+ *  within ±(2^53 − 1), if start > end, or if the outward snap lands on a grid
+ *  point beyond ±(2^53 − 1). start === end is legal (one slot if aligned,
+ *  else two). */
+function snapOut(r: Range, g: Grid): SlotRange;
+/** Slot range → inclusive ms Range (GetResult.coverage and misses). */
+function toMs(r: SlotRange, g: Grid): Range;
+
+// coverage.ts — one index per cache; slot ranges only, no ms arithmetic.
+class CoverageIndex {
+  /** Record r as authoritative. Overlapping AND adjacent ranges merge
+   *  (a.end + 1 === b.start: no slot lies between them). */
+  add(r: SlotRange): void;
+  /** Forget r (invalidate). May split one range into two; subtracting an
+   *  uncovered range is a no-op. */
+  subtract(r: SlotRange): void;
+  /** Covered sub-ranges of r, ascending, each clipped to r. */
+  covered(r: SlotRange): SlotRange[];
+  /** Uncovered sub-ranges of r, ascending, each clipped to r. covered(r) and
+   *  gaps(r) are disjoint and together tile r exactly. */
+  gaps(r: SlotRange): SlotRange[];
+  /** Copy of the index: sorted, disjoint, no two adjacent. Mutating the
+   *  result does not affect the index. */
+  ranges(): SlotRange[];
+  clear(): void;
+}
+```
+
+Ownership: `CoverageIndex` never shares range objects with its callers. It does not keep an object passed to it, and `covered()`, `gaps()` and `ranges()` return fresh objects, so callers may mutate or keep results freely.
+
+`CoverageIndex` methods throw `RangeError` for a malformed `SlotRange` (endpoints that are not safe integers, or start > end): a programming error, never reachable from consumer input, which `snapOut`/`slotOf` validate. Out of step ③ by design: excluding the volatile region (`t >= finalizedUntil`) from coverage is the engine's job (step ⑦); flank coalescing of misses is the orchestrator's (step ⑪).
 
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
@@ -442,7 +503,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9 later, at step ③) (working process §2.3: alternatives presented, user decided).
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -454,6 +515,7 @@ These emerged while making the API concrete (working process §2.3: alternatives
 | N6 | `./fetcher` subpath | **Added** to the export list. Tiny module (AuthInvalidError + fetcher types, zero other imports) — lean fetcher bundles, no DOM-code-in-worker hazard. Auth-error detection is marker-based (`error.code === 'tscache:auth-invalid'`), never `instanceof` (separate bundles duplicate class identity) |
 | N7 | Dtype set | `f64 f32 i32 u32 i16 u16 i8 u8`. Excluded: `i64/u64` (BigInt interop friction — roadmap if demanded), `f16` (patchy 2026 support). Self-describing format makes additions non-breaking |
 | N8 | Auth-failure signal | Fetcher **throws `AuthInvalidError`** (idiomatic, composes with fetch wrappers). Rejected: result code on `FetchResponse` (bifurcates return shape). Single mechanism only |
+| N9 | Grid and coverage internals | **`grid.ts` holds every ms↔slot conversion** (`isAligned`, `slotOf`, `msOf`, `snapOut`, `toMs`); `coverage.ts` works on integer slot ranges only. Internal contract in §4.1. Rejected: conversion inside `coverage.ts` (no doc change, but two concerns in one module and the single-site rule harder to verify). User-confirmed 2026-10-03 |
 
 ## 9. What happens after sign-off
 
