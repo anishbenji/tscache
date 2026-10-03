@@ -121,3 +121,37 @@ None. Step ② is not an engine-logic step; its tests are implementer-written.
 ## Decision concerns
 
 None.
+
+## Follow-up: guard threat model (`chore/02-guard-threat-model`)
+
+Step ② merged to `main` (4b0f5f3) with the guard's later security findings open. This branch resolves them. Reviewer for round A1: GPT-6.1 Sol (xhigh), adversarial, scoped to the threat model in `.claude/hooks/guard-bash.ts`.
+
+### Background security reviews (summaries only)
+
+| # | Finding | Decision | Resolution |
+|---|---|---|---|
+| S-3–S-6 | After 291a9df: control regression, fail-open, parser differential, one more | accepted | Probed without details: 20 realistic bypasses reproduced (run-time values, weak parse-error fallback, wrapper option values, `function`/`coproc`). Fixed in f0520d2; the run-time-value handling was later removed (81a4cc1). |
+| S-7 | Logic bypass | accepted | Nested `sh -c "$CMD"` / `eval` checked text triggers against the nested string only. Fixed in 7ea1e6b; superseded by 81a4cc1. |
+| S-8 | Fail-open regression | accepted | Order-dependent bun/test trigger and a narrowed fallback. Fixed in 4a0fe84; superseded by 81a4cc1. |
+
+### Round A1 — reviewer verdict: merge after fixes
+
+Fifteen P1 findings: nine fail-opens and six false positives. This was the sixth consecutive round of guard findings, so under the convergence rule the user chose to redesign rather than patch (2026-10-03). The guard now checks literal commands only (81a4cc1). Run-time values, stdin, aliases and unparseable input are out of scope by its header, and `bun run ci` re-runs gitleaks and commitlint over `main..HEAD` as the backstop for any hook bypass (0251ad9). A guard crash now lets the command through instead of blocking every Bash call. The regression file pins both sides: literal forms block, ordinary commands pass, and out-of-scope forms are listed as passing by design.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| A1-1 | P1 | `LEFTHOOK=$(printf 0)` and other run-time assignments disable hooks | rejected | Run-time value; out of scope by the guard header. The CI backstop catches any resulting commit. |
+| A1-2 | P1 | Shell input from a heredoc or stdin escapes inspection | accepted in part | A literal heredoc fed to a shell (`bash <<'EOF'`) is now parsed as its script (81a4cc1). Stdin from a pipe or `xargs` is out of scope. |
+| A1-3 | P1 | Attached `env -S'…'` and appended arguments | accepted | Fixed in 81a4cc1 and 73ba4b3 (argument boundaries kept). |
+| A1-4 | P1 | `builtin` wrapper | accepted | Fixed in 81a4cc1. |
+| A1-5 | P1 | Run-time `lefthook` subcommand | rejected | Run-time value; out of scope, CI backstop. |
+| A1-6 | P1 | Short-option bypass through a variable (`F=-nm`) | rejected | Run-time value; out of scope, CI backstop. |
+| A1-7 | P1 | Alias defined in the same call | rejected | Aliases are out of scope (the header now covers all aliases, not only earlier calls). |
+| A1-8 | P1 | `$'…'` not truncated at NUL (re-raises R4-2) | accepted | Fixed in 73ba4b3. |
+| A1-9 | P1 | Bun options with values missing from the table (re-raises R4-3) | accepted in part | `--console-depth` and `--user-agent` added (81a4cc1). The tables cover common options by design, as the header states. |
+| A1-10 | P1 | False positive: run-time test filter on `bun run test` | accepted | Run-time heuristics removed (81a4cc1). |
+| A1-11 | P1 | False positive: quoted braces read as expansion (re-raises R4-5) | accepted | Fixed in 81a4cc1. |
+| A1-12 | P1 | False positive: inert text trips run-time git checks | accepted | Fixed in 81a4cc1. |
+| A1-13 | P1 | False positive: `git branch --no-verbose`, `git config --get core.hooksPath` | accepted | Only `--no-veri…` counts, and config reads and unsets pass (81a4cc1). |
+| A1-14 | P1 | False positive: search-string assignment naming `core.hooksPath` | accepted | Only `GIT_CONFIG*` assignments are checked (81a4cc1). |
+| A1-15 | P1 | False positive: `command -v` treated as execution | accepted | Fixed in 81a4cc1. |
