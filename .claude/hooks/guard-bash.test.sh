@@ -124,6 +124,8 @@ expect block $'CI=1 bash <<\'EOF\'\nbun test\nEOF'
 expect block $'env bash <<\'EOF\'\nbun test\nEOF'
 expect block $'command bash <<\'EOF\'\nbun test\nEOF'
 expect block "env -S 'bun \"test\"'"
+expect block "env -S 'bun\\_test'"
+expect block "env -S \"bun test 'x\""
 expect block "eval -- 'bun test'"
 expect block "bash -c -- 'bun test'"
 expect allow "git config $hp"

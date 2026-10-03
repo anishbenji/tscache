@@ -389,11 +389,14 @@ function commandStart(argv: string[]): { k: number; lookup?: boolean; split?: st
         if (name === "env" && opt.startsWith("-S")) {
           const attached = opt.length > 2;
           const value = attached ? opt.slice(2) : (argv[k + 1] ?? "");
+          // `\_` is env's escaped space. If the value does not parse, fall back
+          // to plain whitespace splitting rather than skipping the check.
+          const spaced = value.replaceAll("\\_", " ");
           let words: string[];
           try {
-            words = parse(value).flat();
+            words = parse(spaced).flat();
           } catch {
-            return { k, lookup: true }; // unparseable: out of scope
+            words = spaced.split(/\s+/).filter(Boolean);
           }
           return { k, split: [...words, ...argv.slice(k + (attached ? 1 : 2))] };
         }
