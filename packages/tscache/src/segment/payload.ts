@@ -9,6 +9,7 @@ import { isAligned, msOf, slotOf } from "../grid";
 import type { FieldArray } from "../types";
 import { DenseSegment } from "./dense";
 import { FIELD_ARRAYS } from "./dtype";
+import { setOwn } from "./own";
 import type {
   Columns,
   DenseSegmentPayload,
@@ -139,7 +140,7 @@ function presentPoints(
     for (let k = 0; k < indices.length; k++) {
       out[k] = source[indices[k] as number] as number;
     }
-    fields[name] = out;
+    setOwn(fields, name, out);
   }
   return { slots: Float64Array.from(indices, (i) => first + i), fields };
 }

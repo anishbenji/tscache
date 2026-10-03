@@ -13,6 +13,7 @@
 import { type Grid, msOf, type SlotRange } from "../grid";
 import type { Dtype, FieldArray } from "../types";
 import { FIELD_ARRAYS, type FieldArrayConstructor } from "./dtype";
+import { getOwn, setOwn } from "./own";
 import type {
   Columns,
   DenseSegmentPayload,
@@ -111,7 +112,7 @@ export class DenseSegment implements Segment {
     if (!this.#has(slot)) return undefined;
     const row: Record<string, number> = {};
     for (const column of this.#columns) {
-      row[column.name] = column.data[slot - this.#base] as number;
+      setOwn(row, column.name, column.data[slot - this.#base] as number);
     }
     return row;
   }
@@ -137,7 +138,7 @@ export class DenseSegment implements Segment {
       for (let k = 0; k < present.length; k++) {
         out[k] = column.data[(present[k] as number) - this.#base] as number;
       }
-      fields[column.name] = out;
+      setOwn(fields, column.name, out);
     }
     return { slots: Float64Array.from(present), fields };
   }
@@ -177,7 +178,7 @@ export class DenseSegment implements Segment {
       throw new RangeError("point fields must be exactly the schema's fields");
     }
     for (const column of this.#columns) {
-      const values = fields[column.name];
+      const values = getOwn(fields, column.name);
       if (values === undefined || values.length !== slots.length) {
         throw new RangeError(
           `point field "${column.name}" must hold ${slots.length} values`,
@@ -299,7 +300,7 @@ export class DenseSegment implements Segment {
       this.#size++;
     }
     for (const column of this.#columns) {
-      const values = points.fields[column.name] as FieldArray;
+      const values = getOwn(points.fields, column.name) as FieldArray;
       for (let k = 0; k < slots.length; k++) {
         column.data[(slots[k] as number) - this.#base] = values[k] as number;
       }
