@@ -255,8 +255,11 @@ const GIT_LONG_WITH_VALUE = new Set([
   "--fixup", "--squash", "--reuse-message", "--reedit-message", "--push-option",
   "--receive-pack", "--exec", "--repo", "--pathspec-from-file", "--grep",
 ]);
-// `git config` forms that only read or remove a key.
-const GIT_CONFIG_READS = new Set(["--get", "--get-all", "--get-regexp", "-l", "--list", "--unset", "--unset-all", "get", "unset", "list"]);
+// `git config` forms that only read or remove a key: legacy flags anywhere,
+// or a subcommand word as the first operand (`git config get <key>`). A bare
+// word elsewhere is a value: `git config core.hooksPath list` sets it.
+const GIT_CONFIG_READ_FLAGS = new Set(["--get", "--get-all", "--get-regexp", "-l", "--list", "--unset", "--unset-all"]);
+const GIT_CONFIG_READ_SUBCOMMANDS = new Set(["get", "list", "unset"]);
 
 function checkGit(args: string[]): string | null {
   let k = 0;
@@ -269,8 +272,12 @@ function checkGit(args: string[]): string | null {
   const sub = args[k];
   const rest = args.slice(k + 1);
   // `git config core.hooksPath <path>` sets it; reads and unsets are fine.
-  if (sub === "config" && rest.some((a) => HOOKS_PATH.test(a)) && !rest.some((a) => GIT_CONFIG_READS.has(a))) {
-    return HOOK_BYPASS;
+  if (sub === "config" && rest.some((a) => HOOKS_PATH.test(a))) {
+    const firstOperand = rest.find((a) => !a.startsWith("-"));
+    const reads =
+      rest.some((a) => GIT_CONFIG_READ_FLAGS.has(a)) ||
+      (firstOperand !== undefined && GIT_CONFIG_READ_SUBCOMMANDS.has(firstOperand));
+    if (!reads) return HOOK_BYPASS;
   }
 
   for (let j = 0; j < rest.length; j++) {
@@ -304,10 +311,24 @@ const BUN_OPTS_WITH_VALUE = new Set([
   "--jsx-import-source", "--jsx-runtime",
 ]);
 
-function bunSubcommand(args: string[]): string | undefined {
+/** Index of Bun's subcommand, after its global options. */
+function bunSubcommand(args: string[]): number {
   let k = 0;
   while (args[k]?.startsWith("-")) k += BUN_OPTS_WITH_VALUE.has(args[k] as string) ? 2 : 1;
-  return args[k];
+  return k;
+}
+
+/** `bun test` is forbidden; `bun x|run|exec <cmd>` runs <cmd>, so check it. */
+function checkBun(args: string[]): string | null {
+  const k = bunSubcommand(args);
+  const sub = args[k];
+  if (sub === "test") return BUN_TEST;
+  if (sub === "x" || sub === "run" || sub === "exec") {
+    const rest = args.slice(k + 1);
+    while (rest[0]?.startsWith("-")) rest.shift();
+    return check(rest);
+  }
+  return null;
 }
 
 function check(argv: string[]): string | null {
@@ -349,7 +370,7 @@ function check(argv: string[]): string | null {
   const cmd = basename(argv[k] as string);
   const args = argv.slice(k + 1);
 
-  if (cmd === "bun") return bunSubcommand(args) === "test" ? BUN_TEST : null;
+  if (cmd === "bun") return checkBun(args);
   if (cmd === "git") return checkGit(args);
   if (cmd === "lefthook") return args.includes("uninstall") ? HOOK_BYPASS : null;
   if (EXPORTERS.has(cmd)) {
