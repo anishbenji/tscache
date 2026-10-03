@@ -135,6 +135,7 @@ Step ② merged to `main` (4b0f5f3) with the guard's later security findings ope
 | S-8 | Fail-open regression | accepted | Order-dependent bun/test trigger and a narrowed fallback. Fixed in 4a0fe84; superseded by 81a4cc1. |
 | S-9 | After 81a4cc1: allowlist semantic escape | accepted | The config-read allowlist accepted `get`/`list`/`unset` anywhere, so setting the hooks path to one of those words passed. Only the first operand counts as a subcommand word. Fixed in d1b6a41. |
 | S-10 | After 81a4cc1: sibling-path parity | accepted | `bun x`/`run`/`exec` run another command like the `bunx` wrapper does, but only `test` was checked. The wrapped command is now checked. Fixed in d1b6a41. |
+| S-11 | After d1b6a41: parser differential / control regression | accepted in part | Two literal differentials: option values (`git config --file <path>`, `bun run --cwd <dir>`) were read as the subcommand. Fixed in 38c6a7f. The control-regression part is the approved scope reduction in 81a4cc1 (run-time values and unparseable input pass; CI backstop), not a defect. |
 
 ### Round A1 — reviewer verdict: merge after fixes
 
