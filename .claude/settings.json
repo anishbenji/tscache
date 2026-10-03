@@ -8,6 +8,8 @@
       "Bash(bunx knip*)",
       "Bash(bunx playwright test*)",
       "Bash(bunx fallow *)",
+      "Bash(scripts/codex-review.sh *)",
+      "Bash(bash scripts/codex-review.sh *)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
