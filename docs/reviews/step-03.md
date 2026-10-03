@@ -1,6 +1,6 @@
 # Step 03 — Coverage index
 
-Branch: `feat/03-coverage-index` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: pending
+Branch: `feat/03-coverage-index` · Reviewer: GPT-6.1 Sol (high; xhigh adversarial) · Rounds: 2 + 1 adversarial · Status: in review · Verdict after triage: pending
 
 The internal contract for this step (`grid.ts`, `coverage.ts`) was approved by the user as N9 and recorded in architecture §4.1 before the contract tests were written (fce08d7).
 
@@ -16,6 +16,14 @@ Host `bun run ci` passed (199 tests).
 ## Round 2 — reviewer verdict: merge
 
 Host `bun run ci` passed. No findings. The reviewer confirmed R1-1 and R1-2 fixed with regression tests and the contract tests unchanged. The round started before 6fe0d2e (contract wording and ownership tests, no source change); the adversarial pass below reviews the branch including it.
+
+## Adversarial round A1 — reviewer verdict: merge after fixes
+
+Focus from the workflow schedule (fenceposts and snap-outward, single conversion site, adjacent/touching/nested ranges) plus arithmetic exactness in the safe-integer domain. Host `bun run ci` passed. The reviewer found nothing in range operations, conversion placement or domain arithmetic, and reported 540,322 exact arithmetic comparisons and 6,000 coverage operations near the integer limits passing in its own probes.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| A1-1 | P1 | `snapOut` coerces non-number endpoints (`"10"`, `null`, booleans) instead of rejecting | accepted | Reproduced: `Math.abs` coerced them, so `{start: "10", end: "10"}` snapped to real slots. Endpoints are now checked with `Number.isFinite`, which does not coerce, and a non-object range is rejected too (found while fixing). Fixed in 4be7fa2 with rejection tests. |
 
 ## Contract-test changes
 
