@@ -1,6 +1,6 @@
 # Step 04 — DenseSegment and bitmask
 
-Branch: `feat/04-dense-segment` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: escalated at the round cap · Verdict after triage: pending the user's decision
+Branch: `feat/04-dense-segment` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: in review (rounds past the cap authorized by the user) · Verdict after triage: pending
 
 The internal contract for this step (`segment/`) was approved by the user as N10 and N11 (N12 added in round 2) and recorded in architecture §4.2 before the contract tests were written (4f3c573). N11 (what a put removes) is provisional.
 
@@ -39,7 +39,7 @@ Host `bun run ci` passed (424 tests). The reviewer confirmed the other five find
 |---|---|---|---|---|
 | R4-1 | P0 | A failure while copying a later field into new buffers corrupts earlier fields (re-raises R2-1) | accepted | Reproduced with a failing test that makes the second field's copy throw. Growth installed each field's buffer as it went. All buffers are now built and filled first, then installed in an assignment-only step. Fixed in 768115a. |
 
-Round 4 is the cap in `docs/workflow.md`, and this finding re-raises R2-1, so the loop stops here and goes to the user: the fix is in and tested, but no review round has confirmed it.
+Round 4 is the cap in `docs/workflow.md`, and this finding re-raises R2-1, so the loop stopped here and went to the user, who authorized further rounds at the implementer's discretion (2026-10-04).
 
 ## Contract-test changes
 
