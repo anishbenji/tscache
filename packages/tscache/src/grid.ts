@@ -77,11 +77,16 @@ export function msOf(slot: number, g: Grid): number {
  * legal: one slot when aligned, the two surrounding slots otherwise.
  */
 export function snapOut(r: Range, g: Grid): SlotRange {
-  // Also false for NaN and ±Infinity.
-  const supported = (t: number) => Math.abs(t) <= Number.MAX_SAFE_INTEGER;
+  // Untyped callers (plain JS, RPC params) can pass anything. isFinite does
+  // not coerce, so "10", null and booleans are rejected, not read as numbers.
+  const supported = (t: unknown) =>
+    Number.isFinite(t) && Math.abs(t as number) <= Number.MAX_SAFE_INTEGER;
+  if (typeof r !== "object" || r === null) {
+    throw new InvalidRangeError(`range must be an object, got ${String(r)}`);
+  }
   if (!supported(r.start) || !supported(r.end)) {
     throw new InvalidRangeError(
-      `range endpoints must be finite and within ±(2^53 - 1), got [${r.start}, ${r.end}]`,
+      `range endpoints must be finite numbers within ±(2^53 - 1), got [${String(r.start)}, ${String(r.end)}]`,
     );
   }
   if (r.start > r.end) {

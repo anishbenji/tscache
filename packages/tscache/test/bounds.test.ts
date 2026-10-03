@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CoverageIndex } from "../src/coverage";
 import { InvalidRangeError } from "../src/errors";
 import { isAligned, slotOf, snapOut, toMs } from "../src/grid";
+import type { Range } from "../src/types";
 
 // Implementer tests (not contract tests): the supported domain is safe
 // integers (architecture §4.1), so every ±1 on a slot is exact.
@@ -26,6 +27,27 @@ describe("grid rejects values outside the safe-integer range", () => {
     { name: "a huge finite end", range: { start: 0, end: 1e300 } },
   ])("snapOut rejects $name", ({ range }) => {
     expect(() => snapOut(range, unit)).toThrow(InvalidRangeError);
+  });
+
+  it.each([
+    { name: "numeric strings", range: { start: "10", end: "10" } },
+    { name: "null endpoints", range: { start: null, end: null } },
+    { name: "boolean endpoints", range: { start: false, end: true } },
+    { name: "a missing end", range: { start: 0 } },
+    { name: "a null range", range: null },
+    { name: "an undefined range", range: undefined },
+  ])("snapOut rejects $name without coercing them", ({ range }) => {
+    // Untyped callers (plain JS, RPC params) can pass anything.
+    expect(() => snapOut(range as unknown as Range, minute)).toThrow(
+      InvalidRangeError,
+    );
+  });
+
+  it("snapOut still accepts fractional endpoints", () => {
+    expect(snapOut({ start: 0.5, end: 1.5 }, unit)).toEqual({
+      start: 0,
+      end: 2,
+    });
   });
 
   it("snapOut rejects a range whose outward snap leaves the range", () => {
