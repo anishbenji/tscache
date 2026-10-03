@@ -2,7 +2,7 @@
 
 How each step of the commit plan (starter §11) is built, tested and reviewed. Claude implements; Codex writes contract tests and reviews; the user approves and merges. Roles and hard rules are in `AGENTS.md`.
 
-The primary driver is **T3 Code**, with one Claude thread and separate Codex threads per step. The fallback is the **Claude Code CLI** with the Codex plugin. Both read the same repository files, so switching between them changes nothing below except how the prompts are sent.
+The primary driver is **T3 Code**: one Claude thread per step, plus a Codex thread for contract tests. Reviews are automated — the Claude thread runs Codex headless through `scripts/codex-review.sh` and loops review → triage → fix until every finding is settled. The fallback is the **Claude Code CLI**, which runs the same script. Both read the same repository files.
 
 ## Files that drive the agents
 
@@ -14,13 +14,15 @@ The primary driver is **T3 Code**, with one Claude thread and separate Codex thr
 | `.claude/hooks/guard-bash.sh` | Claude | Blocks `bun test` and git-hook bypasses |
 | `.codex/config.toml` | Codex, once the project is trusted | Pins `gpt-6.1-sol` at high effort |
 | `docs/review-checklist.md` | Reviewer | Invariants every review checks, and the findings format |
+| `scripts/codex-review.sh` | Claude | Runs `bun run ci`, then a headless read-only Codex review (prompts C and D live here) |
+| `.reviews/step-NN/` | Claude | Raw review output per round (gitignored) |
 | `docs/reviews/step-NN.md` | Everyone | Findings and triage for each step |
 
 ## One-time setup
 
 Do steps 1–2 yourself; T3 Code (a Claude thread) can do the rest with your approval.
 
-1. **Install the Codex CLI on your `PATH`.** T3 Code and ChatGPT.app each bundle a private copy that the terminal and the Claude Code plugin cannot see. Use `brew install --cask codex` (native binary) or `bun add -g @openai/codex` (Node launcher; needs `node` on `PATH`). Check with `codex --version`; sign in with ChatGPT on first run if asked.
+1. **Install the Codex CLI on your `PATH`.** T3 Code and ChatGPT.app each bundle a private copy that the terminal, `scripts/codex-review.sh` and the Claude Code plugin cannot see. Use `brew install --cask codex` (native binary) or `bun add -g @openai/codex` (Node launcher; needs `node` on `PATH`). Check with `codex --version`; sign in with ChatGPT on first run if asked.
 2. **Trust the project in Codex** so `.codex/config.toml` loads. Untrusted projects ignore the project `.codex/` directory, and T3 Code may never show the prompt. In a terminal: `cd ~/code/tscache && codex`, choose **Trust and continue**, then quit. Codex records this in `~/.codex/config.toml` as `[projects."<repo path>"]` with `trust_level = "trusted"`; check with `grep -A1 'code/tscache' ~/.codex/config.toml`.
 3. **Toolchain:** Node ≥ 22.12, Bun and `gitleaks` (`brew install gitleaks`) must be on `PATH` — Lefthook and `scripts/ci.sh` call `gitleaks` directly. Fallow is a pinned devDependency (`bun run fallow`), installed by `bun install`.
 4. **Git hooks** are installed by Lefthook. If they go missing: `bunx lefthook install`. Exercise the pre-push set without pushing: `bunx lefthook run pre-push`.
@@ -36,17 +38,25 @@ Do steps 1–2 yourself; T3 Code (a Claude thread) can do the rest with your app
 | 0 | You | `git switch -c feat/NN-slug main` | ✓ | ✓ |
 | 1 | Codex thread | Contract tests — prompt A. Leave uncommitted. | ✓ | — |
 | 2 | Claude thread | Implement — prompt B | ✓ | ✓ |
-| 3 | **New** Codex thread | Review — prompt C | ✓ | ✓ |
-| 3b | Same thread as 3 | Adversarial review — prompt D, effort xhigh | per schedule | per schedule |
-| 4 | Claude thread | Triage — prompt E | ✓ | ✓ |
-| 5 | Codex thread from 3 | Re-review the fix commits, only if P0/P1 fixes were substantial | as needed | as needed |
-| 6 | You | Read `docs/reviews/step-NN.md`, run `bun run ci`, `git switch main && git merge --no-ff feat/NN-slug` | ✓ | ✓ |
+| 3 | Claude thread | Review loop — prompt E (below) | ✓ | ✓ |
+| 4 | You | Read `docs/reviews/step-NN.md`, run `bun run ci`, `git switch main && git merge --no-ff feat/NN-slug` | ✓ | ✓ |
 
-The reviewer runs in a fresh thread so it carries no context from writing the contract tests. Prompts name the branch explicitly, so they work even if T3 Code gives each thread its own worktree.
+## Review loop
+
+The reviewer reads only committed history (`git diff main...feat/NN-slug`), so commit before each round.
+
+1. **Review.** `scripts/codex-review.sh NN`. The script runs `bun run ci` on the host (Codex's read-only sandbox cannot install or build), then runs `codex exec` read-only in a fresh session with prompt C and the CI result. The model comes from `.codex/config.toml`; the script sets effort high. Output: `.reviews/step-NN/round-K.md`.
+2. **Adversarial review**, for steps in the schedule below: `scripts/codex-review.sh NN --adversarial "<focus>"` (effort xhigh). Output: `.reviews/step-NN/adversarial-K.md`.
+3. **Validate every finding** before acting on it: reproduce it with a failing test, or confirm it by reading the code and the cited doc section. A finding that does not survive validation is rejected with the evidence.
+4. **Triage.** Accepted findings are fixed in small commits, test first where behaviour changes. Rejections take one sentence citing the doc section. "Decision concerns" are never acted on — they go to the user. Record the round in `docs/reviews/step-NN.md` and commit it as `docs(review): step NN round K triage`.
+5. **Re-review.** Run the script again. Later rounds read the triage file, check that accepted fixes landed, and may contest a rejection with a reason.
+6. **Settled** when a round reports no new finding and re-raises nothing, or only re-raises rejections that the triage answers with a doc citation. Stop after four rounds without settling and escalate to the user.
+
+The Claude thread runs the loop without stopping between rounds, then reports the final triage to the user. Each round uses a fresh Codex session, so the reviewer carries no context from writing the contract tests or from earlier rounds beyond the triage file.
 
 ## Prompts
 
-Replace `NN`, `<name>`, `<modules>` and `feat/NN-slug` before sending.
+Replace `NN`, `<name>`, `<modules>` and `feat/NN-slug` before sending. Prompts C (review) and D (adversarial review) are generated by `scripts/codex-review.sh`; print one with `--print-prompt` to paste into a Codex thread by hand.
 
 **A — Contract tests (Codex, engine steps only)**
 
@@ -67,45 +77,26 @@ Implement step NN (<name>) per starter-prompt.md §11 and docs/architecture.md o
 Small Conventional Commits, `bun run ci` green after each; contract tests go in the same commit as the code that makes them pass.
 ```
 
-**C — Review (Codex, new thread)**
+**E — Review loop (Claude)**
 
 ```text
-Read-only code review. Do not edit, create, stage or commit anything.
-Review `git diff main...feat/NN-slug` and `git log main..feat/NN-slug` — step NN (<name>) of starter-prompt.md §11.
-Check the diff against docs/review-checklist.md, docs/architecture.md and AGENTS.md. Run `bun run ci` and report the result.
-Report findings in the checklist's output format, most severe first, then the verdict. Only report issues tied to a line and a concrete failure scenario.
-```
-
-**D — Adversarial review (Codex, same thread as C, effort xhigh)**
-
-```text
-Now an adversarial pass on the same diff, still read-only.
-Challenge the approach, not just the code: hidden assumptions, failure modes, and whether a simpler design within the locked decisions would be safer. Focus: <focus from the schedule below>.
-Locked decisions (starter §3, architecture §7–§8) are not findings. If you think one is wrong, put it under "Decision concerns".
-Use the output format in docs/review-checklist.md.
-```
-
-**E — Triage (Claude)**
-
-```text
-Codex's review of step NN is below. For each finding, accept it (fix it) or reject it (one sentence citing the doc section).
-Write docs/reviews/step-NN.md using the template in docs/reviews/README.md, fix accepted findings in small commits, and commit the triage file as `docs(review): step NN triage`.
+Run the review loop in docs/workflow.md for step NN on feat/NN-slug[, with an adversarial pass focused on <focus>].
+Validate every finding before fixing it, write docs/reviews/step-NN.md using the template in docs/reviews/README.md, and re-review until all findings are settled.
 Do not act on "Decision concerns" — list them for me.
-
-<paste review>
 ```
 
 ### Claude Code CLI equivalents
 
-| Prompt | CLI |
-|---|---|
-| A | `/codex:rescue --fresh --background <prompt A>` |
-| B, E | Send to Claude directly |
-| C | `/codex:review --base main --background` (not steerable; Codex applies the `AGENTS.md` review rules) |
-| D | `/codex:adversarial-review --base main --background <focus>` |
-| — | `/codex:status`, `/codex:result` to collect output; paste into prompt E |
+The CLI runs prompts B and E and the review script exactly as T3 Code does. The Codex plugin is an alternative for one-off reviews:
 
-Never enable the plugin's review gate; it loops Claude and Codex and drains usage.
+| Purpose | CLI |
+|---|---|
+| Contract tests (A) | `/codex:rescue --fresh --background <prompt A>` |
+| One-off review | `/codex:review --base main --background` (not steerable; Codex applies the `AGENTS.md` review rules) |
+| One-off adversarial review | `/codex:adversarial-review --base main --background <focus>` |
+| Collect output | `/codex:status`, `/codex:result` |
+
+Never enable the plugin's review gate; it loops Claude and Codex and drains usage. The review loop above replaces it.
 
 ## Adversarial-review schedule
 
@@ -122,4 +113,4 @@ Never enable the plugin's review gate; it loops Claude and Codex and drains usag
 ## Model choice
 
 - **Claude threads:** Opus 5.5 by default. Consider Fable 5.1 for steps ⑨–⑪ if your plan covers it — on Max plans it can use up to 50% of the weekly limit at no extra cost; on Pro it needs usage credits.
-- **Codex threads:** GPT-6.1 Sol at high effort for prompts A and C; xhigh for prompt D. Avoid Ultrafast for reviews: it uses the subscription limit about 8× faster.
+- **Codex:** GPT-6.1 Sol at high effort for prompts A and C; xhigh for prompt D (the review script sets this). Avoid Ultrafast for reviews: it uses the subscription limit about 8× faster.
