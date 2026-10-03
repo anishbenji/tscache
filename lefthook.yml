@@ -24,6 +24,6 @@ pre-push:
     - name: knip
       run: bunx knip
     - name: fallow
-      run: fallow audit
+      run: bun run fallow
     - name: tests
       run: bunx vitest run --passWithNoTests

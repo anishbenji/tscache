@@ -2,3 +2,9 @@ node_modules/
 dist/
 .DS_Store
 .fallow/
+
+# Local-only / generated
+.claude/settings.local.json
+test-results/
+playwright-report/
+.reviews/

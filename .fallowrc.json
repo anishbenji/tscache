@@ -4,6 +4,12 @@
   "workspaces": {
     "packages": ["packages/*"]
   },
+  // Consumed by tsdown's publint/attw integration, not imported anywhere.
+  "ignoreDependencies": ["@arethetypeswrong/cli", "publint"],
+  "health": {
+    // Test tables run long by design; size thresholds gate src only.
+    "ignore": ["packages/*/test/**"]
+  },
   "duplicates": {
     // Hide pair-only clones; focus on widespread copy-paste
     // worth refactoring. Lower to 2 to report every duplicate pair.

@@ -4,10 +4,11 @@
 set -euo pipefail
 
 bun install --frozen-lockfile
+bash .claude/hooks/guard-bash.test.sh
 bunx biome ci .
 bunx tsc -p packages/tscache
 bunx knip
-fallow audit
+bun run fallow
 bunx vitest run --passWithNoTests
 bun run --filter tscache build   # includes publint + attw (esm-only profile)
 (cd packages/tscache && npm pack --dry-run)

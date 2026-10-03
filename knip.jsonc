@@ -6,8 +6,8 @@
       "project": []
     },
     "packages/tscache": {
-      "entry": ["src/entries/*.ts"],
-      "project": ["src/**/*.ts"]
+      "entry": ["src/entries/*.ts", "test/**/*.test.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts"]
     }
   },
   // Consumed by tsdown's attw integration, not imported anywhere.
