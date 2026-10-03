@@ -37,11 +37,19 @@ export interface DenseSegmentPayload {
   fields: { name: string; dtype: Dtype; data: ArrayBuffer }[];
 }
 
+/**
+ * Largest supported slot cap (N12). Mask indices use 32-bit integer
+ * arithmetic, which is exact only below 2^31 slots; config validation rejects
+ * a larger `segmentSlotCap`, and a segment that size could not be allocated
+ * anyway.
+ */
+export const MAX_SLOT_CAP: number = 2 ** 31 - 1;
+
 /** What a segment needs from the cache's resolved config. */
 export interface SegmentOptions {
   grid: Grid;
   fields: Readonly<Record<string, Dtype>>;
-  /** Maximum slots the extent may span. */
+  /** Maximum slots the extent may span; a positive integer up to MAX_SLOT_CAP. */
   slotCap: number;
 }
 

@@ -94,7 +94,7 @@ interface CacheConfig {
   fields: Record<string, Dtype>;
   /** Dense segment splits when an internal gap exceeds K intervals. Default 4. */
   gapSplitK?: number;
-  /** Max slots per segment. Default 32_768. */
+  /** Max slots per segment. Default 32_768; at most 2^31 − 1 (N12). */
   segmentSlotCap?: number;
   /** Opt-in dataset version; mismatch on put → auto-clear + cacheCleared event. */
   version?: string;
@@ -524,8 +524,8 @@ function segmentFromPayload(
 
 Rules:
 
-- **Slot cap.** `mergeFrom` throws `RangeError` if the extent after the merge would span more than `slotCap` slots. Where to split (gap-split K, segment selection) is merge-path policy (step ⑤); the segment only refuses to exceed its own limit. A segment grows in either direction.
-- **Atomic.** `mergeFrom` validates before it mutates; when it throws, the segment is unchanged.
+- **Slot cap.** `slotCap` is a positive integer up to 2^31 − 1 (N12); the constructor throws `RangeError` otherwise. `mergeFrom` throws `RangeError` if the extent after the merge would span more than `slotCap` slots. Where to split (gap-split K, segment selection) is merge-path policy (step ⑤); the segment only refuses to exceed its own limit. A segment grows in either direction.
+- **Atomic.** `mergeFrom` validates, and allocates any buffers it needs, before it mutates; when it throws, including on an allocation failure, the segment is unchanged.
 - **Programming errors** throw `RangeError`: a slot or range that is not made of safe integers or has start > end; `points` whose slots are not strictly ascending safe integers, whose field names are not exactly the schema's, or whose field arrays differ in length from `slots`; a point outside `authority`; `transferPayload()` on an empty segment. None is reachable from consumer input, which put validation rejects first.
 - **Payload layout.** `start` is the timestamp of `extent.start`; `count` is the extent's slot count; `mask` is a `Uint8Array` of exactly `ceil(count / 8)` bytes in which slot `i` of the extent is bit `i & 7` of byte `i >> 3`, with unused trailing bits zero; `fields` follows the schema's declaration order, each `data` an `ArrayBuffer` of exactly `count × bytes-per-element`, with the values of absent slots zero. Equal segments therefore produce equal payloads. Field data is little-endian, which is the native order of every supported platform; no byte swapping is done. The payload is a plain structured-cloneable object.
 - **Decoding.** `segmentFromPayload` throws `TscacheError` with a descriptive message for an invalid payload: `format` other than 1, `layout` other than `'dense'`, `interval` or `alignmentOffset` differing from the grid, `start` not aligned, `count` not a positive safe integer or greater than `slotCap`, a mask of the wrong type or length or with trailing bits set, fields that do not match the schema's names and dtypes with correctly sized buffers, or a `start` and `count` whose last slot has no safe-integer timestamp. Field entries may come in any order (a schema declared in a different key order names the same fields); re-encoding restores schema order. Values stored under absent mask bits are ignored, since presence is decided by the mask alone; re-encoding writes zeros. The decoded segment's extent is the tight bounds of the present points, and `segmentFromPayload(s.transferPayload(), …)` is equal to `s` in every observable way.
@@ -574,7 +574,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (N9–N11 later, at steps ③–④) (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9–N12 later, at steps ③–④) (working process §2.3: alternatives presented, user decided).
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -589,6 +589,7 @@ These emerged while making the API concrete (N9–N11 later, at steps ③–④)
 | N9 | Grid and coverage internals | **`grid.ts` holds every ms↔slot conversion** (`isAligned`, `slotOf`, `msOf`, `snapOut`, `toMs`); `coverage.ts` works on integer slot ranges only. Internal contract in §4.1. Rejected: conversion inside `coverage.ts` (no doc change, but two concerns in one module and the single-site rule harder to verify). User-confirmed 2026-10-03 |
 | N10 | Segment internals | **`Segment` interface in slot terms** (`extent`, `size`, `lookup`, `slice`, `mergeFrom`, `transferPayload`) with `DenseSegment` and `segmentFromPayload`; contract in §4.2. The segment enforces the slot cap; split policy stays in the merge path. An invalid payload throws plain **`TscacheError`** (rejected: a new `PayloadError` class, which would add to §2.6). Field data is **little-endian, documented, no byte swapping** (rejected: explicit conversion on every transfer for platforms that do not exist in practice). User-confirmed 2026-10-04 |
 | N11 | What a put removes | **Replace only when the range is explicit** (provisional — the user chose it "for now"; revisit when step ⑤ wires `put`). An orchestrated fetch or a `put` with `options.range` replaces that range; a `put` without `range` only adds or overwrites. Rejected: always replace the batch's span (a sparse pushed batch would delete the points between its ends, which the cache cannot refetch because the span is marked known); never remove (a point deleted upstream could not be removed short of `clear()`). Consequences for fetcher authors, to document at step ⑪: a response must be complete for the requested range, so a fetcher against a paginated API loops until it has all of it; and because a slot returned without a point is cached as a confirmed gap and never refetched, a fetcher for a backend that publishes late must report `finalizedUntil` so data that is not final yet stays provisional. **Design intent recorded with this decision:** the primary envisioned use is data that never changes once returned (OHLC candles from a trading system feeding a chart). The purpose of the cache is to avoid refetching; refetching to overwrite is acceptable only in specific scenarios (live tail, explicit invalidation, version change). Replacement adds no fetches: it only governs what happens to old points when a fetch or ranged put occurs anyway. User-confirmed 2026-10-04 |
+| N12 | Upper bound on `segmentSlotCap` | **At most 2^31 − 1**; a larger value is rejected with `ConfigError`. The presence mask is indexed with 32-bit integer arithmetic, which is exact only below 2^31 slots, and a segment that large (over 2 GB per field) could not be used anyway. Rejected: a lower practical limit such as 2^24 (an arbitrary number to defend); no limit with division-based indexing (slower on the hottest loops and not testable without a 2 GB allocation). User-confirmed 2026-10-04 |
 
 ## 9. What happens after sign-off
 

@@ -14,11 +14,12 @@ import { type Grid, msOf, type SlotRange } from "../grid";
 import type { Dtype, FieldArray } from "../types";
 import { FIELD_ARRAYS, type FieldArrayConstructor } from "./dtype";
 import { getOwn, setOwn } from "./own";
-import type {
-  Columns,
-  DenseSegmentPayload,
-  Segment,
-  SegmentOptions,
+import {
+  type Columns,
+  type DenseSegmentPayload,
+  MAX_SLOT_CAP,
+  type Segment,
+  type SegmentOptions,
 } from "./types";
 
 /** Smallest allocation, so a segment built point by point grows in few steps. */
@@ -81,6 +82,12 @@ export class DenseSegment implements Segment {
   #size = 0;
 
   constructor(options: SegmentOptions) {
+    const { slotCap } = options;
+    if (!Number.isInteger(slotCap) || slotCap < 1 || slotCap > MAX_SLOT_CAP) {
+      throw new RangeError(
+        `slotCap must be an integer in [1, ${MAX_SLOT_CAP}], got ${slotCap}`,
+      );
+    }
     this.#grid = options.grid;
     this.#slotCap = options.slotCap;
     this.#columns = Object.entries(options.fields).map(([name, dtype]) => {

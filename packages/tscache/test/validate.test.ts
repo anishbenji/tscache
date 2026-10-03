@@ -143,6 +143,11 @@ describe("resolveCacheConfig — rejections (ConfigError naming the offender)", 
     ["fractional gapSplitK", { gapSplitK: 1.5 }, /gapSplitK/],
     ["zero segmentSlotCap", { segmentSlotCap: 0 }, /segmentSlotCap/],
     ["fractional segmentSlotCap", { segmentSlotCap: 0.5 }, /segmentSlotCap/],
+    [
+      "segmentSlotCap above 2^31 - 1",
+      { segmentSlotCap: 2 ** 31 },
+      /segmentSlotCap/,
+    ],
     ["empty version", { version: "" }, /version/],
     ["non-string version", { version: 3 }, /version/],
     ["NaN finalizedUntil", { finalizedUntil: Number.NaN }, /finalizedUntil/],
@@ -165,6 +170,11 @@ describe("resolveCacheConfig — rejections (ConfigError naming the offender)", 
     const call = () => resolveCacheConfig(config as unknown as CacheConfig);
     expect(call).toThrow(ConfigError);
     expect(call).toThrow(/config must be an object/);
+  });
+
+  it("accepts the largest supported segmentSlotCap", () => {
+    const r = resolveCacheConfig({ ...minimal, segmentSlotCap: 2 ** 31 - 1 });
+    expect(r.segmentSlotCap).toBe(2 ** 31 - 1);
   });
 
   it("gapSplitK of 1 and segmentSlotCap of 1 are legal minima", () => {
