@@ -133,6 +133,8 @@ Step ② merged to `main` (4b0f5f3) with the guard's later security findings ope
 | S-3–S-6 | After 291a9df: control regression, fail-open, parser differential, one more | accepted | Probed without details: 20 realistic bypasses reproduced (run-time values, weak parse-error fallback, wrapper option values, `function`/`coproc`). Fixed in f0520d2; the run-time-value handling was later removed (81a4cc1). |
 | S-7 | Logic bypass | accepted | Nested `sh -c "$CMD"` / `eval` checked text triggers against the nested string only. Fixed in 7ea1e6b; superseded by 81a4cc1. |
 | S-8 | Fail-open regression | accepted | Order-dependent bun/test trigger and a narrowed fallback. Fixed in 4a0fe84; superseded by 81a4cc1. |
+| S-9 | After 81a4cc1: allowlist semantic escape | accepted | The config-read allowlist accepted `get`/`list`/`unset` anywhere, so setting the hooks path to one of those words passed. Only the first operand counts as a subcommand word. Fixed in d1b6a41. |
+| S-10 | After 81a4cc1: sibling-path parity | accepted | `bun x`/`run`/`exec` run another command like the `bunx` wrapper does, but only `test` was checked. The wrapped command is now checked. Fixed in d1b6a41. |
 
 ### Round A1 — reviewer verdict: merge after fixes
 
