@@ -40,10 +40,19 @@ expect block "$lh git commit -m x"
 expect block "export $lh"
 expect block $'echo hi\nexport '"$lh"
 expect block "git -c core.hooksPath=/dev/null commit -m x"
+expect block "sudo git commit $nv -m x"
+expect block "env FOO=1 git push $nv"
+expect block "/usr/bin/git commit $nv -m x"
+expect block "bash -c \"git commit $nv -m x\""
+expect block "$lh bun run release"
+expect block "bash -c '$lh git commit -m x'"
+expect block "LEFTHOOK""=false git commit -m x"
+expect block "sudo git commit -n -m x"
+expect block $'git commit -F - <<\'EOF\'\ndocs: forbid '"$nv"$'\nEOF'
 expect allow "rg -- \"$nv\" AGENTS.md"
-expect allow "grep -n $lh docs/workflow.md"
 expect allow "git log -n 3"
-expect allow $'git commit -F - <<\'EOF\'\ndocs: forbid '"$nv"$'\nEOF'
+expect allow "git commit -m 'add digit check'"
+expect allow "LEFTHOOK_VERBOSE=1 bunx lefthook run pre-push"
 
 if [[ $failures -gt 0 ]]; then
   echo "$failures guard case(s) failed" >&2

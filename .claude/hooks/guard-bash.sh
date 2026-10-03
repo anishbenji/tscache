@@ -11,23 +11,23 @@ block() {
   exit 2
 }
 
-# Patterns match in command position only (start of a line or after a shell
-# operator), so text that merely mentions a command, such as a grep pattern
-# or a heredoc commit message, passes. A git segment ends at an operator or
-# newline; flags inside a quoted `-m` message still match (strict side).
+# `bun test` in command position only (start of a line or after a shell
+# operator), so commit messages and docs that mention it pass.
 nl=$'\n'
-start="(^|[;&|(${nl}])[[:space:]]*"
-git_segment="${start}git[[:space:]][^;&|${nl}]*"
-bun_test="${start}bun[[:space:]]+test([[:space:];&|)]|\$)"
-commit_short_n="${start}git[[:space:]]+commit[^;&|${nl}]*[[:space:]]-[a-zA-Z]*n[a-zA-Z]*([[:space:]]|\$)"
-lefthook_off="${start}((export|env)[[:space:]]+)?LEFTHOOK=(0|false)([[:space:]]|\$)"
-
+bun_test="(^|[;&|(${nl}])[[:space:]]*bun[[:space:]]+test([[:space:];&|)]|\$)"
 if [[ $cmd =~ $bun_test ]]; then
   block "never run 'bun test' — Vitest runs under Node. Use 'bun run test' or 'bunx vitest run'."
 fi
 
-if [[ $cmd =~ ${git_segment}--no-verify || $cmd =~ ${git_segment}core\.hooksPath ||
-  $cmd =~ $commit_short_n || $cmd =~ $lefthook_off ]]; then
+# Hook bypasses fail closed: match anywhere in the text, so wrappers such as
+# sudo, env, absolute paths or `bash -c` cannot hide them. The one exemption
+# is a command that never invokes git, e.g. grepping the docs for the rule.
+# A git commit whose message mentions a bypass flag is blocked (strict side).
+invokes_git="(^|[^[:alnum:]_.-])git([^[:alnum:]_-]|\$)"
+lefthook_off="LEFTHOOK=(0|false)([^[:alnum:]_]|\$)"
+commit_short_n="git[[:space:]]+commit[^;&|${nl}]*[[:space:]]-[a-zA-Z]*n[a-zA-Z]*([[:space:]]|\$)"
+if [[ $cmd =~ $lefthook_off || $cmd =~ $commit_short_n ]] ||
+  [[ $cmd =~ $invokes_git && $cmd =~ --no-verify|core\.hooksPath ]]; then
   block "git hooks must not be bypassed. Fix the failing check instead."
 fi
 
