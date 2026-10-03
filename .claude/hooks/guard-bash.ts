@@ -9,12 +9,14 @@
 // function forms, and static `bash -c` / `eval` / `env -S` bodies.
 //
 // Out of scope by design: values known only at run time (variables, $(…),
-// backticks, brace expansion, stdin, aliases), unparseable input, and tools
-// that spawn git or bun themselves. Those are not accidents, and hardening
-// against them made the guard large and noisy. The backstop is `bun run ci`,
-// which re-runs gitleaks and commitlint over every commit on the branch, so a
-// hook bypass is caught before merge however it was done. For the same
-// reason a guard crash lets the command through rather than blocking all Bash.
+// backticks, brace expansion, stdin, aliases), unparseable input, tools that
+// spawn git or bun themselves, and options missing from the git, bun and
+// wrapper tables (they cover common options, not all). Those are not
+// accidents, and hardening against them made the guard large and noisy.
+// The backstop is `bun run ci`, which re-runs gitleaks and commitlint over
+// every commit on the branch, so a hook bypass is caught before merge however
+// it was done. For the same reason a guard crash lets the command through
+// rather than blocking every Bash call.
 
 export {};
 
@@ -30,9 +32,9 @@ const ANSI_C_ESCAPES: Record<string, string> = {
   "\\": "\\", "'": "'", '"': '"', "?": "?",
 };
 
-/** Decodes the body of a bash `$'…'` string. */
+/** Decodes the body of a bash `$'…'` string; bash truncates it at NUL. */
 function decodeAnsiC(body: string): string {
-  return body.replace(
+  const decoded = body.replace(
     /\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8}|[0-7]{1,3}|c.|.)/gs,
     (_m, e: string) => {
       const head = e[0] as string;
@@ -44,6 +46,8 @@ function decodeAnsiC(body: string): string {
       return ANSI_C_ESCAPES[e] ?? `\\${e}`;
     },
   );
+  const nul = decoded.indexOf("\0");
+  return nul < 0 ? decoded : decoded.slice(0, nul);
 }
 
 const basename = (w: string) => w.slice(w.lastIndexOf("/") + 1);
@@ -330,11 +334,12 @@ function check(argv: string[]): string | null {
         const opt = argv[k] as string;
         // `command -v/-V` only looks a command up.
         if (name === "command" && /^-[vV]$/.test(opt)) return null;
-        // `env -S 'cmd args'` (or -S'…') runs its value as a command line.
+        // `env -S 'cmd args'` (or -S'…') splits its value into words and
+        // runs them followed by the remaining arguments, kept whole.
         if (name === "env" && opt.startsWith("-S")) {
           const attached = opt.length > 2;
           const value = attached ? opt.slice(2) : (argv[k + 1] ?? "");
-          return checkSource([value, ...argv.slice(k + (attached ? 1 : 2))].join(" "));
+          return check([...value.split(/\s+/).filter(Boolean), ...argv.slice(k + (attached ? 1 : 2))]);
         }
         k += wrapper.has(opt) ? 2 : 1;
       }
