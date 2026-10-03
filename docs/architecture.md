@@ -417,8 +417,10 @@ interface Grid { interval: number; alignmentOffset: number }
 interface SlotRange { start: number; end: number }
 
 /** True when t is a safe integer lying exactly on the grid:
- *  (t - alignmentOffset) % interval === 0. False for anything else,
- *  including fractions, NaN and |t| >= 2^53. */
+ *  (t - alignmentOffset) % interval === 0 in exact integer arithmetic, for
+ *  every safe-integer t (the literal floating-point expression is not the
+ *  definition: its subtraction can round near ±2^53). False for anything
+ *  else, including fractions, NaN and |t| >= 2^53. */
 function isAligned(t: number, g: Grid): boolean;
 /** Slot of an aligned timestamp. Throws RangeError if t is not aligned —
  *  callers validate first (put validation reports PutError 'misaligned'). */
@@ -454,6 +456,8 @@ class CoverageIndex {
   clear(): void;
 }
 ```
+
+Ownership: `CoverageIndex` never shares range objects with its callers. It does not keep an object passed to it, and `covered()`, `gaps()` and `ranges()` return fresh objects, so callers may mutate or keep results freely.
 
 `CoverageIndex` methods throw `RangeError` for a malformed `SlotRange` (endpoints that are not safe integers, or start > end): a programming error, never reachable from consumer input, which `snapOut`/`slotOf` validate. Out of step ③ by design: excluding the volatile region (`t >= finalizedUntil`) from coverage is the engine's job (step ⑦); flank coalescing of misses is the orchestrator's (step ⑪).
 

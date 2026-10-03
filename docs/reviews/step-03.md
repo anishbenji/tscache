@@ -20,7 +20,7 @@ None. Codex's `grid.test.ts` and `coverage.test.ts` are unchanged. Implementer t
 Spec ambiguities Codex reported while writing the tests, and their resolution:
 
 - Numeric precision of the alignment formula near ±2^53, and behaviour for unsafe values: resolved by the safe-integer domain above (user-confirmed 2026-10-03).
-- Ownership of ranges passed to and returned from `CoverageIndex`: open, with the user.
+- Ownership of ranges passed to and returned from `CoverageIndex`: the index never shares range objects with callers. Written into §4.1 with tests in `coverage.ownership.test.ts` (user-confirmed 2026-10-03), together with the statement that alignment is exact for every safe-integer timestamp.
 
 ## Decision concerns
 
