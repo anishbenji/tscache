@@ -267,11 +267,13 @@ const HOOKS_PATH = /core\.hookspath/i;
 
 function checkGit(args: string[], src: string, dynamicInput: boolean): string | null {
   let k = 0;
+  // A dynamic global option (`-c "$X"`) may set core.hooksPath at run time.
+  let dynamic = dynamicInput;
   while (k < args.length && (args[k] as string).startsWith("-")) {
     const opt = args[k] as string;
-    if (HOOKS_PATH.test(opt) || (GIT_OPTS_WITH_VALUE.has(opt) && HOOKS_PATH.test(args[k + 1] ?? ""))) {
-      return HOOK_BYPASS;
-    }
+    const value = GIT_OPTS_WITH_VALUE.has(opt) ? (args[k + 1] ?? "") : "";
+    if (HOOKS_PATH.test(opt) || HOOKS_PATH.test(value)) return HOOK_BYPASS;
+    if (isDynamic(opt) || isDynamic(value)) dynamic = true;
     k += GIT_OPTS_WITH_VALUE.has(opt) ? 2 : 1;
   }
   const sub = args[k];
@@ -281,7 +283,7 @@ function checkGit(args: string[], src: string, dynamicInput: boolean): string | 
 
   // Words that are options or operands; option values (a message, a file)
   // are skipped, so neither their text nor their dynamism counts.
-  let dynamic = dynamicInput || (sub !== undefined && isDynamic(sub));
+  if (sub !== undefined && isDynamic(sub)) dynamic = true;
   for (let j = 0; j < rest.length; j++) {
     const a = rest[j] as string;
     if (a === "--") break;
@@ -356,7 +358,7 @@ function check(argv: string[], src: string): string | null {
       while (argv[k]?.startsWith("-")) {
         const opt = argv[k] as string;
         // `env -S 'cmd args'` runs its value as a command line.
-        if (name === "env" && opt === "-S") return checkSource(argv[k + 1] ?? "");
+        if (name === "env" && opt === "-S") return checkSource(argv[k + 1] ?? "", src);
         k += wrapper.has(opt) ? 2 : 1;
       }
       if (name === "timeout") k++; // the duration
@@ -384,24 +386,28 @@ function check(argv: string[], src: string): string | null {
       if (hit) return hit;
     }
   }
-  if (cmd === "eval") return checkSource(args.join(" "));
+  if (cmd === "eval") return checkSource(args.join(" "), src);
   if (SHELLS.has(cmd)) {
     const flag = args.findIndex((a) => /^-[a-z]*c[a-z]*$/.test(a));
-    if (flag >= 0 && args[flag + 1] !== undefined) return checkSource(args[flag + 1] as string);
+    if (flag >= 0 && args[flag + 1] !== undefined) return checkSource(args[flag + 1] as string, src);
   }
   return null;
 }
 
-/** Checks a command line; unparseable input fails closed on text triggers. */
-function checkSource(src: string): string | null {
+/**
+ * Checks a command line; unparseable input fails closed on text triggers.
+ * `root` is the whole tool call: nested sources (`sh -c "$CMD"`, `eval`)
+ * still match text triggers against it, where the value was assigned.
+ */
+function checkSource(src: string, root: string = src): string | null {
   let commands: Command[];
   try {
     commands = parse(src);
   } catch {
-    return checkText(src);
+    return checkText(root);
   }
   for (const argv of commands) {
-    const hit = check(argv, src);
+    const hit = check(argv, root);
     if (hit) return hit;
   }
   return null;
