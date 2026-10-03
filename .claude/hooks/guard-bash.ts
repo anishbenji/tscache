@@ -13,10 +13,18 @@
 // spawn git or bun themselves, and options missing from the git, bun and
 // wrapper tables (they cover common options, not all). Those are not
 // accidents, and hardening against them made the guard large and noisy.
+// Exotic literal spellings are out of scope too: escapes and option forms no
+// agent types by accident (octal or backslash-newline tricks, fd-prefixed
+// heredocs, clustered wrapper options, spliced heredoc delimiters, shell
+// options between -c and its body). Closing them means reimplementing bash.
 // The backstop is `bun run ci`, which re-runs gitleaks and commitlint over
 // every commit on the branch, so a hook bypass is caught before merge however
 // it was done. For the same reason a guard crash lets the command through
 // rather than blocking every Bash call.
+//
+// Frozen (user decision, 2026-10-03): change this file only in response to an
+// accident actually observed in this repository, with a regression case. It
+// is not part of adversarial review; see docs/reviews/step-02.md, round A3.
 
 export {};
 

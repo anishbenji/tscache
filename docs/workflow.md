@@ -114,6 +114,8 @@ Never enable the plugin's review gate; it loops Claude and Codex and drains usag
 | ⑪ Fetcher orchestration | Dedup keying, flank coalescing, `authInvalid`/`updateAuth` races, `get` never blocking on auth |
 | ⑫ Playwright suite | Tests passing for the wrong reason (pages vs contexts), flakiness, timing assumptions |
 
+The Bash guard (`.claude/hooks/guard-bash.ts`) is frozen and excluded from adversarial review: it is a tripwire for common accidents, and `bun run ci` is the backstop. Change it only for an accident actually observed, with a regression case.
+
 ## Model choice
 
 - **Claude threads:** Opus 5.5 by default. Consider Fable 5.1 for steps ⑨–⑪ if your plan covers it — on Max plans it can use up to 50% of the weekly limit at no extra cost; on Pro it needs usage credits.
