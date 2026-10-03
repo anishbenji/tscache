@@ -1,6 +1,6 @@
 # Step 02 — Core types and config validation
 
-Branch: `feat/02-core-types` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: pending
+Branch: `feat/02-core-types` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in review · Verdict after triage: pending
 
 The branch also carries the agent-workflow tooling (a865e55 onward). Findings are labelled by area.
 
@@ -34,6 +34,16 @@ Via `scripts/codex-review.sh`; host `bun run ci` passed. The reviewer confirmed 
 | R2-2 | P2 | Tooling: guard blocks backticks inside a single-quoted commit message | accepted | Reproduced with a regression case. Backtick substitution is now checked on text with single-quoted spans removed. Fixed in 1fc3198. |
 
 Also: 1396ac1 replaces Vitest's deprecated `toThrowError` with `toThrow` (no behaviour change).
+
+## Round 3 — reviewer verdict: merge after fixes
+
+Host `bun run ci` passed. The reviewer confirmed every earlier accepted finding fixed and re-raised no rejection. All three findings are further parser differentials in the guard, so instead of another regex patch the guard was rebuilt as a shell tokenizer (`.claude/hooks/guard-bash.ts`): quotes, escapes, `$'…'`, operators, heredocs, `$(…)` and backtick substitutions, `bash -c` and `eval` bodies, leading assignments and wrappers are resolved, and the rules apply to real argv. Unparseable input fails closed if it names a guarded tool, and a guard crash now blocks instead of allowing (Claude Code only blocks on exit 2). The regression file holds 61 command cases plus a crash check.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | Tooling: git global options (`-C`, `-c`) hide `commit -n` | accepted | Reproduced. Global options are skipped before the subcommand. Fixed in 516947f. |
+| R3-2 | P1 | Tooling: a leading `VAR=value` hides the forbidden test runner | accepted | Reproduced. Leading assignments are consumed (and checked) before argv0. Fixed in 516947f. |
+| R3-3 | P2 | Tooling: `(bun test)` inside a single-quoted message is blocked | accepted | Reproduced. Quoted text is now a word, never a command boundary; mentions of bypass flags inside commit messages and heredocs also pass now, which supersedes the strict-side note in R1-4. Fixed in 516947f. |
 
 ## Contract-test changes
 
