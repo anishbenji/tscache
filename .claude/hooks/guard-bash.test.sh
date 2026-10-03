@@ -114,6 +114,45 @@ expect allow "git commit -m 'document the $nv ban'"
 expect allow $'git commit -F - <<\'EOF\'\ndocs: forbid '"$nv"$'\nEOF'
 expect allow "LEFTHOOK_VERBOSE=1 bunx lefthook run pre-push"
 
+# Dynamic input: values the guard cannot resolve statically fail closed
+# when the command text contains a trigger.
+expect block "git commit \$(echo $nv) -m x"
+expect block "F=$nv; git commit \$F -m x"
+expect block "F=$nv; git commit \"\$F\" -m x"
+expect block "F=-n; git commit \$F -m x"
+expect block "RUNNER=bun; \$RUNNER test"
+expect block "echo $nv | xargs git commit -m x"
+expect block "\$GIT commit $nv -m x"
+expect block "git\${IFS}commit\${IFS}$nv"
+expect block "{bun,test}"
+expect allow "git commit -m \"\$MSG\""
+expect allow $'git commit -m "$(cat <<\'EOF\'\nfix: stop lefthook from skipping bun test; see -n note\nEOF\n)"'
+expect allow "git push origin \"\$BRANCH\""
+# Out of scope: the trigger was set in an earlier call, so no text shows it.
+expect allow "git commit \"\$F\" -m x"
+expect allow "\$RUNNER test"
+expect allow "git log --since \"\$(date)\""
+expect allow "bun run \$SCRIPT"
+expect allow "echo \$HOME"
+
+# Unparseable input falls back to text triggers, so an earlier complete
+# line cannot slip through.
+expect block $'git commit -n -m x\necho "'
+expect block $'bun test\necho $(('
+expect allow $'echo "unterminated'
+
+# Wrapper options that take a value, and shell keyword forms.
+expect block "nice -n 5 git commit -n -m x"
+expect block "nice -n 5 bun test"
+expect block "xargs -I {} git commit -n -m {}"
+expect block "timeout -s KILL 5 bun test"
+expect block "timeout --signal KILL 5 bun test"
+expect block "time -p bun test"
+expect block "env -S 'bun test'"
+expect block "function f { git commit -n -m x; }; f"
+expect block "coproc bun test"
+expect block "coproc NAME { bun test; }"
+
 # A crashing guard must block, not allow (Claude Code only blocks on exit 2).
 echo '{not json' | bash "$guard" 2>/dev/null
 if [[ $? -ne 2 ]]; then

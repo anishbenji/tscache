@@ -2,15 +2,22 @@
 // Exit 2 blocks the call and returns stderr to Claude.
 // Regression cases: .claude/hooks/guard-bash.test.sh
 //
-// The command is tokenized like a shell would (quotes, escapes, operators,
-// heredocs, $(…) and backtick substitutions, `bash -c` and `eval` bodies),
-// so rules apply to real argv rather than to text: a commit message that
-// mentions a forbidden flag passes, and quoting or wrappers cannot hide one.
-// It is a tripwire against accidental violations, not a security boundary.
-// Known limits, by design: variable expansion (`$X test`), aliases and
-// functions, scripts on disk, tools that spawn git or bun themselves, and
-// option tables (git, bun) that cover common options rather than all of
-// them. The rules bind through AGENTS.md regardless.
+// Threat model. The guard stops an agent from *accidentally* running the
+// forbidden test runner or bypassing git hooks, in any way an agent plausibly
+// writes shell: quoting, escapes, wrappers and their options, redirections,
+// keyword and function forms, substitutions, several commands or lines.
+//   1. Static commands are tokenized like bash and checked on real argv, so
+//      a commit message that mentions a flag passes.
+//   2. Dynamic input the guard cannot resolve (variables, $(…), backticks,
+//      brace expansion, xargs reading stdin) fails closed: if a guarded
+//      command has a dynamic word and the command text contains a trigger,
+//      it is blocked.
+//   3. Unparseable input fails closed on the same text triggers.
+// Out of scope: deliberate evasion where no trigger appears in the text
+// (encoded or assembled strings), aliases or functions defined in an earlier
+// call, scripts on disk, and tools that spawn git or bun themselves. It is a
+// tripwire, not a security boundary; the rules bind through AGENTS.md and
+// git hooks run regardless.
 
 export {};
 
@@ -18,6 +25,8 @@ type Command = string[];
 
 class ParseError extends Error {}
 
+/** Marks a word whose value the shell computes at run time. */
+const DYN = "\u0001";
 const SEPARATORS = new Set([";", "&", "|", "(", ")", "\n"]);
 
 const ANSI_C_ESCAPES: Record<string, string> = {
@@ -40,6 +49,9 @@ function decodeAnsiC(body: string): string {
     },
   );
 }
+
+/** True when `$` at `j` starts a parameter expansion. */
+const isExpansion = (src: string, j: number) => /[A-Za-z_{@*#?$!0-9-]/.test(src[j + 1] ?? "");
 
 /** Splits shell source into simple commands, recursing into substitutions. */
 function parse(src: string): Command[] {
@@ -139,12 +151,15 @@ function parse(src: string): Command[] {
         } else if (d === "$" && src[j + 1] === "(") {
           const end = closeParen(j + 2);
           nested(src.slice(j + 2, end));
+          s += DYN;
           j = end + 1;
         } else if (d === "`") {
           const end = closeBacktick(j + 1);
           nested(src.slice(j + 1, end));
+          s += DYN;
           j = end + 1;
         } else {
+          if (d === "$" && isExpansion(src, j)) s += DYN;
           s += d;
           j++;
         }
@@ -155,13 +170,16 @@ function parse(src: string): Command[] {
     } else if (c === "$" && src[i + 1] === "(") {
       const end = closeParen(i + 2);
       nested(src.slice(i + 2, end));
-      append("");
+      append(DYN);
       i = end + 1;
     } else if (c === "`") {
       const end = closeBacktick(i + 1);
       nested(src.slice(i + 1, end));
-      append("");
+      append(DYN);
       i = end + 1;
+    } else if (c === "$" && isExpansion(src, i)) {
+      append(`${DYN}$`);
+      i++;
     } else if (c === "#" && word === null) {
       while (i < src.length && src[i] !== "\n") i++;
     } else if (c === "<" && src[i + 1] === "<" && src[i + 2] !== "<") {
@@ -198,17 +216,37 @@ function parse(src: string): Command[] {
   return commands;
 }
 
+const BUN_TEST = "never run 'bun test' — Vitest runs under Node. Use 'bun run test' or 'bunx vitest run'.";
+const HOOK_BYPASS = "git hooks must not be bypassed. Fix the failing check instead.";
+
+// Text triggers, used where argv cannot be resolved (dynamic or unparseable).
+const BUN_TEST_TEXT = /\bbun\b[\s\S]*\btest\b/;
+const HOOK_BYPASS_TEXT = /--no-v|hookspath|lefthook(=|_exclude|_skip|\s+uninstall)/i;
+const SHORT_N_TEXT = /(^|[\s='"])-[a-zA-Z]*n\b/;
+
 const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s;
-const KEYWORDS = new Set(["{", "}", "!", "if", "then", "elif", "else", "do", "while", "until", "time"]);
-const WRAPPERS = new Set(["sudo", "doas", "env", "command", "exec", "nohup", "nice", "xargs", "timeout", "bunx", "npx"]);
+const KEYWORDS = new Set(["{", "}", "!", "if", "then", "elif", "else", "do", "while", "until"]);
+// Wrapper → its options that take a separate value word.
+const WRAPPERS: Record<string, Set<string>> = {
+  sudo: new Set(["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-R", "--user", "--group", "--chdir"]),
+  doas: new Set(["-u", "-C"]),
+  env: new Set(["-u", "-C", "--unset", "--chdir"]),
+  command: new Set(),
+  exec: new Set(["-a"]),
+  nohup: new Set(),
+  nice: new Set(["-n", "--adjustment"]),
+  timeout: new Set(["-s", "-k", "--signal", "--kill-after"]),
+  time: new Set(["-f", "-o", "--format", "--output"]),
+  xargs: new Set(["-I", "-n", "-L", "-P", "-s", "-d", "-E", "-a", "--max-args", "--max-procs", "--delimiter", "--arg-file"]),
+  bunx: new Set(),
+  npx: new Set(),
+};
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const EXPORTERS = new Set(["export", "declare", "typeset", "readonly", "local"]);
 const GIT_OPTS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"]);
 
-const BUN_TEST = "never run 'bun test' — Vitest runs under Node. Use 'bun run test' or 'bunx vitest run'.";
-const HOOK_BYPASS = "git hooks must not be bypassed. Fix the failing check instead.";
-
 const basename = (w: string) => w.slice(w.lastIndexOf("/") + 1);
+const isDynamic = (w: string) => w.includes(DYN) || /\{[^{}]*,[^{}]*\}/.test(w);
 
 function checkAssignment(name: string, value: string): string | null {
   if (name === "LEFTHOOK" && /^(0|false)$/i.test(value)) return HOOK_BYPASS;
@@ -227,7 +265,7 @@ const GIT_LONG_WITH_VALUE = new Set([
 ]);
 const HOOKS_PATH = /core\.hookspath/i;
 
-function checkGit(args: string[]): string | null {
+function checkGit(args: string[], src: string, dynamicInput: boolean): string | null {
   let k = 0;
   while (k < args.length && (args[k] as string).startsWith("-")) {
     const opt = args[k] as string;
@@ -241,9 +279,13 @@ function checkGit(args: string[]): string | null {
   // `git config core.hooksPath …` names the key as an operand.
   if (sub === "config" && rest.some((a) => HOOKS_PATH.test(a))) return HOOK_BYPASS;
 
+  // Words that are options or operands; option values (a message, a file)
+  // are skipped, so neither their text nor their dynamism counts.
+  let dynamic = dynamicInput || (sub !== undefined && isDynamic(sub));
   for (let j = 0; j < rest.length; j++) {
     const a = rest[j] as string;
     if (a === "--") break;
+    if (isDynamic(a)) dynamic = true;
     if (a.startsWith("--")) {
       // Git accepts unambiguous prefixes of long options: --no-v… is --no-verify.
       if (/^--no-v/i.test(a)) return HOOK_BYPASS;
@@ -261,6 +303,11 @@ function checkGit(args: string[]): string | null {
       }
     }
   }
+  // A dynamic option or operand may expand to a bypass flag at run time.
+  if (dynamic) {
+    if (HOOK_BYPASS_TEXT.test(src)) return HOOK_BYPASS;
+    if ((sub === "commit" || isDynamic(sub ?? "")) && SHORT_N_TEXT.test(src)) return HOOK_BYPASS;
+  }
   return null;
 }
 
@@ -277,30 +324,58 @@ function bunSubcommand(args: string[]): string | undefined {
   return args[k];
 }
 
-function check(argv: string[]): string | null {
+/** Text-trigger fallback for input whose argv the guard cannot resolve. */
+function checkText(src: string): string | null {
+  if (BUN_TEST_TEXT.test(src)) return BUN_TEST;
+  if (HOOK_BYPASS_TEXT.test(src)) return HOOK_BYPASS;
+  if (/\bgit\b/.test(src) && SHORT_N_TEXT.test(src)) return HOOK_BYPASS;
+  return null;
+}
+
+function check(argv: string[], src: string): string | null {
   let k = 0;
+  let stdinArgs = false;
   for (;;) {
     const w = argv[k];
     if (w === undefined) return null;
     const assignment = ASSIGNMENT.exec(w);
+    const wrapper = WRAPPERS[basename(w)];
     if (assignment) {
       const hit = checkAssignment(assignment[1] as string, assignment[2] as string);
       if (hit) return hit;
       k++;
     } else if (KEYWORDS.has(w)) {
       k++;
-    } else if (WRAPPERS.has(basename(w))) {
-      const wrapper = basename(w);
+    } else if (w === "function") {
+      k += 2; // `function name { … }`
+    } else if (w === "coproc") {
+      k += argv[k + 2] === "{" ? 2 : 1; // `coproc [NAME] { … }` or `coproc cmd`
+    } else if (wrapper) {
+      const name = basename(w);
       k++;
-      while (argv[k]?.startsWith("-")) k += /^-[ugCD]$/.test(argv[k] as string) ? 2 : 1;
-      if (wrapper === "timeout") k++;
+      while (argv[k]?.startsWith("-")) {
+        const opt = argv[k] as string;
+        // `env -S 'cmd args'` runs its value as a command line.
+        if (name === "env" && opt === "-S") return checkSource(argv[k + 1] ?? "");
+        k += wrapper.has(opt) ? 2 : 1;
+      }
+      if (name === "timeout") k++; // the duration
+      if (name === "xargs") stdinArgs = true;
     } else break;
   }
-  const cmd = basename(argv[k] as string);
-  const args = argv.slice(k + 1);
+  const words = argv.slice(k);
+  const cmd = basename(words[0] as string);
+  const args = words.slice(1);
 
-  if (cmd === "bun" && bunSubcommand(args) === "test") return BUN_TEST;
-  if (cmd === "git") return checkGit(args);
+  // Dynamic input exists only at run time, so fall back to text triggers:
+  // all of them for an unknown command, the relevant ones for bun and git.
+  if (isDynamic(words[0] as string)) return checkText(src);
+  if (cmd === "bun") {
+    if (bunSubcommand(args) === "test") return BUN_TEST;
+    if ((stdinArgs || args.some(isDynamic)) && BUN_TEST_TEXT.test(src)) return BUN_TEST;
+    return null;
+  }
+  if (cmd === "git") return checkGit(args, src, stdinArgs);
   if (cmd === "lefthook" && args.includes("uninstall")) return HOOK_BYPASS;
   if (EXPORTERS.has(cmd)) {
     for (const a of args) {
@@ -317,18 +392,16 @@ function check(argv: string[]): string | null {
   return null;
 }
 
-/** Fails closed on unparseable input, but only if it names a guarded tool. */
+/** Checks a command line; unparseable input fails closed on text triggers. */
 function checkSource(src: string): string | null {
   let commands: Command[];
   try {
     commands = parse(src);
   } catch {
-    if (/\bbun\b[\s\S]*\btest\b/.test(src)) return BUN_TEST;
-    if (/--no-v|hookspath|lefthook/i.test(src)) return HOOK_BYPASS;
-    return null;
+    return checkText(src);
   }
   for (const argv of commands) {
-    const hit = check(argv);
+    const hit = check(argv, src);
     if (hit) return hit;
   }
   return null;
