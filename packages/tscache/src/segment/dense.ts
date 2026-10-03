@@ -284,9 +284,21 @@ export class DenseSegment implements Segment {
       Math.max(needed, this.#capacity * 2, MIN_CAPACITY),
     );
     const base = this.#placeBase(next, kept, capacity - needed, capacity);
+    // Build phase: allocate and fill every new buffer. Anything here may
+    // throw (allocation, or a view for the copy), and the segment is still
+    // untouched.
     const mask = new Uint8Array(Math.ceil(capacity / 8));
-    const buffers = this.#columns.map((column) => new column.ctor(capacity));
-    // Everything is allocated; from here on nothing throws.
+    const buffers = this.#columns.map((column) => {
+      const data = new column.ctor(capacity);
+      if (kept !== undefined) {
+        const from = kept.start - this.#base;
+        data.set(
+          column.data.subarray(from, from + (kept.end - kept.start + 1)),
+          kept.start - base,
+        );
+      }
+      return data;
+    });
     let size = 0;
     if (kept !== undefined) {
       for (let slot = kept.start; slot <= kept.end; slot++) {
@@ -296,17 +308,10 @@ export class DenseSegment implements Segment {
         size++;
       }
     }
-    this.#columns.forEach((column, c) => {
-      const data = buffers[c] as FieldArray;
-      if (kept !== undefined) {
-        const from = kept.start - this.#base;
-        data.set(
-          column.data.subarray(from, from + (kept.end - kept.start + 1)),
-          kept.start - base,
-        );
-      }
-      column.data = data;
-    });
+    // Commit phase: assignments only.
+    for (let c = 0; c < buffers.length; c++) {
+      (this.#columns[c] as Column).data = buffers[c] as FieldArray;
+    }
     this.#mask = mask;
     this.#base = base;
     this.#capacity = capacity;

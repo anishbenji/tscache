@@ -45,6 +45,55 @@ describe("DenseSegment allocation failure", () => {
   });
 });
 
+describe("DenseSegment failure while copying into new buffers", () => {
+  const species = Object.getOwnPropertyDescriptor(
+    Object.getPrototypeOf(Int16Array),
+    Symbol.species,
+  );
+
+  afterEach(() => {
+    // Remove the override so Int16Array inherits %TypedArray%'s species again.
+    Reflect.deleteProperty(Int16Array, Symbol.species);
+  });
+
+  it("leaves every field intact when a later field's copy fails", () => {
+    expect(species).toBeDefined();
+    const segment = new DenseSegment({
+      grid,
+      fields: { a: "f64", b: "i16" },
+      slotCap: 32_768,
+    });
+    segment.mergeFrom({
+      slots: new Float64Array([0]),
+      fields: { a: new Float64Array([42]), b: new Int16Array([7]) },
+    });
+    const prepend = {
+      slots: new Float64Array([-100]),
+      fields: { a: new Float64Array([1]), b: new Int16Array([2]) },
+    };
+    // subarray() builds its view through the species constructor; make the
+    // second field's view fail after the first field has been copied.
+    Object.defineProperty(Int16Array, Symbol.species, {
+      configurable: true,
+      get: () =>
+        class {
+          constructor() {
+            throw new RangeError("Array buffer allocation failed");
+          }
+        },
+    });
+    expect(() => segment.mergeFrom(prepend)).toThrow(RangeError);
+    Reflect.deleteProperty(Int16Array, Symbol.species);
+    expect(segment.size).toBe(1);
+    expect(segment.extent).toEqual({ start: 0, end: 0 });
+    expect(segment.lookup(0)).toEqual({ a: 42, b: 7 });
+    expect(segment.lookup(-100)).toBeUndefined();
+    segment.mergeFrom(prepend);
+    expect(segment.lookup(-100)).toEqual({ a: 1, b: 2 });
+    expect(segment.lookup(0)).toEqual({ a: 42, b: 7 });
+  });
+});
+
 describe("DenseSegment slot cap bound (N12)", () => {
   it.each([
     0,
