@@ -161,11 +161,12 @@ export class DenseSegment implements Segment {
         `merge would span slots [${next.start}, ${next.end}], more than the slot cap ${this.#slotCap}`,
       );
     }
-    // Validated: nothing below throws, so a rejected merge changes nothing.
+    // Allocation is the last step that can fail, so it comes before the
+    // first mutation: a rejected merge changes nothing.
+    if (next !== undefined) this.#reserve(next, kept);
     if (authority !== undefined) this.#clear(authority);
     this.#extent = kept;
     if (next === undefined) return;
-    this.#reserve(next);
     this.#write(points);
     this.#extent = next;
   }
@@ -236,11 +237,12 @@ export class DenseSegment implements Segment {
   }
 
   /**
-   * Makes the buffers hold `next`, moving the surviving points (`#extent`)
-   * if they must be reallocated. Capacity doubles, capped at the slot cap,
-   * and the spare room goes on the side the segment is growing towards.
+   * Makes the buffers hold `next`. If they must be reallocated, only the
+   * points that survive the merge (`kept`) move across, and every new buffer
+   * is allocated before the segment is touched. Capacity doubles, capped at
+   * the slot cap, with the spare room on the side the segment grows towards.
    */
-  #reserve(next: SlotRange): void {
+  #reserve(next: SlotRange, kept: SlotRange | undefined): void {
     const fits =
       next.start >= this.#base && next.end < this.#base + this.#capacity;
     if (fits) return;
@@ -249,37 +251,45 @@ export class DenseSegment implements Segment {
       this.#slotCap,
       Math.max(needed, this.#capacity * 2, MIN_CAPACITY),
     );
-    const base = this.#placeBase(next, capacity - needed, capacity);
+    const base = this.#placeBase(next, kept, capacity - needed, capacity);
     const mask = new Uint8Array(Math.ceil(capacity / 8));
-    const kept = this.#extent;
+    const buffers = this.#columns.map((column) => new column.ctor(capacity));
+    // Everything is allocated; from here on nothing throws.
+    let size = 0;
     if (kept !== undefined) {
       for (let slot = kept.start; slot <= kept.end; slot++) {
         if (!this.#has(slot)) continue;
         const i = slot - base;
         (mask[i >> 3] as number) |= 1 << (i & 7);
+        size++;
       }
     }
-    for (const column of this.#columns) {
-      const data = new column.ctor(capacity);
+    this.#columns.forEach((column, c) => {
+      const data = buffers[c] as FieldArray;
       if (kept !== undefined) {
+        const from = kept.start - this.#base;
         data.set(
-          column.data.subarray(
-            kept.start - this.#base,
-            kept.end - this.#base + 1,
-          ),
+          column.data.subarray(from, from + (kept.end - kept.start + 1)),
           kept.start - base,
         );
       }
       column.data = data;
-    }
+    });
     this.#mask = mask;
     this.#base = base;
     this.#capacity = capacity;
+    // Points outside `kept` were not copied; the caller clears the rest.
+    this.#extent = kept;
+    this.#size = size;
   }
 
   /** Base slot for new buffers; keeps every index a safe integer. */
-  #placeBase(next: SlotRange, spare: number, capacity: number): number {
-    const kept = this.#extent;
+  #placeBase(
+    next: SlotRange,
+    kept: SlotRange | undefined,
+    spare: number,
+    capacity: number,
+  ): number {
     const growsLeft = kept !== undefined && next.start < kept.start;
     const growsRight = kept !== undefined && next.end > kept.end;
     let lead = Math.floor(spare / 2);
