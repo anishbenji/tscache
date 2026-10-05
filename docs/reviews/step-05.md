@@ -1,6 +1,6 @@
 # Step 05 — Merge / put path
 
-Branch: `feat/05-merge-put` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 2 · Status: in review · Verdict after triage: blocked
+Branch: `feat/05-merge-put` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 · Status: in review · Verdict after triage: blocked
 
 ## Round 1 — reviewer verdict: block
 
@@ -24,6 +24,14 @@ Found while validating, not raised by the reviewer: a replace whose insert faile
 |---|---|---|---|---|
 | R2-1 | P0 | A failed join leaves a gap wider than K inside one segment (follows R1-2) | accepted | Reproduced. Second round running on the join, so per the convergence rule it was redesigned instead of patched, in 8563e57: the other segments and the chunk are gathered in a scratch segment, the stored segment then changes in one atomic `mergeFrom`, and the list is edited only afterwards. A failed join now changes nothing; the fault-injection test fails every `slice` and `mergeFrom` call in turn and compares the whole store before and after. Architecture §4.3 states the resulting guarantee |
 | R2-2 | P1 | `instanceof` checks reject typed arrays from another realm and accept foreign BigInt arrays and DataViews | accepted | Reproduced with `node:vm`. Fixed in 8563e57: array kind is read from the `%TypedArray%` tag getter, which works across realms; regression tests added |
+
+## Round 3 — reviewer verdict: merge after fixes
+
+The reviewer confirmed every accepted finding from rounds 1–2 as fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | A symbol passed as the batch throws `TypeError` from the message interpolation instead of `PutError` `'field-mismatch'` | accepted | Reproduced. Fixed in 4565638 with `String(batch)`; the other messages in `batch.ts` were checked and interpolate only numbers and schema names. Regression tests cover a symbol as the batch, as a field, as `timestamps` and as one timestamp |
 
 ## Contract-test changes
 
