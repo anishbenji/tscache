@@ -59,3 +59,28 @@ describe("validateBatch with arrays from another realm", () => {
     );
   });
 });
+
+describe("validateBatch with values that cannot be interpolated", () => {
+  it.each([
+    { name: "a symbol batch", batch: Symbol("bad") },
+    {
+      name: "a symbol field",
+      batch: { timestamps: [3], fields: { x: Symbol("bad") } },
+    },
+    {
+      name: "symbol timestamps",
+      batch: { timestamps: Symbol("bad"), fields: { x: [1] } },
+    },
+  ])("rejects $name as field-mismatch", ({ batch }) => {
+    expect(() => validateBatch(batch as unknown as PutBatch, config)).toThrow(
+      expect.objectContaining({ code: "field-mismatch", offenderIndex: -1 }),
+    );
+  });
+
+  it("rejects a symbol timestamp as misaligned", () => {
+    const batch = { timestamps: [3, Symbol("bad")], fields: { x: [1, 2] } };
+    expect(() => validateBatch(batch as unknown as PutBatch, config)).toThrow(
+      expect.objectContaining({ code: "misaligned", offenderIndex: 1 }),
+    );
+  });
+});

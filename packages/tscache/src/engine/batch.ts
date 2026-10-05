@@ -57,7 +57,10 @@ function isNumericArray(value: unknown): value is NumericArray {
 
 function timestampsOf(batch: PutBatch): NumericArray {
   if (!isObject(batch)) {
-    structural("field-mismatch", `batch must be an object, got ${batch}`);
+    structural(
+      "field-mismatch",
+      `batch must be an object, got ${String(batch)}`,
+    );
   }
   const { timestamps } = batch;
   if (
