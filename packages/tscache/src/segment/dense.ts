@@ -12,6 +12,7 @@
 
 import { type Grid, msOf, type SlotRange } from "../grid";
 import type { Dtype, FieldArray } from "../types";
+import { assertPoints, assertSlot, assertSlotRange } from "./assert";
 import { FIELD_ARRAYS, type FieldArrayConstructor } from "./dtype";
 import { getOwn, setOwn } from "./own";
 import {
@@ -32,33 +33,6 @@ interface Column {
   data: FieldArray;
 }
 
-function assertSlot(slot: number, what: string): void {
-  if (!Number.isSafeInteger(slot)) {
-    throw new RangeError(`${what} must be a safe integer, got ${slot}`);
-  }
-}
-
-function assertSlotRange(r: SlotRange, what: string): void {
-  assertSlot(r.start, `${what} start`);
-  assertSlot(r.end, `${what} end`);
-  if (r.start > r.end) {
-    throw new RangeError(`${what} start ${r.start} is after its end ${r.end}`);
-  }
-}
-
-function assertAscending(slots: Float64Array): void {
-  let previous = Number.NEGATIVE_INFINITY;
-  for (const slot of slots) {
-    assertSlot(slot, "point slot");
-    if (slot <= previous) {
-      throw new RangeError(
-        `point slots must be strictly ascending, got ${slot} after ${previous}`,
-      );
-    }
-    previous = slot;
-  }
-}
-
 /** Smallest range holding both; either may be undefined (no points). */
 function union(
   a: SlotRange | undefined,
@@ -73,6 +47,7 @@ export class DenseSegment implements Segment {
   readonly #grid: Grid;
   readonly #slotCap: number;
   readonly #columns: Column[];
+  readonly #names: string[];
   #mask: Uint8Array = new Uint8Array(0);
   /** Slot stored at buffer index 0. */
   #base = 0;
@@ -94,6 +69,7 @@ export class DenseSegment implements Segment {
       const ctor = FIELD_ARRAYS[dtype];
       return { name, dtype, ctor, data: new ctor(0) };
     });
+    this.#names = this.#columns.map((column) => column.name);
   }
 
   get extent(): SlotRange | undefined {
@@ -151,8 +127,7 @@ export class DenseSegment implements Segment {
   }
 
   mergeFrom(points: Columns, authority?: SlotRange): void {
-    if (authority !== undefined) assertSlotRange(authority, "authority");
-    this.#assertPoints(points, authority);
+    assertPoints(points, this.#names, authority);
     const kept = this.#keptExtent(authority);
     const n = points.slots.length;
     const added =
@@ -176,42 +151,6 @@ export class DenseSegment implements Segment {
     if (next === undefined) return;
     this.#write(points);
     this.#extent = next;
-  }
-
-  /** Rejects malformed input before anything is written (programming errors). */
-  #assertPoints(points: Columns, authority: SlotRange | undefined): void {
-    const { slots } = points;
-    assertAscending(slots);
-    this.#assertFields(points);
-    if (authority === undefined || slots.length === 0) return;
-    const first = slots[0] as number;
-    const last = slots[slots.length - 1] as number;
-    if (first < authority.start || last > authority.end) {
-      throw new RangeError(
-        `points [${first}, ${last}] lie outside the authority [${authority.start}, ${authority.end}]`,
-      );
-    }
-  }
-
-  /** The batch must carry exactly the schema's fields, one value per slot. */
-  #assertFields(points: Columns): void {
-    const { slots, fields } = points;
-    // Enumerable own names only: the same set a spread or a structured
-    // clone of the batch would carry.
-    const names = new Set(Object.keys(fields));
-    if (names.size !== this.#columns.length) {
-      throw new RangeError("point fields must be exactly the schema's fields");
-    }
-    for (const column of this.#columns) {
-      const values = names.has(column.name)
-        ? getOwn(fields, column.name)
-        : undefined;
-      if (values === undefined || values.length !== slots.length) {
-        throw new RangeError(
-          `point field "${column.name}" must hold ${slots.length} values`,
-        );
-      }
-    }
   }
 
   /** Tight extent of the points that survive clearing `authority`. */
