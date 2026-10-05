@@ -1,6 +1,6 @@
 # Step 05 — Merge / put path
 
-Branch: `feat/05-merge-put` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 · Status: in review · Verdict after triage: blocked
+Branch: `feat/05-merge-put` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 4 (cap reached) · Status: escalated · Verdict after triage: merge, pending the user's call on a further round
 
 ## Round 1 — reviewer verdict: block
 
@@ -32,6 +32,16 @@ The reviewer confirmed every accepted finding from rounds 1–2 as fixed.
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R3-1 | P1 | A symbol passed as the batch throws `TypeError` from the message interpolation instead of `PutError` `'field-mismatch'` | accepted | Reproduced. Fixed in 4565638 with `String(batch)`; the other messages in `batch.ts` were checked and interpolate only numbers and schema names. Regression tests cover a symbol as the batch, as a field, as `timestamps` and as one timestamp |
+
+## Round 4 — reviewer verdict: merge after fixes
+
+The reviewer confirmed every accepted finding from rounds 1–3 as fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P1 | A timestamp whose string conversion throws (`Object.create(null)`) raises `TypeError` from `String(t)` instead of `PutError` `'misaligned'` (same class as R3-1) | accepted | Reproduced. Second round running on message building, so per the convergence rule the class was removed instead of the instance, in 0bd9ded: every message for an untrusted value in `src/` (batch, grid, config validation, payload decoding) now goes through one `show()` helper that never calls the value's own conversion. `test/hostile-values.test.ts` passes five hostile values through every batch, range and config position. Validating this also found that a field element that cannot be converted to a number threw `TypeError` from the typed-array copy; it now rejects as `'field-mismatch'` (architecture §4.3 updated) |
+
+Round 4 is the cap (docs/workflow.md, review loop step 8) and it raised a P1, so the loop is not settled by its own rule and goes to the user. The fix above has not been seen by the reviewer.
 
 ## Contract-test changes
 
