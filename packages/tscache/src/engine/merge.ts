@@ -86,6 +86,19 @@ export class SegmentStore {
       ? overlapWarnings(this.#segments, incoming)
       : [];
     const carved = authority === undefined ? undefined : this.#carve(authority);
+    try {
+      this.#insertChunks(incoming);
+    } finally {
+      // Also after a failed insert: the layout must hold for the next put.
+      if (carved !== undefined && authority !== undefined) {
+        this.#resplit(carved, authority);
+      }
+    }
+    return warnings;
+  }
+
+  /** Writes the batch one chunk at a time; a chunk is a run that shares a segment. */
+  #insertChunks(incoming: Incoming): void {
     const { slots, columns } = incoming;
     let from = 0;
     for (let k = 1; k <= slots.length; k++) {
@@ -98,10 +111,6 @@ export class SegmentStore {
       this.#insert(this.#columns(slots, from, k, columns));
       from = k;
     }
-    if (carved !== undefined && authority !== undefined) {
-      this.#resplit(carved, authority);
-    }
-    return warnings;
   }
 
   /** Drops every segment. */
@@ -233,26 +242,28 @@ export class SegmentStore {
   }
 
   /**
-   * Joins segments `[at, end)` into the widest of them. Each one leaves the
-   * list as soon as it has been copied, so a failed allocation part-way
-   * leaves the list disjoint.
+   * Joins segments `[at, end)` into the widest of them, nearest neighbour
+   * first, and each one leaves the list as soon as it has been copied. The
+   * target then only ever grows over a segment that is already gone, so a
+   * failed allocation part-way leaves the list ascending and disjoint.
    */
   #join(at: number, end: number): Segment {
-    let target = this.#segments[at] as Segment;
+    let t = at;
     for (let i = at + 1; i < end; i++) {
-      const segment = this.#segments[i] as Segment;
-      if (span(segment) > span(target)) target = segment;
-    }
-    let i = at;
-    for (let remaining = end - at; remaining > 0; remaining--) {
-      const segment = this.#segments[i] as Segment;
-      if (segment === target) {
-        i++;
-        continue;
+      if (
+        span(this.#segments[i] as Segment) > span(this.#segments[t] as Segment)
+      ) {
+        t = i;
       }
+    }
+    const target = this.#segments[t] as Segment;
+    const absorb = (i: number) => {
+      const segment = this.#segments[i] as Segment;
       target.mergeFrom(segment.slice(extentOf(segment)));
       this.#segments.splice(i, 1);
-    }
+    };
+    for (let right = end - 1 - t; right > 0; right--) absorb(t + 1);
+    while (t > at) absorb(--t);
     return target;
   }
 
@@ -273,7 +284,7 @@ export class SegmentStore {
       if (gap > this.#k) cuts.push(slots[i] as number);
     }
     if (cuts.length === 0) return;
-    // Build every new segment before the old one is cut back.
+    // Build every new segment, and the new list, before the old one is cut back.
     const parts = cuts.map((start, c) => {
       const next = cuts[c + 1];
       const part = new DenseSegment(this.#options);
@@ -285,10 +296,16 @@ export class SegmentStore {
       );
       return part;
     });
+    // A spread into splice would overflow the stack for very many parts.
+    const at = this.#segments.indexOf(segment) + 1;
+    const next = this.#segments
+      .slice(0, at)
+      .concat(parts, this.#segments.slice(at));
+    // Nothing above changed the store; nothing below can fail.
     segment.mergeFrom(this.#nothing, {
       start: cuts[0] as number,
       end: extent.end,
     });
-    this.#segments.splice(this.#segments.indexOf(segment) + 1, 0, ...parts);
+    this.#segments = next;
   }
 }
