@@ -1,4 +1,5 @@
 import { ConfigError } from "../errors";
+import { MAX_SLOT_CAP } from "../segment/types";
 import {
   type CacheConfig,
   DTYPES,
@@ -69,6 +70,14 @@ function validateFields(
   return Object.freeze({ ...fields });
 }
 
+function validateSegmentSlotCap(value: unknown): number {
+  const cap = requirePositiveSafeInteger(value, "segmentSlotCap");
+  if (cap > MAX_SLOT_CAP) {
+    fail(`segmentSlotCap must be at most ${MAX_SLOT_CAP}, got ${cap}`);
+  }
+  return cap;
+}
+
 function validateVersion(version: unknown): string | undefined {
   if (version === undefined) return undefined;
   if (typeof version !== "string" || version.length === 0) {
@@ -122,7 +131,7 @@ export function resolveCacheConfig(config: CacheConfig): ResolvedCacheConfig {
     segmentSlotCap:
       config.segmentSlotCap === undefined
         ? DEFAULT_SEGMENT_SLOT_CAP
-        : requirePositiveSafeInteger(config.segmentSlotCap, "segmentSlotCap"),
+        : validateSegmentSlotCap(config.segmentSlotCap),
     warnOnOverlapDiff: validateWarnFlag(config.warnOnOverlapDiff),
     ...(version !== undefined ? { version } : {}),
     ...(finalizedUntil !== undefined ? { finalizedUntil } : {}),

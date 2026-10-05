@@ -51,7 +51,7 @@ export interface CacheConfig {
   fields: Record<string, Dtype>;
   /** Dense segment splits when an internal gap exceeds K intervals. Default 4. */
   gapSplitK?: number;
-  /** Max slots per segment. Default 32_768. */
+  /** Max slots per segment. Default 32_768; at most 2^31 - 1. */
   segmentSlotCap?: number;
   /** Opt-in dataset version; mismatch on put → auto-clear + cacheCleared. */
   version?: string;
