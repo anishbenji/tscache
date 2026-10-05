@@ -39,9 +39,18 @@ Do steps 1–2 yourself; T3 Code (a Claude thread) can do the rest with your app
 | 1 | Codex thread | Contract tests — prompt A. Leave uncommitted. | ✓ | — |
 | 2 | Claude thread | Implement — prompt B | ✓ | ✓ |
 | 3 | Claude thread | Review loop — prompt E (below) | ✓ | ✓ |
-| 4 | You | Read `docs/reviews/step-NN.md`, run `bun run ci`, `git switch main && git merge --no-ff feat/NN-slug` | ✓ | ✓ |
+| 4 | Claude thread | `git push -u origin feat/NN-slug`, then open a pull request whose body is the merge request from `docs/reviews/step-NN.md` | ✓ | ✓ |
+| 5 | You | Read the pull request, wait for the CI check, merge it on GitHub (merge commit). Then locally: `git switch main && git pull --ff-only` | ✓ | ✓ |
 
 Keep tooling off step branches. Changes to hooks, scripts, agent configuration or this workflow go on their own `chore/NN-slug` branch from `main` with their own review loop, so a step review covers only the step's code.
+
+## GitHub
+
+The repository is public on GitHub. `main` accepts changes only through a pull request whose `ci` check passed; force-pushes and deletion are blocked, and pull requests merge with a merge commit so the small-commit history survives. The `ci` check is `.github/workflows/ci.yml`, which runs `scripts/ci.sh` — the same gate as a local `bun run ci`, with `CI_BASE` set to the pull request's base commit.
+
+Also enabled, all on the free plan: secret scanning with push protection, CodeQL default setup, Dependabot alerts and monthly update pull requests (`.github/dependabot.yml`), and private vulnerability reporting (`SECURITY.md`). A Dependabot pull request is a proposal: upgrading a dependency is still a decision for the user.
+
+Actions in the workflow are pinned to commit SHAs. The GitHub CLI (`gh`, `brew install gh`, then `gh auth login`) opens pull requests and reads CI results.
 
 ## Review loop
 
