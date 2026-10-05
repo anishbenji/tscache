@@ -214,8 +214,8 @@ export class SegmentStore {
   /**
    * Adds a chunk of points that share a segment. Every stored segment on the
    * chunk's page that overlaps it, or lies within K slots of it, belongs to
-   * the same run, so they are joined into the widest one and the chunk is
-   * written there in place.
+   * the same run, so they all end up in one segment with the chunk. Either
+   * the whole chunk goes in or, if an allocation fails, nothing changes.
    */
   #insert(chunk: Columns): void {
     const first = chunk.slots[0] as number;
@@ -235,19 +235,21 @@ export class SegmentStore {
       const segment = new DenseSegment(this.#options);
       segment.mergeFrom(chunk);
       this.#segments.splice(at, 0, segment);
-      return;
+    } else if (end === at + 1) {
+      (this.#segments[at] as Segment).mergeFrom(chunk);
+    } else {
+      this.#join(at, end, chunk);
     }
-    const target = this.#join(at, end);
-    target.mergeFrom(chunk);
   }
 
   /**
-   * Joins segments `[at, end)` into the widest of them, nearest neighbour
-   * first, and each one leaves the list as soon as it has been copied. The
-   * target then only ever grows over a segment that is already gone, so a
-   * failed allocation part-way leaves the list ascending and disjoint.
+   * Joins segments `[at, end)` and the chunk into the widest of them. The
+   * other segments and the chunk are first gathered in a scratch segment, so
+   * the stored one changes in a single merge, which is atomic (§4.2), and the
+   * list is edited only after it. The widest segment is the one not copied
+   * twice.
    */
-  #join(at: number, end: number): Segment {
+  #join(at: number, end: number, chunk: Columns): void {
     let t = at;
     for (let i = at + 1; i < end; i++) {
       if (
@@ -257,14 +259,16 @@ export class SegmentStore {
       }
     }
     const target = this.#segments[t] as Segment;
-    const absorb = (i: number) => {
+    const scratch = new DenseSegment(this.#options);
+    for (let i = at; i < end; i++) {
       const segment = this.#segments[i] as Segment;
-      target.mergeFrom(segment.slice(extentOf(segment)));
-      this.#segments.splice(i, 1);
-    };
-    for (let right = end - 1 - t; right > 0; right--) absorb(t + 1);
-    while (t > at) absorb(--t);
-    return target;
+      if (segment !== target)
+        scratch.mergeFrom(segment.slice(extentOf(segment)));
+    }
+    // Last, so the chunk's values win over stored ones.
+    scratch.mergeFrom(chunk);
+    target.mergeFrom(scratch.slice(extentOf(scratch)));
+    this.#segments.splice(at, end - at, target);
   }
 
   /**

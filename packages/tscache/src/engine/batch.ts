@@ -38,15 +38,21 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/**
+ * The typed-array kind of a value ("Float64Array", …), or undefined. Read
+ * from the %TypedArray% tag getter, not `instanceof`, so an array made in
+ * another realm (an iframe, a different worker global) is recognized too.
+ */
+const typedArrayKind = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+)?.get as (this: unknown) => string | undefined;
+
 /** A `number[]` or a typed array of numbers; BigInt arrays and DataViews are not. */
 function isNumericArray(value: unknown): value is NumericArray {
   if (Array.isArray(value)) return true;
-  return (
-    ArrayBuffer.isView(value) &&
-    !(value instanceof DataView) &&
-    !(value instanceof BigInt64Array) &&
-    !(value instanceof BigUint64Array)
-  );
+  const kind = typedArrayKind.call(value);
+  return kind !== undefined && !kind.startsWith("Big");
 }
 
 function timestampsOf(batch: PutBatch): NumericArray {
@@ -54,7 +60,10 @@ function timestampsOf(batch: PutBatch): NumericArray {
     structural("field-mismatch", `batch must be an object, got ${batch}`);
   }
   const { timestamps } = batch;
-  if (!Array.isArray(timestamps) && !(timestamps instanceof Float64Array)) {
+  if (
+    !Array.isArray(timestamps) &&
+    typedArrayKind.call(timestamps) !== "Float64Array"
+  ) {
     structural(
       "field-mismatch",
       "batch timestamps must be a number[] or a Float64Array",

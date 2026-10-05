@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DenseSegment } from "../src/segment/dense";
-import { expectRows, extents, points, store } from "./merge-test-helpers";
+import {
+  expectRows,
+  extents,
+  points,
+  snapshot,
+  store,
+} from "./merge-test-helpers";
 
 const mergeFrom = DenseSegment.prototype.mergeFrom;
 
@@ -15,32 +21,41 @@ describe("SegmentStore failure part-way through a join", () => {
     { name: "target on the right", stored: [0, 6, 12, 13, 14] },
     { name: "target on the left", stored: [0, 1, 2, 8, 14] },
     { name: "target in the middle", stored: [0, 6, 7, 8, 14] },
-  ])("keeps the list ascending and disjoint: $name", ({ stored }) => {
-    for (let failAt = 1; failAt <= 2; failAt++) {
-      const s = store({ segmentSlotCap: 100 });
-      s.put(points(stored));
-      expect(s.segments).toHaveLength(3);
-      const slice = DenseSegment.prototype.slice;
-      let calls = 0;
-      vi.spyOn(DenseSegment.prototype, "slice").mockImplementation(function (
-        this: DenseSegment,
-        range,
-      ) {
-        if (++calls === failAt) {
-          throw new RangeError("Array buffer allocation failed");
+  ])("changes nothing, whichever allocation fails: $name", ({ stored }) => {
+    for (const method of ["slice", "mergeFrom"] as const) {
+      for (let failAt = 1; failAt <= 4; failAt++) {
+        const s = store({ segmentSlotCap: 100, gapSplitK: 4 });
+        s.put(points(stored));
+        expect(s.segments).toHaveLength(3);
+        const before = snapshot(s);
+        const original = DenseSegment.prototype[method] as (
+          ...args: unknown[]
+        ) => unknown;
+        let calls = 0;
+        vi.spyOn(DenseSegment.prototype, method).mockImplementation(function (
+          this: DenseSegment,
+          ...args: unknown[]
+        ) {
+          if (++calls === failAt) {
+            throw new RangeError("Array buffer allocation failed");
+          }
+          return original.apply(this, args);
+        } as never);
+        const put = () =>
+          s.put(points([3, 5, 7, 9, 11], [30, 50, 70, 90, 110]));
+        // A join makes two slices and four merges; a later one never fails.
+        if (method === "slice" && failAt > 2) {
+          vi.restoreAllMocks();
+          continue;
         }
-        return slice.call(this, range);
-      });
-      expect(() => s.put(points([3, 5, 7, 9, 11]))).toThrow(RangeError);
-      vi.restoreAllMocks();
-      const after = extents(s);
-      for (let i = 1; i < after.length; i++) {
-        expect(after[i]?.start).toBeGreaterThan(after[i - 1]?.end as number);
+        expect(put).toThrow(RangeError);
+        vi.restoreAllMocks();
+        expect(snapshot(s)).toEqual(before);
+        // The layout still holds for later puts, and the same put succeeds.
+        s.put(points([1]));
+        put();
+        expect(extents(s)).toEqual([{ start: 0, end: 14 }]);
       }
-      expectRows(s, stored);
-      // The same put succeeds once allocation works again.
-      s.put(points([3, 5, 7, 9, 11]));
-      expect(extents(s)).toEqual([{ start: 0, end: 14 }]);
     }
   });
 });
