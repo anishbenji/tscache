@@ -377,6 +377,7 @@ coverage.ts         coverage index on slot ranges: sorted disjoint ranges, binar
                     search, splice on merge, subtraction (invalidate), miss computation
 segment/
   types.ts          Segment interface: lookup / slice / mergeFrom / transferPayload
+  assert.ts         programming-error checks shared by segments and the merge path
   dense.ts          DenseSegment: implicit timestamps, presence bitmask, typed arrays
   payload.ts        DenseSegmentPayload encode/decode (one-format-three-uses lives here)
 engine/
@@ -384,7 +385,8 @@ engine/
   batch.ts          put validation: alignment (offset-aware), sort, dup, field/length,
                     range; converts a batch to slot terms
   merge.ts          put path: SegmentStore — segment selection, K-gap splitting, slot-cap
-                    pages, new-wins merge, overlap-diff detection
+                    pages, new-wins merge
+  overlap.ts        overlap-diff detection for the opt-in merge warning
   read.ts           read path: coverage intersection, present-point extraction to columnar
   engine.ts         Engine: caches map, watermarks, version check, clear/invalidate; pure
                     in-process API — unit-test target, './engine' export surface
@@ -442,8 +444,10 @@ function msOf(slot: number, g: Grid): number;
  *  else two). */
 function snapOut(r: Range, g: Grid): SlotRange;
 /** put's options.range → slots, snapped INWARD (N13): the grid points lying
- *  inside r, or undefined when there is none. Never wider than the input.
- *  Throws InvalidRangeError for the same malformed inputs as snapOut. */
+ *  inside r, or undefined when there is none. Never wider than the input,
+ *  so unlike snapOut it cannot land beyond ±(2^53 − 1). Throws
+ *  InvalidRangeError if either endpoint is not a finite number within
+ *  ±(2^53 − 1) or if start > end. */
 function snapIn(r: Range, g: Grid): SlotRange | undefined;
 /** Slot range → inclusive ms Range (GetResult.coverage and misses). */
 function toMs(r: SlotRange, g: Grid): Range;
@@ -578,7 +582,7 @@ class SegmentStore {
 
 Rules for `validateBatch`:
 
-- **Order of checks.** (1) The batch is an object whose `timestamps` is a `number[]` or a `Float64Array`, and whose `fields` is an object with exactly the schema's field names, each a `number[]` or a typed array other than a BigInt one (a `DataView` is not accepted): otherwise `PutError` `'field-mismatch'`. (2) Every field array has as many elements as `timestamps`: otherwise `'length-mismatch'`. (3) Timestamps are scanned once in order, and the first offender is reported with its index and value: a timestamp that is not on the grid is `'misaligned'` (with `expected`, e.g. `"t ≡ 0 (mod 60000)"`); otherwise one equal to its predecessor is `'duplicate'` and one below it is `'unsorted'`. Anything that is not an aligned safe integer, including `NaN` and a non-number, is `'misaligned'`. (4) With a `range`: a malformed range throws `InvalidRangeError` (as `snapOut`), and the first timestamp outside it is `'range-mismatch'`. Structural rejects (1) and (2) have no offending timestamp and carry `offenderIndex: -1`.
+- **Order of checks.** (1) The batch is an object whose `timestamps` is a `number[]` or a `Float64Array`, and whose `fields` is an object with exactly the schema's field names, each a `number[]` or a typed array other than a BigInt one (a `DataView` is not accepted): otherwise `PutError` `'field-mismatch'`. (2) Every field array has as many elements as `timestamps`: otherwise `'length-mismatch'`. (3) Timestamps are scanned once in order, and the first offender is reported with its index and value: a timestamp that is not on the grid is `'misaligned'` (with `expected`, e.g. `"t ≡ 0 (mod 60000)"`); otherwise one equal to its predecessor is `'duplicate'` and one below it is `'unsorted'`. Anything that is not an aligned safe integer, including `NaN` and a non-number, is `'misaligned'`; a non-number offender is reported by index only, without `offenderTimestamp`. (4) With a `range`: a malformed range throws `InvalidRangeError` (as `snapOut`), and the first timestamp outside it is `'range-mismatch'`. Structural rejects (1) and (2) have no offending timestamp and carry `offenderIndex: -1`.
 - **Values.** Each field is copied into a fresh array of the schema's dtype by typed-array assignment, whatever kind of array it arrived in, so `1.5` given for an `i32` field is stored as `1`. Values are not otherwise validated; `NaN` is legal.
 - **Empty batch.** Zero timestamps is legal. With a range it states that the range holds no points; without one it does nothing.
 - **Not here.** `meta` (`version`, `finalizedUntil`) is validated and applied in step ⑦.
@@ -588,7 +592,7 @@ Rules for `SegmentStore`:
 - **Layout (N14, N15).** With `K = gapSplitK` and `cap = segmentSlotCap`, the page of slot `s` is `floor(s / cap)`. Two present points with no present point between them share a segment exactly when they are on the same page and at most `K` slots between them hold no point. The layout is therefore a function of which points are present, whatever order they arrived in, and it holds after every `put`: a replace that opens a gap wider than `K` splits a segment, and a point that closes one joins two. No segment spans more than `cap` slots. Each segment is built with `slotCap = cap`.
 - **Overlap warning.** When `warnOnOverlapDiff` is on, a batch point *differs* if a point was already present at its slot and at least one field's stored value changes; values are compared after conversion to the field's dtype, and two values are equal when `a === b` or both are `NaN`. Each maximal run of batch points that are consecutive in the batch and all differ yields one warning: `range` from the first to the last slot of the run, `fields` the names that differed anywhere in the run, in schema order. A point that a replace removes is not a difference. When the option is off no comparison is made. Excluding the volatile region from warnings is step ⑦.
 - **Programming errors** throw `RangeError` before anything changes: the same malformed `points` and `authority` that `Segment.mergeFrom` rejects (§4.2). None is reachable through `validateBatch`.
-- **Allocation failure.** Segments are updated in place, so a `put` that fails because memory cannot be allocated may leave some of its points written. The store stays well formed, and every slot holds either its old state or its new one. The engine records coverage only after `put` returns, so a failed write never gains authority. Rejected: copying every touched segment first, which would cost a full segment copy on each live-tail append.
+- **Allocation failure.** Segments are updated in place, so a `put` that fails because memory cannot be allocated may be left half done: some of its points written, and, for a replace, old points inside the authority already removed. The store stays well formed (ascending, disjoint, no empty segment), and no slot outside the put's range changes. The engine records coverage only after `put` returns, and when `put` throws it must also withdraw any coverage it already held for the put's range (step ⑦), so a half-written range is refetched and never trusted. Rejected: copying every touched segment first, which would cost a full segment copy on each live-tail append.
 
 Out of step ⑤ by design: coverage recording, the watermark and version handling (step ⑦); converting warnings to ms and emitting `mergeWarning` (step ⑧).
 
