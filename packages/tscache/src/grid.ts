@@ -4,7 +4,7 @@
  * off-by-one can only be introduced, and only needs to be reviewed, here.
  */
 
-import { InvalidRangeError } from "./errors";
+import { InvalidRangeError, show } from "./errors";
 import type { Range } from "./types";
 
 /** A cache's alignment grid; structurally a subset of ResolvedCacheConfig. */
@@ -78,11 +78,11 @@ function assertRange(r: Range): void {
   const supported = (t: unknown) =>
     Number.isFinite(t) && Math.abs(t as number) <= Number.MAX_SAFE_INTEGER;
   if (typeof r !== "object" || r === null) {
-    throw new InvalidRangeError(`range must be an object, got ${String(r)}`);
+    throw new InvalidRangeError(`range must be an object, got ${show(r)}`);
   }
   if (!supported(r.start) || !supported(r.end)) {
     throw new InvalidRangeError(
-      `range endpoints must be finite numbers within ±(2^53 - 1), got [${String(r.start)}, ${String(r.end)}]`,
+      `range endpoints must be finite numbers within ±(2^53 - 1), got [${show(r.start)}, ${show(r.end)}]`,
     );
   }
   if (r.start > r.end) {

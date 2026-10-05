@@ -4,6 +4,19 @@
  * './fetcher' entry re-exports from it into worker-side fetcher bundles.
  */
 
+/**
+ * Text for an untrusted value in an error message. `String()` and template
+ * interpolation call the value's own conversion, which throws for a
+ * null-prototype object (and interpolation throws for a symbol): the
+ * TypeError would then replace the error being built. Primitives print as
+ * themselves; anything else is only named by kind.
+ */
+export function show(value: unknown): string {
+  if (typeof value === "function") return "a function";
+  if (typeof value !== "object" || value === null) return String(value);
+  return Array.isArray(value) ? "an array" : "an object";
+}
+
 export class TscacheError extends Error {
   constructor(message: string) {
     super(message);

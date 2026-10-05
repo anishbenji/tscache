@@ -4,7 +4,7 @@
  * is rejected whole, and nothing here mutates or keeps its input.
  */
 
-import { PutError, type PutErrorCode } from "../errors";
+import { PutError, type PutErrorCode, show } from "../errors";
 import { type Grid, isAligned, type SlotRange, slotOf, snapIn } from "../grid";
 import { FIELD_ARRAYS } from "../segment/dtype";
 import { getOwn, setOwn } from "../segment/own";
@@ -57,10 +57,7 @@ function isNumericArray(value: unknown): value is NumericArray {
 
 function timestampsOf(batch: PutBatch): NumericArray {
   if (!isObject(batch)) {
-    structural(
-      "field-mismatch",
-      `batch must be an object, got ${String(batch)}`,
-    );
+    structural("field-mismatch", `batch must be an object, got ${show(batch)}`);
   }
   const { timestamps } = batch;
   if (
@@ -108,7 +105,7 @@ function assertTimestamps(timestamps: NumericArray, grid: Grid): void {
     const t = timestamps[i] as number;
     if (!isAligned(t, grid)) {
       throw new PutError(
-        `timestamp ${String(t)} at index ${i} is not on the grid ${expected}`,
+        `timestamp ${show(t)} at index ${i} is not on the grid ${expected}`,
         {
           code: "misaligned",
           offenderIndex: i,
@@ -196,7 +193,16 @@ export function validateBatch(
   const fields: Record<string, FieldArray> = {};
   names.forEach((name, c) => {
     const data = new FIELD_ARRAYS[config.fields[name] as Dtype](n);
-    data.set(arrays[c] as NumericArray);
+    try {
+      data.set(arrays[c] as NumericArray);
+    } catch {
+      // Assignment converts each element to a number, which throws for a
+      // symbol or an object whose own conversion throws.
+      structural(
+        "field-mismatch",
+        `field "${name}" holds a value that cannot be converted to a number`,
+      );
+    }
     setOwn(fields, name, data);
   });
   return { points: { slots, fields }, authority };
