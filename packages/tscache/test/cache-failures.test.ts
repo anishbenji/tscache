@@ -63,6 +63,41 @@ describe("CacheState when the store write fails", () => {
     },
   );
 
+  it("a failed provisional upsert withdraws coverage for everything the put touched", () => {
+    // The put's own watermark (0) makes its claim empty, yet its first write
+    // may have changed covered points before the second one failed.
+    const c = cache({
+      interval: 1,
+      alignmentOffset: 0,
+      segmentSlotCap: 2,
+      finalizedUntil: 20,
+    });
+    c.put(batch([0, 1, 2, 3]));
+    const put = SegmentStore.prototype.put;
+    let calls = 0;
+    vi.spyOn(SegmentStore.prototype, "put").mockImplementation(function (
+      this: SegmentStore,
+      points,
+      authority,
+    ) {
+      if (++calls === 2) throw new RangeError("Array buffer allocation failed");
+      return put.call(this, points, authority);
+    });
+    expect(() =>
+      c.put({
+        ...batch([0, 1, 2, 3], [10, 11, 12, 13]),
+        meta: { finalizedUntil: 0 },
+      }),
+    ).toThrow(RangeError);
+    vi.restoreAllMocks();
+    const after = c.get({ start: 0, end: 3 });
+    expect(after.coverage).toEqual([]);
+    expect(after.misses).toEqual([
+      { range: { start: 0, end: 3 }, reason: "uncached" },
+    ]);
+    expect(Array.from(after.timestamps)).toEqual([0, 1, 2, 3]);
+  });
+
   it("a version mismatch that clears and then fails to write leaves an empty, consistent cache", () => {
     const c = cache({ version: "v1" });
     c.put(batch([3, 13]));

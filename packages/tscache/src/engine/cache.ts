@@ -76,17 +76,16 @@ function slice(points: Columns, from: number, to: number): Columns {
 }
 
 /**
- * The slots a put claims as authoritative: its authority (N13) or, without
- * one, its batch's span (N3), cut below the put's own watermark (N19).
+ * The slots a put claims as authoritative: the slots it touches (its
+ * authority, N13, or without one its batch's span, N3), cut below the put's
+ * own watermark (N19).
  */
 function claimOf(
-  points: Columns,
-  authority: SlotRange | undefined,
+  touched: SlotRange | undefined,
   limit: number | undefined,
 ): SlotRange | undefined {
-  const span = authority ?? spanOf(points);
-  if (span === undefined || limit === undefined) return span;
-  return below(span, limit);
+  if (touched === undefined || limit === undefined) return touched;
+  return below(touched, limit);
 }
 
 /** Splits points into those below `limit` and the rest. */
@@ -144,12 +143,15 @@ export class CacheState {
     const meta = this.#validateMeta(batch.meta);
     const cleared = this.#applyVersion(meta.version);
     const wm = meta.finalizedUntil;
-    const claim = claimOf(points, authority, wm?.slot);
+    const touched = authority ?? spanOf(points);
+    const claim = claimOf(touched, wm?.slot);
     let slotWarnings: SlotWarning[];
     try {
       slotWarnings = this.#write(points, authority, wm?.slot);
     } catch (error) {
-      if (claim !== undefined) this.#coverage.subtract(claim);
+      // Everything the write may have changed, not only what it would have
+      // claimed: a half-written provisional stretch must be refetched too.
+      if (touched !== undefined) this.#coverage.subtract(touched);
       throw error;
     }
     if (wm !== undefined) this.#advance(wm.t, wm.slot);
