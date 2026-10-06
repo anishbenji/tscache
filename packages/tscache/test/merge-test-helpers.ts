@@ -2,7 +2,13 @@ import { expect } from "vitest";
 import { SegmentStore } from "../src/engine/merge";
 import { resolveCacheConfig } from "../src/engine/validate";
 import type { Columns } from "../src/segment/types";
-import type { CacheConfig } from "../src/types";
+import type { CacheConfig, Dtype } from "../src/types";
+
+/** The schema every store() uses. */
+export const schema: Readonly<Record<string, Dtype>> = {
+  price: "f64",
+  volume: "i16",
+};
 
 export function store(overrides: Partial<CacheConfig> = {}): SegmentStore {
   return new SegmentStore(
@@ -10,7 +16,7 @@ export function store(overrides: Partial<CacheConfig> = {}): SegmentStore {
       id: "merge",
       interval: 10,
       alignmentOffset: 3,
-      fields: { price: "f64", volume: "i16" },
+      fields: schema,
       gapSplitK: 2,
       segmentSlotCap: 8,
       ...overrides,

@@ -604,9 +604,15 @@ Internal module: not exported from any package entry. Contract tests (step ⑥) 
 ```ts
 // engine/read.ts
 /** The present points of `segments` inside `range`, concatenated ascending,
- *  as fresh arrays (never views): one per schema field, of that field's
- *  dtype. Segments are the store's: ascending and disjoint. */
-function collect(segments: readonly Segment[], range: SlotRange): Columns;
+ *  as fresh arrays (never views): one per field of `fields` (the cache's
+ *  schema), of that field's dtype, so the result has the schema's shape
+ *  even when there is no segment. Segments are the store's: ascending and
+ *  disjoint. */
+function collect(
+  segments: readonly Segment[],
+  range: SlotRange,
+  fields: Readonly<Record<string, Dtype>>,
+): Columns;
 
 /** Assembles a GetResult for a request already snapped to slots. */
 function read(
@@ -614,13 +620,14 @@ function read(
   segments: readonly Segment[],
   coverage: CoverageIndex,
   grid: Grid,
+  fields: Readonly<Record<string, Dtype>>,
 ): GetResult;
 ```
 
 Rules:
 
 - **What is returned (N16).** Every present point inside the request, whether or not its slot is covered: `timestamps` are their slots in ms (`msOf`), ascending; `fields` holds one array per schema field, same length. The live tail (volatile region, never covered) and points whose coverage was invalidated but not yet refetched are therefore returned too; `coverage` says which parts are authoritative.
-- **Coverage and misses.** `coverage` is `coverage.covered(request)` in ms (`toMs`), ascending; `misses` is `coverage.gaps(request)` in ms, ascending, each with `reason: 'uncached'` and no `error`. They tile the request exactly: every slot of the request is in exactly one of them. An empty request result is zero-length arrays with `coverage: []` and `misses: [request in ms]`.
+- **Coverage and misses.** `coverage` is `coverage.covered(request)` in ms (`toMs`), ascending; `misses` is `coverage.gaps(request)` in ms, ascending, each with `reason: 'uncached'` and no `error`. They tile the request exactly: every slot of the request is in exactly one of them, and both are independent of which points are present: a covered stretch without points is still coverage (a confirmed gap), and a request with no points and no coverage yields zero-length arrays, `coverage: []` and `misses: [request in ms]`.
 - **Fresh results.** Arrays and range objects in the result share nothing with the segments or the index; mutating a result changes nothing.
 - **Programming errors** throw `RangeError` for a malformed `request` (not safe integers, start > end), as the store does. None is reachable from consumer input: `snapOut` validates first.
 - **Not here.** Snapping the consumer's ms range outward is the engine's job (step ⑧); excluding the volatile region from the coverage passed in is the engine's job (step ⑦), as is the version check; miss reasons other than `'uncached'` are set by the orchestrator (step ⑪), which rewrites the misses of a request after fetching.
