@@ -48,17 +48,17 @@ describe("SegmentStore layout — architecture §4.3, N14, N15", () => {
         [11, 11],
       ],
     },
-  ])("allows exactly K=$k absent slots and splits at K+1", ({
-    k,
-    slots,
-    ends,
-  }) => {
-    const s = store({ gapSplitK: k, segmentSlotCap: 32 });
-    s.put(points(slots));
-    expect(extents(s)).toEqual(ends.map(([start, end]) => ({ start, end })));
-    expectRows(s, slots);
-    for (const segment of s.segments) expect(segment.lookup(1)).toBeUndefined();
-  });
+  ])(
+    "allows exactly K=$k absent slots and splits at K+1",
+    ({ k, slots, ends }) => {
+      const s = store({ gapSplitK: k, segmentSlotCap: 32 });
+      s.put(points(slots));
+      expect(extents(s)).toEqual(ends.map(([start, end]) => ({ start, end })));
+      expectRows(s, slots);
+      for (const segment of s.segments)
+        expect(segment.lookup(1)).toBeUndefined();
+    },
+  );
 
   it.each([
     {
@@ -91,21 +91,20 @@ describe("SegmentStore layout — architecture §4.3, N14, N15", () => {
         [32_768, 32_768],
       ],
     },
-  ])("splits at fixed multiples of cap $cap, even with a large K", ({
-    cap,
-    slots,
-    ends,
-  }) => {
-    const s = store({ segmentSlotCap: cap, gapSplitK: 32_768 });
-    s.put(points(slots));
-    expect(extents(s)).toEqual(ends.map(([start, end]) => ({ start, end })));
-    expectRows(s, slots);
-    for (const segment of s.segments) {
-      const extent = segment.extent;
-      if (extent === undefined) throw new Error("Empty segment");
-      expect(extent.end - extent.start + 1).toBeLessThanOrEqual(cap);
-    }
-  });
+  ])(
+    "splits at fixed multiples of cap $cap, even with a large K",
+    ({ cap, slots, ends }) => {
+      const s = store({ segmentSlotCap: cap, gapSplitK: 32_768 });
+      s.put(points(slots));
+      expect(extents(s)).toEqual(ends.map(([start, end]) => ({ start, end })));
+      expectRows(s, slots);
+      for (const segment of s.segments) {
+        const extent = segment.extent;
+        if (extent === undefined) throw new Error("Empty segment");
+        expect(extent.end - extent.start + 1).toBeLessThanOrEqual(cap);
+      }
+    },
+  );
 
   it("uses the documented default K=4 and cap=32768", () => {
     const s = new SegmentStore(

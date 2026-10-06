@@ -194,41 +194,44 @@ const dtypeCases: { dtype: Dtype; expected: FieldArray }[] = [
 ];
 
 describe("DenseSegment dtypes — architecture §4.2, N7", () => {
-  it.each(dtypeCases)("stores $dtype by typed-array assignment", ({
-    dtype,
-    expected,
-  }) => {
-    const segment = new DenseSegment({ ...options, fields: { value: dtype } });
-    segment.mergeFrom({
-      slots: new Float64Array([0, 1, 2, 3, 4, 5]),
-      fields: {
-        value: new Float64Array([
-          1.1,
-          -1.9,
-          257.9,
-          65_537.9,
-          4_294_967_297.9,
-          Number.NaN,
-        ]),
-      },
-    });
-    const result = segment.slice({ start: 0, end: 5 });
-    expect(result.fields.value).toBeInstanceOf(expected.constructor);
-    expect(result.fields.value).toEqual(expected);
-    expect(segment.size).toBe(6);
-    Array.from(expected).forEach((value, slot) => {
-      expect(segment.lookup(slot)).toEqual({ value });
-    });
-    // Overwriting must use the same conversion as the initial assignment.
-    segment.mergeFrom({
-      slots: new Float64Array([0]),
-      fields: { value: new Float64Array([257.9]) },
-    });
-    expect(segment.lookup(0)).toEqual({ value: expected[2] });
-    const empty = segment.slice({ start: 10, end: 10 }).fields.value;
-    expect(empty).toBeInstanceOf(expected.constructor);
-    expect(empty).toHaveLength(0);
-  });
+  it.each(dtypeCases)(
+    "stores $dtype by typed-array assignment",
+    ({ dtype, expected }) => {
+      const segment = new DenseSegment({
+        ...options,
+        fields: { value: dtype },
+      });
+      segment.mergeFrom({
+        slots: new Float64Array([0, 1, 2, 3, 4, 5]),
+        fields: {
+          value: new Float64Array([
+            1.1,
+            -1.9,
+            257.9,
+            65_537.9,
+            4_294_967_297.9,
+            Number.NaN,
+          ]),
+        },
+      });
+      const result = segment.slice({ start: 0, end: 5 });
+      expect(result.fields.value).toBeInstanceOf(expected.constructor);
+      expect(result.fields.value).toEqual(expected);
+      expect(segment.size).toBe(6);
+      Array.from(expected).forEach((value, slot) => {
+        expect(segment.lookup(slot)).toEqual({ value });
+      });
+      // Overwriting must use the same conversion as the initial assignment.
+      segment.mergeFrom({
+        slots: new Float64Array([0]),
+        fields: { value: new Float64Array([257.9]) },
+      });
+      expect(segment.lookup(0)).toEqual({ value: expected[2] });
+      const empty = segment.slice({ start: 10, end: 10 }).fields.value;
+      expect(empty).toBeInstanceOf(expected.constructor);
+      expect(empty).toHaveLength(0);
+    },
+  );
 });
 
 describe("DenseSegment merge semantics — architecture §4.2, N11", () => {
@@ -337,18 +340,19 @@ describe("DenseSegment merge semantics — architecture §4.2, N11", () => {
 });
 
 describe("DenseSegment slot cap — architecture §4.2", () => {
-  it.each([
-    1, 8, 32_768,
-  ])("allows exactly %i slots, rejects one more in either direction atomically", (slotCap) => {
-    const segment = new DenseSegment({ ...options, slotCap });
-    const start = -7;
-    const end = start + slotCap - 1;
-    segment.mergeFrom(points(slotCap === 1 ? [start] : [start, end]));
-    expect(segment.extent).toEqual({ start, end });
-    expect(segment.transferPayload().count).toBe(slotCap);
-    expectAtomicRejection(segment, points([end + 1]));
-    expectAtomicRejection(segment, points([start - 1]));
-  });
+  it.each([1, 8, 32_768])(
+    "allows exactly %i slots, rejects one more in either direction atomically",
+    (slotCap) => {
+      const segment = new DenseSegment({ ...options, slotCap });
+      const start = -7;
+      const end = start + slotCap - 1;
+      segment.mergeFrom(points(slotCap === 1 ? [start] : [start, end]));
+      expect(segment.extent).toEqual({ start, end });
+      expect(segment.transferPayload().count).toBe(slotCap);
+      expectAtomicRejection(segment, points([end + 1]));
+      expectAtomicRejection(segment, points([start - 1]));
+    },
+  );
 
   it("rejects an oversized first merge and an oversized replacement without partial writes or clears", () => {
     const empty = new DenseSegment({ ...options, slotCap: 5 });
@@ -378,42 +382,44 @@ const invalidRanges = [
 ];
 
 describe("DenseSegment programming-error rejection — architecture §4.2", () => {
-  it.each(
-    invalidSlots,
-  )("lookup rejects $name with RangeError, even when empty", ({ value }) => {
-    for (const segment of [new DenseSegment(options), populated()]) {
-      expect(() => segment.lookup(value)).toThrow(RangeError);
-    }
-  });
+  it.each(invalidSlots)(
+    "lookup rejects $name with RangeError, even when empty",
+    ({ value }) => {
+      for (const segment of [new DenseSegment(options), populated()]) {
+        expect(() => segment.lookup(value)).toThrow(RangeError);
+      }
+    },
+  );
 
-  it.each(
-    invalidRanges,
-  )("slice rejects $name with RangeError, even when empty", ({ range }) => {
-    for (const segment of [new DenseSegment(options), populated()]) {
-      expect(() => segment.slice(range)).toThrow(RangeError);
-    }
-  });
+  it.each(invalidRanges)(
+    "slice rejects $name with RangeError, even when empty",
+    ({ range }) => {
+      for (const segment of [new DenseSegment(options), populated()]) {
+        expect(() => segment.slice(range)).toThrow(RangeError);
+      }
+    },
+  );
 
-  it.each(
-    invalidRanges,
-  )("mergeFrom rejects $name authority atomically, even for empty points", ({
-    range,
-  }) => {
-    for (const input of [points([]), points([0], [999], [999])]) {
-      expectAtomicRejection(populated(), input, range);
-      expectAtomicRejection(new DenseSegment(options), input, range);
-    }
-  });
+  it.each(invalidRanges)(
+    "mergeFrom rejects $name authority atomically, even for empty points",
+    ({ range }) => {
+      for (const input of [points([]), points([0], [999], [999])]) {
+        expectAtomicRejection(populated(), input, range);
+        expectAtomicRejection(new DenseSegment(options), input, range);
+      }
+    },
+  );
 
-  it.each(invalidSlots)("mergeFrom rejects a $name slot atomically", ({
-    value,
-  }) => {
-    expectAtomicRejection(populated(), points([value], [999], [999]));
-    expectAtomicRejection(
-      new DenseSegment(options),
-      points([value], [999], [999]),
-    );
-  });
+  it.each(invalidSlots)(
+    "mergeFrom rejects a $name slot atomically",
+    ({ value }) => {
+      expectAtomicRejection(populated(), points([value], [999], [999]));
+      expectAtomicRejection(
+        new DenseSegment(options),
+        points([value], [999], [999]),
+      );
+    },
+  );
 
   it.each([
     { name: "descending slots", slots: [1, 0] },
@@ -452,14 +458,15 @@ describe("DenseSegment programming-error rejection — architecture §4.2", () =
         volume: new Int16Array([999, 999]),
       },
     },
-  ])("mergeFrom rejects $name atomically for upsert and replace", ({
-    arrays,
-  }) => {
-    const input: Columns = { slots: new Float64Array([0]), fields: arrays };
-    for (const authority of [undefined, { start: -2, end: 2 }]) {
-      expectAtomicRejection(populated(), input, authority);
-    }
-  });
+  ])(
+    "mergeFrom rejects $name atomically for upsert and replace",
+    ({ arrays }) => {
+      const input: Columns = { slots: new Float64Array([0]), fields: arrays };
+      for (const authority of [undefined, { start: -2, end: 2 }]) {
+        expectAtomicRejection(populated(), input, authority);
+      }
+    },
+  );
 
   it("validates field names and lengths even when the slots array is empty", () => {
     expectAtomicRejection(
@@ -476,33 +483,38 @@ describe("DenseSegment programming-error rejection — architecture §4.2", () =
   it.each([
     { name: "before authority", slots: [-3, 0] },
     { name: "after authority", slots: [0, 3] },
-  ])("rejects a point $name without clearing or overwriting anything", ({
-    slots,
-  }) => {
-    expectAtomicRejection(populated(), points(slots, [999, 999], [999, 999]), {
-      start: -2,
-      end: 2,
-    });
-  });
+  ])(
+    "rejects a point $name without clearing or overwriting anything",
+    ({ slots }) => {
+      expectAtomicRejection(
+        populated(),
+        points(slots, [999, 999], [999, 999]),
+        {
+          start: -2,
+          end: 2,
+        },
+      );
+    },
+  );
 
-  it.each([
-    Number.MIN_SAFE_INTEGER,
-    Number.MAX_SAFE_INTEGER,
-  ])("accepts the safe slot boundary %i", (slot) => {
-    // Unit interval makes these slots' timestamps representable as well.
-    const segment = new DenseSegment({
-      ...options,
-      grid: { interval: 1, alignmentOffset: 0 },
-      slotCap: 1,
-    });
-    segment.mergeFrom(points([slot], [42], [4]));
-    expect(segment.extent).toEqual({ start: slot, end: slot });
-    expect(segment.lookup(slot)).toEqual({ price: 42, volume: 4 });
-    expect(segment.slice({ start: slot, end: slot }).slots).toEqual(
-      new Float64Array([slot]),
-    );
-    expect(segment.transferPayload().start).toBe(slot);
-  });
+  it.each([Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER])(
+    "accepts the safe slot boundary %i",
+    (slot) => {
+      // Unit interval makes these slots' timestamps representable as well.
+      const segment = new DenseSegment({
+        ...options,
+        grid: { interval: 1, alignmentOffset: 0 },
+        slotCap: 1,
+      });
+      segment.mergeFrom(points([slot], [42], [4]));
+      expect(segment.extent).toEqual({ start: slot, end: slot });
+      expect(segment.lookup(slot)).toEqual({ price: 42, volume: 4 });
+      expect(segment.slice({ start: slot, end: slot }).slots).toEqual(
+        new Float64Array([slot]),
+      );
+      expect(segment.transferPayload().start).toBe(slot);
+    },
+  );
 });
 
 function randomInt(seed: number): (min: number, max: number) => number {
@@ -549,62 +561,63 @@ function expectModel(segment: Segment, model: Map<number, Row>): void {
 }
 
 describe("DenseSegment seeded row-model properties — architecture §5, starter §6", () => {
-  it.each([
-    1, 0xc0ffee, 0xdeadbeef,
-  ])("upsert/replace sequences and payload round trips match a Map (seed %i)", (seed) => {
-    const next = randomInt(seed);
-    const segment = new DenseSegment(options);
-    const model = new Map<number, Row>();
-    for (let step = 0; step < 100; step += 1) {
-      const a = next(universe.start, universe.end);
-      const b = next(universe.start, universe.end);
-      const authority =
-        step % 3 === 0
-          ? undefined
-          : { start: Math.min(a, b), end: Math.max(a, b) };
-      const inputSlots = new Set<number>();
-      const n = next(0, 6);
-      for (let i = 0; i < n; i += 1)
-        inputSlots.add(
-          next(
-            authority?.start ?? universe.start,
-            authority?.end ?? universe.end,
-          ),
+  it.each([1, 0xc0ffee, 0xdeadbeef])(
+    "upsert/replace sequences and payload round trips match a Map (seed %i)",
+    (seed) => {
+      const next = randomInt(seed);
+      const segment = new DenseSegment(options);
+      const model = new Map<number, Row>();
+      for (let step = 0; step < 100; step += 1) {
+        const a = next(universe.start, universe.end);
+        const b = next(universe.start, universe.end);
+        const authority =
+          step % 3 === 0
+            ? undefined
+            : { start: Math.min(a, b), end: Math.max(a, b) };
+        const inputSlots = new Set<number>();
+        const n = next(0, 6);
+        for (let i = 0; i < n; i += 1)
+          inputSlots.add(
+            next(
+              authority?.start ?? universe.start,
+              authority?.end ?? universe.end,
+            ),
+          );
+        const slots = [...inputSlots].sort((x, y) => x - y);
+        const prices = slots.map(() =>
+          next(0, 9) === 0 ? Number.NaN : next(-1000, 1000) / 10,
         );
-      const slots = [...inputSlots].sort((x, y) => x - y);
-      const prices = slots.map(() =>
-        next(0, 9) === 0 ? Number.NaN : next(-1000, 1000) / 10,
-      );
-      const volumes = slots.map(() => next(-100_000, 100_000) + 0.75);
-      if (authority !== undefined) {
-        for (const slot of model.keys())
-          if (authority.start <= slot && slot <= authority.end)
-            model.delete(slot);
-      }
-      slots.forEach((slot, i) => {
-        const price = prices[i];
-        const volume = volumes[i];
-        if (price === undefined || volume === undefined)
-          throw new Error("Missing generated value");
-        // Independent row model; language typed-array assignment is the specified conversion.
-        model.set(slot, { price, volume: new Int16Array([volume])[0] ?? 0 });
-      });
-      segment.mergeFrom(points(slots, prices, volumes), authority);
-      expectModel(segment, model);
-      if (model.size > 0) {
-        const payload = segment.transferPayload();
-        const decoded = segmentFromPayload(structuredClone(payload), options);
-        expectModel(decoded, model);
-        expect(decoded.transferPayload()).toEqual(payload);
-        // The reconstructed value remains usable at the same merge seam.
-        decoded.mergeFrom(points([0], [777], [7]));
-        const changedModel = new Map(model);
-        changedModel.set(0, { price: 777, volume: 7 });
-        expectModel(decoded, changedModel);
+        const volumes = slots.map(() => next(-100_000, 100_000) + 0.75);
+        if (authority !== undefined) {
+          for (const slot of model.keys())
+            if (authority.start <= slot && slot <= authority.end)
+              model.delete(slot);
+        }
+        slots.forEach((slot, i) => {
+          const price = prices[i];
+          const volume = volumes[i];
+          if (price === undefined || volume === undefined)
+            throw new Error("Missing generated value");
+          // Independent row model; language typed-array assignment is the specified conversion.
+          model.set(slot, { price, volume: new Int16Array([volume])[0] ?? 0 });
+        });
+        segment.mergeFrom(points(slots, prices, volumes), authority);
         expectModel(segment, model);
-      } else {
-        expect(() => segment.transferPayload()).toThrow(RangeError);
+        if (model.size > 0) {
+          const payload = segment.transferPayload();
+          const decoded = segmentFromPayload(structuredClone(payload), options);
+          expectModel(decoded, model);
+          expect(decoded.transferPayload()).toEqual(payload);
+          // The reconstructed value remains usable at the same merge seam.
+          decoded.mergeFrom(points([0], [777], [7]));
+          const changedModel = new Map(model);
+          changedModel.set(0, { price: 777, volume: 7 });
+          expectModel(decoded, changedModel);
+          expectModel(segment, model);
+        } else {
+          expect(() => segment.transferPayload()).toThrow(RangeError);
+        }
       }
-    }
-  });
+    },
+  );
 });

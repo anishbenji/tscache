@@ -17,12 +17,13 @@ function atomicReject(input: Columns, authority?: SlotRange): void {
 const invalid = [0.5, Number.NaN, Infinity, -Infinity, 2 ** 53, -(2 ** 53)];
 
 describe("SegmentStore programming errors — architecture §4.2, §4.3", () => {
-  it.each(
-    invalid,
-  )("rejects invalid slot %j before any upsert or replacement", (slot) => {
-    for (const authority of [undefined, { start: -20, end: 20 }])
-      atomicReject(points([-10, slot], [999, 999]), authority);
-  });
+  it.each(invalid)(
+    "rejects invalid slot %j before any upsert or replacement",
+    (slot) => {
+      for (const authority of [undefined, { start: -20, end: 20 }])
+        atomicReject(points([-10, slot], [999, 999]), authority);
+    },
+  );
 
   it.each([
     { name: "descending", slots: [0, -1] },
@@ -106,15 +107,15 @@ describe("SegmentStore programming errors — architecture §4.2, §4.3", () => 
     atomicReject(points(slots, [999, 999]), { start: -8, end: 8 });
   });
 
-  it.each([
-    Number.MIN_SAFE_INTEGER,
-    Number.MAX_SAFE_INTEGER,
-  ])("accepts safe slot boundary %i", (slot) => {
-    const s = store({ interval: 1, alignmentOffset: 0, segmentSlotCap: 1 });
-    expect(s.put(points([slot], [42], [4]))).toEqual([]);
-    expect(s.segments.map((segment) => segment.extent)).toEqual([
-      { start: slot, end: slot },
-    ]);
-    expect(s.segments[0]?.lookup(slot)).toEqual({ price: 42, volume: 4 });
-  });
+  it.each([Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER])(
+    "accepts safe slot boundary %i",
+    (slot) => {
+      const s = store({ interval: 1, alignmentOffset: 0, segmentSlotCap: 1 });
+      expect(s.put(points([slot], [42], [4]))).toEqual([]);
+      expect(s.segments.map((segment) => segment.extent)).toEqual([
+        { start: slot, end: slot },
+      ]);
+      expect(s.segments[0]?.lookup(slot)).toEqual({ price: 42, volume: 4 });
+    },
+  );
 });

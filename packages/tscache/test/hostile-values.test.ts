@@ -37,67 +37,74 @@ describe("show", () => {
   });
 });
 
-describe.each(hostile.map((value) => ({ value })))("hostile value %#", ({
-  value,
-}) => {
-  it("as a batch, a field, timestamps or one timestamp → PutError", () => {
-    const batches = [
-      value,
-      { timestamps: [0], fields: { x: value } },
-      { timestamps: value, fields: { x: [1] } },
-      { timestamps: [value], fields: { x: [1] } },
-      { timestamps: [0, value], fields: { x: [1, 2] } },
-    ];
-    for (const batch of batches) {
-      expect(() => validateBatch(batch as PutBatch, config)).toThrow(PutError);
-    }
-  });
+describe.each(hostile.map((value) => ({ value })))(
+  "hostile value %#",
+  ({ value }) => {
+    it("as a batch, a field, timestamps or one timestamp → PutError", () => {
+      const batches = [
+        value,
+        { timestamps: [0], fields: { x: value } },
+        { timestamps: value, fields: { x: [1] } },
+        { timestamps: [value], fields: { x: [1] } },
+        { timestamps: [0, value], fields: { x: [1, 2] } },
+      ];
+      for (const batch of batches) {
+        expect(() => validateBatch(batch as PutBatch, config)).toThrow(
+          PutError,
+        );
+      }
+    });
 
-  it("as a field value → stored as a number, or PutError", () => {
-    // A value that converts (a function becomes NaN) is legal; one that
-    // cannot be converted rejects the batch.
-    const batch = { timestamps: [0], fields: { x: [value] } };
-    try {
-      const { points } = validateBatch(batch as PutBatch, config);
-      expect(points.fields.x).toEqual(new Float64Array([Number.NaN]));
-    } catch (error) {
-      expect(error).toBeInstanceOf(PutError);
-      expect(error).toMatchObject({
-        code: "field-mismatch",
-        offenderIndex: -1,
-      });
-    }
-  });
+    it("as a field value → stored as a number, or PutError", () => {
+      // A value that converts (a function becomes NaN) is legal; one that
+      // cannot be converted rejects the batch.
+      const batch = { timestamps: [0], fields: { x: [value] } };
+      try {
+        const { points } = validateBatch(batch as PutBatch, config);
+        expect(points.fields.x).toEqual(new Float64Array([Number.NaN]));
+      } catch (error) {
+        expect(error).toBeInstanceOf(PutError);
+        expect(error).toMatchObject({
+          code: "field-mismatch",
+          offenderIndex: -1,
+        });
+      }
+    });
 
-  it("as a range or a range endpoint → InvalidRangeError", () => {
-    const ranges = [value, { start: value, end: 1 }, { start: 0, end: value }];
-    const empty = { timestamps: [], fields: { x: [] } };
-    for (const range of ranges) {
-      expect(() => snapOut(range as Range, grid)).toThrow(InvalidRangeError);
-      expect(() => snapIn(range as Range, grid)).toThrow(InvalidRangeError);
-      expect(() => validateBatch(empty, config, range as Range)).toThrow(
-        InvalidRangeError,
-      );
-    }
-  });
+    it("as a range or a range endpoint → InvalidRangeError", () => {
+      const ranges = [
+        value,
+        { start: value, end: 1 },
+        { start: 0, end: value },
+      ];
+      const empty = { timestamps: [], fields: { x: [] } };
+      for (const range of ranges) {
+        expect(() => snapOut(range as Range, grid)).toThrow(InvalidRangeError);
+        expect(() => snapIn(range as Range, grid)).toThrow(InvalidRangeError);
+        expect(() => validateBatch(empty, config, range as Range)).toThrow(
+          InvalidRangeError,
+        );
+      }
+    });
 
-  it("as a config or a config value → ConfigError", () => {
-    const configs = [
-      value,
-      { ...base, id: value },
-      { ...base, interval: value },
-      { ...base, alignmentOffset: value },
-      { ...base, fields: { x: value } },
-      { ...base, gapSplitK: value },
-      { ...base, segmentSlotCap: value },
-      { ...base, version: value },
-      { ...base, finalizedUntil: value },
-      { ...base, warnOnOverlapDiff: value },
-    ];
-    for (const candidate of configs) {
-      expect(() => resolveCacheConfig(candidate as CacheConfig)).toThrow(
-        ConfigError,
-      );
-    }
-  });
-});
+    it("as a config or a config value → ConfigError", () => {
+      const configs = [
+        value,
+        { ...base, id: value },
+        { ...base, interval: value },
+        { ...base, alignmentOffset: value },
+        { ...base, fields: { x: value } },
+        { ...base, gapSplitK: value },
+        { ...base, segmentSlotCap: value },
+        { ...base, version: value },
+        { ...base, finalizedUntil: value },
+        { ...base, warnOnOverlapDiff: value },
+      ];
+      for (const candidate of configs) {
+        expect(() => resolveCacheConfig(candidate as CacheConfig)).toThrow(
+          ConfigError,
+        );
+      }
+    });
+  },
+);

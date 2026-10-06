@@ -5,21 +5,21 @@ import type { Columns } from "../src/segment/types";
 import { expectRows, points, store } from "./merge-test-helpers";
 
 describe("SlotWarning — architecture §2.2, §4.3, starter §3.1", () => {
-  it.each([
-    false,
-    undefined,
-  ])("warnings are off for warnOnOverlapDiff=%j while new values still win", (enabled) => {
-    const config = resolveCacheConfig({
-      id: "off",
-      interval: 1,
-      fields: { price: "f64", volume: "i16" },
-      ...(enabled === undefined ? {} : { warnOnOverlapDiff: enabled }),
-    });
-    const s = new SegmentStore(config);
-    expect(s.put(points([0, 8], [10, 80]))).toEqual([]);
-    expect(s.put(points([0, 8], [11, 81]))).toEqual([]);
-    expectRows(s, [0, 8], [11, 81]);
-  });
+  it.each([false, undefined])(
+    "warnings are off for warnOnOverlapDiff=%j while new values still win",
+    (enabled) => {
+      const config = resolveCacheConfig({
+        id: "off",
+        interval: 1,
+        fields: { price: "f64", volume: "i16" },
+        ...(enabled === undefined ? {} : { warnOnOverlapDiff: enabled }),
+      });
+      const s = new SegmentStore(config);
+      expect(s.put(points([0, 8], [10, 80]))).toEqual([]);
+      expect(s.put(points([0, 8], [11, 81]))).toEqual([]);
+      expectRows(s, [0, 8], [11, 81]);
+    },
+  );
 
   it("reports changed fields at one overlapping slot in slot terms", () => {
     const s = store({ warnOnOverlapDiff: true });

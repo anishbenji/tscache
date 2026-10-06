@@ -11,15 +11,13 @@ const unit = { interval: 1, alignmentOffset: 0 };
 const minute = { interval: 60_000, alignmentOffset: 0 };
 
 describe("grid rejects values outside the safe-integer range", () => {
-  it.each([
-    2 ** 53,
-    -(2 ** 53),
-    2 ** 60,
-    1e300,
-  ])("treats timestamp %d as unaligned", (t) => {
-    expect(isAligned(t, unit)).toBe(false);
-    expect(() => slotOf(t, unit)).toThrow(RangeError);
-  });
+  it.each([2 ** 53, -(2 ** 53), 2 ** 60, 1e300])(
+    "treats timestamp %d as unaligned",
+    (t) => {
+      expect(isAligned(t, unit)).toBe(false);
+      expect(() => slotOf(t, unit)).toThrow(RangeError);
+    },
+  );
 
   it.each([
     { name: "start below the range", range: { start: -(2 ** 53), end: 0 } },
@@ -68,20 +66,18 @@ describe("grid rejects values outside the safe-integer range", () => {
 });
 
 describe("CoverageIndex at the safe-integer bounds", () => {
-  it.each([
-    "add",
-    "subtract",
-    "covered",
-    "gaps",
-  ] as const)("%s throws RangeError for a slot beyond the safe range", (method) => {
-    const index = new CoverageIndex();
-    expect(() => index[method]({ start: 2 ** 53, end: 2 ** 53 })).toThrow(
-      RangeError,
-    );
-    expect(() => index[method]({ start: -(2 ** 53), end: 0 })).toThrow(
-      RangeError,
-    );
-  });
+  it.each(["add", "subtract", "covered", "gaps"] as const)(
+    "%s throws RangeError for a slot beyond the safe range",
+    (method) => {
+      const index = new CoverageIndex();
+      expect(() => index[method]({ start: 2 ** 53, end: 2 ** 53 })).toThrow(
+        RangeError,
+      );
+      expect(() => index[method]({ start: -(2 ** 53), end: 0 })).toThrow(
+        RangeError,
+      );
+    },
+  );
 
   it("partitions exactly at both extremes", () => {
     const index = new CoverageIndex();

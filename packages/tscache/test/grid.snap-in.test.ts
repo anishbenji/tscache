@@ -37,14 +37,14 @@ describe("snapIn — architecture §4.1, N1, N9, N13", () => {
     expect(snapIn(range, grid)).toBeUndefined();
   });
 
-  it.each([
-    Number.MIN_SAFE_INTEGER,
-    Number.MAX_SAFE_INTEGER,
-  ])("accepts the safe timestamp boundary %i on a unit grid", (t) => {
-    expect(
-      snapIn({ start: t, end: t }, { interval: 1, alignmentOffset: 0 }),
-    ).toEqual({ start: t, end: t });
-  });
+  it.each([Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER])(
+    "accepts the safe timestamp boundary %i on a unit grid",
+    (t) => {
+      expect(
+        snapIn({ start: t, end: t }, { interval: 1, alignmentOffset: 0 }),
+      ).toEqual({ start: t, end: t });
+    },
+  );
 
   it("keeps exact negative slots when timestamp minus offset exceeds the safe domain", () => {
     const t = Number.MIN_SAFE_INTEGER;
