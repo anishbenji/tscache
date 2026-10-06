@@ -18,6 +18,9 @@ updates:
       interval: monthly
     commit-message:
       prefix: chore
+    # Patch and minor bumps arrive together; a major bump gets its own pull
+    # request, so it can be judged against its changelog on its own.
     groups:
       dev-dependencies:
         dependency-type: development
+        update-types: ["minor", "patch"]
