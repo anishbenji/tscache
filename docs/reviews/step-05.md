@@ -102,3 +102,14 @@ No findings.
 ## Merge request: `chore/06-tsdown` → `main`
 
 One dependency, `tsdown` 0.22.2 → 0.23.0. `bun run ci` passes (658 tests, build output identical in size). Confidence high; blast radius is the build step only.
+## Follow-up: Vitest 5 (`chore/06-vitest`)
+
+Breaking changes from the migration guide checked against the repo: Node ≥ 22.12 and Vite ≥ 6.4 are met; `clearMocks` now defaults to true, which the suites tolerate because each restores its own mocks; unawaited async assertions now fail the test (none exist); `toThrow("")` semantics changed (not used); the bench API was rewritten (no bench files yet; the step ⑥+ bench smoke will use the new context-based API); config files are no longer searched in parent directories (Vitest runs from the repository root, where `vitest.config.ts` lives). The whole suite passes unchanged, with no deprecation output.
+
+### Round 1 — reviewer verdict: merge
+
+No findings; the reviewer checked the usage against the migration guide.
+
+## Merge request: `chore/06-vitest` → `main`
+
+One dependency, `vitest` 4.1.8 → 5.0.3. `bun run ci` passes (658 tests). Confidence high; blast radius is the test runner only. Vitest still runs under Node, per the toolchain rule in `AGENTS.md`.
