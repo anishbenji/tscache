@@ -99,12 +99,11 @@ describe("collect present points — architecture §4.2–§4.4, N1, N14, N15", 
     });
   });
 
-  it("returns zero slots when there are no segments", () => {
+  it("returns schema-shaped zero-length arrays when there are no segments", () => {
     const result: Columns = collect([], { start: -2, end: 2 }, schema);
-    expect(result.slots).toEqual(new Float64Array(0));
-    // §4.4 supplies no schema for this case; field names and dtypes await
-    // clarification rather than being inferred by the test.
-    for (const field of Object.values(result.fields))
-      expect(field.length).toBe(0);
+    expect(result).toEqual({
+      slots: new Float64Array(0),
+      fields: { price: new Float64Array(0), volume: new Int16Array(0) },
+    });
   });
 });

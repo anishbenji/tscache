@@ -191,10 +191,49 @@ describe("read results — architecture §2.3, §4.1, §4.4, N1, N9, N16", () =>
     expect(result.misses).toEqual([
       { range: { start: -17, end: 23 }, reason: "uncached" },
     ]);
-    // The no-segment field schema is unresolved in §4.4.
-    for (const field of Object.values(result.fields))
-      expect(field.length).toBe(0);
+    expect(result.fields).toEqual({
+      price: new Float64Array(0),
+      volume: new Int16Array(0),
+    });
   });
+
+  it.each([
+    {
+      name: "fully covered",
+      covered: { start: 0, end: 5 },
+      coverage: [{ start: 3, end: 53 }],
+      misses: [],
+    },
+    {
+      name: "partly covered",
+      covered: { start: 2, end: 3 },
+      coverage: [{ start: 23, end: 33 }],
+      misses: [
+        { range: { start: 3, end: 13 }, reason: "uncached" },
+        { range: { start: 43, end: 53 }, reason: "uncached" },
+      ],
+    },
+  ])(
+    "reports a confirmed gap as coverage without points: $name",
+    ({ covered, coverage, misses }) => {
+      // Coverage is independent of data (starter §3.2): a covered stretch
+      // holding no point is a real gap, not a miss.
+      for (const populated of [false, true]) {
+        const s = store();
+        if (populated) s.put(points([-3, 9]));
+        const index = new CoverageIndex();
+        index.add(covered);
+        expect(
+          read({ start: 0, end: 5 }, s.segments, index, grid, schema),
+        ).toEqual({
+          timestamps: new Float64Array(0),
+          fields: { price: new Float64Array(0), volume: new Int16Array(0) },
+          coverage,
+          misses,
+        });
+      }
+    },
+  );
 });
 
 describe("result field dtypes — architecture §2.3, §4.2, §4.4, N7, N10", () => {
