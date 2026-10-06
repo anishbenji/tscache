@@ -1,6 +1,6 @@
 # Step 07 — Invalidation suite (watermark, invalidate, clear, version)
 
-Branch: `feat/07-invalidation` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 4 (cap reached) · Status: escalated · Verdict after triage: merge, pending the user's call on a further round
+Branch: `feat/07-invalidation` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 4 (cap reached) · Status: in review (further rounds authorized) · Verdict after triage: blocked
 
 ## Round 1 — reviewer verdict: merge after fixes
 
@@ -46,7 +46,7 @@ R3-1 confirmed fixed.
 | R4-1 | P0 | After a failed write the coverage withdrawal used the watermark-clipped claim, which is empty when the put's own watermark precedes its points, so a provisional upsert failing after a first write left half-written covered data authoritative | accepted | Reproduced (cap 2, watermark 20, `meta.finalizedUntil: 0`, second segment write fails: values half new, coverage intact). Fixed in 88d6b74: the withdrawal covers everything the put touched (its authority or batch span); regression test added. Introduced by N19 in 0381f10, so the convergence rule does not fire: the area had not drawn a finding before |
 | R4-2 | P2 | The version documentation lacks the required note that restatements without a version signal are undetectable (starter §3.3, §8) | accepted | Added to architecture §2.4 and §4.5 in 88d6b74 |
 
-Round 4 is the cap (docs/workflow.md, review loop step 8) and it raised a P0, so the loop is not settled by its own rule and goes to the user. The fix above has not been seen by the reviewer.
+Round 4 is the cap (docs/workflow.md, review loop step 8) and it raised a P0, so the loop was escalated. The user authorized further rounds until settled (2026-10-06).
 
 ## Contract-test changes
 
