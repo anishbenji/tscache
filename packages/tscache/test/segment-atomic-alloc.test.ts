@@ -95,18 +95,14 @@ describe("DenseSegment failure while copying into new buffers", () => {
 });
 
 describe("DenseSegment slot cap bound (N12)", () => {
-  it.each([
-    0,
-    -1,
-    1.5,
-    Number.NaN,
-    MAX_SLOT_CAP + 1,
-    Number.MAX_SAFE_INTEGER,
-  ])("rejects slotCap %d at construction", (slotCap) => {
-    expect(
-      () => new DenseSegment({ grid, fields: { v: "u8" }, slotCap }),
-    ).toThrow(RangeError);
-  });
+  it.each([0, -1, 1.5, Number.NaN, MAX_SLOT_CAP + 1, Number.MAX_SAFE_INTEGER])(
+    "rejects slotCap %d at construction",
+    (slotCap) => {
+      expect(
+        () => new DenseSegment({ grid, fields: { v: "u8" }, slotCap }),
+      ).toThrow(RangeError);
+    },
+  );
 
   it("accepts the largest supported cap without allocating for it", () => {
     expect(MAX_SLOT_CAP).toBe(2 ** 31 - 1);

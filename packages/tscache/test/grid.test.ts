@@ -72,13 +72,13 @@ describe("grid alignment and conversion", () => {
       grid: epochGrid,
       timestamp: Number.NEGATIVE_INFINITY,
     },
-  ])("reports $name as unaligned and slotOf throws RangeError", ({
-    grid,
-    timestamp,
-  }) => {
-    expect(isAligned(timestamp, grid)).toBe(false);
-    expect(() => slotOf(timestamp, grid)).toThrow(RangeError);
-  });
+  ])(
+    "reports $name as unaligned and slotOf throws RangeError",
+    ({ grid, timestamp }) => {
+      expect(isAligned(timestamp, grid)).toBe(false);
+      expect(() => slotOf(timestamp, grid)).toThrow(RangeError);
+    },
+  );
 
   it("round-trips exact aligned slots on epoch and offset grids", () => {
     for (const grid of [epochGrid, offsetGrid]) {
@@ -289,11 +289,10 @@ describe("toMs — inclusive slot range conversion", () => {
       slots: { start: -1, end: 1 },
       expected: { start: -10, end: 10 },
     },
-  ])("converts $name without changing the inclusive ends", ({
-    grid,
-    slots,
-    expected,
-  }) => {
-    expect(toMs(slots, grid)).toEqual(expected);
-  });
+  ])(
+    "converts $name without changing the inclusive ends",
+    ({ grid, slots, expected }) => {
+      expect(toMs(slots, grid)).toEqual(expected);
+    },
+  );
 });

@@ -131,127 +131,121 @@ function configFor(k: number, cap: number): ResolvedCacheConfig {
 }
 
 describe("SegmentStore seeded properties — architecture §4.3, §5, N11, N14, N15", () => {
-  it.each(
-    cases,
-  )("layout depends only on present points, across arrival orders (seed $seed, K=$k, cap=$cap)", ({
-    seed,
-    k,
-    cap,
-  }) => {
-    const next = randomInt(seed);
-    const config = configFor(k, cap);
-    const slots = Array.from({ length: 49 }, (_, i) => i - 24).filter(
-      () => next(0, 3) !== 0,
-    );
-    const model = new Map(
-      slots.map((slot) => [slot, { price: slot * 10, volume: slot }]),
-    );
-    const canonical = new SegmentStore(config);
-    canonical.put(
-      points(
-        slots,
-        slots.map((slot) => slot * 10),
-      ),
-    );
-    assertModel(canonical, model, config);
-    for (const order of [
-      slots,
-      [...slots].reverse(),
-      ...Array.from({ length: 5 }, () => shuffle(slots, next)),
-    ]) {
-      const s = new SegmentStore(config);
-      const arrived = new Map<number, Row>();
-      // Both single-point and multi-point batches, each internally sorted.
-      for (let at = 0; at < order.length; ) {
-        const batchSlots = order
-          .slice(at, at + next(1, 5))
-          .sort((a, b) => a - b);
-        at += batchSlots.length;
-        s.put(
-          points(
-            batchSlots,
-            batchSlots.map((slot) => row(model, slot).price),
-          ),
-        );
-        for (const slot of batchSlots) arrived.set(slot, row(model, slot));
-        assertModel(s, arrived, config);
-      }
-      expect(extents(s)).toEqual(extents(canonical));
-      expect(snapshot(s)).toEqual(snapshot(canonical));
-    }
-  });
-
-  it.each(
-    cases,
-  )("random upsert/replace puts match a Map after every operation (seed $seed, K=$k, cap=$cap)", ({
-    seed,
-    k,
-    cap,
-  }) => {
-    const next = randomInt(seed);
-    const config = configFor(k, cap);
-    const s = new SegmentStore(config);
-    const model = new Map<number, Row>();
-    for (let step = 0; step < 120; step += 1) {
-      const a = next(universe.start, universe.end);
-      const b = next(universe.start, universe.end);
-      const authority: SlotRange | undefined =
-        step % 3 === 0
-          ? undefined
-          : { start: Math.min(a, b), end: Math.max(a, b) };
-      const chosen = new Set<number>();
-      const count = next(0, 8);
-      for (let i = 0; i < count; i += 1)
-        chosen.add(
-          next(
-            authority?.start ?? universe.start,
-            authority?.end ?? universe.end,
-          ),
-        );
-      const slots = [...chosen].sort((x, y) => x - y);
-      const prices = slots.map(() =>
-        next(0, 9) === 0 ? Number.NaN : next(-1000, 1000) / 10,
+  it.each(cases)(
+    "layout depends only on present points, across arrival orders (seed $seed, K=$k, cap=$cap)",
+    ({ seed, k, cap }) => {
+      const next = randomInt(seed);
+      const config = configFor(k, cap);
+      const slots = Array.from({ length: 49 }, (_, i) => i - 24).filter(
+        () => next(0, 3) !== 0,
       );
-      const volumes = slots.map(() => next(-100_000, 100_000) + 0.75);
-      const input = {
-        timestamps: slots.map((slot) => msOf(slot, config)),
-        fields: { price: prices, volume: volumes },
-      };
-      // Fractional flanks exercise inward snapping without including neighbors.
-      const range =
-        authority === undefined
-          ? undefined
-          : {
-              start: msOf(authority.start, config) - 0.25,
-              end: msOf(authority.end, config) + 0.25,
-            };
-      const validated = validateBatch(input, config, range);
-      expect(validated.authority).toEqual(authority);
-      if (authority !== undefined) {
-        for (const slot of model.keys())
-          if (authority.start <= slot && slot <= authority.end)
-            model.delete(slot);
-      }
-      slots.forEach((slot, i) => {
-        const price = prices[i];
-        const volume = volumes[i];
-        if (price === undefined || volume === undefined)
-          throw new Error("Missing generated value");
-        // Typed-array assignment is the specified conversion, independent of store logic.
-        model.set(slot, { price, volume: new Int16Array([volume])[0] ?? 0 });
-      });
-      expect(s.put(validated.points, validated.authority)).toEqual([]);
-      assertModel(s, model, config);
-      const sorted = [...model.keys()].sort((x, y) => x - y);
-      const rebuilt = new SegmentStore(config);
-      rebuilt.put(
+      const model = new Map(
+        slots.map((slot) => [slot, { price: slot * 10, volume: slot }]),
+      );
+      const canonical = new SegmentStore(config);
+      canonical.put(
         points(
-          sorted,
-          sorted.map((slot) => row(model, slot).price),
-          sorted.map((slot) => row(model, slot).volume),
+          slots,
+          slots.map((slot) => slot * 10),
         ),
       );
-      expect(snapshot(s)).toEqual(snapshot(rebuilt));
-    }
-  });
+      assertModel(canonical, model, config);
+      for (const order of [
+        slots,
+        [...slots].reverse(),
+        ...Array.from({ length: 5 }, () => shuffle(slots, next)),
+      ]) {
+        const s = new SegmentStore(config);
+        const arrived = new Map<number, Row>();
+        // Both single-point and multi-point batches, each internally sorted.
+        for (let at = 0; at < order.length; ) {
+          const batchSlots = order
+            .slice(at, at + next(1, 5))
+            .sort((a, b) => a - b);
+          at += batchSlots.length;
+          s.put(
+            points(
+              batchSlots,
+              batchSlots.map((slot) => row(model, slot).price),
+            ),
+          );
+          for (const slot of batchSlots) arrived.set(slot, row(model, slot));
+          assertModel(s, arrived, config);
+        }
+        expect(extents(s)).toEqual(extents(canonical));
+        expect(snapshot(s)).toEqual(snapshot(canonical));
+      }
+    },
+  );
+
+  it.each(cases)(
+    "random upsert/replace puts match a Map after every operation (seed $seed, K=$k, cap=$cap)",
+    ({ seed, k, cap }) => {
+      const next = randomInt(seed);
+      const config = configFor(k, cap);
+      const s = new SegmentStore(config);
+      const model = new Map<number, Row>();
+      for (let step = 0; step < 120; step += 1) {
+        const a = next(universe.start, universe.end);
+        const b = next(universe.start, universe.end);
+        const authority: SlotRange | undefined =
+          step % 3 === 0
+            ? undefined
+            : { start: Math.min(a, b), end: Math.max(a, b) };
+        const chosen = new Set<number>();
+        const count = next(0, 8);
+        for (let i = 0; i < count; i += 1)
+          chosen.add(
+            next(
+              authority?.start ?? universe.start,
+              authority?.end ?? universe.end,
+            ),
+          );
+        const slots = [...chosen].sort((x, y) => x - y);
+        const prices = slots.map(() =>
+          next(0, 9) === 0 ? Number.NaN : next(-1000, 1000) / 10,
+        );
+        const volumes = slots.map(() => next(-100_000, 100_000) + 0.75);
+        const input = {
+          timestamps: slots.map((slot) => msOf(slot, config)),
+          fields: { price: prices, volume: volumes },
+        };
+        // Fractional flanks exercise inward snapping without including neighbors.
+        const range =
+          authority === undefined
+            ? undefined
+            : {
+                start: msOf(authority.start, config) - 0.25,
+                end: msOf(authority.end, config) + 0.25,
+              };
+        const validated = validateBatch(input, config, range);
+        expect(validated.authority).toEqual(authority);
+        if (authority !== undefined) {
+          for (const slot of model.keys())
+            if (authority.start <= slot && slot <= authority.end)
+              model.delete(slot);
+        }
+        slots.forEach((slot, i) => {
+          const price = prices[i];
+          const volume = volumes[i];
+          if (price === undefined || volume === undefined)
+            throw new Error("Missing generated value");
+          // Typed-array assignment is the specified conversion, independent of store logic.
+          model.set(slot, { price, volume: new Int16Array([volume])[0] ?? 0 });
+        });
+        expect(s.put(validated.points, validated.authority)).toEqual([]);
+        assertModel(s, model, config);
+        const sorted = [...model.keys()].sort((x, y) => x - y);
+        const rebuilt = new SegmentStore(config);
+        rebuilt.put(
+          points(
+            sorted,
+            sorted.map((slot) => row(model, slot).price),
+            sorted.map((slot) => row(model, slot).volume),
+          ),
+        );
+        expect(snapshot(s)).toEqual(snapshot(rebuilt));
+      }
+    },
+  );
 });

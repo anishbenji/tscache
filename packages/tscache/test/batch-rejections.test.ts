@@ -102,45 +102,36 @@ describe("validateBatch rejects atomically — architecture §2.4, §2.6, §4.3"
     );
   });
 
-  it.each([
-    4,
-    3.5,
-    Number.NaN,
-    Infinity,
-    -Infinity,
-    2 ** 53,
-    -(2 ** 53),
-  ])("misaligned: reports first invalid numeric timestamp %j", (t) => {
-    const error = rejection(batch([3, t, 23]), "misaligned", 1);
-    expect(error.offenderTimestamp).toBe(t);
-  });
+  it.each([4, 3.5, Number.NaN, Infinity, -Infinity, 2 ** 53, -(2 ** 53)])(
+    "misaligned: reports first invalid numeric timestamp %j",
+    (t) => {
+      const error = rejection(batch([3, t, 23]), "misaligned", 1);
+      expect(error.offenderTimestamp).toBe(t);
+    },
+  );
 
-  it.each([
-    "13",
-    null,
-    undefined,
-    true,
-  ])("misaligned: rejects non-number timestamp %j", (t) => {
-    // The runtime rejection is specified; the number-typed diagnostic's
-    // representation of a non-number offender is not specified.
-    rejection({ ...batch(), timestamps: [3, t] }, "misaligned", 1);
-  });
+  it.each(["13", null, undefined, true])(
+    "misaligned: rejects non-number timestamp %j",
+    (t) => {
+      // The runtime rejection is specified; the number-typed diagnostic's
+      // representation of a non-number offender is not specified.
+      rejection({ ...batch(), timestamps: [3, t] }, "misaligned", 1);
+    },
+  );
 
   it.each([
     { timestamps: [3, 13, 13, 23], code: "duplicate", index: 2, t: 13 },
     { timestamps: [3, 23, 13], code: "unsorted", index: 2, t: 13 },
     { timestamps: [-7, -7, 3], code: "duplicate", index: 1, t: -7 },
     { timestamps: [-7, -17, 3], code: "unsorted", index: 1, t: -17 },
-  ] as const)("$code: reports index $index and value $t", ({
-    timestamps,
-    code,
-    index,
-    t,
-  }) => {
-    expect(
-      rejection(batch([...timestamps]), code, index).offenderTimestamp,
-    ).toBe(t);
-  });
+  ] as const)(
+    "$code: reports index $index and value $t",
+    ({ timestamps, code, index, t }) => {
+      expect(
+        rejection(batch([...timestamps]), code, index).offenderTimestamp,
+      ).toBe(t);
+    },
+  );
 
   it.each([
     { timestamps: [-7, 3, 13], range: { start: 3, end: 13 }, index: 0, t: -7 },
@@ -148,17 +139,15 @@ describe("validateBatch rejects atomically — architecture §2.4, §2.6, §4.3"
     { timestamps: [3, 13], range: { start: 4, end: 23 }, index: 0, t: 3 },
     { timestamps: [3, 13], range: { start: 3, end: 12.9 }, index: 1, t: 13 },
     { timestamps: [3], range: { start: 4, end: 12 }, index: 0, t: 3 },
-  ])("range-mismatch: first excluded timestamp $t", ({
-    timestamps,
-    range,
-    index,
-    t,
-  }) => {
-    expect(
-      rejection(batch(timestamps), "range-mismatch", index, range)
-        .offenderTimestamp,
-    ).toBe(t);
-  });
+  ])(
+    "range-mismatch: first excluded timestamp $t",
+    ({ timestamps, range, index, t }) => {
+      expect(
+        rejection(batch(timestamps), "range-mismatch", index, range)
+          .offenderTimestamp,
+      ).toBe(t);
+    },
+  );
 
   it.each([
     null,
@@ -176,13 +165,16 @@ describe("validateBatch rejects atomically — architecture §2.4, §2.6, §4.3"
       { start: t, end: 13 },
       { start: 3, end: t },
     ]),
-  ])("InvalidRangeError: malformed explicit range %j, including empty batches", (range) => {
-    for (const input of [batch(), batch([])]) {
-      expect(() => validateBatch(input, config, range as Range)).toThrow(
-        InvalidRangeError,
-      );
-    }
-  });
+  ])(
+    "InvalidRangeError: malformed explicit range %j, including empty batches",
+    (range) => {
+      for (const input of [batch(), batch([])]) {
+        expect(() => validateBatch(input, config, range as Range)).toThrow(
+          InvalidRangeError,
+        );
+      }
+    },
+  );
 
   it("check order: structure before lengths, timestamps, and range", () => {
     rejection({ timestamps: [4, 3], fields: { x: [] } }, "field-mismatch", -1, {

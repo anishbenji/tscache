@@ -57,14 +57,17 @@ describe("resolveCacheConfig — valid input", () => {
     ["equal to interval", 60_000, 0],
     ["above interval", 125_000, 5_000],
     ["below -interval", -125_000, 55_000],
-  ])("normalizes a %s alignmentOffset to the same grid in [0, interval)", (_label, offset, normalized) => {
-    const r = resolveCacheConfig({ ...minimal, alignmentOffset: offset });
-    expect(r.alignmentOffset).toBe(normalized);
-    // Same grid: a timestamp aligned under the raw offset stays aligned.
-    const t = 1_700_000_000_000 - (1_700_000_000_000 % 60_000) + normalized;
-    expect((t - offset) % 60_000).toBe(0);
-    expect((t - r.alignmentOffset) % 60_000).toBe(0);
-  });
+  ])(
+    "normalizes a %s alignmentOffset to the same grid in [0, interval)",
+    (_label, offset, normalized) => {
+      const r = resolveCacheConfig({ ...minimal, alignmentOffset: offset });
+      expect(r.alignmentOffset).toBe(normalized);
+      // Same grid: a timestamp aligned under the raw offset stays aligned.
+      const t = 1_700_000_000_000 - (1_700_000_000_000 % 60_000) + normalized;
+      expect((t - offset) % 60_000).toBe(0);
+      expect((t - r.alignmentOffset) % 60_000).toBe(0);
+    },
+  );
 
   it("normalizes without leaving exact-integer range at huge intervals", () => {
     const interval = Number.MAX_SAFE_INTEGER;

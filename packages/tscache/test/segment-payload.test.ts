@@ -90,20 +90,19 @@ describe("DenseSegment payload layout — architecture §3.4, §4.2", () => {
     { count: 9, slots: [0, 3, 7, 8], bytes: [0x89, 0x01] },
     { count: 16, slots: [0, 3, 7, 8, 15], bytes: [0x89, 0x81] },
     { count: 17, slots: [0, 3, 7, 8, 15, 16], bytes: [0x89, 0x81, 0x01] },
-  ])("count $count has exactly ceil(count/8) bytes, low-bit-first presence, and zero trailing bits", ({
-    count,
-    slots,
-    bytes,
-  }) => {
-    const segment = new DenseSegment(options);
-    segment.mergeFrom(points(slots));
-    const payload = segment.transferPayload();
-    expect(payload.count).toBe(count);
-    expect(payload.mask).toEqual(new Uint8Array(bytes));
-    expect(payload.mask.byteLength).toBe(Math.ceil(count / 8));
-    expect(field(payload, "price").data.byteLength).toBe(count * 8);
-    expect(field(payload, "volume").data.byteLength).toBe(count * 2);
-  });
+  ])(
+    "count $count has exactly ceil(count/8) bytes, low-bit-first presence, and zero trailing bits",
+    ({ count, slots, bytes }) => {
+      const segment = new DenseSegment(options);
+      segment.mergeFrom(points(slots));
+      const payload = segment.transferPayload();
+      expect(payload.count).toBe(count);
+      expect(payload.mask).toEqual(new Uint8Array(bytes));
+      expect(payload.mask.byteLength).toBe(Math.ceil(count / 8));
+      expect(field(payload, "price").data.byteLength).toBe(count * 8);
+      expect(field(payload, "volume").data.byteLength).toBe(count * 2);
+    },
+  );
 
   it("clears deleted-slot mask bits and emits zeros for all absent field values", () => {
     const segment = new DenseSegment(options);
@@ -258,57 +257,53 @@ const dtypeCases: {
 ];
 
 describe("Payload dtypes and round trips — architecture §3.4, §4.2, N7, N10", () => {
-  it.each(
-    dtypeCases,
-  )("$dtype has correctly sized little-endian bytes, zero absent values, and decodes to its dtype", ({
-    dtype,
-    value,
-    array,
-    bytes,
-  }) => {
-    const dtypeOptions = { ...options, fields: { value: dtype } };
-    const segment = new DenseSegment(dtypeOptions);
-    segment.mergeFrom({
-      slots: new Float64Array([-1, 1]),
-      fields: { value: new Float64Array([value, value]) },
-    });
-    const payload = segment.transferPayload();
-    expect(payload.fields).toHaveLength(1);
-    const entry = field(payload, "value");
-    expect(entry.dtype).toBe(dtype);
-    const denseBytes = new Uint8Array([
-      ...bytes,
-      ...new Uint8Array(bytes.length),
-      ...bytes,
-    ]);
-    expect(entry.data.byteLength).toBe(bytes.length * 3);
-    expect(new Uint8Array(entry.data)).toEqual(denseBytes);
-    // Decode manually supplied bytes, not just the encoder's output.
-    const manual: Payload = {
-      format: 1,
-      layout: "dense",
-      start: -7,
-      count: 3,
-      interval: 10,
-      alignmentOffset: 3,
-      mask: new Uint8Array([5]),
-      fields: [{ name: "value", dtype, data: denseBytes.buffer }],
-    };
-    for (const decoded of [
-      segmentFromPayload(manual, dtypeOptions),
-      segmentFromPayload(structuredClone(payload), dtypeOptions),
-    ]) {
-      expect(decoded.extent).toEqual({ start: -1, end: 1 });
-      expect(decoded.size).toBe(2);
-      expect(decoded.lookup(-1)).toEqual({ value });
-      expect(decoded.lookup(0)).toBeUndefined();
-      expect(decoded.lookup(1)).toEqual({ value });
-      const result = decoded.slice({ start: -2, end: 0 }).fields.value;
-      expect(result).toBeInstanceOf(array.constructor);
-      expect(result).toEqual(array);
-      expect(decoded.transferPayload()).toEqual(payload);
-    }
-  });
+  it.each(dtypeCases)(
+    "$dtype has correctly sized little-endian bytes, zero absent values, and decodes to its dtype",
+    ({ dtype, value, array, bytes }) => {
+      const dtypeOptions = { ...options, fields: { value: dtype } };
+      const segment = new DenseSegment(dtypeOptions);
+      segment.mergeFrom({
+        slots: new Float64Array([-1, 1]),
+        fields: { value: new Float64Array([value, value]) },
+      });
+      const payload = segment.transferPayload();
+      expect(payload.fields).toHaveLength(1);
+      const entry = field(payload, "value");
+      expect(entry.dtype).toBe(dtype);
+      const denseBytes = new Uint8Array([
+        ...bytes,
+        ...new Uint8Array(bytes.length),
+        ...bytes,
+      ]);
+      expect(entry.data.byteLength).toBe(bytes.length * 3);
+      expect(new Uint8Array(entry.data)).toEqual(denseBytes);
+      // Decode manually supplied bytes, not just the encoder's output.
+      const manual: Payload = {
+        format: 1,
+        layout: "dense",
+        start: -7,
+        count: 3,
+        interval: 10,
+        alignmentOffset: 3,
+        mask: new Uint8Array([5]),
+        fields: [{ name: "value", dtype, data: denseBytes.buffer }],
+      };
+      for (const decoded of [
+        segmentFromPayload(manual, dtypeOptions),
+        segmentFromPayload(structuredClone(payload), dtypeOptions),
+      ]) {
+        expect(decoded.extent).toEqual({ start: -1, end: 1 });
+        expect(decoded.size).toBe(2);
+        expect(decoded.lookup(-1)).toEqual({ value });
+        expect(decoded.lookup(0)).toBeUndefined();
+        expect(decoded.lookup(1)).toEqual({ value });
+        const result = decoded.slice({ start: -2, end: 0 }).fields.value;
+        expect(result).toBeInstanceOf(array.constructor);
+        expect(result).toEqual(array);
+        expect(decoded.transferPayload()).toEqual(payload);
+      }
+    },
+  );
 
   it("round trips NaN as present for both floating dtypes beside absent slots", () => {
     const nanOptions = {
@@ -473,45 +468,36 @@ function expectDecodeRejection(value: unknown, context: RegExp): void {
 }
 
 describe("segmentFromPayload rejection — architecture §4.2, N10", () => {
-  it.each([
-    0,
-    2,
-    "1",
-    undefined,
-  ])("rejects format %s with plain, descriptive TscacheError", (format) => {
-    expectDecodeRejection({ ...fixture(), format }, /format|version/i);
-  });
+  it.each([0, 2, "1", undefined])(
+    "rejects format %s with plain, descriptive TscacheError",
+    (format) => {
+      expectDecodeRejection({ ...fixture(), format }, /format|version/i);
+    },
+  );
 
-  it.each([
-    "columnar",
-    "",
-    1,
-    undefined,
-  ])("rejects layout %s with plain, descriptive TscacheError", (layout) => {
-    expectDecodeRejection({ ...fixture(), layout }, /layout|dense/i);
-  });
+  it.each(["columnar", "", 1, undefined])(
+    "rejects layout %s with plain, descriptive TscacheError",
+    (layout) => {
+      expectDecodeRejection({ ...fixture(), layout }, /layout|dense/i);
+    },
+  );
 
-  it.each([
-    0,
-    11,
-    Number.NaN,
-    Number.POSITIVE_INFINITY,
-    undefined,
-  ])("rejects interval %s differing from the grid", (interval) => {
-    expectDecodeRejection({ ...fixture(), interval }, /interval|grid/i);
-  });
+  it.each([0, 11, Number.NaN, Number.POSITIVE_INFINITY, undefined])(
+    "rejects interval %s differing from the grid",
+    (interval) => {
+      expectDecodeRejection({ ...fixture(), interval }, /interval|grid/i);
+    },
+  );
 
-  it.each([
-    0,
-    4,
-    Number.NaN,
-    undefined,
-  ])("rejects alignmentOffset %s differing from the grid", (alignmentOffset) => {
-    expectDecodeRejection(
-      { ...fixture(), alignmentOffset },
-      /offset|alignment|grid/i,
-    );
-  });
+  it.each([0, 4, Number.NaN, undefined])(
+    "rejects alignmentOffset %s differing from the grid",
+    (alignmentOffset) => {
+      expectDecodeRejection(
+        { ...fixture(), alignmentOffset },
+        /offset|alignment|grid/i,
+      );
+    },
+  );
 
   it.each([
     -18,
@@ -570,14 +556,15 @@ describe("segmentFromPayload rejection — architecture §4.2, N10", () => {
     expectDecodeRejection({ ...fixture(), mask }, /mask|presence/i);
   });
 
-  it.each([
-    0x20, 0x40, 0x80,
-  ])("rejects each unused trailing bit in a five-slot mask (%i)", (bit) => {
-    expectDecodeRejection(
-      { ...fixture(), mask: new Uint8Array([0x15 | bit]) },
-      /mask|trailing|unused|padding/i,
-    );
-  });
+  it.each([0x20, 0x40, 0x80])(
+    "rejects each unused trailing bit in a five-slot mask (%i)",
+    (bit) => {
+      expectDecodeRejection(
+        { ...fixture(), mask: new Uint8Array([0x15 | bit]) },
+        /mask|trailing|unused|padding/i,
+      );
+    },
+  );
 
   it("rejects trailing bits in the last byte of a multi-byte mask", () => {
     expectDecodeRejection(
@@ -594,32 +581,30 @@ describe("segmentFromPayload rejection — architecture §4.2, N10", () => {
     );
   });
 
-  it.each([
-    "missing",
-    "extra",
-    "renamed",
-    "duplicate",
-  ])("rejects %s schema fields", (kind) => {
-    const payload = fixture();
-    const price = field(payload, "price");
-    const volume = field(payload, "volume");
-    const invalid =
-      kind === "missing"
-        ? [price]
-        : kind === "extra"
-          ? [
-              price,
-              volume,
-              { name: "extra", dtype: "u8", data: new ArrayBuffer(5) },
-            ]
-          : kind === "renamed"
-            ? [price, { ...volume, name: "other" }]
-            : [price, { ...volume, name: "price" }];
-    expectDecodeRejection(
-      { ...payload, fields: invalid },
-      /field|schema|name/i,
-    );
-  });
+  it.each(["missing", "extra", "renamed", "duplicate"])(
+    "rejects %s schema fields",
+    (kind) => {
+      const payload = fixture();
+      const price = field(payload, "price");
+      const volume = field(payload, "volume");
+      const invalid =
+        kind === "missing"
+          ? [price]
+          : kind === "extra"
+            ? [
+                price,
+                volume,
+                { name: "extra", dtype: "u8", data: new ArrayBuffer(5) },
+              ]
+            : kind === "renamed"
+              ? [price, { ...volume, name: "other" }]
+              : [price, { ...volume, name: "price" }];
+      expectDecodeRejection(
+        { ...payload, fields: invalid },
+        /field|schema|name/i,
+      );
+    },
+  );
 
   it.each([
     { name: "missing", entries: undefined },
@@ -640,35 +625,34 @@ describe("segmentFromPayload rejection — architecture §4.2, N10", () => {
     );
   });
 
-  it.each([
-    "f32",
-    "i64",
-    undefined,
-  ])("rejects field dtype %s that does not match the schema", (dtype) => {
-    const payload = fixture();
-    expectDecodeRejection(
-      {
-        ...payload,
-        fields: [
-          { ...field(payload, "price"), dtype },
-          field(payload, "volume"),
-        ],
-      },
-      /dtype|type|field|schema/i,
-    );
-  });
-
-  it.each([
-    "price",
-    "volume",
-  ])("rejects short and long %s field buffers", (name) => {
-    for (const difference of [-1, 1]) {
+  it.each(["f32", "i64", undefined])(
+    "rejects field dtype %s that does not match the schema",
+    (dtype) => {
       const payload = fixture();
-      const entry = field(payload, name);
-      entry.data = new ArrayBuffer(entry.data.byteLength + difference);
-      expectDecodeRejection(payload, /buffer|byte|length|size|field/i);
-    }
-  });
+      expectDecodeRejection(
+        {
+          ...payload,
+          fields: [
+            { ...field(payload, "price"), dtype },
+            field(payload, "volume"),
+          ],
+        },
+        /dtype|type|field|schema/i,
+      );
+    },
+  );
+
+  it.each(["price", "volume"])(
+    "rejects short and long %s field buffers",
+    (name) => {
+      for (const difference of [-1, 1]) {
+        const payload = fixture();
+        const entry = field(payload, name);
+        entry.data = new ArrayBuffer(entry.data.byteLength + difference);
+        expectDecodeRejection(payload, /buffer|byte|length|size|field/i);
+      }
+    },
+  );
 
   it.each([
     { name: "typed-array view", data: new Float64Array(5) },

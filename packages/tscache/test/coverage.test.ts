@@ -497,66 +497,72 @@ function expectPartition(
 describe("CoverageIndex seeded set-model properties — architecture §5", () => {
   const seeds = [1, 0xc0ffee, 0xdeadbeef];
 
-  it.each(
-    seeds,
-  )("merge matches the covered-slot set after every addition (seed %i)", (seed) => {
-    const next = randomInt(seed);
-    const index = new CoverageIndex();
-    const model = new Set<number>();
-    for (let step = 0; step < 100; step += 1) {
-      const start = next(universe.start, universe.end);
-      const range = { start, end: Math.min(universe.end, start + next(0, 5)) };
-      for (const slot of slotsIn(range)) model.add(slot);
-      index.add(range);
-      expectModel(index, model);
-      expectPartition(index, model, universe);
-    }
-  });
-
-  it.each(
-    seeds,
-  )("subtraction matches set deletion after every removal (seed %i)", (seed) => {
-    const next = randomInt(seed);
-    const index = indexWith([universe]);
-    const model = new Set(slotsIn(universe));
-    for (let step = 0; step < 100; step += 1) {
-      const start = next(universe.start - 5, universe.end + 5);
-      const range = { start, end: start + next(0, 3) };
-      for (const slot of slotsIn(range)) model.delete(slot);
-      index.subtract(range);
-      expectModel(index, model);
-      expectPartition(index, model, universe);
-    }
-  });
-
-  it.each(
-    seeds,
-  )("covered and gaps tile queries after mixed add/subtract/clear operations (seed %i)", (seed) => {
-    const next = randomInt(seed);
-    const index = new CoverageIndex();
-    const model = new Set<number>();
-    for (let step = 0; step < 150; step += 1) {
-      const range = randomRange(next);
-      const operation = next(0, 9);
-      if (operation === 0) {
-        index.clear();
-        model.clear();
-      } else if (operation <= 5) {
+  it.each(seeds)(
+    "merge matches the covered-slot set after every addition (seed %i)",
+    (seed) => {
+      const next = randomInt(seed);
+      const index = new CoverageIndex();
+      const model = new Set<number>();
+      for (let step = 0; step < 100; step += 1) {
+        const start = next(universe.start, universe.end);
+        const range = {
+          start,
+          end: Math.min(universe.end, start + next(0, 5)),
+        };
         for (const slot of slotsIn(range)) model.add(slot);
         index.add(range);
-      } else {
+        expectModel(index, model);
+        expectPartition(index, model, universe);
+      }
+    },
+  );
+
+  it.each(seeds)(
+    "subtraction matches set deletion after every removal (seed %i)",
+    (seed) => {
+      const next = randomInt(seed);
+      const index = indexWith([universe]);
+      const model = new Set(slotsIn(universe));
+      for (let step = 0; step < 100; step += 1) {
+        const start = next(universe.start - 5, universe.end + 5);
+        const range = { start, end: start + next(0, 3) };
         for (const slot of slotsIn(range)) model.delete(slot);
         index.subtract(range);
+        expectModel(index, model);
+        expectPartition(index, model, universe);
       }
-      expectModel(index, model);
-      expectPartition(index, model, universe);
-      expectPartition(index, model, randomRange(next));
-      const slot = next(universe.start, universe.end);
-      expectPartition(index, model, { start: slot, end: slot });
-      expectPartition(index, model, {
-        start: universe.start - 5,
-        end: universe.end + 5,
-      });
-    }
-  });
+    },
+  );
+
+  it.each(seeds)(
+    "covered and gaps tile queries after mixed add/subtract/clear operations (seed %i)",
+    (seed) => {
+      const next = randomInt(seed);
+      const index = new CoverageIndex();
+      const model = new Set<number>();
+      for (let step = 0; step < 150; step += 1) {
+        const range = randomRange(next);
+        const operation = next(0, 9);
+        if (operation === 0) {
+          index.clear();
+          model.clear();
+        } else if (operation <= 5) {
+          for (const slot of slotsIn(range)) model.add(slot);
+          index.add(range);
+        } else {
+          for (const slot of slotsIn(range)) model.delete(slot);
+          index.subtract(range);
+        }
+        expectModel(index, model);
+        expectPartition(index, model, universe);
+        expectPartition(index, model, randomRange(next));
+        const slot = next(universe.start, universe.end);
+        expectPartition(index, model, { start: slot, end: slot });
+        expectPartition(index, model, {
+          start: universe.start - 5,
+          end: universe.end + 5,
+        });
+      }
+    },
+  );
 });

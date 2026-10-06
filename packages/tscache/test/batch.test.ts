@@ -64,14 +64,17 @@ describe("validateBatch accepted inputs — architecture §2.2, §2.4, §4.3", (
     new Uint8Array([1]),
     new Uint8ClampedArray([1]),
     [1.5],
-  ])("accepts numeric field array %j independently of the schema dtype", (values) => {
-    const result = validateBatch(
-      { timestamps: [3], fields: { price: values, volume: values } },
-      config,
-    );
-    expect(result.points.fields.price).toEqual(new Float64Array(values));
-    expect(result.points.fields.volume).toEqual(new Int32Array(values));
-  });
+  ])(
+    "accepts numeric field array %j independently of the schema dtype",
+    (values) => {
+      const result = validateBatch(
+        { timestamps: [3], fields: { price: values, volume: values } },
+        config,
+      );
+      expect(result.points.fields.price).toEqual(new Float64Array(values));
+      expect(result.points.fields.volume).toEqual(new Int32Array(values));
+    },
+  );
 
   it("converts all eight schema dtypes by typed-array assignment", () => {
     const all = resolveCacheConfig({
@@ -109,12 +112,15 @@ describe("validateBatch accepted inputs — architecture §2.2, §2.4, §4.3", (
   it.each([
     { start: -17, end: 23 },
     { start: -18.5, end: 24.5 },
-  ])("snaps explicit authority inward and keeps inclusive endpoints: %j", (range) => {
-    expect(validateBatch(batch, config, range).authority).toEqual({
-      start: -2,
-      end: 2,
-    });
-  });
+  ])(
+    "snaps explicit authority inward and keeps inclusive endpoints: %j",
+    (range) => {
+      expect(validateBatch(batch, config, range).authority).toEqual({
+        start: -2,
+        end: 2,
+      });
+    },
+  );
 
   it("accepts a one-point batch with one-slot authority", () => {
     expect(
@@ -143,19 +149,20 @@ describe("validateBatch accepted inputs — architecture §2.2, §2.4, §4.3", (
     ).toBeUndefined();
   });
 
-  it.each([
-    Number.MIN_SAFE_INTEGER,
-    Number.MAX_SAFE_INTEGER,
-  ])("accepts safe timestamp %i", (t) => {
-    const unit = resolveCacheConfig({
-      id: "unit",
-      interval: 1,
-      fields: { x: "f64" },
-    });
-    expect(
-      validateBatch({ timestamps: [t], fields: { x: [1] } }, unit).points.slots,
-    ).toEqual(new Float64Array([t]));
-  });
+  it.each([Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER])(
+    "accepts safe timestamp %i",
+    (t) => {
+      const unit = resolveCacheConfig({
+        id: "unit",
+        interval: 1,
+        fields: { x: "f64" },
+      });
+      expect(
+        validateBatch({ timestamps: [t], fields: { x: [1] } }, unit).points
+          .slots,
+      ).toEqual(new Float64Array([t]));
+    },
+  );
 
   it("leaves metadata handling to step 07", () => {
     const input = { ...batch, meta: { version: "v2", finalizedUntil: 13 } };
