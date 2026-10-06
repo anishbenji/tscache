@@ -70,3 +70,23 @@ None.
 **Known limits, by design.** A `put` that cannot allocate may be left half done, in steps that are each atomic; the engine must withdraw coverage for the range when `put` throws (step ⑦, recorded in §4.3). The opt-in overlap warning allocates per batch point; it is off by default and O(overlap) as documented. The large-split regression test takes about three seconds.
 
 **Test coverage.** 658 tests pass (`bun run ci`): 198 contract tests across eight files from Codex, plus implementer tests for allocation failure, cross-realm arrays and hostile values.
+
+## Follow-up: dev dependency bumps (`chore/06-dev-deps`)
+
+Dependabot's grouped proposal (#3) bundled eight patch/minor bumps with three major ones and failed CI on the new Biome's formatting. It was closed and split (user decision 2026-10-06): this branch takes the eight small bumps; TypeScript 7, Vitest 5 and tsdown 0.23 follow one pull request each.
+
+### Round 1 — reviewer verdict: merge
+
+No findings. The reviewer confirmed the test changes are formatting only.
+
+### Contract-test changes
+
+Fifteen test files, eight of them Codex contract tests, were reflowed by Biome 2.5.15 (line breaks only, verified with a whitespace-insensitive diff). No assertion changed.
+
+## Merge request: `chore/06-dev-deps` → `main`
+
+**Scope.** Biome 2.4.16 → 2.5.15, commitlint 21.0.2 → 21.2.3, Playwright 1.60.0 → 1.63.0, git-cliff 2.13.1 → 2.14.2, Knip 6.16.1 → 6.39.0, Lefthook 2.1.9 → 2.1.16, publint 0.3.21 → 0.3.25, attw 0.18.3 → 0.18.5. `biome.json` points at the 2.5.15 schema and uses `rules.preset` (the `recommended` flag is deprecated). `.github/dependabot.yml` groups only minor and patch bumps, so a major arrives on its own.
+
+**Confidence: high.** `bun run ci` passes with the new tools (658 tests); the only source change is formatting. Blast radius: tooling only, no `src/` change. The one behaviour change to watch is Biome's formatter, which now reflows some constructs; the pre-commit hook formats staged files, so later commits follow the new style automatically.
+
+**Not included.** TypeScript 6 → 7 (no programmatic API in 7.0, so tooling on the compiler API needs care), Vitest 4 → 5, tsdown 0.22 → 0.23 (drops the `types` export field it emits and several deprecated options). Each comes separately with its changelog summary.
