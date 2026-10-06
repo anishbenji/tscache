@@ -40,6 +40,13 @@ function reject(message: string): never {
   throw new PutError(message, { code: "field-mismatch", offenderIndex: -1 });
 }
 
+function validVersion(version: unknown): string {
+  if (typeof version !== "string" || version.length === 0) {
+    reject(`meta.version must be a non-empty string, got ${show(version)}`);
+  }
+  return version;
+}
+
 /** The tight slot range of validated points, or undefined when empty. */
 function spanOf(points: Columns): SlotRange | undefined {
   const n = points.slots.length;
@@ -177,24 +184,20 @@ export class CacheState {
       reject(`meta must be an object, got ${show(meta)}`);
     }
     const out: Meta = {};
-    if (meta.version !== undefined) {
-      if (typeof meta.version !== "string" || meta.version.length === 0) {
-        reject(
-          `meta.version must be a non-empty string, got ${show(meta.version)}`,
-        );
-      }
-      out.version = meta.version;
-    }
+    if (meta.version !== undefined) out.version = validVersion(meta.version);
     if (meta.finalizedUntil !== undefined) {
-      const t = meta.finalizedUntil;
-      try {
-        out.finalizedUntil = { t, slot: slotAtOrAfter(t, this.config) };
-      } catch (error) {
-        if (!(error instanceof InvalidRangeError)) throw error;
-        reject(`meta.finalizedUntil: ${error.message}`);
-      }
+      out.finalizedUntil = this.#validWatermark(meta.finalizedUntil);
     }
     return out;
+  }
+
+  #validWatermark(t: number): { t: number; slot: number } {
+    try {
+      return { t, slot: slotAtOrAfter(t, this.config) };
+    } catch (error) {
+      if (!(error instanceof InvalidRangeError)) throw error;
+      return reject(`meta.finalizedUntil: ${error.message}`);
+    }
   }
 
   /** Slot warnings → ms, dropping the volatile region (§2.4). */
