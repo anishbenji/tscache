@@ -1,6 +1,6 @@
 # Step 07 — Invalidation suite (watermark, invalidate, clear, version)
 
-Branch: `feat/07-invalidation` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 2 · Status: in review · Verdict after triage: blocked
+Branch: `feat/07-invalidation` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 · Status: in review · Verdict after triage: blocked
 
 ## Round 1 — reviewer verdict: merge after fixes
 
@@ -28,6 +28,14 @@ R1-1 and R1-2 confirmed fixed.
 | R2-2 | P1 | No test covers the constructor turning an unsafe `config.finalizedUntil` into `ConfigError` | accepted | Added in 0381f10: interval 2, `finalizedUntil: MAX_SAFE_INTEGER` throws `ConfigError` naming `finalizedUntil` |
 
 Also in 0381f10, from the decision concerns below: N19 (a response's authority is bounded by its own watermark), with four tests.
+
+## Round 3 — reviewer verdict: merge after fixes
+
+R2-1 and R2-2 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | `warnings.push(...more)` overflows the argument limit when a put yields a warning per point, after the data has changed | accepted | Reproduced with 150 000 warnings. Fixed in 36635e9 with `concat`; regression test added. Same defect class as step ⑤ R1-1 (spread into a call); the other spreads in `cache.ts` are over schema field names, which are bounded |
 
 ## Contract-test changes
 
