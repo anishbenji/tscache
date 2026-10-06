@@ -224,8 +224,8 @@ export class CacheState {
       last.fields = Object.keys(this.config.fields).filter((n) => names.has(n));
       more.shift();
     }
-    warnings.push(...more);
-    return warnings;
+    // Not a spread into push: a warning per point can exceed the argument limit.
+    return warnings.concat(more);
   }
 
   #setWatermark(t: number, slot: number): void {

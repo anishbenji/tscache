@@ -108,3 +108,35 @@ describe("CacheState warnings against a watermark the same put moves", () => {
     expect(c.finalizedUntil).toBe(23);
   });
 });
+
+describe("CacheState with very many warnings", () => {
+  it("returns them all when a put with an own watermark splits the batch", () => {
+    const n = 300_000;
+    const c = cache({
+      interval: 1,
+      alignmentOffset: 0,
+      warnOnOverlapDiff: true,
+      finalizedUntil: n + 1,
+    });
+    const timestamps = Float64Array.from({ length: n }, (_, i) => i);
+    const zeros = new Float64Array(n);
+    c.put({ timestamps, fields: { price: zeros, volume: zeros } });
+    // Every other point differs: 150 000 single-point runs, almost all of
+    // them in the part of the batch at or beyond the put's own watermark.
+    const alternating = Float64Array.from({ length: n }, (_, i) => i % 2);
+    const { warnings } = c.put({
+      timestamps,
+      fields: { price: alternating, volume: zeros },
+      meta: { finalizedUntil: 1 },
+    });
+    expect(warnings).toHaveLength(n / 2);
+    expect(warnings[0]).toEqual({
+      range: { start: 1, end: 1 },
+      fields: ["price"],
+    });
+    expect(warnings.at(-1)).toEqual({
+      range: { start: n - 1, end: n - 1 },
+      fields: ["price"],
+    });
+  });
+});
