@@ -44,15 +44,10 @@ describe("CacheState version — architecture §2.4, §2.6, §4.5, N17, N18, sta
       }).cleared,
     ).toBe(true);
     expect(c.finalizedUntil).toBe(23);
+    // N19 (decided after this test was written): the response called
+    // t >= 13 provisional, so it covers nothing, not even slot 13.
     expect(c.get({ start: -7, end: 33 })).toEqual(
-      result(
-        [13, 23, 33],
-        [{ start: 13, end: 13 }],
-        [
-          { start: -7, end: 3 },
-          { start: 23, end: 33 },
-        ],
-      ),
+      result([13, 23, 33], [], [{ start: -7, end: 33 }]),
     );
   });
 

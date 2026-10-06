@@ -8,8 +8,10 @@
 import { CoverageIndex } from "../coverage";
 import { ConfigError, InvalidRangeError, PutError, show } from "../errors";
 import { type SlotRange, slotAtOrAfter, snapOut, toMs } from "../grid";
+import { getOwn, setOwn } from "../segment/own";
 import type { Columns } from "../segment/types";
 import type {
+  FieldArray,
   GetResult,
   MergeWarning,
   PutBatch,
@@ -55,6 +57,43 @@ function spanOf(points: Columns): SlotRange | undefined {
     start: points.slots[0] as number,
     end: points.slots[n - 1] as number,
   };
+}
+
+/** The part of a range below `limit`, or undefined when there is none. */
+function below(range: SlotRange, limit: number): SlotRange | undefined {
+  if (range.start >= limit) return undefined;
+  return { start: range.start, end: Math.min(range.end, limit - 1) };
+}
+
+/** Points `[from, to)` as views; mergeFrom copies what it keeps. */
+function slice(points: Columns, from: number, to: number): Columns {
+  const fields: Record<string, FieldArray> = {};
+  for (const name of Object.keys(points.fields)) {
+    const values = getOwn(points.fields, name) as FieldArray;
+    setOwn(fields, name, values.subarray(from, to));
+  }
+  return { slots: points.slots.subarray(from, to), fields };
+}
+
+/**
+ * The slots a put claims as authoritative: its authority (N13) or, without
+ * one, its batch's span (N3), cut below the put's own watermark (N19).
+ */
+function claimOf(
+  points: Columns,
+  authority: SlotRange | undefined,
+  limit: number | undefined,
+): SlotRange | undefined {
+  const span = authority ?? spanOf(points);
+  if (span === undefined || limit === undefined) return span;
+  return below(span, limit);
+}
+
+/** Splits points into those below `limit` and the rest. */
+function splitAt(points: Columns, limit: number): [Columns, Columns] {
+  let i = 0;
+  while (i < points.slots.length && (points.slots[i] as number) < limit) i++;
+  return [slice(points, 0, i), slice(points, i, points.slots.length)];
 }
 
 export class CacheState {
@@ -104,23 +143,25 @@ export class CacheState {
     );
     const meta = this.#validateMeta(batch.meta);
     const cleared = this.#applyVersion(meta.version);
-    const claim = authority ?? spanOf(points);
+    const wm = meta.finalizedUntil;
+    const claim = claimOf(points, authority, wm?.slot);
     let slotWarnings: SlotWarning[];
     try {
-      slotWarnings = this.#store.put(points, authority);
+      slotWarnings = this.#write(points, authority, wm?.slot);
     } catch (error) {
       if (claim !== undefined) this.#coverage.subtract(claim);
       throw error;
     }
-    const wm = meta.finalizedUntil;
-    if (
-      wm !== undefined &&
-      (this.#finalizedUntil === undefined || wm.t > this.#finalizedUntil)
-    ) {
-      this.#setWatermark(wm.t, wm.slot);
-    }
+    if (wm !== undefined) this.#advance(wm.t, wm.slot);
     if (claim !== undefined) this.#cover(claim);
     return { warnings: this.#toWarnings(slotWarnings), cleared };
+  }
+
+  /** meta.finalizedUntil only ever moves the watermark forward (N17). */
+  #advance(t: number, slot: number): void {
+    if (this.#finalizedUntil === undefined || t > this.#finalizedUntil) {
+      this.#setWatermark(t, slot);
+    }
   }
 
   /** Every present point in the range, with coverage and 'uncached' misses. */
@@ -149,6 +190,42 @@ export class CacheState {
   /** Sets the watermark exactly; moving it back makes points provisional again. */
   setFinalizedUntil(t: number): void {
     this.#setWatermark(t, slotAtOrAfter(t, this.config));
+  }
+
+  /**
+   * Writes the batch. With an own watermark (`limit`), the replace authority
+   * stops below it and the points at or beyond it are merely upserted.
+   */
+  #write(
+    points: Columns,
+    authority: SlotRange | undefined,
+    limit: number | undefined,
+  ): SlotWarning[] {
+    if (limit === undefined) return this.#store.put(points, authority);
+    const [final, provisional] = splitAt(points, limit);
+    const warnings = this.#store.put(
+      final,
+      authority === undefined ? undefined : below(authority, limit),
+    );
+    if (provisional.slots.length === 0) return warnings;
+    const more = this.#store.put(provisional);
+    // The two writes split one batch: a run that reaches the split from both
+    // sides is one run of consecutive differing points (§4.3), so rejoin it.
+    const last = warnings.at(-1);
+    const first = more[0];
+    if (
+      last !== undefined &&
+      first !== undefined &&
+      last.range.end === final.slots.at(-1) &&
+      first.range.start === provisional.slots[0]
+    ) {
+      last.range.end = first.range.end;
+      const names = new Set([...last.fields, ...first.fields]);
+      last.fields = Object.keys(this.config.fields).filter((n) => names.has(n));
+      more.shift();
+    }
+    warnings.push(...more);
+    return warnings;
   }
 
   #setWatermark(t: number, slot: number): void {
