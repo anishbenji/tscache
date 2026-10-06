@@ -69,4 +69,4 @@ None.
 
 **Known limits, by design.** A `put` that cannot allocate may be left half done, in steps that are each atomic; the engine must withdraw coverage for the range when `put` throws (step ⑦, recorded in §4.3). The opt-in overlap warning allocates per batch point; it is off by default and O(overlap) as documented. The large-split regression test takes about three seconds.
 
-**Test coverage.** 658 tests pass (`bun run ci`): 285 contract tests across eight files from Codex, plus implementer tests for allocation failure, cross-realm arrays and hostile values.
+**Test coverage.** 658 tests pass (`bun run ci`): 198 contract tests across eight files from Codex, plus implementer tests for allocation failure, cross-realm arrays and hostile values.
