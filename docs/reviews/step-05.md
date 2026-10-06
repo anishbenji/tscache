@@ -91,6 +91,17 @@ Fifteen test files, eight of them Codex contract tests, were reflowed by Biome 2
 
 **Not included.** TypeScript 6 → 7 (no programmatic API in 7.0, so tooling on the compiler API needs care), Vitest 4 → 5, tsdown 0.22 → 0.23 (drops the `types` export field it emits and several deprecated options). Each comes separately with its changelog summary.
 
+## Follow-up: tsdown 0.23 (`chore/06-tsdown`)
+
+Major-feeling bump of a pre-1.0 tool. Breaking changes checked against `packages/tscache/tsdown.config.ts`: the `types`/`typesVersions` emission it drops is unused (exports-only package), the attw profile was already `esm-only`, none of the removed options (`bundle`, `outExtension`, `publicDir`, `dts.cjsReexport`, `skipNodeModulesBundle`, `deps.onlyAllowBundle`) is set, and Node ^22.18 / ^24.11 holds locally and in CI. Build, publint and attw pass unchanged.
+
+### Round 1 — reviewer verdict: merge
+
+No findings.
+
+## Merge request: `chore/06-tsdown` → `main`
+
+One dependency, `tsdown` 0.22.2 → 0.23.0. `bun run ci` passes (658 tests, build output identical in size). Confidence high; blast radius is the build step only.
 ## Follow-up: Vitest 5 (`chore/06-vitest`)
 
 Breaking changes from the migration guide checked against the repo: Node ≥ 22.12 and Vite ≥ 6.4 are met; `clearMocks` now defaults to true, which the suites tolerate because each restores its own mocks; unawaited async assertions now fail the test (none exist); `toThrow("")` semantics changed (not used); the bench API was rewritten (no bench files yet; the step ⑥+ bench smoke will use the new context-based API); config files are no longer searched in parent directories (Vitest runs from the repository root, where `vitest.config.ts` lives). The whole suite passes unchanged, with no deprecation output.
