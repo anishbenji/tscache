@@ -1,6 +1,6 @@
 # Step 05 — Merge / put path
 
-Branch: `feat/05-merge-put` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 4 (cap reached) · Status: escalated · Verdict after triage: merge, pending the user's call on a further round
+Branch: `feat/05-merge-put` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 4 (cap reached) · Status: in review (further rounds authorized) · Verdict after triage: blocked
 
 ## Round 1 — reviewer verdict: block
 
@@ -41,7 +41,7 @@ The reviewer confirmed every accepted finding from rounds 1–3 as fixed.
 |---|---|---|---|---|
 | R4-1 | P1 | A timestamp whose string conversion throws (`Object.create(null)`) raises `TypeError` from `String(t)` instead of `PutError` `'misaligned'` (same class as R3-1) | accepted | Reproduced. Second round running on message building, so per the convergence rule the class was removed instead of the instance, in 0bd9ded: every message for an untrusted value in `src/` (batch, grid, config validation, payload decoding) now goes through one `show()` helper that never calls the value's own conversion. `test/hostile-values.test.ts` passes five hostile values through every batch, range and config position. Validating this also found that a field element that cannot be converted to a number threw `TypeError` from the typed-array copy; it now rejects as `'field-mismatch'` (architecture §4.3 updated) |
 
-Round 4 is the cap (docs/workflow.md, review loop step 8) and it raised a P1, so the loop is not settled by its own rule and goes to the user. The fix above has not been seen by the reviewer.
+Round 4 is the cap (docs/workflow.md, review loop step 8) and it raised a P1, so the loop was escalated. The user authorized further rounds until settled (2026-10-06).
 
 ## Contract-test changes
 
