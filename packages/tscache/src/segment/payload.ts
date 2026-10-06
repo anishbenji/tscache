@@ -4,7 +4,7 @@
  * field is checked against the cache's own config before any byte is used.
  */
 
-import { TscacheError } from "../errors";
+import { show, TscacheError } from "../errors";
 import { isAligned, msOf, slotOf } from "../grid";
 import type { FieldArray } from "../types";
 import { DenseSegment } from "./dense";
@@ -24,14 +24,14 @@ function fail(message: string): never {
 /** The payload must describe the cache's own grid, in a known format. */
 function checkGrid(p: DenseSegmentPayload, options: SegmentOptions): void {
   const { grid } = options;
-  if (p.format !== 1) fail(`unsupported format ${String(p.format)}`);
-  if (p.layout !== "dense") fail(`unsupported layout ${String(p.layout)}`);
+  if (p.format !== 1) fail(`unsupported format ${show(p.format)}`);
+  if (p.layout !== "dense") fail(`unsupported layout ${show(p.layout)}`);
   if (p.interval !== grid.interval) {
-    fail(`interval ${String(p.interval)} differs from the cache grid`);
+    fail(`interval ${show(p.interval)} differs from the cache grid`);
   }
   if (p.alignmentOffset !== grid.alignmentOffset) {
     fail(
-      `alignmentOffset ${String(p.alignmentOffset)} differs from the cache grid`,
+      `alignmentOffset ${show(p.alignmentOffset)} differs from the cache grid`,
     );
   }
 }
@@ -40,10 +40,10 @@ function checkGrid(p: DenseSegmentPayload, options: SegmentOptions): void {
 function checkSpan(p: DenseSegmentPayload, options: SegmentOptions): number {
   const { grid, slotCap } = options;
   if (!isAligned(p.start, grid)) {
-    fail(`start ${String(p.start)} is not an aligned safe-integer timestamp`);
+    fail(`start ${show(p.start)} is not an aligned safe-integer timestamp`);
   }
   if (!Number.isSafeInteger(p.count) || p.count < 1) {
-    fail(`count must be a positive integer, got ${String(p.count)}`);
+    fail(`count must be a positive integer, got ${show(p.count)}`);
   }
   if (p.count > slotCap) {
     fail(`count ${p.count} exceeds the slot cap ${slotCap}`);
@@ -106,7 +106,7 @@ function checkFields(
     if (entry === undefined) fail(`field "${name}" is missing`);
     if (entry.dtype !== dtype) {
       fail(
-        `field "${name}" has dtype ${String(entry.dtype)}, the schema says ${dtype}`,
+        `field "${name}" has dtype ${show(entry.dtype)}, the schema says ${dtype}`,
       );
     }
     const bytes = p.count * FIELD_ARRAYS[dtype].BYTES_PER_ELEMENT;

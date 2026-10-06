@@ -92,7 +92,8 @@ interface CacheConfig {
   alignmentOffset?: number;
   /** Field name → dtype. 'f64' is the documented default dtype. */
   fields: Record<string, Dtype>;
-  /** Dense segment splits when an internal gap exceeds K intervals. Default 4. */
+  /** Dense segment splits where more than K consecutive slots hold no point
+   *  (N14). Default 4. */
   gapSplitK?: number;
   /** Max slots per segment. Default 32_768; at most 2^31 − 1 (N12). */
   segmentSlotCap?: number;
@@ -177,7 +178,9 @@ interface PutOptions {
    * CONFIRMED real gaps, never re-fetched; only invalidate() undoes a wrong
    * claim. Default: the batch's own span [t₀, tₙ] — safe for streaming
    * appends, claims nothing the points don't prove (N3). The orchestrated
-   * path always passes the fetch's requested range automatically.
+   * path always passes the fetch's requested range automatically. A range
+   * that is not on the grid snaps INWARD: it covers the grid points inside it
+   * and no others (N13).
    */
   range?: Range;
 }
@@ -374,12 +377,16 @@ coverage.ts         coverage index on slot ranges: sorted disjoint ranges, binar
                     search, splice on merge, subtraction (invalidate), miss computation
 segment/
   types.ts          Segment interface: lookup / slice / mergeFrom / transferPayload
+  assert.ts         programming-error checks shared by segments and the merge path
   dense.ts          DenseSegment: implicit timestamps, presence bitmask, typed arrays
   payload.ts        DenseSegmentPayload encode/decode (one-format-three-uses lives here)
 engine/
-  validate.ts       put validation: alignment (offset-aware), sort, dup, field/dtype/length
-  merge.ts          put path: segment selection, K-gap splitting, slot-cap, new-wins merge,
-                    overlap-diff detection
+  validate.ts       CacheConfig validation and defaults
+  batch.ts          put validation: alignment (offset-aware), sort, dup, field/length,
+                    range; converts a batch to slot terms
+  merge.ts          put path: SegmentStore — segment selection, K-gap splitting, slot-cap
+                    pages, new-wins merge
+  overlap.ts        overlap-diff detection for the opt-in merge warning
   read.ts           read path: coverage intersection, present-point extraction to columnar
   engine.ts         Engine: caches map, watermarks, version check, clear/invalidate; pure
                     in-process API — unit-test target, './engine' export surface
@@ -436,6 +443,12 @@ function msOf(slot: number, g: Grid): number;
  *  point beyond ±(2^53 − 1). start === end is legal (one slot if aligned,
  *  else two). */
 function snapOut(r: Range, g: Grid): SlotRange;
+/** put's options.range → slots, snapped INWARD (N13): the grid points lying
+ *  inside r, or undefined when there is none. Never wider than the input,
+ *  so unlike snapOut it cannot land beyond ±(2^53 − 1). Throws
+ *  InvalidRangeError if either endpoint is not a finite number within
+ *  ±(2^53 − 1) or if start > end. */
+function snapIn(r: Range, g: Grid): SlotRange | undefined;
 /** Slot range → inclusive ms Range (GetResult.coverage and misses). */
 function toMs(r: SlotRange, g: Grid): Range;
 
@@ -532,6 +545,57 @@ Rules:
 
 Out of step ④ by design: gap-split K and segment selection (step ⑤), the overlap-difference warning (step ⑤ builds it from `slice`, so it costs nothing when off), ms conversion of results and concatenation across segments (step ⑥).
 
+### 4.3 Internal contracts — put path (N13–N15, approved 2026-10-05)
+
+Internal modules: not exported from any package entry. Contract tests (step ⑤) pin this surface. Both work in slot terms; the only ms arithmetic is the calls into `grid.ts`.
+
+```ts
+// engine/batch.ts
+/** Validates a consumer batch against the cache's config and converts it to
+ *  slot terms. Rejects the whole batch (§2.4) by throwing; never mutates or
+ *  keeps its input. `authority` is the inward snap of `range` (N13), and
+ *  undefined when no range was given or the range holds no grid point. */
+function validateBatch(
+  batch: PutBatch,
+  config: ResolvedCacheConfig,
+  range?: Range,
+): { points: Columns; authority: SlotRange | undefined };
+
+// engine/merge.ts
+/** A merge warning in slot terms; the engine converts it to a MergeWarning. */
+interface SlotWarning { range: SlotRange; fields: string[] }
+
+/** All the segments of one cache. */
+class SegmentStore {
+  constructor(config: ResolvedCacheConfig);
+  /** Ascending by extent, disjoint, none empty, in the layout defined below. */
+  readonly segments: readonly Segment[];
+  /** Merges validated points in; new values win. Without authority it only
+   *  adds or overwrites; with authority the present points inside it end up
+   *  exactly `points` (N11). Returns the overlap warnings, always empty when
+   *  `warnOnOverlapDiff` is off. */
+  put(points: Columns, authority?: SlotRange): SlotWarning[];
+  /** Drops every segment. */
+  clear(): void;
+}
+```
+
+Rules for `validateBatch`:
+
+- **Order of checks.** (1) The batch is an object whose `timestamps` is a `number[]` or a `Float64Array`, and whose `fields` is an object with exactly the schema's field names, each a `number[]` or a typed array other than a BigInt one (a `DataView` is not accepted; arrays made in another realm, such as an iframe, are recognized): otherwise `PutError` `'field-mismatch'`. (2) Every field array has as many elements as `timestamps`: otherwise `'length-mismatch'`. (3) Timestamps are scanned once in order, and the first offender is reported with its index and value: a timestamp that is not on the grid is `'misaligned'` (with `expected`, e.g. `"t ≡ 0 (mod 60000)"`); otherwise one equal to its predecessor is `'duplicate'` and one below it is `'unsorted'`. Anything that is not an aligned safe integer, including `NaN` and a non-number, is `'misaligned'`; a non-number offender is reported by index only, without `offenderTimestamp`. (4) With a `range`: a malformed range throws `InvalidRangeError` (as `snapOut`), and the first timestamp outside it is `'range-mismatch'`. Structural rejects (1) and (2) have no offending timestamp and carry `offenderIndex: -1`. Error messages never call a value's own string conversion, so a hostile value (a symbol, a null-prototype object) still produces the documented error.
+- **Values.** Each field is copied into a fresh array of the schema's dtype by typed-array assignment, whatever kind of array it arrived in, so `1.5` given for an `i32` field is stored as `1`. Values are not otherwise validated; `NaN` is legal. An element that cannot be converted to a number at all (a symbol, or an object whose conversion throws) rejects the batch as `'field-mismatch'`.
+- **Empty batch.** Zero timestamps is legal. With a range it states that the range holds no points; without one it does nothing.
+- **Not here.** `meta` (`version`, `finalizedUntil`) is validated and applied in step ⑦.
+
+Rules for `SegmentStore`:
+
+- **Layout (N14, N15).** With `K = gapSplitK` and `cap = segmentSlotCap`, the page of slot `s` is `floor(s / cap)`. Two present points with no present point between them share a segment exactly when they are on the same page and at most `K` slots between them hold no point. The layout is therefore a function of which points are present, whatever order they arrived in, and it holds after every `put`: a replace that opens a gap wider than `K` splits a segment, and a point that closes one joins two. No segment spans more than `cap` slots. Each segment is built with `slotCap = cap`.
+- **Overlap warning.** When `warnOnOverlapDiff` is on, a batch point *differs* if a point was already present at its slot and at least one field's stored value changes; values are compared after conversion to the field's dtype, and two values are equal when `a === b` or both are `NaN`. Each maximal run of batch points that are consecutive in the batch and all differ yields one warning: `range` from the first to the last slot of the run, `fields` the names that differed anywhere in the run, in schema order. A point that a replace removes is not a difference. When the option is off no comparison is made. Excluding the volatile region from warnings is step ⑦.
+- **Programming errors** throw `RangeError` before anything changes: the same malformed `points` and `authority` that `Segment.mergeFrom` rejects (§4.2). None is reachable through `validateBatch`.
+- **Allocation failure.** Segments are updated in place, so a `put` that fails because memory cannot be allocated may be left half done. It works in steps, each of which either completes or changes nothing: first, for a replace, the old points inside the authority are removed; then the batch goes in one run of points at a time (a run is a stretch of the batch that shares a segment). After a failure the store is therefore still well formed (ascending, disjoint, no empty segment) and in the layout above — the one exception is a replace that cleared the middle of a segment and then could not allocate the split — and no slot outside the put's range has changed. The engine records coverage only after `put` returns, and when `put` throws it must also withdraw any coverage it already held for the put's range (step ⑦), so a half-written range is refetched and never trusted. Rejected: copying every touched segment first, which would cost a full segment copy on each live-tail append.
+
+Out of step ⑤ by design: coverage recording, the watermark and version handling (step ⑦); converting warnings to ms and emitting `mergeWarning` (step ⑧).
+
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
 - Vitest/Node against `engine/`, `coverage`, `segment/` directly (~90% of logic), plus RPC protocol over an in-memory port pair; property-style tests for coverage merge/subtraction and segment merge.
@@ -574,7 +638,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (N9–N12 later, at steps ③–④) (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9–N15 later, at steps ③–⑤) (working process §2.3: alternatives presented, user decided).
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -588,8 +652,11 @@ These emerged while making the API concrete (N9–N12 later, at steps ③–④)
 | N8 | Auth-failure signal | Fetcher **throws `AuthInvalidError`** (idiomatic, composes with fetch wrappers). Rejected: result code on `FetchResponse` (bifurcates return shape). Single mechanism only |
 | N9 | Grid and coverage internals | **`grid.ts` holds every ms↔slot conversion** (`isAligned`, `slotOf`, `msOf`, `snapOut`, `toMs`); `coverage.ts` works on integer slot ranges only. Internal contract in §4.1. Rejected: conversion inside `coverage.ts` (no doc change, but two concerns in one module and the single-site rule harder to verify). User-confirmed 2026-10-03 |
 | N10 | Segment internals | **`Segment` interface in slot terms** (`extent`, `size`, `lookup`, `slice`, `mergeFrom`, `transferPayload`) with `DenseSegment` and `segmentFromPayload`; contract in §4.2. The segment enforces the slot cap; split policy stays in the merge path. An invalid payload throws plain **`TscacheError`** (rejected: a new `PayloadError` class, which would add to §2.6). Field data is **little-endian, documented, no byte swapping** (rejected: explicit conversion on every transfer for platforms that do not exist in practice). User-confirmed 2026-10-04 |
-| N11 | What a put removes | **Replace only when the range is explicit** (provisional — the user chose it "for now"; revisit when step ⑤ wires `put`). An orchestrated fetch or a `put` with `options.range` replaces that range; a `put` without `range` only adds or overwrites. Rejected: always replace the batch's span (a sparse pushed batch would delete the points between its ends, which the cache cannot refetch because the span is marked known); never remove (a point deleted upstream could not be removed short of `clear()`). Consequences for fetcher authors, to document at step ⑪: a response must be complete for the requested range, so a fetcher against a paginated API loops until it has all of it; and because a slot returned without a point is cached as a confirmed gap and never refetched, a fetcher for a backend that publishes late must report `finalizedUntil` so data that is not final yet stays provisional. **Design intent recorded with this decision:** the primary envisioned use is data that never changes once returned (OHLC candles from a trading system feeding a chart). The purpose of the cache is to avoid refetching; refetching to overwrite is acceptable only in specific scenarios (live tail, explicit invalidation, version change). Replacement adds no fetches: it only governs what happens to old points when a fetch or ranged put occurs anyway. User-confirmed 2026-10-04 |
+| N11 | What a put removes | **Replace only when the range is explicit** (chosen provisionally on 2026-10-04 and confirmed as final at step ⑤, 2026-10-05). An orchestrated fetch or a `put` with `options.range` replaces that range; a `put` without `range` only adds or overwrites. Rejected: always replace the batch's span (a sparse pushed batch would delete the points between its ends, which the cache cannot refetch because the span is marked known); never remove (a point deleted upstream could not be removed short of `clear()`). Consequences for fetcher authors, to document at step ⑪: a response must be complete for the requested range, so a fetcher against a paginated API loops until it has all of it; and because a slot returned without a point is cached as a confirmed gap and never refetched, a fetcher for a backend that publishes late must report `finalizedUntil` so data that is not final yet stays provisional. **Design intent recorded with this decision:** the primary envisioned use is data that never changes once returned (OHLC candles from a trading system feeding a chart). The purpose of the cache is to avoid refetching; refetching to overwrite is acceptable only in specific scenarios (live tail, explicit invalidation, version change). Replacement adds no fetches: it only governs what happens to old points when a fetch or ranged put occurs anyway. User-confirmed 2026-10-04 |
 | N12 | Upper bound on `segmentSlotCap` | **At most 2^31 − 1**; a larger value is rejected with `ConfigError`. The presence mask is indexed with 32-bit integer arithmetic, which is exact only below 2^31 slots, and a segment that large (over 2 GB per field) could not be used anyway. Rejected: a lower practical limit such as 2^24 (an arbitrary number to defend); no limit with division-based indexing (slower on the hottest loops and not testable without a 2 GB allocation). User-confirmed 2026-10-04 |
+| N13 | Unaligned `put` range | **Snaps inward**: `options.range` covers the grid points inside it and no others (`snapIn` in `grid.ts`); a range holding no grid point claims nothing. `get`/`invalidate` snap outward because reading or forgetting too much is safe; claiming too much is not, since a claimed slot without a point is a confirmed gap that is never refetched. Rejected: snap outward (consistent with `get`, but vouches for slots the caller never named); reject an unaligned range (unambiguous, but every caller passing a chart range must align it first). User-confirmed 2026-10-05 |
+| N14 | How the K gap is counted | **A segment splits where more than K consecutive slots hold no point.** With K = 4 at one minute, 10:00 and 10:05 (four absent) share a segment; 10:00 and 10:06 (five absent) do not. Rejected: split when the two points are more than K intervals apart (tolerates K − 1 absent slots; reads less naturally as "a gap of K"). User-confirmed 2026-10-05 |
+| N15 | How the slot cap is applied | **Fixed pages**: a segment never crosses a multiple of `segmentSlotCap`. The layout then depends only on which points are present, so tests can state it exactly, equal data persists as equal payloads, and prepending history never reshuffles later segments. Cost: a short run that straddles a page edge is two segments. Rejected: fill a segment to the cap, then open the next (fewer segments in the straddling case, but the layout depends on arrival order). User-confirmed 2026-10-05 |
 
 ## 9. What happens after sign-off
 

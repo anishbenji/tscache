@@ -4,7 +4,7 @@
  * off-by-one can only be introduced, and only needs to be reviewed, here.
  */
 
-import { InvalidRangeError } from "./errors";
+import { InvalidRangeError, show } from "./errors";
 import type { Range } from "./types";
 
 /** A cache's alignment grid; structurally a subset of ResolvedCacheConfig. */
@@ -71,22 +71,18 @@ export function msOf(slot: number, g: Grid): number {
   return (slot + 1) * g.interval + (g.alignmentOffset - g.interval);
 }
 
-/**
- * Snaps a get/invalidate range outward to the grid: start floors, end ceils,
- * so the result is never narrower than the input (N1). `start === end` is
- * legal: one slot when aligned, the two surrounding slots otherwise.
- */
-export function snapOut(r: Range, g: Grid): SlotRange {
+/** Rejects a range that is not two ordered finite numbers within ±(2^53 − 1). */
+function assertRange(r: Range): void {
   // Untyped callers (plain JS, RPC params) can pass anything. isFinite does
   // not coerce, so "10", null and booleans are rejected, not read as numbers.
   const supported = (t: unknown) =>
     Number.isFinite(t) && Math.abs(t as number) <= Number.MAX_SAFE_INTEGER;
   if (typeof r !== "object" || r === null) {
-    throw new InvalidRangeError(`range must be an object, got ${String(r)}`);
+    throw new InvalidRangeError(`range must be an object, got ${show(r)}`);
   }
   if (!supported(r.start) || !supported(r.end)) {
     throw new InvalidRangeError(
-      `range endpoints must be finite numbers within ±(2^53 - 1), got [${String(r.start)}, ${String(r.end)}]`,
+      `range endpoints must be finite numbers within ±(2^53 - 1), got [${show(r.start)}, ${show(r.end)}]`,
     );
   }
   if (r.start > r.end) {
@@ -94,6 +90,15 @@ export function snapOut(r: Range, g: Grid): SlotRange {
       `range start ${r.start} is after its end ${r.end}`,
     );
   }
+}
+
+/**
+ * Snaps a get/invalidate range outward to the grid: start floors, end ceils,
+ * so the result is never narrower than the input (N1). `start === end` is
+ * legal: one slot when aligned, the two surrounding slots otherwise.
+ */
+export function snapOut(r: Range, g: Grid): SlotRange {
+  assertRange(r);
   const floorEnd = floorSlot(r.end, g);
   const slots = {
     start: floorSlot(r.start, g),
@@ -110,6 +115,20 @@ export function snapOut(r: Range, g: Grid): SlotRange {
     );
   }
   return slots;
+}
+
+/**
+ * Snaps a put's authority range inward: the grid points lying inside it, or
+ * undefined when there is none (N13). Never wider than the input, so a put
+ * cannot claim a slot its caller did not name, and every slot returned has a
+ * safe-integer timestamp.
+ */
+export function snapIn(r: Range, g: Grid): SlotRange | undefined {
+  assertRange(r);
+  const floorStart = floorSlot(r.start, g);
+  const start = isAligned(r.start, g) ? floorStart : floorStart + 1;
+  const end = floorSlot(r.end, g);
+  return start > end ? undefined : { start, end };
 }
 
 /** Slot range → inclusive ms Range (GetResult.coverage and misses). */

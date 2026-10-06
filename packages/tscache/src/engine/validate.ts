@@ -1,4 +1,4 @@
-import { ConfigError } from "../errors";
+import { ConfigError, show } from "../errors";
 import { MAX_SLOT_CAP } from "../segment/types";
 import {
   type CacheConfig,
@@ -16,14 +16,14 @@ function fail(message: string): never {
 
 function requirePositiveSafeInteger(value: unknown, what: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
-    fail(`${what} must be a positive integer, got ${String(value)}`);
+    fail(`${what} must be a positive integer, got ${show(value)}`);
   }
   return value;
 }
 
 function validateId(id: unknown): string {
   if (typeof id !== "string" || id.length === 0) {
-    fail(`id must be a non-empty string, got ${String(id)}`);
+    fail(`id must be a non-empty string, got ${show(id)}`);
   }
   return id;
 }
@@ -37,7 +37,7 @@ function validateId(id: unknown): string {
 function validateAlignmentOffset(offset: unknown, interval: number): number {
   if (offset === undefined) return 0;
   if (typeof offset !== "number" || !Number.isSafeInteger(offset)) {
-    fail(`alignmentOffset must be an integer, got ${String(offset)}`);
+    fail(`alignmentOffset must be an integer, got ${show(offset)}`);
   }
   // Add interval only to a negative remainder: `r + interval` then stays below
   // interval, so the result is exact even when interval nears 2^53.
@@ -63,7 +63,7 @@ function validateFields(
     const dtype = fields[name];
     if (!DTYPES.includes(dtype as Dtype)) {
       fail(
-        `field "${name}" has unknown dtype ${String(dtype)}; expected one of ${DTYPES.join(", ")}`,
+        `field "${name}" has unknown dtype ${show(dtype)}; expected one of ${DTYPES.join(", ")}`,
       );
     }
   }
@@ -81,7 +81,7 @@ function validateSegmentSlotCap(value: unknown): number {
 function validateVersion(version: unknown): string | undefined {
   if (version === undefined) return undefined;
   if (typeof version !== "string" || version.length === 0) {
-    fail(`version must be a non-empty string when set, got ${String(version)}`);
+    fail(`version must be a non-empty string when set, got ${show(version)}`);
   }
   return version;
 }
@@ -89,9 +89,7 @@ function validateVersion(version: unknown): string | undefined {
 function validateFinalizedUntil(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    fail(
-      `finalizedUntil must be a finite number when set, got ${String(value)}`,
-    );
+    fail(`finalizedUntil must be a finite number when set, got ${show(value)}`);
   }
   return value;
 }
@@ -99,7 +97,7 @@ function validateFinalizedUntil(value: unknown): number | undefined {
 function validateWarnFlag(value: unknown): boolean {
   if (value === undefined) return false;
   if (typeof value !== "boolean") {
-    fail(`warnOnOverlapDiff must be a boolean when set, got ${String(value)}`);
+    fail(`warnOnOverlapDiff must be a boolean when set, got ${show(value)}`);
   }
   return value;
 }
@@ -113,7 +111,7 @@ export function resolveCacheConfig(config: CacheConfig): ResolvedCacheConfig {
   // Untyped callers (plain JS, RPC params) can pass anything; keep the
   // ConfigError contract (architecture §2.6) instead of a TypeError.
   if (!isPlainObject(config)) {
-    fail(`config must be an object, got ${String(config)}`);
+    fail(`config must be an object, got ${show(config)}`);
   }
   const id = validateId(config.id);
   const interval = requirePositiveSafeInteger(config.interval, "interval");

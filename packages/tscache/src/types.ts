@@ -49,7 +49,7 @@ export interface CacheConfig {
   alignmentOffset?: number;
   /** Field name → dtype. At least one field. */
   fields: Record<string, Dtype>;
-  /** Dense segment splits when an internal gap exceeds K intervals. Default 4. */
+  /** Dense segment splits where more than K consecutive slots hold no point. Default 4. */
   gapSplitK?: number;
   /** Max slots per segment. Default 32_768; at most 2^31 - 1. */
   segmentSlotCap?: number;
@@ -112,7 +112,8 @@ export interface PutBatch {
 export interface PutOptions {
   /**
    * Authority range; must contain all batch timestamps. Flanks without points
-   * become CONFIRMED real gaps. Default: the batch's own span (N3).
+   * become CONFIRMED real gaps. Default: the batch's own span (N3). A range
+   * that is not on the grid covers only the grid points inside it (N13).
    */
   range?: Range;
 }
