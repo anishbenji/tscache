@@ -1,6 +1,6 @@
 # Step 07 — Invalidation suite (watermark, invalidate, clear, version)
 
-Branch: `feat/07-invalidation` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 · Status: in review · Verdict after triage: blocked
+Branch: `feat/07-invalidation` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 4 (cap reached) · Status: escalated · Verdict after triage: merge, pending the user's call on a further round
 
 ## Round 1 — reviewer verdict: merge after fixes
 
@@ -36,6 +36,17 @@ R2-1 and R2-2 confirmed fixed.
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R3-1 | P1 | `warnings.push(...more)` overflows the argument limit when a put yields a warning per point, after the data has changed | accepted | Reproduced with 150 000 warnings. Fixed in 36635e9 with `concat`; regression test added. Same defect class as step ⑤ R1-1 (spread into a call); the other spreads in `cache.ts` are over schema field names, which are bounded |
+
+## Round 4 — reviewer verdict: block
+
+R3-1 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P0 | After a failed write the coverage withdrawal used the watermark-clipped claim, which is empty when the put's own watermark precedes its points, so a provisional upsert failing after a first write left half-written covered data authoritative | accepted | Reproduced (cap 2, watermark 20, `meta.finalizedUntil: 0`, second segment write fails: values half new, coverage intact). Fixed in 88d6b74: the withdrawal covers everything the put touched (its authority or batch span); regression test added. Introduced by N19 in 0381f10, so the convergence rule does not fire: the area had not drawn a finding before |
+| R4-2 | P2 | The version documentation lacks the required note that restatements without a version signal are undetectable (starter §3.3, §8) | accepted | Added to architecture §2.4 and §4.5 in 88d6b74 |
+
+Round 4 is the cap (docs/workflow.md, review loop step 8) and it raised a P0, so the loop is not settled by its own rule and goes to the user. The fix above has not been seen by the reviewer.
 
 ## Contract-test changes
 
