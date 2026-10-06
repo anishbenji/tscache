@@ -387,7 +387,8 @@ engine/
   merge.ts          put path: SegmentStore — segment selection, K-gap splitting, slot-cap
                     pages, new-wins merge
   overlap.ts        overlap-diff detection for the opt-in merge warning
-  read.ts           read path: coverage intersection, present-point extraction to columnar
+  read.ts           read path: present-point extraction across segments, coverage
+                    intersection, 'uncached' misses, ms conversion of the result
   engine.ts         Engine: caches map, watermarks, version check, clear/invalidate; pure
                     in-process API — unit-test target, './engine' export surface
 orchestrator/
@@ -596,6 +597,34 @@ Rules for `SegmentStore`:
 
 Out of step ⑤ by design: coverage recording, the watermark and version handling (step ⑦); converting warnings to ms and emitting `mergeWarning` (step ⑧).
 
+### 4.4 Internal contracts — read path (N16, approved 2026-10-06)
+
+Internal module: not exported from any package entry. Contract tests (step ⑥) pin this surface. Input is in slot terms; the result is the consumer's `GetResult` (§2.3), so this is where slots become milliseconds again, through `grid.ts`.
+
+```ts
+// engine/read.ts
+/** The present points of `segments` inside `range`, concatenated ascending,
+ *  as fresh arrays (never views): one per schema field, of that field's
+ *  dtype. Segments are the store's: ascending and disjoint. */
+function collect(segments: readonly Segment[], range: SlotRange): Columns;
+
+/** Assembles a GetResult for a request already snapped to slots. */
+function read(
+  request: SlotRange,
+  segments: readonly Segment[],
+  coverage: CoverageIndex,
+  grid: Grid,
+): GetResult;
+```
+
+Rules:
+
+- **What is returned (N16).** Every present point inside the request, whether or not its slot is covered: `timestamps` are their slots in ms (`msOf`), ascending; `fields` holds one array per schema field, same length. The live tail (volatile region, never covered) and points whose coverage was invalidated but not yet refetched are therefore returned too; `coverage` says which parts are authoritative.
+- **Coverage and misses.** `coverage` is `coverage.covered(request)` in ms (`toMs`), ascending; `misses` is `coverage.gaps(request)` in ms, ascending, each with `reason: 'uncached'` and no `error`. They tile the request exactly: every slot of the request is in exactly one of them. An empty request result is zero-length arrays with `coverage: []` and `misses: [request in ms]`.
+- **Fresh results.** Arrays and range objects in the result share nothing with the segments or the index; mutating a result changes nothing.
+- **Programming errors** throw `RangeError` for a malformed `request` (not safe integers, start > end), as the store does. None is reachable from consumer input: `snapOut` validates first.
+- **Not here.** Snapping the consumer's ms range outward is the engine's job (step ⑧); excluding the volatile region from the coverage passed in is the engine's job (step ⑦), as is the version check; miss reasons other than `'uncached'` are set by the orchestrator (step ⑪), which rewrites the misses of a request after fetching.
+
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
 - Vitest/Node against `engine/`, `coverage`, `segment/` directly (~90% of logic), plus RPC protocol over an in-memory port pair; property-style tests for coverage merge/subtraction and segment merge.
@@ -638,7 +667,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (N9–N15 later, at steps ③–⑤) (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9–N16 later, at steps ③–⑥) (working process §2.3: alternatives presented, user decided).
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -657,6 +686,7 @@ These emerged while making the API concrete (N9–N15 later, at steps ③–⑤)
 | N13 | Unaligned `put` range | **Snaps inward**: `options.range` covers the grid points inside it and no others (`snapIn` in `grid.ts`); a range holding no grid point claims nothing. `get`/`invalidate` snap outward because reading or forgetting too much is safe; claiming too much is not, since a claimed slot without a point is a confirmed gap that is never refetched. Rejected: snap outward (consistent with `get`, but vouches for slots the caller never named); reject an unaligned range (unambiguous, but every caller passing a chart range must align it first). User-confirmed 2026-10-05 |
 | N14 | How the K gap is counted | **A segment splits where more than K consecutive slots hold no point.** With K = 4 at one minute, 10:00 and 10:05 (four absent) share a segment; 10:00 and 10:06 (five absent) do not. Rejected: split when the two points are more than K intervals apart (tolerates K − 1 absent slots; reads less naturally as "a gap of K"). User-confirmed 2026-10-05 |
 | N15 | How the slot cap is applied | **Fixed pages**: a segment never crosses a multiple of `segmentSlotCap`. The layout then depends only on which points are present, so tests can state it exactly, equal data persists as equal payloads, and prepending history never reshuffles later segments. Cost: a short run that straddles a page edge is two segments. Rejected: fill a segment to the cap, then open the next (fewer segments in the straddling case, but the layout depends on arrival order). User-confirmed 2026-10-05 |
+| N16 | What `get` returns | **Every present point in the request**, covered or not; `coverage` marks the authoritative parts. Needed for the live tail, whose slots are never covered yet whose last candle must show, and it keeps an invalidated range on screen until the refetch replaces it. Rejected: only points inside coverage (nothing stale ever shows, but the volatile region would need a special case and an invalidated range would go blank until refetched). User-confirmed 2026-10-06 |
 
 ## 9. What happens after sign-off
 
