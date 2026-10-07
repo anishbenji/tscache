@@ -1,6 +1,6 @@
 # Step 09 — RPC protocol, handshake and dedicated worker
 
-Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 · Status: in review · Verdict after triage: blocked
+Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 4 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (hybrid TDD).
 
@@ -50,6 +50,15 @@ Completed on the fourth attempt; three earlier sessions stalled mid-review (each
 | R3-4 | P1 | A request whose params cannot be cloned rejected but left its pending entry behind | accepted | Reproduced. Fixed in 4026523; test via the new `pendingCount` |
 
 **Convergence rule.** Transport lifecycle drew findings in rounds 1, 2 and 3, so 4026523 reworks the area instead of patching: both sides subscribe to a port through one `listen()` helper that pairs the message and close listeners and returns the single function removing both; the server sends through one `#send` that falls back to a plain, always-cloneable error reply and drops a port that cannot take even that; the client's handshake and steady state share the same closure handling. The architecture doc (§4.7) is unchanged in substance; `listen` is an internal helper.
+
+## Round 4 — reviewer verdict: merge after fixes
+
+R3-1, R3-2 and R3-4 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P1 | R3-3 held only for ports with `close()`: a dedicated `Worker` has none, so `dispose()` left the server connection registered | accepted | Correct. Fixed in 8223d6f: `dispose()` posts the `dispose` op before shutting down; test with a transport lacking `close()` |
+| R4-2 | P1 | The R3-3 test waited one timer tick for the asynchronous peer-close event and raced it (about 3 % of runs; the round's own host CI run hit it) | accepted | Fixed in 8223d6f: bounded polling until the connection count drops; three consecutive green runs locally and CI green |
 
 ## Contract-test changes
 
