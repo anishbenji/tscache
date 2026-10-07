@@ -95,8 +95,20 @@ function splitAt(points: Columns, limit: number): [Columns, Columns] {
   return [slice(points, 0, i), slice(points, i, points.slots.length)];
 }
 
+/** Hooks the owner may pass; each is optional. */
+export interface CacheStateHooks {
+  /**
+   * Called once when a put's version mismatch has cleared the cache: after
+   * the put was applied, or, if its write then failed, before the error
+   * propagates (the cache is empty either way). The engine emits
+   * `cacheCleared 'version-mismatch'` from it.
+   */
+  onVersionClear?: () => void;
+}
+
 export class CacheState {
   readonly config: ResolvedCacheConfig;
+  readonly #hooks: CacheStateHooks;
   readonly #store: SegmentStore;
   readonly #coverage = new CoverageIndex();
   #version: string | undefined;
@@ -104,8 +116,9 @@ export class CacheState {
   /** First provisional slot; undefined when nothing is provisional. */
   #volatileFrom: number | undefined;
 
-  constructor(config: ResolvedCacheConfig) {
+  constructor(config: ResolvedCacheConfig, hooks: CacheStateHooks = {}) {
     this.config = config;
+    this.#hooks = hooks;
     this.#store = new SegmentStore(config);
     this.#version = config.version;
     if (config.finalizedUntil !== undefined) {
@@ -145,17 +158,16 @@ export class CacheState {
     const wm = meta.finalizedUntil;
     const touched = authority ?? spanOf(points);
     const claim = claimOf(touched, wm?.slot);
-    let slotWarnings: SlotWarning[];
-    try {
-      slotWarnings = this.#write(points, authority, wm?.slot);
-    } catch (error) {
-      // Everything the write may have changed, not only what it would have
-      // claimed: a half-written provisional stretch must be refetched too.
-      if (touched !== undefined) this.#coverage.subtract(touched);
-      throw error;
-    }
+    const slotWarnings = this.#writeOrWithdraw(
+      points,
+      authority,
+      wm?.slot,
+      touched,
+      cleared,
+    );
     if (wm !== undefined) this.#advance(wm.t, wm.slot);
     if (claim !== undefined) this.#cover(claim);
+    if (cleared) this.#hooks.onVersionClear?.();
     return { warnings: this.#toWarnings(slotWarnings), cleared };
   }
 
@@ -192,6 +204,37 @@ export class CacheState {
   /** Sets the watermark exactly; moving it back makes points provisional again. */
   setFinalizedUntil(t: number): void {
     this.#setWatermark(t, slotAtOrAfter(t, this.config));
+  }
+
+  /**
+   * Writes the batch; if the write fails, withdraws coverage for everything
+   * it may have changed (not only what it would have claimed: a half-written
+   * provisional stretch must be refetched too), tells the owner about a
+   * clear that already happened, and rethrows.
+   */
+  #writeOrWithdraw(
+    points: Columns,
+    authority: SlotRange | undefined,
+    limit: number | undefined,
+    touched: SlotRange | undefined,
+    cleared: boolean,
+  ): SlotWarning[] {
+    try {
+      return this.#write(points, authority, limit);
+    } catch (error) {
+      if (touched !== undefined) this.#coverage.subtract(touched);
+      // The write failure is the error the caller must see; a listener that
+      // throws while being told about the clear cannot replace it.
+      if (cleared) {
+        try {
+          this.#hooks.onVersionClear?.();
+        } catch {
+          // Reported through the write error; the listener's own error is
+          // dropped, as a second failure inside a failure path.
+        }
+      }
+      throw error;
+    }
   }
 
   /**
