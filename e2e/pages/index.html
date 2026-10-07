@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>tscache e2e</title>
+  </head>
+  <body>
+    <script type="module">
+      import { createClient } from "/dist/index.js";
+
+      // The suite drives the client through window.tscache.
+      window.tscache = { createClient };
+      window.ready = true;
+    </script>
+  </body>
+</html>

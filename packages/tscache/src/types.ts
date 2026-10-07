@@ -127,3 +127,51 @@ export interface PutResult {
   /** Non-empty only when warnOnOverlapDiff is on and overlapping values differed. */
   warnings: MergeWarning[];
 }
+
+/** Where the engine runs; the fallback chain steps down this list (§2.1). */
+export type HostingMode = "shared" | "dedicated" | "in-process";
+
+export interface ClientOptions {
+  /**
+   * Worker script URL, e.g. `new URL('tscache/worker', import.meta.url)`.
+   * Required unless `mode` is 'in-process'.
+   */
+  workerUrl?: string | URL;
+  /** Starting hosting; fallback continues down-chain from it. Default 'shared'. */
+  mode?: HostingMode;
+  /**
+   * How long a hosting may take to say hello before the chain steps down
+   * (N25). Default 5000 ms. A protocol mismatch never falls back.
+   */
+  handshakeTimeoutMs?: number;
+  /** Worker-side fetch orchestration (§2.5). Omit for pure pull-model use. */
+  fetcher?: {
+    /** Module specifier or URL the worker will import(). */
+    module: string | URL;
+    /** Structured-cloneable config/auth material passed to the fetcher. */
+    context?: unknown;
+  };
+}
+
+/** '<clientId>:<seq>' — unique across tabs (N5). */
+export type RequestId = string;
+
+/** Three scopes, one channel (N5, §2.7). */
+export interface ClientEvents {
+  /** Fetcher signalled auth failure; broadcast to all tabs (step ⑪). */
+  authInvalid: { error: { name: string; message: string } };
+  /** The fallback chain stepped down while connecting. */
+  modeFallback: { from: HostingMode; to: HostingMode; reason: string };
+  /** A cache was cleared; in SharedWorker mode one tab's clear affects all. */
+  cacheCleared: {
+    cacheId: string;
+    reason: "manual" | "clear-all" | "version-mismatch";
+  };
+  /** Opt-in (warnOnOverlapDiff): an overlapping put differed. */
+  mergeWarning: {
+    cacheId: string;
+    requestId: RequestId;
+    range: Range;
+    fields: string[];
+  };
+}
