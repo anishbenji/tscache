@@ -28,6 +28,15 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/** An error reply always becomes an error, however malformed it arrived. */
+function rebuild(wire: unknown): TscacheError {
+  try {
+    return fromWireError(wire as never);
+  } catch {
+    return new TscacheError("malformed error reply");
+  }
+}
+
 export class PortClient {
   readonly clientId: string;
   readonly #port: MessagePortLike;
@@ -94,6 +103,10 @@ export class PortClient {
       const onMessage = (data: unknown) => {
         const message = data as ToClient;
         if (!isObject(message)) return;
+        if (message.t === "bye") {
+          finish(new TscacheError("port closed during handshake"));
+          return;
+        }
         const expected =
           stage === "hello" ? message.t === "hello" : message.t !== "hello";
         if (!expected) {
@@ -185,9 +198,12 @@ export class PortClient {
       if (pending === undefined) return;
       this.#pending.delete(message.id);
       if (message.ok) pending.resolve(message.result);
-      else pending.reject(fromWireError(message.error));
+      else pending.reject(rebuild(message.error));
     } else if (message.t === "evt") {
       for (const fn of [...this.#listeners]) fn(message);
+    } else if (message.t === "bye") {
+      // Controlled detach on the other side (no close event in browsers).
+      this.#shutDown(new TscacheError("port closed"));
     }
   }
 }

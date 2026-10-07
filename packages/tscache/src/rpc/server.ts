@@ -15,6 +15,7 @@ import type {
   Range,
 } from "../types";
 import {
+  type Bye,
   type Evt,
   type Hello,
   type InitResult,
@@ -82,8 +83,8 @@ export class RpcServer {
     };
     connection.unlisten = listen(port, {
       onMessage: (data) => this.#receive(connection, data),
-      // The peer closed (client disposed, tab gone): forget it.
-      onClose: () => this.#drop(connection),
+      // The peer closed (client disposed, tab gone): forget it quietly.
+      onClose: () => this.#drop(connection, false),
     });
     this.#connections.add(connection);
     const hello: Hello = {
@@ -106,8 +107,20 @@ export class RpcServer {
     }
   }
 
-  #drop(connection: Connection): void {
+  /**
+   * Forgets a connection. `notify` posts a bye first, for a controlled
+   * detach: a browser MessagePort fires no close event, so the client would
+   * otherwise never learn that its pending requests are orphaned.
+   */
+  #drop(connection: Connection, notify = true): void {
     if (!this.#connections.delete(connection)) return;
+    if (notify) {
+      try {
+        connection.port.postMessage({ t: "bye" } satisfies Bye);
+      } catch {
+        // The port is already gone; nothing to tell.
+      }
+    }
     connection.unlisten();
     connection.port.close?.();
   }

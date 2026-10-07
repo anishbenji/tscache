@@ -72,7 +72,10 @@ export type Evt =
       payload: unknown;
     };
 
-export type ToClient = Hello | InitResult | Res | Evt;
+/** Server → client: the server is dropping this port (controlled detach). */
+export type Bye = { t: "bye" };
+
+export type ToClient = Hello | InitResult | Res | Evt | Bye;
 export type ToServer = Init | Req;
 
 /** The port surface both MessagePort and a worker global satisfy. */
@@ -151,7 +154,11 @@ export function toWireError(error: unknown): WireError {
   if (!(error instanceof Error)) {
     return { name: "Error", message: show(error) };
   }
-  const wire: WireError = { name: wireNameOf(error), message: error.message };
+  // A message that is not a string (a hostile object) must not reach the
+  // wire as is: it may clone yet throw on conversion at the other end.
+  const message =
+    typeof error.message === "string" ? error.message : show(error.message);
+  const wire: WireError = { name: wireNameOf(error), message };
   if (error instanceof PutError) {
     wire.code = error.code;
     const data: PutErrorData = { offenderIndex: error.offenderIndex };
@@ -176,7 +183,15 @@ export function toWireError(error: unknown): WireError {
  * WireError → the §2.6 class with that name, fields restored. An unknown
  * name becomes a TscacheError that keeps the original name in its message.
  */
-export function fromWireError(wire: WireError): TscacheError {
+export function fromWireError(input: WireError): TscacheError {
+  // The peer may be another bundle or a hostile page: trust nothing.
+  const wire: WireError = {
+    name: typeof input?.name === "string" ? input.name : "Error",
+    message:
+      typeof input?.message === "string" ? input.message : show(input?.message),
+    ...(typeof input?.code === "string" ? { code: input.code } : {}),
+    ...(input?.data !== undefined ? { data: input.data } : {}),
+  };
   switch (wire.name) {
     case "PutError": {
       const data = (wire.data ?? {}) as Partial<PutErrorData>;

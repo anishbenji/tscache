@@ -372,11 +372,12 @@ describe("transport lifecycle (round 3)", () => {
       (error as { message: unknown }).message = () => 0;
       throw error;
     });
+    // The non-string message is described, not shipped as is.
     await expect(
       client.request("clear", { cacheId: "rpc" }),
     ).rejects.toMatchObject({
       name: "TscacheError",
-      message: expect.stringMatching(/could not be sent/),
+      message: expect.stringMatching(/a function/),
     });
   });
 
@@ -432,6 +433,68 @@ describe("transport without close()", () => {
     client.dispose();
     await until(() => server.connections === 0);
     channel.port2.close();
+  });
+});
+
+/** A port that never fires "close", as a browser MessagePort may not. */
+function withoutCloseEvent(port: MessagePort): MessagePortLike {
+  return {
+    postMessage: (m, t) => port.postMessage(m, t ?? []),
+    addEventListener: (type, fn) => {
+      if (type === "message") port.addEventListener(type, fn as EventListener);
+    },
+    removeEventListener: (type, fn) => {
+      if (type === "message")
+        port.removeEventListener(type, fn as EventListener);
+    },
+    start: () => port.start(),
+    close: () => port.close(),
+  };
+}
+
+describe("transport without a close event (browser ports)", () => {
+  it("a controlled server detach still rejects pending requests", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const client = await PortClient.connect(withoutCloseEvent(channel.port2));
+    const pending = client.request("clearAll", {});
+    server.detach(channel.port1 as MessagePortLike);
+    await expect(pending).rejects.toMatchObject({ message: "port closed" });
+    client.dispose();
+  });
+
+  it("a server detach during the handshake rejects connect", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const channel = new MessageChannel();
+    // Hold the hello back so the handshake is still waiting.
+    const connecting = PortClient.connect(withoutCloseEvent(channel.port2));
+    server.attach(channel.port1 as MessagePortLike);
+    server.detach(channel.port1 as MessagePortLike);
+    await expect(connecting).rejects.toMatchObject({
+      message: expect.stringMatching(/closed|out of order/),
+    });
+  });
+
+  it("an error whose message converts badly still rejects the request", async () => {
+    const engine = new Engine();
+    const client = await connect(new RpcServer(engine, "0.0.0"));
+    await client.request("cache", config);
+    engine.on("cacheCleared", () => {
+      const error = new Error("x");
+      (error as { message: unknown }).message = { toString: 0, valueOf: 0 };
+      throw error;
+    });
+    await expect(
+      client.request("clear", { cacheId: "rpc" }),
+    ).rejects.toBeInstanceOf(TscacheError);
+    expect(client.pendingCount).toBe(0);
+  });
+
+  it("a malformed error reply on the wire still rejects", () => {
+    expect(
+      fromWireError({ name: 7, message: { toString: 0 } } as never),
+    ).toBeInstanceOf(TscacheError);
   });
 });
 
