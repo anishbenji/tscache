@@ -254,7 +254,10 @@ describe("Engine cache get-or-create — architecture §2.2, §4.6, N4, N20", ()
     expect(engine.has(config.id)).toBe(true);
   });
 
-  // has(unknownId) is intentionally unpinned pending clarification: §4.6's
-  // blanket UnknownCacheError rule includes has, but its boolean signature
-  // also admits the ordinary existence-check interpretation.
+  it("has answers false for an unknown id instead of throwing", () => {
+    const engine = new Engine();
+    expect(engine.has("missing")).toBe(false);
+    engine.cache(engineConfig());
+    expect(engine.has("missing")).toBe(false);
+  });
 });

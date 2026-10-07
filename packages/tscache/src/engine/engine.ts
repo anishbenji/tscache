@@ -109,12 +109,22 @@ export class Engine {
     this.#cleared(cacheId, "manual");
   }
 
-  /** Empties every cache (N22); the caches and their configs stay. */
+  /**
+   * Empties every cache (N22); the caches and their configs stay. Every
+   * cache is cleared and notified even if a listener throws; the first
+   * listener error is rethrown at the end.
+   */
   clearAll(): void {
+    let failure: { error: unknown } | undefined;
     for (const [cacheId, state] of this.#caches) {
       state.clear();
-      this.#cleared(cacheId, "clear-all");
+      try {
+        this.#cleared(cacheId, "clear-all");
+      } catch (error) {
+        failure ??= { error };
+      }
     }
+    if (failure !== undefined) throw failure.error;
   }
 
   setFinalizedUntil(cacheId: string, t: number): void {
