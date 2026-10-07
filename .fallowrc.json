@@ -23,6 +23,9 @@
     // ]
   },
   "rules": {
-    "unused-dependencies": "warn"
+    "unused-dependencies": "warn",
+    // Members used only by tests or by a later commit-plan step are reported,
+    // not gating: the import graph excludes tests, so they look unused.
+    "unused-class-members": "warn"
   }
 }
