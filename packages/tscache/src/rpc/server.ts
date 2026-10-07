@@ -169,8 +169,11 @@ export class RpcServer {
   #init(connection: Connection, protocol: number): void {
     if (protocol !== PROTOCOL_VERSION) {
       const error = new ProtocolMismatchError(
-        `client speaks protocol ${protocol}, worker speaks ${PROTOCOL_VERSION}`,
-        { clientProtocol: protocol, workerProtocol: PROTOCOL_VERSION },
+        `client speaks protocol ${show(protocol)}, worker speaks ${PROTOCOL_VERSION}`,
+        {
+          clientProtocol: typeof protocol === "number" ? protocol : Number.NaN,
+          workerProtocol: PROTOCOL_VERSION,
+        },
       );
       const reply: InitResult = { t: "init-err", error: toWireError(error) };
       this.#send(connection, reply);

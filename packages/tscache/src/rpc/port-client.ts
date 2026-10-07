@@ -4,7 +4,7 @@
  * re-emits events. The CacheHandle facade (step ⑩) sits on top.
  */
 
-import { ProtocolMismatchError, TscacheError } from "../errors";
+import { ProtocolMismatchError, show, TscacheError } from "../errors";
 import {
   type Evt,
   type FetcherConfig,
@@ -80,10 +80,13 @@ export class PortClient {
         if (message.protocol !== PROTOCOL_VERSION) {
           finish(
             new ProtocolMismatchError(
-              `worker speaks protocol ${message.protocol}, client speaks ${PROTOCOL_VERSION}`,
+              `worker speaks protocol ${show(message.protocol)}, client speaks ${PROTOCOL_VERSION}`,
               {
                 clientProtocol: PROTOCOL_VERSION,
-                workerProtocol: message.protocol,
+                workerProtocol:
+                  typeof message.protocol === "number"
+                    ? message.protocol
+                    : Number.NaN,
               },
             ),
           );
@@ -110,7 +113,9 @@ export class PortClient {
         const expected =
           stage === "hello" ? message.t === "hello" : message.t !== "hello";
         if (!expected) {
-          finish(new TscacheError(`handshake out of order: got ${message.t}`));
+          finish(
+            new TscacheError(`handshake out of order: got ${show(message.t)}`),
+          );
         } else if (message.t === "hello") {
           onHello(message);
         } else if (message.t === "init-ok") {

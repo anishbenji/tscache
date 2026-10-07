@@ -498,6 +498,41 @@ describe("transport without a close event (browser ports)", () => {
   });
 });
 
+describe("hostile protocol values", () => {
+  const hostile = { toString: 0, valueOf: 0 };
+
+  it("the client rejects a hello whose protocol cannot be interpolated", async () => {
+    const channel = new MessageChannel();
+    channel.port1.postMessage({
+      t: "hello",
+      protocol: hostile,
+      lib: "x",
+      clientId: "c1",
+    });
+    await expect(
+      PortClient.connect(channel.port2 as MessagePortLike),
+    ).rejects.toBeInstanceOf(ProtocolMismatchError);
+    channel.port1.close();
+  });
+
+  it("the server refuses an init whose protocol cannot be interpolated and drops the port", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const channel = new MessageChannel();
+    const replies: unknown[] = [];
+    channel.port2.addEventListener("message", (e) => replies.push(e.data));
+    channel.port2.start();
+    server.attach(channel.port1 as MessagePortLike);
+    channel.port2.postMessage({ t: "init", protocol: hostile });
+    await until(() => replies.length >= 2);
+    expect(replies[1]).toMatchObject({
+      t: "init-err",
+      error: { name: "ProtocolMismatchError" },
+    });
+    await until(() => server.connections === 0);
+    channel.port2.close();
+  });
+});
+
 describe("transport closure", () => {
   it("a server-side detach rejects pending and later requests on the client", async () => {
     const server = new RpcServer(new Engine(), "0.0.0");
