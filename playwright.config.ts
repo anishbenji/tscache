@@ -14,7 +14,8 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: "bun scripts/e2e-server.ts",
-    url: "http://127.0.0.1:4173/",
+    url: "http://127.0.0.1:4173/healthz",
     reuseExistingServer: !process.env.CI,
+    timeout: 30_000,
   },
 });

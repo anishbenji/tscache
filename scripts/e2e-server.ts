@@ -26,7 +26,11 @@ function contentType(path: string): string {
 }
 
 async function serve(request: Request): Promise<Response> {
-  const path = fileFor(new URL(request.url).pathname);
+  const { pathname } = new URL(request.url);
+  // Readiness probe for Playwright's webServer: 200 even before any fixture
+  // page exists (a 404 would never count as "up").
+  if (pathname === "/healthz") return new Response("ok");
+  const path = fileFor(pathname);
   const file = Bun.file(new URL(path, root));
   if (!(await file.exists())) {
     return new Response("not found", { status: 404 });
