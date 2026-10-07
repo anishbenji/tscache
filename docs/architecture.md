@@ -46,6 +46,11 @@ interface ClientOptions {
    * the pin (shared → dedicated → in-process). Default: 'shared'.
    */
   mode?: HostingMode;
+  /**
+   * How long a hosting may take to say hello before the chain steps down
+   * (N25). Default 5000 ms. A protocol mismatch never falls back: it rejects.
+   */
+  handshakeTimeoutMs?: number;
   /** Worker-side fetch orchestration (§2.5). Omit for pure pull-model use. */
   fetcher?: {
     /** Module specifier/URL the worker will dynamic-import(). */
@@ -787,6 +792,36 @@ Rules:
 - **Browser coverage (N24).** Step ⑨ is tested under Node over `MessageChannel`. A real dedicated `Worker` and transfer across a real port are covered at step ⑩ with Playwright (already a dependency; needs `bunx playwright install chromium` locally and a browser-install step in CI, on a chore branch), and the multi-tab suite at step ⑫.
 - **Entries.** `entries/worker.ts` gains the dedicated-worker path: when the module runs inside a dedicated worker (a worker global without `onconnect`), it attaches the worker global as a port at load; messages the worker posts before the page listens are buffered by the browser. SharedWorker `onconnect` arrives at step ⑩. The entry imports `Engine` and `RpcServer` only, and is the package's one side-effecting module (`sideEffects` in `package.json`).
 
+### 4.8 Internal contracts — client and hosting (N25–N27, approved 2026-10-08)
+
+Not an engine step: tests are written with the code. The public surface is §2.1 and §2.3–§2.4; this section fixes the module shapes and the fallback rules.
+
+```ts
+// client/client.ts
+/** §2.1. Resolves once a hosting completed the handshake. */
+function createClient(options?: ClientOptions): Promise<TscacheClient>;
+
+// client/hosting.ts — one function per hosting, each yielding a connected
+// PortClient or throwing a HostingError the chain treats as "step down".
+function openShared(url: string | URL, timeoutMs: number): Promise<PortClient>;
+function openDedicated(url: string | URL, timeoutMs: number): Promise<PortClient>;
+/** MessageChannel pair with RpcServer(new Engine()) in this realm (N27). */
+function openInProcess(): Promise<PortClient>;
+
+// client/cache.ts — CacheHandle facade over PortClient.request.
+// client/events.ts — ClientEvents emitter fed by evt messages (reuses engine/emitter).
+```
+
+Rules:
+
+- **Chain (§3.4, locked).** From the pin (`mode`, default `'shared'`): shared → dedicated → in-process. A hosting **fails** (N25) when its constructor throws (no `SharedWorker` on Chrome Android), the worker fires `error` before the handshake completed (script failed to load or threw at top level), or no `hello` arrives within `handshakeTimeoutMs` (default 5000). Each failure emits `modeFallback { from, to, reason }` (§2.7) and the next hosting is tried; when the last one fails, `createClient` rejects with that error. A `ProtocolMismatchError` is **not** a failure to step down from: it is a real incompatibility and rejects `createClient` at once (stale cached script, package skew — §3.1).
+- **`workerUrl`** is required for `'shared'` and `'dedicated'`; omitting it with the default pin throws `ConfigError` before anything is created (the doc says: omit only when pinning `'in-process'`). Workers are created as module workers (`{ type: 'module' }`).
+- **In-process (N27).** Every `createClient` with the in-process hosting builds its own `Engine` behind a `MessageChannel` pair in the page (no module-level singleton); two in-process clients in one page do not share data — sharing in a page is what the workers are for. The server side is the same `RpcServer`, so the RPC layer is exercised (§3.2).
+- **Handles.** `client.cache(config)` sends `cache` and returns a `CacheHandle` whose methods map one-to-one onto the ops with `cacheId` filled in. `put` transfers the batch's typed-array buffers (§3.3); the TSDoc says the arrays are consumed. `cache.on(event, fn)` filters `client.on` by `cacheId` for cache- and request-scoped events.
+- **Events.** `evt` messages re-emit as `ClientEvents`: `cacheCleared` (cache scope), `mergeWarning` (request scope, with `requestId`), `authInvalid` (client scope, step ⑪), and the client-made `modeFallback`. Listeners run on the page; a throwing listener does not break the port (the emitter's rule).
+- **Dispose.** `client.dispose()` sends `dispose`, releases the port, terminates an owned dedicated worker, and rejects later calls with `TscacheError`; idempotent. A SharedWorker is never terminated by a client (other tabs may use it).
+- **Browser coverage (N26).** A Playwright suite in Chromium runs: a real dedicated `Worker`; a real `SharedWorker` with two pages of one `BrowserContext` sharing one engine (a put in one page is read in the other); the in-process pin; and the no-`SharedWorker` fallback (the API deleted from `window` before `createClient`, expecting `modeFallback` to `'dedicated'`). CI installs Chromium with `bunx playwright install --with-deps chromium` and `scripts/ci.sh` runs the suite (chore branch). Node tests over `MessageChannel` cover the facade and the chain logic with fake hostings.
+
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
 - Vitest/Node against `engine/`, `coverage`, `segment/` directly (~90% of logic), plus RPC protocol over an in-memory port pair; property-style tests for coverage merge/subtraction and segment merge.
@@ -829,7 +864,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (N9–N24 later, at steps ③–⑨) (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9–N27 later, at steps ③–⑩) (working process §2.3: alternatives presented, user decided).
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -857,6 +892,9 @@ These emerged while making the API concrete (N9–N24 later, at steps ③–⑨)
 | N22 | `clearAll` | **Empties every cache and keeps the configs**, emitting `cacheCleared 'clear-all'` per cache; handles in every tab stay valid. Rejected: dropping the caches (live handles would fail with `UnknownCacheError` until each tab calls `cache()` again). User-confirmed 2026-10-07 |
 | N23 | Where `clientId` comes from | **The worker assigns it in `hello`** (one server numbers its connections), so request ids `clientId:seq` are unique across tabs by construction with no client-side randomness. Rejected: a client-generated random id (uniqueness by luck, server must trust it). User-confirmed 2026-10-07 |
 | N24 | Browser coverage for the RPC layer | **Node over `MessageChannel` at step ⑨; real Worker and ports with Playwright at steps ⑩ and ⑫.** No new dependency; Playwright is already present. Rejected: adding Vitest browser mode now (a second browser runner and a dependency decision for one test). User-confirmed 2026-10-07 |
+| N25 | When a hosting fails over | **Constructor throw, worker `error` before the handshake, or no `hello` within `handshakeTimeoutMs` (default 5 s, configurable)** step the chain down with a `modeFallback` event; a `ProtocolMismatchError` rejects instead. Rejected: no timeout (a loaded worker that never speaks, e.g. a stale service-worker-cached script, would hang `createClient`). User-confirmed 2026-10-08 |
+| N26 | Browser coverage from step ⑩ | **Playwright in Chromium**, installed locally and in CI; the Node tests keep covering logic over `MessageChannel`. Rejected: staying Node-only until step ⑫ (real Worker/SharedWorker behaviour unverified for two more steps). User-confirmed 2026-10-08 |
+| N27 | In-process engine scope | **One `Engine` per `createClient`** behind its own `MessageChannel` pair; matches the SSR use and needs no module-level state. Rejected: a page-wide singleton shared by every in-process client (worker-like semantics, but a global with a disposal story). User-confirmed 2026-10-08 |
 
 ## 9. What happens after sign-off
 
