@@ -393,8 +393,10 @@ engine/
                     intersection, 'uncached' misses, ms conversion of the result
   cache.ts          CacheState: one cache's store, coverage, watermark and version;
                     put/get/invalidate/clear/setFinalizedUntil in ms
-  engine.ts         Engine: caches map, watermarks, version check, clear/invalidate; pure
-                    in-process API — unit-test target, './engine' export surface
+  emitter.ts        minimal typed emitter for engine events (engine/ must not import client/)
+  engine.ts         Engine: caches map keyed by id, get-or-create with config conflicts (N4,
+                    N20), cacheId-first ops, cacheCleared events; pure in-process API —
+                    unit-test target, './engine' export surface
 orchestrator/
   orchestrator.ts   miss-driven fetch loop, in-flight dedup, miss coalescing, retry-after-auth
   auth.ts           auth state machine: valid → invalid (broadcast) → updated (retry)
@@ -683,6 +685,54 @@ Rules:
 
 Out of step ⑦ by design: the caches map, `clearAll`, config conflicts (N4) and event emission (step ⑧); orchestration (step ⑪).
 
+### 4.6 Internal contracts — engine assembly (N20–N22, approved 2026-10-07)
+
+`Engine` is the `./engine` export surface (SSR/Node, tests) and what the RPC server (step ⑨) drives. Contract tests (step ⑧) pin this surface. It is a map of `CacheState` (§4.5) keyed by cache id, with the cache-scoped events; it speaks milliseconds and consumer types only. Zero DOM/worker imports at module top level (locked, §2.1).
+
+```ts
+// engine/emitter.ts
+/** Minimal typed emitter: on() returns the unsubscribe; listeners added or
+ *  removed during emit do not affect that emit; a throwing listener does
+ *  not stop the others (its error is rethrown after all ran). */
+class Emitter<Events extends Record<string, unknown>> {
+  on<E extends keyof Events>(event: E, fn: (payload: Events[E]) => void): () => void;
+  off<E extends keyof Events>(event: E, fn: (payload: Events[E]) => void): void;
+  emit<E extends keyof Events>(event: E, payload: Events[E]): void;
+}
+
+// engine/engine.ts
+interface EngineEvents {
+  /** Cache-scoped (N5). */
+  cacheCleared: { cacheId: string; reason: 'manual' | 'clear-all' | 'version-mismatch' };
+}
+
+class Engine {
+  /** Get-or-create (N4, N20). Returns the resolved config in force. */
+  cache(config: CacheConfig): ResolvedCacheConfig;
+  has(cacheId: string): boolean;
+  /** Current state only: no orchestration (that is step ⑪). */
+  get(cacheId: string, range: Range): GetResult;
+  put(cacheId: string, batch: PutBatch, options?: PutOptions): PutResult;
+  invalidate(cacheId: string, range: Range): void;
+  clear(cacheId: string): void;
+  clearAll(): void;
+  setFinalizedUntil(cacheId: string, t: number): void;
+  on<E extends keyof EngineEvents>(event: E, fn: (e: EngineEvents[E]) => void): () => void;
+  off<E extends keyof EngineEvents>(event: E, fn: (e: EngineEvents[E]) => void): void;
+}
+```
+
+Rules:
+
+- **Get-or-create (N20).** `cache(config)` first resolves the config (`resolveCacheConfig`, so a bad config throws `ConfigError` before the map is touched). With no cache under that id, a `CacheState` is created from it. With one, the resolved **structural** fields must equal the live ones: `interval`, `alignmentOffset`, `fields` (same names and dtypes; key order irrelevant), `gapSplitK`, `segmentSlotCap`, `warnOnOverlapDiff`; any difference throws `ConfigError` naming the field, and the live cache is untouched. `version` and `finalizedUntil` describe the dataset, not the structure: they apply only when the cache is created and are **ignored** when joining an existing cache, so a tab from an older deploy can neither clear nor rewind the live cache. The return value is the live resolved config.
+- **Unknown id.** Every other method throws `UnknownCacheError` for an id without a cache, before validating anything else.
+- **Delegation.** `get`, `put`, `invalidate`, `setFinalizedUntil` delegate to the `CacheState` and keep its errors and results; `put` returns `{ warnings }` (§2.4) and, when the state reports `cleared`, emits `cacheCleared` with `reason: 'version-mismatch'` **after** the put has been applied. `clear(id)` clears that cache and emits `'manual'`.
+- **`clearAll` (N22).** Clears every cache's data and coverage and emits `cacheCleared` with `reason: 'clear-all'` for each, in creation order; the caches themselves, their configs, versions and watermarks stay, so handles in every tab remain valid. An engine with no caches emits nothing.
+- **Events (N21).** The engine emits only cache-scoped events. Request-scoped `mergeWarning` (requestId `clientId:seq`, §2.7) is emitted by the RPC server from `put`'s return value (step ⑨); the engine never carries request identity. Listeners run synchronously inside the emitting call, after the state change they describe.
+- **No DOM, no worker, no timers** at module top level or in any method: the module is importable and usable in Node.
+
+Out of step ⑧ by design: orchestration and `cacheOnly` (step ⑪ — until then every `get` is cache-only), RPC envelopes and request ids (step ⑨), `updateAuth`/`dispose` (client and worker layers).
+
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
 - Vitest/Node against `engine/`, `coverage`, `segment/` directly (~90% of logic), plus RPC protocol over an in-memory port pair; property-style tests for coverage merge/subtraction and segment merge.
@@ -725,7 +775,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (N9–N19 later, at steps ③–⑦) (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9–N22 later, at steps ③–⑧) (working process §2.3: alternatives presented, user decided).
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -748,6 +798,9 @@ These emerged while making the API concrete (N9–N19 later, at steps ③–⑦)
 | N17 | `meta.finalizedUntil` direction | **Forwards only**: a put's `meta.finalizedUntil` advances the watermark and a lower value is ignored, so fetch responses arriving out of order cannot pull it back and drop coverage. `setFinalizedUntil()` can still move it either way. Rejected: set exactly from `meta` (simpler rule, order-dependent result). User-confirmed 2026-10-06 |
 | N18 | First version seen by an unversioned cache | **Adopt without clearing**: when `config.version` is unset, the first `meta.version` a put reports becomes the cache's version and existing data is kept; later mismatches clear. The starter's "inert when unset" holds, since nothing is cleared, while a backend that reports a version still protects the cache. Rejected: ignore it (a reported version could never protect an unversioned cache); treat it as a mismatch (wipes the cache on the first versioned response). User-confirmed 2026-10-06 |
 | N19 | Authority of a response with its own watermark | **Clipped to its own watermark**: a put carrying `meta.finalizedUntil` replaces and covers only slots below it; points at or beyond are upserted. Raised by the step ⑦ adversarial review: a late empty response reporting an older watermark would otherwise delete a provisional point and record it as a confirmed gap. Rejected: discard responses with an older watermark (throws away valid final data and can loop against a backend whose watermark lags); apply as is (weakest). Companion decision for step ⑪: the orchestrator stamps requests with the cache's version generation and drops responses from before the last version change, so a late old-version response cannot clear fresh data. User-confirmed 2026-10-06 |
+| N20 | Scope of the `cache()` config conflict | **Every resolved field except the dataset ones must match**: `interval`, `alignmentOffset`, `fields`, `gapSplitK`, `segmentSlotCap`, `warnOnOverlapDiff` (they shape the layout or cross-tab behaviour) → `ConfigError` on mismatch. `version` and `finalizedUntil` apply at creation only and are ignored by a joining tab, so a stale tab cannot clear or rewind the live cache. Rejected: grid and schema only, rest first-creator-wins (a tab asking for warnings would silently get none); everything must match (tabs started minutes apart with a moving `finalizedUntil` would reject each other). User-confirmed 2026-10-07 |
+| N21 | Who emits `mergeWarning` | **The RPC server, from `put`'s result**: it knows the request id. The engine emits only cache-scoped `cacheCleared`; in-process callers get warnings from `put()` directly. Rejected: the engine with a made-up `engine:<seq>` id (carries request identity it does not need). User-confirmed 2026-10-07 |
+| N22 | `clearAll` | **Empties every cache and keeps the configs**, emitting `cacheCleared 'clear-all'` per cache; handles in every tab stay valid. Rejected: dropping the caches (live handles would fail with `UnknownCacheError` until each tab calls `cache()` again). User-confirmed 2026-10-07 |
 
 ## 9. What happens after sign-off
 
