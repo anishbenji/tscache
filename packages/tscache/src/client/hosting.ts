@@ -42,8 +42,10 @@ interface ErrorSource {
 }
 
 /**
- * Completes the handshake within `timeoutMs`; a worker `error` before then
- * (script failed to load, threw at top level) or a timeout is a HostingError.
+ * Completes the handshake within `timeoutMs`. A worker `error` before then
+ * (script failed to load, threw at top level) or a timeout aborts the
+ * handshake: its listeners go and this side's port closes, so a late hello
+ * completes nothing (the SharedWorker itself is untouched).
  */
 async function handshake(
   port: MessagePortLike,
@@ -52,32 +54,37 @@ async function handshake(
   timeoutMs: number,
   what: string,
 ): Promise<PortClient> {
-  let fail: (error: HostingError) => void = () => {};
-  const failed = new Promise<never>((_, reject) => {
-    fail = (error) => reject(error);
-  });
+  const controller = new AbortController();
   const onError = (event: unknown) => {
-    const message =
-      typeof event === "object" && event !== null && "message" in event
-        ? String((event as { message: unknown }).message)
-        : "worker error";
-    fail(new HostingError(`${what} failed to start: ${message}`));
+    controller.abort(
+      new HostingError(`${what} failed to start: ${describe(event)}`),
+    );
   };
   source.addEventListener("error", onError);
   const timer = setTimeout(
     () =>
-      fail(new HostingError(`${what} did not answer within ${timeoutMs} ms`)),
+      controller.abort(
+        new HostingError(`${what} did not answer within ${timeoutMs} ms`),
+      ),
     timeoutMs,
   );
   try {
-    return await Promise.race([
-      PortClient.connect(port, fetcher === undefined ? {} : { fetcher }),
-      failed,
-    ]);
+    return await PortClient.connect(
+      port,
+      fetcher === undefined ? {} : { fetcher },
+      controller.signal,
+    );
   } finally {
     clearTimeout(timer);
     source.removeEventListener("error", onError);
   }
+}
+
+/** The message of a worker error event, if it has one. */
+function describe(event: unknown): string {
+  return typeof event === "object" && event !== null && "message" in event
+    ? String((event as { message: unknown }).message)
+    : "worker error";
 }
 
 function globals(): WorkerGlobals {
@@ -127,19 +134,26 @@ export async function openDedicated(
   } catch (error) {
     throw new HostingError(`Worker could not be created: ${String(error)}`);
   }
+  let client: PortClient;
   try {
-    const client = await handshake(
-      worker,
-      worker,
-      fetcher,
-      timeoutMs,
-      "Worker",
-    );
-    return { mode: "dedicated", client, terminate: () => worker.terminate() };
+    client = await handshake(worker, worker, fetcher, timeoutMs, "Worker");
   } catch (error) {
     worker.terminate();
     throw error;
   }
+  // A Worker reports a fatal error but never a port closure: keep watching
+  // for the hosting's lifetime so pending requests do not hang.
+  const onFatal = (event: unknown) =>
+    client.abort(new TscacheError(`Worker failed: ${describe(event)}`));
+  worker.addEventListener("error", onFatal);
+  return {
+    mode: "dedicated",
+    client,
+    terminate: () => {
+      worker.removeEventListener("error", onFatal);
+      worker.terminate();
+    },
+  };
 }
 
 /** A MessageChannel pair with its own Engine in this realm (N27, §3.2). */

@@ -322,3 +322,108 @@ describe("cache handle", () => {
     expect(clearedB).toEqual([{ cacheId: "other", reason: "clear-all" }]);
   });
 });
+
+describe("lifecycle (round 1)", () => {
+  it("a SharedWorker that answers after the timeout completes nothing: this side's port is closed", async () => {
+    let closed = 0;
+    let messages = 0;
+    vi.stubGlobal("Worker", undefined);
+    vi.stubGlobal(
+      "SharedWorker",
+      class {
+        port: unknown;
+        constructor() {
+          const channel = new MessageChannel();
+          const server = new RpcServer(new Engine(), "0.0.0");
+          // Attach late: hello arrives after the client gave up.
+          setTimeout(() => server.attach(channel.port1 as MessagePortLike), 60);
+          const port = channel.port2;
+          this.port = {
+            postMessage: (m: unknown, t?: Transferable[]) => {
+              messages++;
+              port.postMessage(m, t ?? []);
+            },
+            addEventListener: (type: string, fn: EventListener) =>
+              port.addEventListener(type, fn),
+            removeEventListener: (type: string, fn: EventListener) =>
+              port.removeEventListener(type, fn),
+            start: () => port.start(),
+            close: () => {
+              closed++;
+              port.close();
+            },
+          };
+        }
+        addEventListener() {}
+        removeEventListener() {}
+      },
+    );
+    const client = await make({ workerUrl: url, handshakeTimeoutMs: 20 });
+    expect(client.mode).toBe("in-process");
+    await new Promise((r) => setTimeout(r, 120));
+    // Abandoned on timeout: the port was closed and no init was ever sent.
+    expect(closed).toBe(1);
+    expect(messages).toBe(0);
+  });
+
+  it("a dedicated worker's fatal error after the handshake rejects pending requests", async () => {
+    vi.stubGlobal("SharedWorker", undefined);
+    let fake: ReturnType<typeof workerLike> | undefined;
+    vi.stubGlobal("Worker", function FakeWorker() {
+      const channel = new MessageChannel();
+      new RpcServer(new Engine(), "0.0.0").attach(
+        channel.port1 as MessagePortLike,
+      );
+      fake = workerLike(channel.port2, () => {});
+      // Swallow requests so one stays pending.
+      const original = fake.postMessage;
+      fake.postMessage = (m: unknown, t?: Transferable[]) => {
+        if ((m as { t?: string }).t !== "req") original(m, t);
+      };
+      return fake;
+    });
+    const client = await make({ workerUrl: url });
+    expect(client.mode).toBe("dedicated");
+    const pending = client.clearAll();
+    fake?.fail("out of memory");
+    await expect(pending).rejects.toMatchObject({
+      name: "TscacheError",
+      message: expect.stringMatching(/out of memory/),
+    });
+  });
+
+  it("delivers every fallback step even when a listener throws", async () => {
+    vi.stubGlobal("Worker", undefined);
+    vi.stubGlobal("SharedWorker", undefined);
+    const client = await make({ workerUrl: url });
+    const seen: string[] = [];
+    client.on("modeFallback", (e) => {
+      seen.push(e.to);
+      throw new Error("listener failed");
+    });
+    const reported: unknown[] = [];
+    vi.stubGlobal("reportError", (e: unknown) => reported.push(e));
+    await settled();
+    expect(seen).toEqual(["dedicated", "in-process"]);
+    expect(reported).toHaveLength(1);
+  });
+
+  it("disposes itself on pagehide, telling the worker", async () => {
+    const listeners = new Map<string, () => void>();
+    vi.stubGlobal("addEventListener", (type: string, fn: () => void) =>
+      listeners.set(type, fn),
+    );
+    vi.stubGlobal("removeEventListener", (type: string) =>
+      listeners.delete(type),
+    );
+    const fakes = installFakeWorkers();
+    const client = await make({ workerUrl: url });
+    const server = fakes.servers.get(url);
+    expect(server?.connections).toBe(1);
+    listeners.get("pagehide")?.();
+    await settled();
+    expect(server?.connections).toBe(0);
+    await expect(client.clearAll()).rejects.toBeInstanceOf(TscacheError);
+    expect(listeners.has("pagehide")).toBe(false);
+  });
+});

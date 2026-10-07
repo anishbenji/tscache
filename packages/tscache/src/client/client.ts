@@ -25,6 +25,13 @@ import {
 } from "./hosting";
 
 const CHAIN: readonly HostingMode[] = ["shared", "dedicated", "in-process"];
+
+/** Surfaces a listener error that no caller can catch. */
+function report(error: unknown): void {
+  const page = globalThis as { reportError?: (e: unknown) => void };
+  if (typeof page.reportError === "function") page.reportError(error);
+  else throw error;
+}
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5000;
 
 export interface TscacheClient {
@@ -139,13 +146,41 @@ class Client implements TscacheClient {
     this.mode = hosting.mode;
     this.#port.on((evt) => this.#events.receive(evt));
     // The chain ran before anyone could subscribe: deliver its steps on the
-    // next macrotask, after the awaiting caller has had its turn.
+    // next macrotask, after the awaiting caller has had its turn. Every
+    // step is delivered even if a listener throws; the first error surfaces
+    // afterwards.
     if (fallbacks.length > 0) {
       setTimeout(() => {
-        for (const step of fallbacks) this.#events.emit("modeFallback", step);
+        let failure: { error: unknown } | undefined;
+        for (const step of fallbacks) {
+          try {
+            this.#events.emit("modeFallback", step);
+          } catch (error) {
+            failure ??= { error };
+          }
+        }
+        // Nobody awaits this macrotask: hand the error to the page's
+        // reporter (window.reportError) rather than throwing into the void.
+        if (failure !== undefined) report(failure.error);
       }, 0);
     }
+    // A tab that closes or navigates away tells the worker (browsers fire
+    // no port-close event a SharedWorker could rely on); best effort.
+    const page = globalThis as {
+      addEventListener?: (type: string, fn: () => void) => void;
+      removeEventListener?: (type: string, fn: () => void) => void;
+    };
+    if (typeof page.addEventListener === "function") {
+      this.#unlistenPage = () =>
+        page.removeEventListener?.("pagehide", this.#onPageHide);
+      page.addEventListener("pagehide", this.#onPageHide);
+    }
   }
+
+  readonly #onPageHide = () => {
+    void this.dispose();
+  };
+  #unlistenPage: () => void = () => {};
 
   async cache(config: CacheConfig): Promise<CacheHandle> {
     this.#live();
@@ -183,6 +218,7 @@ class Client implements TscacheClient {
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#unlistenPage();
     this.#port.dispose();
     this.#hosting.terminate();
   }

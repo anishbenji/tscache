@@ -36,9 +36,10 @@ type HostingMode = 'shared' | 'dedicated' | 'in-process';
 
 interface ClientOptions {
   /**
-   * Worker script URL — the consumer resolves the packaged entry, e.g.
-   * `new URL('tscache/worker', import.meta.url)` (bundler guide covers
-   * Vite/webpack). Omit only when pinning 'in-process'.
+   * Worker script URL as the bundler serves the `tscache/worker` entry
+   * (docs/guides/worker-setup.md: Vite `?worker&url`, webpack
+   * `new URL(..., import.meta.url)`, or a served copy of dist/). Omit only
+   * when pinning 'in-process'.
    */
   workerUrl?: string | URL;
   /**
@@ -819,7 +820,7 @@ Rules:
 - **In-process (N27).** Every `createClient` with the in-process hosting builds its own `Engine` behind a `MessageChannel` pair in the page (no module-level singleton); two in-process clients in one page do not share data — sharing in a page is what the workers are for. The server side is the same `RpcServer`, so the RPC layer is exercised (§3.2).
 - **Handles.** `client.cache(config)` sends `cache` and returns a `CacheHandle` whose methods map one-to-one onto the ops with `cacheId` filled in. `put` transfers the batch's typed-array buffers (§3.3); the TSDoc says the arrays are consumed. `cache.on(event, fn)` filters `client.on` by `cacheId` for cache- and request-scoped events.
 - **Events.** `evt` messages re-emit as `ClientEvents`: `cacheCleared` (cache scope), `mergeWarning` (request scope, with `requestId`), `authInvalid` (client scope, step ⑪), and the client-made `modeFallback`. Listeners run on the page; a throwing listener does not break the port (the emitter's rule).
-- **Dispose.** `client.dispose()` sends `dispose`, releases the port, terminates an owned dedicated worker, and rejects later calls with `TscacheError`; idempotent. A SharedWorker is never terminated by a client (other tabs may use it).
+- **Dispose.** `client.dispose()` sends `dispose`, releases the port, terminates an owned dedicated worker, and rejects later calls with `TscacheError`; idempotent. A SharedWorker is never terminated by a client (other tabs may use it). The client also disposes itself on the page's `pagehide` event (best effort), because browsers fire no port-close event a SharedWorker could use to notice a closed tab. A handshake that times out or sees a worker `error` is aborted: its listeners go and this side's port closes, so a late `hello` completes nothing. A dedicated worker's `error` after the handshake aborts the client's pending requests (a `Worker` has no port closure to observe).
 - **Browser coverage (N26).** A Playwright suite in Chromium runs: a real dedicated `Worker`; a real `SharedWorker` with two pages of one `BrowserContext` sharing one engine (a put in one page is read in the other); the in-process pin; and the no-`SharedWorker` fallback (the API deleted from `window` before `createClient`, expecting `modeFallback` to `'dedicated'`). CI installs Chromium with `bunx playwright install --with-deps chromium` and `scripts/ci.sh` runs the suite (chore branch). Node tests over `MessageChannel` cover the facade and the chain logic with fake hostings.
 
 ## 5. Testing hooks (how this layout maps to the locked strategy)

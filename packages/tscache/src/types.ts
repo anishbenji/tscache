@@ -133,8 +133,9 @@ export type HostingMode = "shared" | "dedicated" | "in-process";
 
 export interface ClientOptions {
   /**
-   * Worker script URL, e.g. `new URL('tscache/worker', import.meta.url)`.
-   * Required unless `mode` is 'in-process'.
+   * URL of the worker script (the package's `tscache/worker` entry) as your
+   * bundler serves it; see docs/guides/worker-setup.md for Vite, webpack and
+   * no-bundler setups. Required unless `mode` is 'in-process'.
    */
   workerUrl?: string | URL;
   /** Starting hosting; fallback continues down-chain from it. Default 'shared'. */
