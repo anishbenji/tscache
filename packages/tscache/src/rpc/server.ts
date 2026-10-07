@@ -32,7 +32,7 @@ interface Connection {
   port: MessagePortLike;
   clientId: string;
   ready: boolean;
-  listener: (event: { data: unknown }) => void;
+  listener: (event: { data?: unknown }) => void;
 }
 
 /** What a request may carry; the engine validates the values. */

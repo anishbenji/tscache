@@ -256,9 +256,12 @@ describe("operations round-trip", () => {
     await expect(
       client.request("cache", { ...config, interval: 20 }),
     ).rejects.toBeInstanceOf(ConfigError);
-    await expect(
-      client.request("nonsense" as never, {}),
-    ).rejects.toBeInstanceOf(TscacheError);
+    for (const op of ["nonsense", "toString", "constructor", "__proto__"]) {
+      await expect(client.request(op as never, {})).rejects.toMatchObject({
+        name: "TscacheError",
+        message: expect.stringMatching(/unknown op/),
+      });
+    }
     // Malformed params never crash the server: they come back as errors.
     await expect(client.request("get", null)).rejects.toBeInstanceOf(
       TscacheError,
@@ -330,6 +333,26 @@ describe("events", () => {
   });
 });
 
+describe("transport closure", () => {
+  it("a server-side detach rejects pending and later requests on the client", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const client = await PortClient.connect(channel.port2 as MessagePortLike);
+    await client.request("cache", config);
+    const pending = client.request("clearAll", {});
+    server.detach(channel.port1 as MessagePortLike);
+    await expect(pending).rejects.toMatchObject({
+      name: "TscacheError",
+      message: "port closed",
+    });
+    await expect(client.request("clearAll", {})).rejects.toBeInstanceOf(
+      TscacheError,
+    );
+    client.dispose();
+  });
+});
+
 describe("transfer", () => {
   it("get results arrive as fresh arrays and put transfers the caller's buffers", async () => {
     const client = await connect(new RpcServer(new Engine(), "0.0.0"));
@@ -370,6 +393,20 @@ describe("transfer", () => {
 });
 
 describe("wire errors", () => {
+  it("names a §2.6 error by its class even when a minifier renamed the constructor", () => {
+    const error = new PutError("bad", { code: "duplicate", offenderIndex: 2 });
+    Object.defineProperty(error, "name", { value: "t" });
+    expect(toWireError(error)).toMatchObject({
+      name: "PutError",
+      code: "duplicate",
+    });
+    const rebuilt = fromWireError(toWireError(error));
+    expect(rebuilt).toBeInstanceOf(PutError);
+    expect(rebuilt).toMatchObject({ code: "duplicate", offenderIndex: 2 });
+    class Odd extends Error {}
+    expect(toWireError(new Odd("x")).name).toBe("Error");
+  });
+
   it("round-trips a non-Error throw and an unknown class name", () => {
     expect(toWireError("boom")).toEqual({ name: "Error", message: "boom" });
     const rebuilt = fromWireError({ name: "SomethingElse", message: "x" });

@@ -78,12 +78,12 @@ export type ToServer = Init | Req;
 export interface MessagePortLike {
   postMessage(message: unknown, transfer?: Transferable[]): void;
   addEventListener(
-    type: "message",
-    listener: (event: { data: unknown }) => void,
+    type: "message" | "close",
+    listener: (event: { data?: unknown }) => void,
   ): void;
   removeEventListener(
-    type: "message",
-    listener: (event: { data: unknown }) => void,
+    type: "message" | "close",
+    listener: (event: { data?: unknown }) => void,
   ): void;
   start?(): void;
   close?(): void;
@@ -100,12 +100,35 @@ interface ProtocolData {
   workerProtocol: number;
 }
 
+/** The §2.6 classes by their stable wire names; most specific first. */
+const WIRE_CLASSES: [string, new (...args: never[]) => Error][] = [
+  ["PutError", PutError],
+  ["ProtocolMismatchError", ProtocolMismatchError],
+  ["ConfigError", ConfigError],
+  ["InvalidRangeError", InvalidRangeError],
+  ["UnknownCacheError", UnknownCacheError],
+  ["AuthInvalidError", AuthInvalidError],
+  ["TscacheError", TscacheError],
+];
+
+/**
+ * The name an error travels under: the stable wire name of its §2.6 class,
+ * decided by instanceof, since a minifier may rename the constructor and
+ * with it `error.name`. Other errors keep their own name.
+ */
+function wireNameOf(error: Error): string {
+  for (const [name, cls] of WIRE_CLASSES) {
+    if (error instanceof cls) return name;
+  }
+  return error.name;
+}
+
 /** Error → WireError. Any value can be thrown; non-errors become messages. */
 export function toWireError(error: unknown): WireError {
   if (!(error instanceof Error)) {
     return { name: "Error", message: String(error) };
   }
-  const wire: WireError = { name: error.name, message: error.message };
+  const wire: WireError = { name: wireNameOf(error), message: error.message };
   if (error instanceof PutError) {
     wire.code = error.code;
     const data: PutErrorData = { offenderIndex: error.offenderIndex };

@@ -32,7 +32,8 @@ export class PortClient {
   readonly #port: MessagePortLike;
   readonly #pending = new Map<number, Pending>();
   readonly #listeners = new Set<(evt: Evt) => void>();
-  readonly #onMessage: (event: { data: unknown }) => void;
+  readonly #onMessage: (event: { data?: unknown }) => void;
+  readonly #onClose: () => void;
   #seq = 0;
   #disposed = false;
 
@@ -40,7 +41,11 @@ export class PortClient {
     this.#port = port;
     this.clientId = clientId;
     this.#onMessage = (event) => this.#receive(event.data);
+    // The other side went away (worker died, server detached): nothing
+    // pending can be answered any more.
+    this.#onClose = () => this.#shutDown(new TscacheError("port closed"));
     port.addEventListener("message", this.#onMessage);
+    port.addEventListener("close", this.#onClose);
   }
 
   /**
@@ -84,7 +89,7 @@ export class PortClient {
           finish(error);
         }
       };
-      const onMessage = (event: { data: unknown }) => {
+      const onMessage = (event: { data?: unknown }) => {
         const message = event.data as ToClient;
         if (!isObject(message)) return;
         const expected =
@@ -136,11 +141,15 @@ export class PortClient {
    * @public used by the client facade (step ⑩)
    */
   dispose(): void {
+    this.#shutDown(new TscacheError("client disposed"));
+  }
+
+  #shutDown(error: TscacheError): void {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#port.removeEventListener("message", this.#onMessage);
+    this.#port.removeEventListener("close", this.#onClose);
     this.#port.close?.();
-    const error = new TscacheError("client disposed");
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
   }
