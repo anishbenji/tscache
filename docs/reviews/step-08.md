@@ -1,6 +1,6 @@
 # Step 08 — Engine assembly
 
-Branch: `feat/08-engine` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: blocked
+Branch: `feat/08-engine` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in review · Verdict after triage: blocked
 
 ## Round 1 — reviewer verdict: block
 
@@ -18,6 +18,14 @@ R1-1 to R1-3 confirmed fixed.
 |---|---|---|---|---|
 | R2-1 | P0 | A version-changing put whose write then failed had already cleared the cache and adopted the version, but its throw bypassed the event; the retry emitted nothing either | accepted | Reproduced. Fixed in 565a6fa: `CacheState` takes an `onVersionClear` hook (architecture §4.5), called after the put applied or, on a failed write, before the error propagates; the engine emits from it. Regression test: event once, error propagated, retry silent. Follow-up 21819df moves the recovery out of `put` for the complexity gate |
 | R2-2 | P2 | `Engine.setFinalizedUntil` lacked TSDoc on the two directions and the need to refetch | accepted | TSDoc added to every `Engine` method in 565a6fa |
+
+## Round 3 — reviewer verdict: merge after fixes
+
+R2-1 and R2-2 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | In the failed-write path, a throwing `cacheCleared` listener replaced the write error the caller must see | accepted | Reproduced. Fixed in d6be9f9: the listener's error is dropped in that path and the write error propagates (recorded in §4.6); regression test with both failures |
 
 ## Contract-test changes
 
