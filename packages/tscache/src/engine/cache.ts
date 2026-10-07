@@ -223,7 +223,16 @@ export class CacheState {
       return this.#write(points, authority, limit);
     } catch (error) {
       if (touched !== undefined) this.#coverage.subtract(touched);
-      if (cleared) this.#hooks.onVersionClear?.();
+      // The write failure is the error the caller must see; a listener that
+      // throws while being told about the clear cannot replace it.
+      if (cleared) {
+        try {
+          this.#hooks.onVersionClear?.();
+        } catch {
+          // Reported through the write error; the listener's own error is
+          // dropped, as a second failure inside a failure path.
+        }
+      }
       throw error;
     }
   }

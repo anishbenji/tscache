@@ -78,3 +78,29 @@ describe("Engine version-mismatch clear whose write fails", () => {
     );
   });
 });
+
+describe("Engine version-mismatch clear whose write and listener both fail", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("propagates the write error, not the listener's", () => {
+    const engine = new Engine();
+    const { id } = engine.cache(engineConfig({ version: "v1" }));
+    engine.put(id, batch([3]));
+    const seen: EngineEvents["cacheCleared"][] = [];
+    engine.on("cacheCleared", (event) => {
+      seen.push(event);
+      throw new Error("listener failed");
+    });
+    const failure = new RangeError("Array buffer allocation failed");
+    vi.spyOn(SegmentStore.prototype, "put").mockImplementationOnce(() => {
+      throw failure;
+    });
+    expect(() =>
+      engine.put(id, { ...batch([13]), meta: { version: "v2" } }),
+    ).toThrow(failure);
+    expect(seen).toEqual([{ cacheId: id, reason: "version-mismatch" }]);
+    expect(engine.get(id, { start: 3, end: 13 })).toEqual(
+      result([], [], [{ start: 3, end: 13 }]),
+    );
+  });
+});
