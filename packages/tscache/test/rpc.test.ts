@@ -264,7 +264,13 @@ describe("operations round-trip", () => {
     await expect(
       client.request("cache", { ...config, interval: 20 }),
     ).rejects.toBeInstanceOf(ConfigError);
-    for (const op of ["nonsense", "toString", "constructor", "__proto__"]) {
+    for (const op of [
+      "nonsense",
+      "toString",
+      "constructor",
+      "__proto__",
+      { toString: 0, valueOf: 0 },
+    ]) {
       await expect(client.request(op as never, {})).rejects.toMatchObject({
         name: "TscacheError",
         message: expect.stringMatching(/unknown op/),

@@ -220,7 +220,7 @@ export class RpcServer {
   #dispatch(connection: Connection, req: Req): unknown {
     // Own properties only: "toString" is not an op.
     if (typeof req.op !== "string" || !Object.hasOwn(this.#handlers, req.op)) {
-      throw new TscacheError(`unknown op ${String(req.op)}`);
+      throw new TscacheError(`unknown op ${show(req.op)}`);
     }
     const handler = this.#handlers[req.op as Op];
     const p = (isObject(req.params) ? req.params : {}) as Params;
