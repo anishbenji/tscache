@@ -1,6 +1,6 @@
 # Step 09 — RPC protocol, handshake and dedicated worker
 
-Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 1 · Status: in review · Verdict after triage: blocked
+Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 2 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (hybrid TDD).
 
@@ -10,7 +10,7 @@ Not an engine step: tests were written with the code (hybrid TDD).
 |---|---|---|---|---|
 | R1-1 | P1 | `dispose` closed the port before its response was posted, so `await request("dispose")` never settled | accepted | Reproduced. Fixed in 67c3bd9: the response leaves first, the port is detached after; round-trip test |
 | R1-2 | P1 | A failure to post `init` (an uncloneable fetcher context) threw inside the listener and left `connect()` pending with the port open | accepted | Reproduced. Fixed in 67c3bd9: the error rejects `connect()` and closes the port; test with a function in the context |
-| R1-3 | P1 | Op lookup found inherited properties, so `op: "toString"` succeeded | accepted | Reproduced. Fixed in 67c3bd9: own-property check; test for `toString`, `constructor`, `__proto__` |
+| R1-3 | P1 | Op lookup found inherited properties, so `op: "toString"` succeeded | accepted | Reproduced. Fixed in 67c3bd9: own-property check. The tests this row first claimed had not landed (a script edit silently missed); they exist since fa67988 (see R2-3) |
 
 ## Adversarial round 1 — focus: cache-owned buffers never transferred; mismatch handling; payload still valid for IndexedDB and SSR — reviewer verdict: merge after fixes
 
@@ -23,6 +23,16 @@ The reviewer's probes confirmed that transferred reads and segment payloads pres
 | A1-3 | P1 | The client accepted `init-ok` before `hello`, succeeding without a protocol check | accepted | Reproduced. Fixed in 67c3bd9: two-stage handshake state; an out-of-order message rejects `connect()`; test |
 | A1-4 | P1 | Handler lookup accepts inherited operations (same as R1-3) | accepted | fixed in 67c3bd9 |
 | A1-5 | P2 | The Fallow rule change (`unused-class-members` → warn) sat on the step branch, coupling a CI-policy change to the RPC review | accepted | Reverted here; moved to `chore/09-fallow-class-members` (own pull request). Until that merges, `bun run ci` on this branch reports the two members as gating dead code |
+
+## Round 2 — reviewer verdict: merge after fixes
+
+All runtime fixes from round 1 confirmed present; the Fallow change confirmed gone from the branch (it merged separately as #15).
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | A server-side detach left the client's pending and later requests unsettled | accepted | Reproduced. Fixed in fa67988: the client listens for the port's `close` event and shuts down, rejecting pending and later requests; test |
+| R2-2 | P1 | A minified worker bundle renames constructors, so `error.name` no longer matched and `fromWireError` lost `PutError`'s fields | accepted | Reproduced in reasoning (the base class sets `name` from the constructor). Fixed in fa67988: the wire name is the stable class name chosen by `instanceof`; test overrides `name` and checks the rebuild |
+| R2-3 | P1 | The inherited-op tests claimed in R1-3 were not in the suite | accepted | Correct: the edit had not applied. Added in fa67988 for `toString`, `constructor`, `__proto__`; the R1-3 record above is corrected |
 
 ## Contract-test changes
 
