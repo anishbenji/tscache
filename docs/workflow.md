@@ -63,7 +63,7 @@ The reviewer reads only committed history (`git diff main...feat/NN-slug`), so c
 5. **Re-review** when the round had a P0 or P1, accepted or contested. Run the script again. Later rounds read the triage file, check that accepted fixes landed, and may contest a rejection with a reason.
 6. **Settled** when a round reports no P0 or P1, new or re-raised. That round's P2s and nits are still triaged (fixed or rejected) but do not trigger another round. A re-raised rejection that the triage answers with a doc citation does not block settling.
 7. **Convergence check.** If the same area draws findings in two consecutive rounds, the fixes are not converging: stop patching, then redesign the area or escalate to the user, and record which in the triage. More rounds on a design that keeps leaking only produce more patches.
-8. **Cap.** Stop after four rounds without settling and escalate to the user.
+8. **Cap.** Stop after ten rounds without settling and escalate to the user (raised from four on 2026-10-06: the user wants to hear about a loop only when it is clearly not converging; the convergence check in step 7 still catches an area that keeps leaking).
 
 The Claude thread runs the loop without stopping between rounds, then reports the final triage to the user. Each round uses a fresh Codex session, so the reviewer carries no context from writing the contract tests or from earlier rounds beyond the triage file.
 
