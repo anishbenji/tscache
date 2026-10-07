@@ -34,6 +34,10 @@ All runtime fixes from round 1 confirmed present; the Fallow change confirmed go
 | R2-2 | P1 | A minified worker bundle renames constructors, so `error.name` no longer matched and `fromWireError` lost `PutError`'s fields | accepted | Reproduced in reasoning (the base class sets `name` from the constructor). Fixed in fa67988: the wire name is the stable class name chosen by `instanceof`; test overrides `name` and checks the rebuild |
 | R2-3 | P1 | The inherited-op tests claimed in R1-3 were not in the suite | accepted | Correct: the edit had not applied. Added in fa67988 for `toString`, `constructor`, `__proto__`; the R1-3 record above is corrected |
 
+## Round 3 (first attempt) — no verdict
+
+The Codex session hit the one-hour limit while still probing and wrote no report. Its last probe showed a real defect, fixed before the rerun in d428e7e: a `cacheCleared` listener throwing a null-prototype object made `String()` throw inside the server's reply path, so the `clear` request never settled. Non-Error throws are now described with `show()`, a reply whose serialization fails falls back to a generic wire error, and an uncloneable result is answered with an error; regression test added.
+
 ## Contract-test changes
 
 None (no contract tests for this step).
