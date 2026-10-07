@@ -785,7 +785,7 @@ Rules:
 - **Transfer (§3.3).** The server transfers the buffers of a `get` result (already copies) and the client transfers the batch's typed arrays on `put` where it owns them; the sender's arrays are detached afterwards (documented in `put`).
 - **Events.** `Engine` `cacheCleared` → `evt scope:'cache'` to every attached port. `mergeWarning` (N21) is sent by the server from `put`'s warnings as `evt scope:'request'` with `requestId = clientId + ':' + req.id`, to every port (cross-tab observability, §2.7). The client re-emits `evt` to its `on` listeners as received.
 - **Browser coverage (N24).** Step ⑨ is tested under Node over `MessageChannel`. A real dedicated `Worker` and transfer across a real port are covered at step ⑩ with Playwright (already a dependency; needs `bunx playwright install chromium` locally and a browser-install step in CI, on a chore branch), and the multi-tab suite at step ⑫.
-- **Entries.** `entries/worker.ts` gains the dedicated-worker path: on first `message`, if it is `init`, the module attaches the worker global as a port (SharedWorker `onconnect` arrives at step ⑩). The entry imports `Engine` and `RpcServer` only.
+- **Entries.** `entries/worker.ts` gains the dedicated-worker path: when the module runs inside a dedicated worker (a worker global without `onconnect`), it attaches the worker global as a port at load; messages the worker posts before the page listens are buffered by the browser. SharedWorker `onconnect` arrives at step ⑩. The entry imports `Engine` and `RpcServer` only, and is the package's one side-effecting module (`sideEffects` in `package.json`).
 
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
