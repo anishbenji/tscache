@@ -55,29 +55,42 @@ interface Resolved {
   fetcher: FetcherConfig | undefined;
 }
 
-function resolve(options: ClientOptions): Resolved {
-  const mode = options.mode ?? "shared";
-  if (!CHAIN.includes(mode)) {
+function chainFrom(mode: HostingMode | undefined): HostingMode[] {
+  const start = mode ?? "shared";
+  if (!CHAIN.includes(start)) {
     throw new ConfigError(`mode must be one of ${CHAIN.join(", ")}`);
   }
-  const chain = CHAIN.slice(CHAIN.indexOf(mode));
-  if (mode !== "in-process" && options.workerUrl === undefined) {
-    throw new ConfigError("workerUrl is required unless mode is 'in-process'");
-  }
+  return CHAIN.slice(CHAIN.indexOf(start));
+}
+
+function timeoutOf(options: ClientOptions): number {
   const timeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
   if (!(Number.isFinite(timeoutMs) && timeoutMs > 0)) {
     throw new ConfigError("handshakeTimeoutMs must be a positive number");
   }
-  const fetcher =
-    options.fetcher === undefined
-      ? undefined
-      : {
-          module: String(options.fetcher.module),
-          ...(options.fetcher.context !== undefined
-            ? { context: options.fetcher.context }
-            : {}),
-        };
-  return { chain, workerUrl: options.workerUrl, timeoutMs, fetcher };
+  return timeoutMs;
+}
+
+/** The fetcher config as it crosses the wire: module as a string. */
+function fetcherOf(options: ClientOptions): FetcherConfig | undefined {
+  const fetcher = options.fetcher;
+  if (fetcher === undefined) return undefined;
+  const wire: FetcherConfig = { module: String(fetcher.module) };
+  if (fetcher.context !== undefined) wire.context = fetcher.context;
+  return wire;
+}
+
+function resolve(options: ClientOptions): Resolved {
+  const chain = chainFrom(options.mode);
+  if (chain[0] !== "in-process" && options.workerUrl === undefined) {
+    throw new ConfigError("workerUrl is required unless mode is 'in-process'");
+  }
+  return {
+    chain,
+    workerUrl: options.workerUrl,
+    timeoutMs: timeoutOf(options),
+    fetcher: fetcherOf(options),
+  };
 }
 
 function open(mode: HostingMode, r: Resolved): Promise<Hosting> {
