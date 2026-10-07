@@ -1,6 +1,6 @@
 # Step 09 — RPC protocol, handshake and dedicated worker
 
-Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 6 · Status: in review · Verdict after triage: blocked
+Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 7 · Status: settled · Verdict after triage: merge
 
 Not an engine step: tests were written with the code (hybrid TDD).
 
@@ -79,6 +79,10 @@ R5-1 and R5-2 confirmed fixed.
 |---|---|---|---|---|
 | R6-1 | P1 | A `hello`/`init` whose `protocol` clones but cannot be converted to a string threw during interpolation, leaving the handshake pending on either side | accepted | Reproduced. Fixed in ac7a304: every interpolation of a peer-supplied value in `rpc/` goes through `show()` (same class as step ⑤ R3/R4); non-numeric protocols are reported as NaN. Tests both directions |
 
+## Round 7 — reviewer verdict: merge
+
+No findings; R6-1 confirmed fixed.
+
 ## Contract-test changes
 
 None (no contract tests for this step).
@@ -86,3 +90,17 @@ None (no contract tests for this step).
 ## Decision concerns
 
 None.
+
+## Merge request
+
+**Scope.** Step ⑨ of the commit plan: the RPC layer. `rpc/protocol.ts` (wire types of §3, error and transfer helpers, the shared `listen` port helper), `rpc/server.ts` (`RpcServer`: hello with a worker-assigned clientId, protocol check on init, dispatch to `Engine`, `cacheCleared` and `mergeWarning` fan-out, controlled-detach `bye`), `rpc/port-client.ts` (`PortClient`: two-stage handshake, request correlation, error rebuild, closure handling), and the dedicated-worker path in `entries/worker.ts`. Architecture §4.7 (new), N23–N24, `hello.clientId` in §3.1. `package.json` marks the worker entry as the package's one side-effecting module.
+
+**Decisions taken on this branch** (user-confirmed 2026-10-07). N23: the worker assigns `clientId` in `hello`. N24: step ⑨ is tested under Node over `MessageChannel`; real Worker/port coverage comes with Playwright at steps ⑩ and ⑫. The in-process `MessageChannel` pair stays as locked (§3.2). One tooling change surfaced here and merged separately as #15 (Fallow `unused-class-members` → warn).
+
+**Review outcome.** Seven rounds plus the scheduled adversarial pass; three round-3 sessions stalled before one completed. Findings were all transport lifecycle and hostile-input robustness, none in the wire format or dispatch semantics: dispose acknowledged after the port closed; `connect()` left pending by a failed `init` post, an out-of-order message, a peer closing mid-handshake, or a hostile `protocol` value; inherited op names accepted; server-side detach and client dispose not propagated (incl. browser ports without a `close` event and Workers without `close()`); minified bundles breaking error reconstruction; hostile error payloads throwing on either side; a flaky peer-close test. After round 3 the lifecycle area was reworked as one piece (convergence rule). Round 7: no findings.
+
+**Confidence: high for the Node path, deliberately unverified for real browser transports** (N24): every finding was reproduced by a test before its fix and confirmed by the reviewer the next round; 27 RPC tests cover handshake order and refusal, every op round trip with exact results, error classes with fields, event fan-out and request ids, transfer (sender detached, result fresh), closure on both sides with and without `close` events, and hostile values at each entry point. The first browser run is step ⑩'s Playwright smoke.
+
+**Blast radius: additive.** New `rpc/` modules, the worker entry (side-effecting only inside a worker), `sideEffects` in `package.json`. No `engine/` behaviour changed. 998 tests pass under `bun run ci`.
+
+**Known limits, by design.** `updateAuth` is accepted and ignored until step ⑪; every `get` is cache-only until then. `lib` in `hello` is a placeholder version string until the build injects it. `PortClient` is consumed by step ⑩'s client facade; until then Fallow reports its public methods as unused (warning only, per #15).
