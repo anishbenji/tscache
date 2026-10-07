@@ -61,4 +61,8 @@ jobs:
           echo "CI_BASE=${base}" >> "$GITHUB_ENV"
           echo "FALLOW_AUDIT_BASE=${base}" >> "$GITHUB_ENV"
 
+      # Browser tests (Playwright, Chromium only) start at commit-plan step 10.
+      - name: Install Chromium for Playwright
+        run: bunx playwright install --with-deps chromium
+
       - run: bun run ci
