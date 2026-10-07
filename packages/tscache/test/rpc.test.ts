@@ -141,6 +141,41 @@ describe("handshake", () => {
   });
 });
 
+describe("handshake order and failures", () => {
+  it("rejects init-ok arriving before hello", async () => {
+    const channel = new MessageChannel();
+    channel.port1.postMessage({ t: "init-ok" });
+    await expect(
+      PortClient.connect(channel.port2 as MessagePortLike),
+    ).rejects.toMatchObject({
+      name: "TscacheError",
+      message: expect.stringMatching(/out of order/),
+    });
+    channel.port1.close();
+  });
+
+  it("rejects when the fetcher context cannot be posted", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    await expect(
+      PortClient.connect(channel.port2 as MessagePortLike, {
+        fetcher: { module: "x", context: { fn: () => 0 } },
+      }),
+    ).rejects.toThrow();
+    server.detach(channel.port1 as MessagePortLike);
+  });
+
+  it("dispose is acknowledged before the port closes", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const client = await PortClient.connect(channel.port2 as MessagePortLike);
+    await expect(client.request("dispose", {})).resolves.toBeUndefined();
+    client.dispose();
+  });
+});
+
 describe("operations round-trip", () => {
   it("drives every op through the wire with exact results", async () => {
     const engine = new Engine();

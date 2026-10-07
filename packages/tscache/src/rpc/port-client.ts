@@ -9,6 +9,7 @@ import {
   type Evt,
   type FetcherConfig,
   fromWireError,
+  type Hello,
   type Init,
   type MessagePortLike,
   type Op,
@@ -51,38 +52,53 @@ export class PortClient {
     init: { fetcher?: FetcherConfig } = {},
   ): Promise<PortClient> {
     return new Promise((resolve, reject) => {
-      let clientId: string | undefined;
-      const onMessage = (event: { data: unknown }) => {
-        const message = event.data as ToClient;
-        if (!isObject(message)) return;
-        if (message.t === "hello") {
-          if (message.protocol !== PROTOCOL_VERSION) {
-            finish(
-              new ProtocolMismatchError(
-                `worker speaks protocol ${message.protocol}, client speaks ${PROTOCOL_VERSION}`,
-                {
-                  clientProtocol: PROTOCOL_VERSION,
-                  workerProtocol: message.protocol,
-                },
-              ),
-            );
-            return;
-          }
-          clientId = message.clientId;
-          const reply: Init = { t: "init", protocol: PROTOCOL_VERSION };
-          if (init.fetcher !== undefined) reply.fetcher = init.fetcher;
-          port.postMessage(reply);
-        } else if (message.t === "init-ok") {
-          port.removeEventListener("message", onMessage);
-          resolve(new PortClient(port, clientId ?? ""));
-        } else if (message.t === "init-err") {
-          finish(fromWireError(message.error));
-        }
-      };
+      // hello first, then the init result: anything else is out of order.
+      let stage: "hello" | "init" = "hello";
+      let clientId = "";
       const finish = (error: unknown) => {
         port.removeEventListener("message", onMessage);
         port.close?.();
         reject(error);
+      };
+      const onHello = (message: Hello) => {
+        if (message.protocol !== PROTOCOL_VERSION) {
+          finish(
+            new ProtocolMismatchError(
+              `worker speaks protocol ${message.protocol}, client speaks ${PROTOCOL_VERSION}`,
+              {
+                clientProtocol: PROTOCOL_VERSION,
+                workerProtocol: message.protocol,
+              },
+            ),
+          );
+          return;
+        }
+        clientId = message.clientId;
+        stage = "init";
+        const reply: Init = { t: "init", protocol: PROTOCOL_VERSION };
+        if (init.fetcher !== undefined) reply.fetcher = init.fetcher;
+        try {
+          port.postMessage(reply);
+        } catch (error) {
+          // An uncloneable fetcher context cannot cross the port.
+          finish(error);
+        }
+      };
+      const onMessage = (event: { data: unknown }) => {
+        const message = event.data as ToClient;
+        if (!isObject(message)) return;
+        const expected =
+          stage === "hello" ? message.t === "hello" : message.t !== "hello";
+        if (!expected) {
+          finish(new TscacheError(`handshake out of order: got ${message.t}`));
+        } else if (message.t === "hello") {
+          onHello(message);
+        } else if (message.t === "init-ok") {
+          port.removeEventListener("message", onMessage);
+          resolve(new PortClient(port, clientId));
+        } else if (message.t === "init-err") {
+          finish(fromWireError(message.error));
+        }
       };
       port.addEventListener("message", onMessage);
       port.start?.();

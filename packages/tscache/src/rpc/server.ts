@@ -142,6 +142,8 @@ export class RpcServer {
     const transfer =
       req.op === "get" ? transferablesOf(result as GetResult) : [];
     connection.port.postMessage(res, transfer);
+    // The acknowledgement must leave before the port goes.
+    if (req.op === "dispose") this.#drop(connection);
   }
 
   #reply(connection: Connection, id: number, error: unknown): void {
@@ -151,10 +153,11 @@ export class RpcServer {
 
   /** One op, one engine call; the engine validates every value. */
   #dispatch(connection: Connection, req: Req): unknown {
-    const handler = this.#handlers[req.op as Op];
-    if (handler === undefined) {
+    // Own properties only: "toString" is not an op.
+    if (typeof req.op !== "string" || !Object.hasOwn(this.#handlers, req.op)) {
       throw new TscacheError(`unknown op ${String(req.op)}`);
     }
+    const handler = this.#handlers[req.op as Op];
     const p = (isObject(req.params) ? req.params : {}) as Params;
     return handler(connection, req, p);
   }
@@ -174,10 +177,8 @@ export class RpcServer {
       this.#engine.setFinalizedUntil(p.cacheId as string, p.t as number),
     // Delivered to the fetcher at step ⑪.
     updateAuth: () => undefined,
-    dispose: (c) => {
-      this.#drop(c);
-      return undefined;
-    },
+    // Acknowledged first; #request detaches the port afterwards.
+    dispose: () => undefined,
   };
 
   /** put, then the request-scoped mergeWarning events (N21). */
