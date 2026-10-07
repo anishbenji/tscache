@@ -6,7 +6,7 @@
  */
 
 import type { Engine } from "../engine/engine";
-import { ProtocolMismatchError, TscacheError } from "../errors";
+import { ProtocolMismatchError, show, TscacheError } from "../errors";
 import type {
   GetResult,
   PutBatch,
@@ -18,11 +18,13 @@ import {
   type Evt,
   type Hello,
   type InitResult,
+  listen,
   type MessagePortLike,
   type Op,
   PROTOCOL_VERSION,
   type Req,
   type Res,
+  type ToClient,
   type ToServer,
   toWireError,
   transferablesOf,
@@ -33,7 +35,8 @@ interface Connection {
   port: MessagePortLike;
   clientId: string;
   ready: boolean;
-  listener: (event: { data?: unknown }) => void;
+  /** Removes the port's message and close listeners. */
+  unlisten: () => void;
 }
 
 /** What a request may carry; the engine validates the values. */
@@ -75,18 +78,26 @@ export class RpcServer {
       port,
       clientId: `c${++this.#nextClient}`,
       ready: false,
-      listener: (event) => this.#receive(connection, event.data),
+      unlisten: () => {},
     };
+    connection.unlisten = listen(port, {
+      onMessage: (data) => this.#receive(connection, data),
+      // The peer closed (client disposed, tab gone): forget it.
+      onClose: () => this.#drop(connection),
+    });
     this.#connections.add(connection);
-    port.addEventListener("message", connection.listener);
-    port.start?.();
     const hello: Hello = {
       t: "hello",
       protocol: PROTOCOL_VERSION,
       lib: this.#lib,
       clientId: connection.clientId,
     };
-    port.postMessage(hello);
+    this.#send(connection, hello);
+  }
+
+  /** Attached ports still alive (for tests and diagnostics). */
+  get connections(): number {
+    return this.#connections.size;
   }
 
   detach(port: MessagePortLike): void {
@@ -96,9 +107,40 @@ export class RpcServer {
   }
 
   #drop(connection: Connection): void {
-    connection.port.removeEventListener("message", connection.listener);
-    this.#connections.delete(connection);
+    if (!this.#connections.delete(connection)) return;
+    connection.unlisten();
     connection.port.close?.();
+  }
+
+  /**
+   * Posts a message. A message that cannot be cloned is answered, when it
+   * was a response, with a plain generic error that always can be; if even
+   * that fails, the port is unusable and is dropped.
+   */
+  #send(
+    connection: Connection,
+    message: ToClient,
+    transfer: Transferable[] = [],
+  ): void {
+    try {
+      connection.port.postMessage(message, transfer);
+    } catch (error) {
+      if (message.t !== "res") return;
+      const fallback: Res = {
+        t: "res",
+        id: message.id,
+        ok: false,
+        error: {
+          name: "Error",
+          message: `reply could not be sent: ${show(error)}`,
+        },
+      };
+      try {
+        connection.port.postMessage(fallback);
+      } catch {
+        this.#drop(connection);
+      }
+    }
   }
 
   #receive(connection: Connection, data: unknown): void {
@@ -118,13 +160,13 @@ export class RpcServer {
         { clientProtocol: protocol, workerProtocol: PROTOCOL_VERSION },
       );
       const reply: InitResult = { t: "init-err", error: toWireError(error) };
-      connection.port.postMessage(reply);
+      this.#send(connection, reply);
       this.#drop(connection);
       return;
     }
     connection.ready = true;
     const reply: InitResult = { t: "init-ok" };
-    connection.port.postMessage(reply);
+    this.#send(connection, reply);
   }
 
   #request(connection: Connection, req: Req): void {
@@ -142,12 +184,7 @@ export class RpcServer {
     const res: Res = { t: "res", id: req.id, ok: true, result };
     const transfer =
       req.op === "get" ? transferablesOf(result as GetResult) : [];
-    try {
-      connection.port.postMessage(res, transfer);
-    } catch (error) {
-      // A result that cannot be cloned still gets an answer.
-      this.#reply(connection, req.id, error);
-    }
+    this.#send(connection, res, transfer);
     // The acknowledgement must leave before the port goes.
     if (req.op === "dispose") this.#drop(connection);
   }
@@ -160,8 +197,7 @@ export class RpcServer {
     } catch {
       wire = { name: "Error", message: "unserializable error" };
     }
-    const res: Res = { t: "res", id, ok: false, error: wire };
-    connection.port.postMessage(res);
+    this.#send(connection, { t: "res", id, ok: false, error: wire });
   }
 
   /** One op, one engine call; the engine validates every value. */
@@ -217,8 +253,8 @@ export class RpcServer {
   }
 
   #broadcast(evt: Evt): void {
-    for (const connection of this.#connections) {
-      if (connection.ready) connection.port.postMessage(evt);
+    for (const connection of [...this.#connections]) {
+      if (connection.ready) this.#send(connection, evt);
     }
   }
 }

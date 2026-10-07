@@ -11,6 +11,7 @@ import {
   fromWireError,
   type Hello,
   type Init,
+  listen,
   type MessagePortLike,
   type Op,
   PROTOCOL_VERSION,
@@ -32,25 +33,25 @@ export class PortClient {
   readonly #port: MessagePortLike;
   readonly #pending = new Map<number, Pending>();
   readonly #listeners = new Set<(evt: Evt) => void>();
-  readonly #onMessage: (event: { data?: unknown }) => void;
-  readonly #onClose: () => void;
+  readonly #unlisten: () => void;
   #seq = 0;
   #disposed = false;
 
   private constructor(port: MessagePortLike, clientId: string) {
     this.#port = port;
     this.clientId = clientId;
-    this.#onMessage = (event) => this.#receive(event.data);
-    // The other side went away (worker died, server detached): nothing
-    // pending can be answered any more.
-    this.#onClose = () => this.#shutDown(new TscacheError("port closed"));
-    port.addEventListener("message", this.#onMessage);
-    port.addEventListener("close", this.#onClose);
+    this.#unlisten = listen(port, {
+      onMessage: (data) => this.#receive(data),
+      // The other side went away (worker died, server detached): nothing
+      // pending can be answered any more.
+      onClose: () => this.#shutDown(new TscacheError("port closed")),
+    });
   }
 
   /**
    * Waits for hello, checks the protocol, sends init and waits for its
-   * answer. Rejects with ProtocolMismatchError when either side refuses.
+   * answer. Rejects with ProtocolMismatchError when either side refuses,
+   * and with TscacheError when the port closes or misbehaves meanwhile.
    */
   static connect(
     port: MessagePortLike,
@@ -60,8 +61,9 @@ export class PortClient {
       // hello first, then the init result: anything else is out of order.
       let stage: "hello" | "init" = "hello";
       let clientId = "";
+      let unlisten = () => {};
       const finish = (error: unknown) => {
-        port.removeEventListener("message", onMessage);
+        unlisten();
         port.close?.();
         reject(error);
       };
@@ -89,8 +91,8 @@ export class PortClient {
           finish(error);
         }
       };
-      const onMessage = (event: { data?: unknown }) => {
-        const message = event.data as ToClient;
+      const onMessage = (data: unknown) => {
+        const message = data as ToClient;
         if (!isObject(message)) return;
         const expected =
           stage === "hello" ? message.t === "hello" : message.t !== "hello";
@@ -99,19 +101,27 @@ export class PortClient {
         } else if (message.t === "hello") {
           onHello(message);
         } else if (message.t === "init-ok") {
-          port.removeEventListener("message", onMessage);
+          unlisten();
           resolve(new PortClient(port, clientId));
         } else if (message.t === "init-err") {
           finish(fromWireError(message.error));
         }
       };
-      port.addEventListener("message", onMessage);
-      port.start?.();
+      unlisten = listen(port, {
+        onMessage,
+        onClose: () => finish(new TscacheError("port closed during handshake")),
+      });
     });
+  }
+
+  /** Requests awaiting a response (for tests and diagnostics). */
+  get pendingCount(): number {
+    return this.#pending.size;
   }
 
   /**
    * Sends a request; `transfer` moves the listed buffers to the worker.
+   * Parameters that cannot be cloned reject here and leave nothing behind.
    * @public used by the client facade (step ⑩)
    */
   request(
@@ -126,7 +136,12 @@ export class PortClient {
     const req: Req = { t: "req", id, op, params };
     return new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
-      this.#port.postMessage(req, transfer);
+      try {
+        this.#port.postMessage(req, transfer);
+      } catch (error) {
+        this.#pending.delete(id);
+        reject(error);
+      }
     });
   }
 
@@ -147,8 +162,7 @@ export class PortClient {
   #shutDown(error: TscacheError): void {
     if (this.#disposed) return;
     this.#disposed = true;
-    this.#port.removeEventListener("message", this.#onMessage);
-    this.#port.removeEventListener("close", this.#onClose);
+    this.#unlisten();
     this.#port.close?.();
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();

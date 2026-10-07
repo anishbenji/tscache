@@ -90,6 +90,27 @@ export interface MessagePortLike {
   close?(): void;
 }
 
+/**
+ * Subscribes to a port's messages and its closure together, and returns the
+ * one function that removes both: lifecycle handling on either side of the
+ * wire goes through here, so a listener is never left behind.
+ */
+export function listen(
+  port: MessagePortLike,
+  handlers: { onMessage(data: unknown): void; onClose(): void },
+): () => void {
+  const onMessage = (event: { data?: unknown }) =>
+    handlers.onMessage(event.data);
+  const onClose = () => handlers.onClose();
+  port.addEventListener("message", onMessage);
+  port.addEventListener("close", onClose);
+  port.start?.();
+  return () => {
+    port.removeEventListener("message", onMessage);
+    port.removeEventListener("close", onClose);
+  };
+}
+
 interface PutErrorData {
   offenderIndex: number;
   offenderTimestamp?: number;

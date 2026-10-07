@@ -354,6 +354,58 @@ describe("requests are always answered", () => {
   });
 });
 
+describe("transport lifecycle (round 3)", () => {
+  it("an error whose message cannot be cloned still yields a rejection", async () => {
+    const engine = new Engine();
+    const client = await connect(new RpcServer(engine, "0.0.0"));
+    await client.request("cache", config);
+    engine.on("cacheCleared", () => {
+      const error = new Error("x");
+      (error as { message: unknown }).message = () => 0;
+      throw error;
+    });
+    await expect(
+      client.request("clear", { cacheId: "rpc" }),
+    ).rejects.toMatchObject({
+      name: "TscacheError",
+      message: expect.stringMatching(/could not be sent/),
+    });
+  });
+
+  it("a peer closing during the handshake rejects connect", async () => {
+    const channel = new MessageChannel();
+    const connecting = PortClient.connect(channel.port2 as MessagePortLike);
+    channel.port1.close();
+    await expect(connecting).rejects.toMatchObject({
+      message: "port closed during handshake",
+    });
+  });
+
+  it("the server forgets a client that disposed itself", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const a = await connect(server);
+    const b = await connect(server);
+    const seenA = events(a);
+    await a.request("cache", config);
+    expect(server.connections).toBe(2);
+    b.dispose();
+    await tick();
+    expect(server.connections).toBe(1);
+    await a.request("clear", { cacheId: "rpc" });
+    await tick();
+    expect(seenA).toHaveLength(1);
+  });
+
+  it("a request whose params cannot be cloned rejects and leaves nothing pending", async () => {
+    const client = await connect(new RpcServer(new Engine(), "0.0.0"));
+    await expect(
+      client.request("updateAuth", { context: { fn() {} } }),
+    ).rejects.toThrow();
+    expect(client.pendingCount).toBe(0);
+    await expect(client.request("clearAll", {})).resolves.toBeUndefined();
+  });
+});
+
 describe("transport closure", () => {
   it("a server-side detach rejects pending and later requests on the client", async () => {
     const server = new RpcServer(new Engine(), "0.0.0");
