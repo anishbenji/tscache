@@ -1,6 +1,6 @@
 # Step 09 — RPC protocol, handshake and dedicated worker
 
-Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 5 · Status: in review · Verdict after triage: blocked
+Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 6 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (hybrid TDD).
 
@@ -70,6 +70,14 @@ R4-1 and R4-2 confirmed fixed.
 | R5-2 | P1 | An error whose `message` is an object with non-callable `toString`/`valueOf` cloned fine but threw inside `fromWireError`, after the pending entry was deleted | accepted | Fixed in ddecce6: non-string messages are described with `show()` before they travel, a wire error's fields are normalized on arrival, and a reply that still cannot be rebuilt rejects as "malformed error reply". Tests for both ends |
 
 The round 3 test "an error whose message cannot be cloned" now expects the described message (`a function`) instead of the send-failure fallback, since the message no longer fails to clone.
+
+## Round 6 — reviewer verdict: merge after fixes
+
+R5-1 and R5-2 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R6-1 | P1 | A `hello`/`init` whose `protocol` clones but cannot be converted to a string threw during interpolation, leaving the handshake pending on either side | accepted | Reproduced. Fixed in ac7a304: every interpolation of a peer-supplied value in `rpc/` goes through `show()` (same class as step ⑤ R3/R4); non-numeric protocols are reported as NaN. Tests both directions |
 
 ## Contract-test changes
 
