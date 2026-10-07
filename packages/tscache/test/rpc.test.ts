@@ -333,6 +333,27 @@ describe("events", () => {
   });
 });
 
+describe("requests are always answered", () => {
+  it("a listener throwing a null-prototype object still yields a rejection", async () => {
+    const engine = new Engine();
+    const client = await connect(new RpcServer(engine, "0.0.0"));
+    await client.request("cache", config);
+    engine.on("cacheCleared", () => {
+      throw Object.create(null);
+    });
+    await expect(
+      client.request("clear", { cacheId: "rpc" }),
+    ).rejects.toMatchObject({
+      name: "TscacheError",
+      message: expect.stringMatching(/an object/),
+    });
+    // The clear itself happened before the listener ran.
+    expect(engine.get("rpc", { start: 3, end: 3 })).toEqual(
+      result([], [], [{ start: 3, end: 3 }]),
+    );
+  });
+});
+
 describe("transport closure", () => {
   it("a server-side detach rejects pending and later requests on the client", async () => {
     const server = new RpcServer(new Engine(), "0.0.0");

@@ -26,6 +26,7 @@ import {
   type ToServer,
   toWireError,
   transferablesOf,
+  type WireError,
 } from "./protocol";
 
 interface Connection {
@@ -141,13 +142,25 @@ export class RpcServer {
     const res: Res = { t: "res", id: req.id, ok: true, result };
     const transfer =
       req.op === "get" ? transferablesOf(result as GetResult) : [];
-    connection.port.postMessage(res, transfer);
+    try {
+      connection.port.postMessage(res, transfer);
+    } catch (error) {
+      // A result that cannot be cloned still gets an answer.
+      this.#reply(connection, req.id, error);
+    }
     // The acknowledgement must leave before the port goes.
     if (req.op === "dispose") this.#drop(connection);
   }
 
+  /** Every request is answered, whatever the error looks like. */
   #reply(connection: Connection, id: number, error: unknown): void {
-    const res: Res = { t: "res", id, ok: false, error: toWireError(error) };
+    let wire: WireError;
+    try {
+      wire = toWireError(error);
+    } catch {
+      wire = { name: "Error", message: "unserializable error" };
+    }
+    const res: Res = { t: "res", id, ok: false, error: wire };
     connection.port.postMessage(res);
   }
 

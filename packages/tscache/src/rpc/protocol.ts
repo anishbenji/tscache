@@ -12,6 +12,7 @@ import {
   ProtocolMismatchError,
   PutError,
   type PutErrorCode,
+  show,
   TscacheError,
   UnknownCacheError,
 } from "../errors";
@@ -125,8 +126,9 @@ function wireNameOf(error: Error): string {
 
 /** Error → WireError. Any value can be thrown; non-errors become messages. */
 export function toWireError(error: unknown): WireError {
+  // show() never calls the value's own conversion, which can throw.
   if (!(error instanceof Error)) {
-    return { name: "Error", message: String(error) };
+    return { name: "Error", message: show(error) };
   }
   const wire: WireError = { name: wireNameOf(error), message: error.message };
   if (error instanceof PutError) {
