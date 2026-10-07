@@ -1,6 +1,6 @@
 # Step 09 — RPC protocol, handshake and dedicated worker
 
-Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 4 · Status: in review · Verdict after triage: blocked
+Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 5 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (hybrid TDD).
 
@@ -59,6 +59,17 @@ R3-1, R3-2 and R3-4 confirmed fixed.
 |---|---|---|---|---|
 | R4-1 | P1 | R3-3 held only for ports with `close()`: a dedicated `Worker` has none, so `dispose()` left the server connection registered | accepted | Correct. Fixed in 8223d6f: `dispose()` posts the `dispose` op before shutting down; test with a transport lacking `close()` |
 | R4-2 | P1 | The R3-3 test waited one timer tick for the asynchronous peer-close event and raced it (about 3 % of runs; the round's own host CI run hit it) | accepted | Fixed in 8223d6f: bounded polling until the connection count drops; three consecutive green runs locally and CI green |
+
+## Round 5 — reviewer verdict: merge after fixes
+
+R4-1 and R4-2 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R5-1 | P1 | The closure handling of R2-1/R3-2 relied on Node's `close` event, which a browser `MessagePort` does not fire, so a controlled server detach would leave browser clients pending | accepted | Fixed in ddecce6: the server posts a `bye` message before dropping a port (controlled detach, `init-err`, `dispose`), and the client treats `bye` as closure during and after the handshake; the `close` listener stays for the uncontrolled case. Tests use a port wrapper that swallows `close` |
+| R5-2 | P1 | An error whose `message` is an object with non-callable `toString`/`valueOf` cloned fine but threw inside `fromWireError`, after the pending entry was deleted | accepted | Fixed in ddecce6: non-string messages are described with `show()` before they travel, a wire error's fields are normalized on arrival, and a reply that still cannot be rebuilt rejects as "malformed error reply". Tests for both ends |
+
+The round 3 test "an error whose message cannot be cloned" now expects the described message (`a function`) instead of the send-failure fallback, since the message no longer fails to clone.
 
 ## Contract-test changes
 
