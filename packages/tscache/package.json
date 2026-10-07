@@ -4,7 +4,9 @@
   "description": "Browser time-series cache: SharedWorker multi-tab sharing, worker-side fetch orchestration, coverage tracking with real-gap awareness",
   "license": "MIT",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/worker.js"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

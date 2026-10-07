@@ -314,8 +314,9 @@ On connect, the worker immediately reports its protocol version; the client refu
 ```ts
 const PROTOCOL_VERSION = 1;
 
-// worker → client, unprompted on connect:
-{ t: 'hello', protocol: 1, lib: '0.1.0' }
+// worker → client, unprompted on connect. clientId is assigned by the
+// worker per connection (N23) and prefixes the client's request ids (§2.7):
+{ t: 'hello', protocol: 1, lib: '0.1.0', clientId: 'c1' }
 // client → worker (also carries fetcher config so the worker can import it):
 { t: 'init', protocol: 1, fetcher?: { module: string, context?: unknown } }
 // worker → client:
@@ -740,6 +741,52 @@ Rules:
 
 Out of step ⑧ by design: orchestration and `cacheOnly` (step ⑪ — until then every `get` is cache-only), RPC envelopes and request ids (step ⑨), `updateAuth`/`dispose` (client and worker layers).
 
+### 4.7 Internal contracts — RPC layer (N23, N24, approved 2026-10-07)
+
+Not an engine step: tests are written with the code (hybrid TDD, AGENTS.md). The wire format is §3; this section fixes the module shapes.
+
+```ts
+// rpc/protocol.ts — wire types (§3.1–§3.2) and helpers; no DOM references.
+const PROTOCOL_VERSION = 1;
+/** Error → WireError: name, message, code (PutError, AuthInvalidError) and,
+ *  for PutError, offenderIndex/offenderTimestamp/expected in data. */
+function toWireError(error: unknown): WireError;
+/** WireError → the §2.6 class with that name, fields restored; an unknown
+ *  name becomes a TscacheError carrying the original name in its message. */
+function fromWireError(error: WireError): TscacheError;
+/** The buffers of a result's arrays, for the postMessage transfer list. */
+function transferablesOf(value: { timestamps?: ArrayBufferView; fields?: Record<string, ArrayBufferView> }): ArrayBuffer[];
+
+// rpc/server.ts — worker-side shell around Engine.
+class RpcServer {
+  constructor(engine: Engine, lib: string);
+  /** Sends hello with a fresh clientId, awaits init (protocol check),
+   *  then dispatches req → engine and fans out evt to every attached port. */
+  attach(port: MessagePortLike): void;
+  detach(port: MessagePortLike): void;
+}
+
+// rpc/port-client.ts — client-side port wrapper.
+class PortClient {
+  /** Completes the handshake; rejects with ProtocolMismatchError. */
+  static connect(port: MessagePortLike, init?: { fetcher?: FetcherConfig }): Promise<PortClient>;
+  readonly clientId: string;
+  request(op: Op, params: unknown, transfer?: ArrayBuffer[]): Promise<unknown>;
+  on(fn: (evt: Evt) => void): () => void;
+  dispose(): void;
+}
+```
+
+Rules:
+
+- **`MessagePortLike`** is the structural subset both `MessagePort` (browser, Node) and a dedicated worker's global/`Worker` object satisfy: `postMessage(message, transfer?)`, `addEventListener('message' | 'messageclose', …)`, `start?()`, `close?()`. In-process mode builds a `MessageChannel` and attaches the server to one port and the client to the other (§3.2, locked), so the RPC layer has one code path and its tests run under Node.
+- **Handshake.** On `attach`, the server posts `hello` with `PROTOCOL_VERSION`, `lib` and the new `clientId` (`'c' + counter`, N23). The client answers `init`; a `protocol` other than the server's gets `init-err` with a `ProtocolMismatchError` wire error and the port is detached; the client likewise rejects `connect()` with `ProtocolMismatchError` when `hello.protocol` differs. A `req` before `init-ok` is answered with an error.
+- **Dispatch.** `op` maps one-to-one onto `Engine` (`cache`, `get`, `put`, `invalidate`, `clear`, `clearAll`, `setFinalizedUntil`) plus `updateAuth` (accepted and ignored until step ⑪) and `dispose` (detaches the port). Params are passed through to the engine, which validates them; any thrown error travels back as `res ok:false` with `toWireError`, so `PutError` fields and `code` survive the wire and the client rethrows the same class.
+- **Transfer (§3.3).** The server transfers the buffers of a `get` result (already copies) and the client transfers the batch's typed arrays on `put` where it owns them; the sender's arrays are detached afterwards (documented in `put`).
+- **Events.** `Engine` `cacheCleared` → `evt scope:'cache'` to every attached port. `mergeWarning` (N21) is sent by the server from `put`'s warnings as `evt scope:'request'` with `requestId = clientId + ':' + req.id`, to every port (cross-tab observability, §2.7). The client re-emits `evt` to its `on` listeners as received.
+- **Browser coverage (N24).** Step ⑨ is tested under Node over `MessageChannel`. A real dedicated `Worker` and transfer across a real port are covered at step ⑩ with Playwright (already a dependency; needs `bunx playwright install chromium` locally and a browser-install step in CI, on a chore branch), and the multi-tab suite at step ⑫.
+- **Entries.** `entries/worker.ts` gains the dedicated-worker path: when the module runs inside a dedicated worker (a worker global without `onconnect`), it attaches the worker global as a port at load; messages the worker posts before the page listens are buffered by the browser. SharedWorker `onconnect` arrives at step ⑩. The entry imports `Engine` and `RpcServer` only, and is the package's one side-effecting module (`sideEffects` in `package.json`).
+
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
 - Vitest/Node against `engine/`, `coverage`, `segment/` directly (~90% of logic), plus RPC protocol over an in-memory port pair; property-style tests for coverage merge/subtraction and segment merge.
@@ -782,7 +829,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (N9–N22 later, at steps ③–⑧) (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9–N24 later, at steps ③–⑨) (working process §2.3: alternatives presented, user decided).
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -808,6 +855,8 @@ These emerged while making the API concrete (N9–N22 later, at steps ③–⑧)
 | N20 | Scope of the `cache()` config conflict | **Every resolved field except the dataset ones must match**: `interval`, `alignmentOffset`, `fields`, `gapSplitK`, `segmentSlotCap`, `warnOnOverlapDiff` (they shape the layout or cross-tab behaviour) → `ConfigError` on mismatch. `version` and `finalizedUntil` apply at creation only and are ignored by a joining tab, so a stale tab cannot clear or rewind the live cache. Rejected: grid and schema only, rest first-creator-wins (a tab asking for warnings would silently get none); everything must match (tabs started minutes apart with a moving `finalizedUntil` would reject each other). User-confirmed 2026-10-07 |
 | N21 | Who emits `mergeWarning` | **The RPC server, from `put`'s result**: it knows the request id. The engine emits only cache-scoped `cacheCleared`; in-process callers get warnings from `put()` directly. Rejected: the engine with a made-up `engine:<seq>` id (carries request identity it does not need). User-confirmed 2026-10-07 |
 | N22 | `clearAll` | **Empties every cache and keeps the configs**, emitting `cacheCleared 'clear-all'` per cache; handles in every tab stay valid. Rejected: dropping the caches (live handles would fail with `UnknownCacheError` until each tab calls `cache()` again). User-confirmed 2026-10-07 |
+| N23 | Where `clientId` comes from | **The worker assigns it in `hello`** (one server numbers its connections), so request ids `clientId:seq` are unique across tabs by construction with no client-side randomness. Rejected: a client-generated random id (uniqueness by luck, server must trust it). User-confirmed 2026-10-07 |
+| N24 | Browser coverage for the RPC layer | **Node over `MessageChannel` at step ⑨; real Worker and ports with Playwright at steps ⑩ and ⑫.** No new dependency; Playwright is already present. Rejected: adding Vitest browser mode now (a second browser runner and a dependency decision for one test). User-confirmed 2026-10-07 |
 
 ## 9. What happens after sign-off
 
