@@ -1,6 +1,6 @@
 # Step 09 — RPC protocol, handshake and dedicated worker
 
-Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 2 · Status: in review · Verdict after triage: blocked
+Branch: `feat/09-rpc` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (hybrid TDD).
 
@@ -37,6 +37,19 @@ All runtime fixes from round 1 confirmed present; the Fallow change confirmed go
 ## Round 3 (first attempt) — no verdict
 
 The Codex session hit the one-hour limit while still probing and wrote no report. Its last probe showed a real defect, fixed before the rerun in d428e7e: a `cacheCleared` listener throwing a null-prototype object made `String()` throw inside the server's reply path, so the `clear` request never settled. Non-Error throws are now described with `show()`, a reply whose serialization fails falls back to a generic wire error, and an uncloneable result is answered with an error; regression test added.
+
+## Round 3 — reviewer verdict: merge after fixes
+
+Completed on the fourth attempt; three earlier sessions stalled mid-review (each ran its probes for 15–20 minutes, then went silent until the hour limit). Rounds 1–2 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | An `Error` whose `message` is a function passes `toWireError` but fails to clone in `postMessage`, so the request never settles | accepted | Reproduced. Fixed in 4026523; test |
+| R3-2 | P1 | A peer closing during the handshake left `connect()` pending (only messages were listened for) | accepted | Reproduced. Fixed in 4026523; test |
+| R3-3 | P1 | A client that disposed itself stayed registered on the server (listener, port, broadcast work retained) | accepted | Reproduced. Fixed in 4026523; test via the new `connections` count |
+| R3-4 | P1 | A request whose params cannot be cloned rejected but left its pending entry behind | accepted | Reproduced. Fixed in 4026523; test via the new `pendingCount` |
+
+**Convergence rule.** Transport lifecycle drew findings in rounds 1, 2 and 3, so 4026523 reworks the area instead of patching: both sides subscribe to a port through one `listen()` helper that pairs the message and close listeners and returns the single function removing both; the server sends through one `#send` that falls back to a plain, always-cloneable error reply and drops a port that cannot take even that; the client's handshake and steady state share the same closure handling. The architecture doc (§4.7) is unchanged in substance; `listen` is an internal helper.
 
 ## Contract-test changes
 
