@@ -95,8 +95,20 @@ function splitAt(points: Columns, limit: number): [Columns, Columns] {
   return [slice(points, 0, i), slice(points, i, points.slots.length)];
 }
 
+/** Hooks the owner may pass; each is optional. */
+export interface CacheStateHooks {
+  /**
+   * Called once when a put's version mismatch has cleared the cache: after
+   * the put was applied, or, if its write then failed, before the error
+   * propagates (the cache is empty either way). The engine emits
+   * `cacheCleared 'version-mismatch'` from it.
+   */
+  onVersionClear?: () => void;
+}
+
 export class CacheState {
   readonly config: ResolvedCacheConfig;
+  readonly #hooks: CacheStateHooks;
   readonly #store: SegmentStore;
   readonly #coverage = new CoverageIndex();
   #version: string | undefined;
@@ -104,8 +116,9 @@ export class CacheState {
   /** First provisional slot; undefined when nothing is provisional. */
   #volatileFrom: number | undefined;
 
-  constructor(config: ResolvedCacheConfig) {
+  constructor(config: ResolvedCacheConfig, hooks: CacheStateHooks = {}) {
     this.config = config;
+    this.#hooks = hooks;
     this.#store = new SegmentStore(config);
     this.#version = config.version;
     if (config.finalizedUntil !== undefined) {
@@ -152,10 +165,13 @@ export class CacheState {
       // Everything the write may have changed, not only what it would have
       // claimed: a half-written provisional stretch must be refetched too.
       if (touched !== undefined) this.#coverage.subtract(touched);
+      // The clear already happened; its observers must still hear of it.
+      if (cleared) this.#hooks.onVersionClear?.();
       throw error;
     }
     if (wm !== undefined) this.#advance(wm.t, wm.slot);
     if (claim !== undefined) this.#cover(claim);
+    if (cleared) this.#hooks.onVersionClear?.();
     return { warnings: this.#toWarnings(slotWarnings), cleared };
   }
 

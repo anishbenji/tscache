@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Engine, type EngineEvents } from "../src/engine/engine";
+import { SegmentStore } from "../src/engine/merge";
 import { batch, engineConfig, result } from "./engine-test-helpers";
 
 // Implementer tests (not contract tests): a throwing listener must not stop
@@ -42,6 +43,38 @@ describe("the './engine' package entry", () => {
     engine.put(id, batch([3]));
     expect(engine.get(id, { start: 3, end: 3 })).toEqual(
       result([3], [{ start: 3, end: 3 }], []),
+    );
+  });
+});
+
+describe("Engine version-mismatch clear whose write fails", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("still emits cacheCleared once, propagates the error, and a retry emits nothing", () => {
+    const engine = new Engine();
+    const { id } = engine.cache(engineConfig({ version: "v1" }));
+    engine.put(id, batch([3, 13]));
+    const seen: EngineEvents["cacheCleared"][] = [];
+    engine.on("cacheCleared", (event) => {
+      seen.push(event);
+      // The cache is already empty when the listener runs.
+      expect(engine.get(id, { start: 3, end: 23 })).toEqual(
+        result([], [], [{ start: 3, end: 23 }]),
+      );
+    });
+    vi.spyOn(SegmentStore.prototype, "put").mockImplementationOnce(() => {
+      throw new RangeError("Array buffer allocation failed");
+    });
+    expect(() =>
+      engine.put(id, { ...batch([23]), meta: { version: "v2" } }),
+    ).toThrow(RangeError);
+    expect(seen).toEqual([{ cacheId: id, reason: "version-mismatch" }]);
+    expect(engine.put(id, { ...batch([23]), meta: { version: "v2" } })).toEqual(
+      { warnings: [] },
+    );
+    expect(seen).toHaveLength(1);
+    expect(engine.get(id, { start: 3, end: 23 })).toEqual(
+      result([23], [{ start: 23, end: 23 }], [{ start: 3, end: 13 }]),
     );
   });
 });

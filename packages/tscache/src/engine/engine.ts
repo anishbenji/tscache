@@ -80,30 +80,43 @@ export class Engine {
       assertCompatible(live.config, resolved);
       return live.config;
     }
-    const created = new CacheState(resolved);
+    const created = new CacheState(resolved, {
+      onVersionClear: () => this.#cleared(resolved.id, "version-mismatch"),
+    });
     this.#caches.set(resolved.id, created);
     return created.config;
   }
 
+  /** Whether a cache with this id exists; never throws. */
   has(cacheId: string): boolean {
     return this.#caches.has(cacheId);
   }
 
-  /** Current state only: orchestration arrives at step ⑪. */
+  /**
+   * Every present point in the range, with the authoritative sub-ranges and
+   * the uncovered ones as 'uncached' misses (§2.3, N16). Current state only:
+   * orchestration arrives at step ⑪.
+   */
   get(cacheId: string, range: Range): GetResult {
     return this.#state(cacheId).get(range);
   }
 
+  /**
+   * Writes a batch (§2.4). A version mismatch clears the cache first and
+   * emits `cacheCleared 'version-mismatch'` once the put is applied — or,
+   * if the write then fails, before the error propagates.
+   */
   put(cacheId: string, batch: PutBatch, options?: PutOptions): PutResult {
-    const { warnings, cleared } = this.#state(cacheId).put(batch, options);
-    if (cleared) this.#cleared(cacheId, "version-mismatch");
+    const { warnings } = this.#state(cacheId).put(batch, options);
     return { warnings };
   }
 
+  /** Forgets coverage over the range (snapped outward); the points stay. */
   invalidate(cacheId: string, range: Range): void {
     this.#state(cacheId).invalidate(range);
   }
 
+  /** Drops the cache's data and coverage; emits `cacheCleared 'manual'`. */
   clear(cacheId: string): void {
     this.#state(cacheId).clear();
     this.#cleared(cacheId, "manual");
@@ -127,6 +140,15 @@ export class Engine {
     if (failure !== undefined) throw failure.error;
   }
 
+  /**
+   * Sets the finalized watermark exactly (§4.5): points at t >= watermark
+   * are provisional. Moving it backwards withdraws coverage from there on,
+   * so those points are fetched again. Moving it forwards promotes nothing:
+   * points that were provisional when stored stay uncovered until the next
+   * put over them, since provisional data may have changed meanwhile.
+   * Unlike `meta.finalizedUntil` on a put (forwards only, N17), this call
+   * may move the watermark in either direction.
+   */
   setFinalizedUntil(cacheId: string, t: number): void {
     this.#state(cacheId).setFinalizedUntil(t);
   }
