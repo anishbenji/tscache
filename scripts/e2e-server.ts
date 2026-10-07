@@ -13,21 +13,26 @@ const types: Record<string, string> = {
   ".map": "application/json",
 };
 
-Bun.serve({
-  port,
-  hostname: "127.0.0.1",
-  async fetch(request) {
-    const { pathname } = new URL(request.url);
-    const path = pathname.startsWith("/dist/")
-      ? `packages/tscache/dist/${pathname.slice("/dist/".length)}`
-      : `e2e/pages${pathname === "/" ? "/index.html" : pathname}`;
-    const file = Bun.file(new URL(path, root));
-    if (!(await file.exists()))
-      return new Response("not found", { status: 404 });
-    const ext = path.slice(path.lastIndexOf("."));
-    return new Response(file, {
-      headers: { "content-type": types[ext] ?? "application/octet-stream" },
-    });
-  },
-});
+/** URL path → repository-relative file path. */
+function fileFor(pathname: string): string {
+  if (pathname.startsWith("/dist/")) {
+    return `packages/tscache/dist/${pathname.slice("/dist/".length)}`;
+  }
+  return `e2e/pages${pathname === "/" ? "/index.html" : pathname}`;
+}
+
+function contentType(path: string): string {
+  return types[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream";
+}
+
+async function serve(request: Request): Promise<Response> {
+  const path = fileFor(new URL(request.url).pathname);
+  const file = Bun.file(new URL(path, root));
+  if (!(await file.exists())) {
+    return new Response("not found", { status: 404 });
+  }
+  return new Response(file, { headers: { "content-type": contentType(path) } });
+}
+
+Bun.serve({ port, hostname: "127.0.0.1", fetch: serve });
 console.log(`e2e server on http://127.0.0.1:${port}/`);
