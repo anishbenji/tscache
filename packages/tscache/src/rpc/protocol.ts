@@ -179,51 +179,64 @@ export function toWireError(error: unknown): WireError {
   return wire;
 }
 
-/**
- * WireError → the §2.6 class with that name, fields restored. An unknown
- * name becomes a TscacheError that keeps the original name in its message.
- */
-export function fromWireError(input: WireError): TscacheError {
-  // The peer may be another bundle or a hostile page: trust nothing.
+/** A wire error with every field forced to the type the wire promises. */
+function normalized(input: WireError): WireError {
   const wire: WireError = {
     name: typeof input?.name === "string" ? input.name : "Error",
     message:
       typeof input?.message === "string" ? input.message : show(input?.message),
-    ...(typeof input?.code === "string" ? { code: input.code } : {}),
-    ...(input?.data !== undefined ? { data: input.data } : {}),
   };
-  switch (wire.name) {
-    case "PutError": {
-      const data = (wire.data ?? {}) as Partial<PutErrorData>;
-      return new PutError(wire.message, {
-        code: wire.code as PutErrorCode,
-        offenderIndex: data.offenderIndex ?? -1,
-        ...(data.offenderTimestamp !== undefined
-          ? { offenderTimestamp: data.offenderTimestamp }
-          : {}),
-        ...(data.expected !== undefined ? { expected: data.expected } : {}),
-      });
-    }
-    case "ProtocolMismatchError": {
-      const data = (wire.data ?? {}) as Partial<ProtocolData>;
-      return new ProtocolMismatchError(wire.message, {
-        clientProtocol: data.clientProtocol ?? Number.NaN,
-        workerProtocol: data.workerProtocol ?? Number.NaN,
-      });
-    }
-    case "ConfigError":
-      return new ConfigError(wire.message);
-    case "InvalidRangeError":
-      return new InvalidRangeError(wire.message);
-    case "UnknownCacheError":
-      return new UnknownCacheError(wire.message);
-    case "AuthInvalidError":
-      return new AuthInvalidError(wire.message);
-    case "TscacheError":
-      return new TscacheError(wire.message);
-    default:
-      return new TscacheError(`${wire.name}: ${wire.message}`);
+  if (typeof input?.code === "string") wire.code = input.code;
+  if (input?.data !== undefined) wire.data = input.data;
+  return wire;
+}
+
+function rebuildPutError(wire: WireError): PutError {
+  const data = (wire.data ?? {}) as Partial<PutErrorData>;
+  const opts: ConstructorParameters<typeof PutError>[1] = {
+    code: wire.code as PutErrorCode,
+    offenderIndex: data.offenderIndex ?? -1,
+  };
+  if (data.offenderTimestamp !== undefined) {
+    opts.offenderTimestamp = data.offenderTimestamp;
   }
+  if (data.expected !== undefined) opts.expected = data.expected;
+  return new PutError(wire.message, opts);
+}
+
+function rebuildProtocolError(wire: WireError): ProtocolMismatchError {
+  const data = (wire.data ?? {}) as Partial<ProtocolData>;
+  return new ProtocolMismatchError(wire.message, {
+    clientProtocol: data.clientProtocol ?? Number.NaN,
+    workerProtocol: data.workerProtocol ?? Number.NaN,
+  });
+}
+
+/** Rebuilders by wire name; the message-only classes share one shape. */
+const REBUILDERS: Record<string, (wire: WireError) => TscacheError> = {
+  PutError: rebuildPutError,
+  ProtocolMismatchError: rebuildProtocolError,
+  ConfigError: (w) => new ConfigError(w.message),
+  InvalidRangeError: (w) => new InvalidRangeError(w.message),
+  UnknownCacheError: (w) => new UnknownCacheError(w.message),
+  AuthInvalidError: (w) => new AuthInvalidError(w.message),
+  TscacheError: (w) => new TscacheError(w.message),
+};
+
+/**
+ * WireError → the §2.6 class with that name, fields restored. The peer may
+ * be another bundle or a hostile page, so every field is normalized first;
+ * an unknown name becomes a TscacheError that keeps the name in its message.
+ */
+export function fromWireError(input: WireError): TscacheError {
+  const wire = normalized(input);
+  const rebuild = Object.hasOwn(REBUILDERS, wire.name)
+    ? REBUILDERS[wire.name]
+    : undefined;
+  if (rebuild === undefined) {
+    return new TscacheError(`${wire.name}: ${wire.message}`);
+  }
+  return rebuild(wire);
 }
 
 /** The distinct buffers behind a message's typed arrays, for the transfer list. */
