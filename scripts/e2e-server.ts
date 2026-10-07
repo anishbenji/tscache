@@ -22,7 +22,8 @@ Bun.serve({
       ? `packages/tscache/dist/${pathname.slice("/dist/".length)}`
       : `e2e/pages${pathname === "/" ? "/index.html" : pathname}`;
     const file = Bun.file(new URL(path, root));
-    if (!(await file.exists())) return new Response("not found", { status: 404 });
+    if (!(await file.exists()))
+      return new Response("not found", { status: 404 });
     const ext = path.slice(path.lastIndexOf("."));
     return new Response(file, {
       headers: { "content-type": types[ext] ?? "application/octet-stream" },
