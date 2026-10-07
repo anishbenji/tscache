@@ -81,6 +81,14 @@ function events(client: PortClient): Evt[] {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** Polls a condition for up to a second: peer-close events are asynchronous. */
+async function until(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !condition(); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  expect(condition()).toBe(true);
+}
+
 describe("handshake", () => {
   it("assigns clientIds in connection order and completes init", async () => {
     const server = new RpcServer(new Engine(), "0.0.0");
@@ -389,8 +397,7 @@ describe("transport lifecycle (round 3)", () => {
     await a.request("cache", config);
     expect(server.connections).toBe(2);
     b.dispose();
-    await tick();
-    expect(server.connections).toBe(1);
+    await until(() => server.connections === 1);
     await a.request("clear", { cacheId: "rpc" });
     await tick();
     expect(seenA).toHaveLength(1);
@@ -403,6 +410,28 @@ describe("transport lifecycle (round 3)", () => {
     ).rejects.toThrow();
     expect(client.pendingCount).toBe(0);
     await expect(client.request("clearAll", {})).resolves.toBeUndefined();
+  });
+});
+
+describe("transport without close()", () => {
+  it("dispose tells the server to drop the connection", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const channel = new MessageChannel();
+    // A dedicated Worker has postMessage and event listeners but no close().
+    const worker: MessagePortLike = {
+      postMessage: (m, t) => channel.port2.postMessage(m, t ?? []),
+      addEventListener: (type, fn) =>
+        channel.port2.addEventListener(type, fn as EventListener),
+      removeEventListener: (type, fn) =>
+        channel.port2.removeEventListener(type, fn as EventListener),
+      start: () => channel.port2.start(),
+    };
+    server.attach(channel.port1 as MessagePortLike);
+    const client = await PortClient.connect(worker);
+    expect(server.connections).toBe(1);
+    client.dispose();
+    await until(() => server.connections === 0);
+    channel.port2.close();
   });
 });
 

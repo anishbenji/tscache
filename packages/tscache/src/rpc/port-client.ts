@@ -156,6 +156,15 @@ export class PortClient {
    * @public used by the client facade (step ⑩)
    */
   dispose(): void {
+    if (this.#disposed) return;
+    // Tell the server first: a dedicated Worker has no close() to signal
+    // with, so the server would otherwise keep this connection forever.
+    const bye: Req = { t: "req", id: ++this.#seq, op: "dispose", params: {} };
+    try {
+      this.#port.postMessage(bye);
+    } catch {
+      // The port is already unusable; nothing more to tell.
+    }
     this.#shutDown(new TscacheError("client disposed"));
   }
 
