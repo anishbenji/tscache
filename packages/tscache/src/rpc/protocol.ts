@@ -179,15 +179,21 @@ export function toWireError(error: unknown): WireError {
   return wire;
 }
 
+/** A string as given, or a description of whatever else arrived. */
+function text(value: unknown): string {
+  return typeof value === "string" ? value : show(value);
+}
+
 /** A wire error with every field forced to the type the wire promises. */
 function normalized(input: WireError): WireError {
+  const given: Partial<WireError> =
+    typeof input === "object" && input !== null ? input : {};
   const wire: WireError = {
-    name: typeof input?.name === "string" ? input.name : "Error",
-    message:
-      typeof input?.message === "string" ? input.message : show(input?.message),
+    name: typeof given.name === "string" ? given.name : "Error",
+    message: text(given.message),
   };
-  if (typeof input?.code === "string") wire.code = input.code;
-  if (input?.data !== undefined) wire.data = input.data;
+  if (typeof given.code === "string") wire.code = given.code;
+  if (given.data !== undefined) wire.data = given.data;
   return wire;
 }
 
