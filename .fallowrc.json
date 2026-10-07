@@ -1,6 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
-  "entry": ["packages/*/src/entries/*.ts"],
+  // Scripts run directly by Bun are entry points too (the e2e server).
+  "entry": ["packages/*/src/entries/*.ts", "scripts/*.ts"],
   "workspaces": {
     "packages": ["packages/*"]
   },
