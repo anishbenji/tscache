@@ -203,6 +203,8 @@ setFinalizedUntil(t: number): Promise<void>;
 
 **What a put removes (N11):** a write that states its range — every orchestrated fetch, and a `put` with `options.range` — replaces that range: afterwards the points inside it are exactly the batch's, so a point the backend no longer returns disappears. A `put` without `range` only adds or overwrites the points it carries and never removes one.
 
+**Restatements without a version signal are undetectable.** If the backend revises a point that the cache already holds as covered and reports no `version` change, no library mechanism can notice: the cache keeps returning the old value until the consumer calls `invalidate` over the range or `clear`. The `version` machinery only helps when the backend reports a version. (Documentation debt from starter §8, committed.)
+
 TTL is deliberately not in core: call `invalidate`/`clear` on your own clock (a documented consumer pattern).
 
 ### 2.5 Fetcher module contract
@@ -389,6 +391,8 @@ engine/
   overlap.ts        overlap-diff detection for the opt-in merge warning
   read.ts           read path: present-point extraction across segments, coverage
                     intersection, 'uncached' misses, ms conversion of the result
+  cache.ts          CacheState: one cache's store, coverage, watermark and version;
+                    put/get/invalidate/clear/setFinalizedUntil in ms
   engine.ts         Engine: caches map, watermarks, version check, clear/invalidate; pure
                     in-process API — unit-test target, './engine' export surface
 orchestrator/
@@ -452,6 +456,11 @@ function snapOut(r: Range, g: Grid): SlotRange;
 function snapIn(r: Range, g: Grid): SlotRange | undefined;
 /** Slot range → inclusive ms Range (GetResult.coverage and misses). */
 function toMs(r: SlotRange, g: Grid): Range;
+/** First slot whose timestamp is at or after t (the watermark's slot: points
+ *  at t >= finalizedUntil are provisional, §2.4). Throws InvalidRangeError
+ *  if t is not a finite number within ±(2^53 − 1), or if that slot's
+ *  timestamp would not be a safe integer. */
+function slotAtOrAfter(t: number, g: Grid): number;
 
 // coverage.ts — one index per cache; slot ranges only, no ms arithmetic.
 class CoverageIndex {
@@ -632,6 +641,48 @@ Rules:
 - **Programming errors** throw `RangeError` for a malformed `request` (not safe integers, start > end), as the store does. None is reachable from consumer input: `snapOut` validates first.
 - **Not here.** Snapping the consumer's ms range outward is the engine's job (step ⑧); excluding the volatile region from the coverage passed in is the engine's job (step ⑦), as is the version check; miss reasons other than `'uncached'` are set by the orchestrator (step ⑪), which rewrites the misses of a request after fetching.
 
+### 4.5 Internal contracts — per-cache state (N17, N18, approved 2026-10-06)
+
+Internal module: not exported from any package entry. Contract tests (step ⑦) pin this surface. `CacheState` is one cache: its resolved config, a `SegmentStore`, a `CoverageIndex`, the finalized watermark and the dataset version. It speaks milliseconds to its callers and slots to the modules beneath it; every conversion goes through `grid.ts`. Step ⑧'s `Engine` is a map of these plus events.
+
+```ts
+// engine/cache.ts
+interface CachePutResult {
+  /** In ms, outside the volatile region only. */
+  warnings: MergeWarning[];
+  /** True when a version mismatch cleared the cache before this put. */
+  cleared: boolean;
+}
+
+class CacheState {
+  constructor(config: ResolvedCacheConfig);
+  readonly config: ResolvedCacheConfig;
+  /** The dataset version in force: config.version, then whatever puts report. */
+  readonly version: string | undefined;
+  /** Points at t >= finalizedUntil are provisional; undefined: nothing is. */
+  readonly finalizedUntil: number | undefined;
+
+  put(batch: PutBatch, options?: PutOptions): CachePutResult;
+  get(range: Range): GetResult;
+  invalidate(range: Range): void;
+  clear(): void;
+  setFinalizedUntil(t: number): void;
+}
+```
+
+Rules:
+
+- **Volatile region (§2.4, starter §3.3).** `volatileFrom = slotAtOrAfter(finalizedUntil)`; with no watermark there is no volatile region. Coverage is excluded **when it is recorded**: a put records `[claim.start, min(claim.end, volatileFrom − 1)]`, where `claim` is the put's authority (N13) or, without a range, the batch's span (N3); nothing is recorded if that is empty. Slots that were provisional when fetched are therefore never covered, and when the watermark later moves forward they are fetched once more, which is the point: provisional data may have changed. Rejected: excluding the volatile region when coverage is read, which would promote stale provisional points to authoritative the moment the watermark passes them.
+- **Moving the watermark.** `setFinalizedUntil(t)` sets it exactly. Moving it **backwards** subtracts coverage from the new `volatileFrom` onward (those points are provisional again); moving it forwards subtracts nothing. `t` is validated as `slotAtOrAfter` does, throwing `InvalidRangeError`. `put` with `meta.finalizedUntil` only ever **advances** the watermark (N17): a value at or below the current one is ignored, so fetch responses that arrive out of order cannot pull it back.
+- **Version (starter §3.3).** `version` starts as `config.version`. A put whose `meta.version` differs from a **set** `version` first clears the cache (segments and coverage, as `clear()` does), then adopts the new version and applies the put; the result's `cleared` is true and the engine emits `cacheCleared` with `reason: 'version-mismatch'` (step ⑧). When `version` is unset, the first `meta.version` seen is adopted without clearing (N18). A put without `meta.version` never triggers any of this; in particular a restatement from a backend that reports no version is undetectable (§2.4), and only `invalidate` or `clear` recovers from it. `meta` must be an object when present, `meta.version` a non-empty string and `meta.finalizedUntil` a timestamp `slotAtOrAfter` accepts; otherwise `PutError` `'field-mismatch'` with `offenderIndex: -1`, raised after the batch's own checks and before anything changes.
+- **A response's own watermark bounds its authority (N19).** When a put carries `meta.finalizedUntil`, it is authoritative only for slots below `slotAtOrAfter(meta.finalizedUntil)`: its replace authority (N11) and its coverage claim are clipped there, and its points at or beyond that slot are merged new-wins but neither replace anything nor record coverage. A response that arrives late with an older watermark therefore cannot delete, or confirm as a gap, a point it itself called provisional. A put without `meta.finalizedUntil` keeps its full authority.
+- **Order inside `put`.** Validate the batch (so a rejected batch never clears anything) → version check and clear → `store.put` → advance the watermark → record coverage. If `store.put` throws (an allocation failure, §4.3), nothing is recorded, the coverage the put would have recorded is subtracted so a half-written range is refetched, and the error is rethrown.
+- **Warnings** come back in ms, dropping any inside the volatile region (§2.4), judged against the watermark **after** this put's `meta.finalizedUntil` has been applied: a response that declares points final also vouches for the differences it found there. A warning range that straddles `volatileFrom` is clipped to end at `volatileFrom − 1`; its `fields` are kept as reported for the whole run.
+- **`get`** snaps the range outward (N1) and returns `read()` over the store and the index; since the index never holds volatile slots, no further filtering is needed. **`invalidate`** snaps outward and subtracts; the points stay (N16). **`clear`** drops segments and coverage and keeps config, version and watermark, which describe the dataset rather than its contents.
+- **Errors.** `get`/`invalidate` throw `InvalidRangeError` for a malformed range (as `snapOut`), `setFinalizedUntil` as `slotAtOrAfter` does; `put` throws as `validateBatch` does; a `config.finalizedUntil` that `slotAtOrAfter` rejects makes the constructor throw `ConfigError`. Nothing is changed by a call that throws, except the recorded coverage withdrawal above.
+
+Out of step ⑦ by design: the caches map, `clearAll`, config conflicts (N4) and event emission (step ⑧); orchestration (step ⑪).
+
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
 - Vitest/Node against `engine/`, `coverage`, `segment/` directly (~90% of logic), plus RPC protocol over an in-memory port pair; property-style tests for coverage merge/subtraction and segment merge.
@@ -674,7 +725,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (N9–N16 later, at steps ③–⑥) (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9–N19 later, at steps ③–⑦) (working process §2.3: alternatives presented, user decided).
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -694,6 +745,9 @@ These emerged while making the API concrete (N9–N16 later, at steps ③–⑥)
 | N14 | How the K gap is counted | **A segment splits where more than K consecutive slots hold no point.** With K = 4 at one minute, 10:00 and 10:05 (four absent) share a segment; 10:00 and 10:06 (five absent) do not. Rejected: split when the two points are more than K intervals apart (tolerates K − 1 absent slots; reads less naturally as "a gap of K"). User-confirmed 2026-10-05 |
 | N15 | How the slot cap is applied | **Fixed pages**: a segment never crosses a multiple of `segmentSlotCap`. The layout then depends only on which points are present, so tests can state it exactly, equal data persists as equal payloads, and prepending history never reshuffles later segments. Cost: a short run that straddles a page edge is two segments. Rejected: fill a segment to the cap, then open the next (fewer segments in the straddling case, but the layout depends on arrival order). User-confirmed 2026-10-05 |
 | N16 | What `get` returns | **Every present point in the request**, covered or not; `coverage` marks the authoritative parts. Needed for the live tail, whose slots are never covered yet whose last candle must show, and it keeps an invalidated range on screen until the refetch replaces it. Rejected: only points inside coverage (nothing stale ever shows, but the volatile region would need a special case and an invalidated range would go blank until refetched). User-confirmed 2026-10-06 |
+| N17 | `meta.finalizedUntil` direction | **Forwards only**: a put's `meta.finalizedUntil` advances the watermark and a lower value is ignored, so fetch responses arriving out of order cannot pull it back and drop coverage. `setFinalizedUntil()` can still move it either way. Rejected: set exactly from `meta` (simpler rule, order-dependent result). User-confirmed 2026-10-06 |
+| N18 | First version seen by an unversioned cache | **Adopt without clearing**: when `config.version` is unset, the first `meta.version` a put reports becomes the cache's version and existing data is kept; later mismatches clear. The starter's "inert when unset" holds, since nothing is cleared, while a backend that reports a version still protects the cache. Rejected: ignore it (a reported version could never protect an unversioned cache); treat it as a mismatch (wipes the cache on the first versioned response). User-confirmed 2026-10-06 |
+| N19 | Authority of a response with its own watermark | **Clipped to its own watermark**: a put carrying `meta.finalizedUntil` replaces and covers only slots below it; points at or beyond are upserted. Raised by the step ⑦ adversarial review: a late empty response reporting an older watermark would otherwise delete a provisional point and record it as a confirmed gap. Rejected: discard responses with an older watermark (throws away valid final data and can loop against a backend whose watermark lags); apply as is (weakest). Companion decision for step ⑪: the orchestrator stamps requests with the cache's version generation and drops responses from before the last version change, so a late old-version response cannot clear fresh data. User-confirmed 2026-10-06 |
 
 ## 9. What happens after sign-off
 

@@ -131,6 +131,33 @@ export function snapIn(r: Range, g: Grid): SlotRange | undefined {
   return start > end ? undefined : { start, end };
 }
 
+/** Rejects a timestamp that is not a finite number within ±(2^53 − 1). */
+function assertTimestamp(t: number, what: string): void {
+  if (!Number.isFinite(t) || Math.abs(t) > Number.MAX_SAFE_INTEGER) {
+    throw new InvalidRangeError(
+      `${what} must be a finite number within ±(2^53 - 1), got ${show(t)}`,
+    );
+  }
+}
+
+/**
+ * First slot whose timestamp is at or after `t`: the watermark's slot, since
+ * points at t >= finalizedUntil are provisional (§2.4). Throws
+ * InvalidRangeError for an unsupported `t`, or when that slot's timestamp
+ * would not be a safe integer.
+ */
+export function slotAtOrAfter(t: number, g: Grid): number {
+  assertTimestamp(t, "timestamp");
+  const floor = floorSlot(t, g);
+  const slot = isAligned(t, g) ? floor : floor + 1;
+  if (!Number.isSafeInteger(msOf(slot, g))) {
+    throw new InvalidRangeError(
+      `the grid point at or after ${t} lies beyond ±(2^53 - 1)`,
+    );
+  }
+  return slot;
+}
+
 /** Slot range → inclusive ms Range (GetResult.coverage and misses). */
 export function toMs(r: SlotRange, g: Grid): Range {
   return { start: msOf(r.start, g), end: msOf(r.end, g) };
