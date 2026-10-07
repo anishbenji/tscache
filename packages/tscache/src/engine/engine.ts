@@ -1,0 +1,152 @@
+/**
+ * Engine (docs/architecture.md §4.6): a map of CacheState keyed by cache id,
+ * with the cache-scoped events. The './engine' export surface (SSR/Node,
+ * tests) and what the RPC server drives. No DOM, worker or timer use.
+ */
+
+import { ConfigError, UnknownCacheError } from "../errors";
+import type {
+  CacheConfig,
+  GetResult,
+  PutBatch,
+  PutOptions,
+  PutResult,
+  Range,
+  ResolvedCacheConfig,
+} from "../types";
+import { CacheState } from "./cache";
+import { Emitter } from "./emitter";
+import { resolveCacheConfig } from "./validate";
+
+export interface EngineEvents {
+  /** Cache-scoped (N5). */
+  cacheCleared: {
+    cacheId: string;
+    reason: "manual" | "clear-all" | "version-mismatch";
+  };
+}
+
+/** Resolved fields that must agree for two configs to name the same cache (N20). */
+const STRUCTURAL = [
+  "interval",
+  "alignmentOffset",
+  "fields",
+  "gapSplitK",
+  "segmentSlotCap",
+  "warnOnOverlapDiff",
+] as const;
+
+function sameFields(
+  a: Readonly<Record<string, string>>,
+  b: Readonly<Record<string, string>>,
+): boolean {
+  const names = Object.keys(a);
+  return (
+    names.length === Object.keys(b).length &&
+    names.every((name) => Object.hasOwn(b, name) && a[name] === b[name])
+  );
+}
+
+/** Throws ConfigError naming the first structural field that differs. */
+function assertCompatible(
+  live: ResolvedCacheConfig,
+  wanted: ResolvedCacheConfig,
+): void {
+  for (const field of STRUCTURAL) {
+    const same =
+      field === "fields"
+        ? sameFields(live.fields, wanted.fields)
+        : live[field] === wanted[field];
+    if (!same) {
+      throw new ConfigError(
+        `cache "${live.id}" exists with a different ${field}; a cache's structure cannot change`,
+      );
+    }
+  }
+}
+
+export class Engine {
+  readonly #caches = new Map<string, CacheState>();
+  readonly #events = new Emitter<EngineEvents>();
+
+  /**
+   * Get-or-create (N4, N20). Returns the resolved config the cache was
+   * created with; a joining tab's version and finalizedUntil are ignored.
+   */
+  cache(config: CacheConfig): ResolvedCacheConfig {
+    const resolved = resolveCacheConfig(config);
+    const live = this.#caches.get(resolved.id);
+    if (live !== undefined) {
+      assertCompatible(live.config, resolved);
+      return live.config;
+    }
+    const created = new CacheState(resolved);
+    this.#caches.set(resolved.id, created);
+    return created.config;
+  }
+
+  has(cacheId: string): boolean {
+    return this.#caches.has(cacheId);
+  }
+
+  /** Current state only: orchestration arrives at step ⑪. */
+  get(cacheId: string, range: Range): GetResult {
+    return this.#state(cacheId).get(range);
+  }
+
+  put(cacheId: string, batch: PutBatch, options?: PutOptions): PutResult {
+    const { warnings, cleared } = this.#state(cacheId).put(batch, options);
+    if (cleared) this.#cleared(cacheId, "version-mismatch");
+    return { warnings };
+  }
+
+  invalidate(cacheId: string, range: Range): void {
+    this.#state(cacheId).invalidate(range);
+  }
+
+  clear(cacheId: string): void {
+    this.#state(cacheId).clear();
+    this.#cleared(cacheId, "manual");
+  }
+
+  /** Empties every cache (N22); the caches and their configs stay. */
+  clearAll(): void {
+    for (const [cacheId, state] of this.#caches) {
+      state.clear();
+      this.#cleared(cacheId, "clear-all");
+    }
+  }
+
+  setFinalizedUntil(cacheId: string, t: number): void {
+    this.#state(cacheId).setFinalizedUntil(t);
+  }
+
+  on<E extends keyof EngineEvents>(
+    event: E,
+    fn: (payload: EngineEvents[E]) => void,
+  ): () => void {
+    return this.#events.on(event, fn);
+  }
+
+  off<E extends keyof EngineEvents>(
+    event: E,
+    fn: (payload: EngineEvents[E]) => void,
+  ): void {
+    this.#events.off(event, fn);
+  }
+
+  #state(cacheId: string): CacheState {
+    const state = this.#caches.get(cacheId);
+    if (state === undefined) {
+      throw new UnknownCacheError(`no cache with id "${cacheId}"`);
+    }
+    return state;
+  }
+
+  #cleared(
+    cacheId: string,
+    reason: EngineEvents["cacheCleared"]["reason"],
+  ): void {
+    this.#events.emit("cacheCleared", { cacheId, reason });
+  }
+}

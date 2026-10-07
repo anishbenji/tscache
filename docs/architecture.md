@@ -693,8 +693,8 @@ Out of step ⑦ by design: the caches map, `clearAll`, config conflicts (N4) and
 // engine/emitter.ts
 /** Minimal typed emitter: on() returns the unsubscribe; listeners added or
  *  removed during emit do not affect that emit; a throwing listener does
- *  not stop the others (its error is rethrown after all ran). */
-class Emitter<Events extends Record<string, unknown>> {
+ *  not stop the others (the first error is rethrown after all ran). */
+class Emitter<Events extends object> {
   on<E extends keyof Events>(event: E, fn: (payload: Events[E]) => void): () => void;
   off<E extends keyof Events>(event: E, fn: (payload: Events[E]) => void): void;
   emit<E extends keyof Events>(event: E, payload: Events[E]): void;
@@ -724,8 +724,8 @@ class Engine {
 
 Rules:
 
-- **Get-or-create (N20).** `cache(config)` first resolves the config (`resolveCacheConfig`, so a bad config throws `ConfigError` before the map is touched). With no cache under that id, a `CacheState` is created from it. With one, the resolved **structural** fields must equal the live ones: `interval`, `alignmentOffset`, `fields` (same names and dtypes; key order irrelevant), `gapSplitK`, `segmentSlotCap`, `warnOnOverlapDiff`; any difference throws `ConfigError` naming the field, and the live cache is untouched. `version` and `finalizedUntil` describe the dataset, not the structure: they apply only when the cache is created and are **ignored** when joining an existing cache, so a tab from an older deploy can neither clear nor rewind the live cache. The return value is the live resolved config.
-- **Unknown id.** Every other method throws `UnknownCacheError` for an id without a cache, before validating anything else.
+- **Get-or-create (N20).** `cache(config)` first resolves the config (`resolveCacheConfig`, so a bad config throws `ConfigError` before the map is touched). With no cache under that id, a `CacheState` is created from it. With one, the resolved **structural** fields must equal the live ones: `interval`, `alignmentOffset`, `fields` (same names and dtypes; key order irrelevant), `gapSplitK`, `segmentSlotCap`, `warnOnOverlapDiff`; any difference throws `ConfigError` naming the field, and the live cache is untouched. `version` and `finalizedUntil` describe the dataset, not the structure: they apply only when the cache is created and are **ignored** when joining an existing cache, so a tab from an older deploy can neither clear nor rewind the live cache. The return value is the resolved config the cache was **created** with (`CacheState.config`): it carries the creation-time `version` and `finalizedUntil`, while the current ones are observable through behaviour (and, for the RPC layer, through `CacheState` — the engine exposes no getters for them in step ⑧).
+- **Unknown id.** Every method that takes a `cacheId`, except `has`, throws `UnknownCacheError` for an id without a cache, before validating anything else; `has` answers `false`.
 - **Delegation.** `get`, `put`, `invalidate`, `setFinalizedUntil` delegate to the `CacheState` and keep its errors and results; `put` returns `{ warnings }` (§2.4) and, when the state reports `cleared`, emits `cacheCleared` with `reason: 'version-mismatch'` **after** the put has been applied. `clear(id)` clears that cache and emits `'manual'`.
 - **`clearAll` (N22).** Clears every cache's data and coverage and emits `cacheCleared` with `reason: 'clear-all'` for each, in creation order; the caches themselves, their configs, versions and watermarks stay, so handles in every tab remain valid. An engine with no caches emits nothing.
 - **Events (N21).** The engine emits only cache-scoped events. Request-scoped `mergeWarning` (requestId `clientId:seq`, §2.7) is emitted by the RPC server from `put`'s return value (step ⑨); the engine never carries request identity. Listeners run synchronously inside the emitting call, after the state change they describe.
