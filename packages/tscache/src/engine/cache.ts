@@ -158,17 +158,13 @@ export class CacheState {
     const wm = meta.finalizedUntil;
     const touched = authority ?? spanOf(points);
     const claim = claimOf(touched, wm?.slot);
-    let slotWarnings: SlotWarning[];
-    try {
-      slotWarnings = this.#write(points, authority, wm?.slot);
-    } catch (error) {
-      // Everything the write may have changed, not only what it would have
-      // claimed: a half-written provisional stretch must be refetched too.
-      if (touched !== undefined) this.#coverage.subtract(touched);
-      // The clear already happened; its observers must still hear of it.
-      if (cleared) this.#hooks.onVersionClear?.();
-      throw error;
-    }
+    const slotWarnings = this.#writeOrWithdraw(
+      points,
+      authority,
+      wm?.slot,
+      touched,
+      cleared,
+    );
     if (wm !== undefined) this.#advance(wm.t, wm.slot);
     if (claim !== undefined) this.#cover(claim);
     if (cleared) this.#hooks.onVersionClear?.();
@@ -208,6 +204,28 @@ export class CacheState {
   /** Sets the watermark exactly; moving it back makes points provisional again. */
   setFinalizedUntil(t: number): void {
     this.#setWatermark(t, slotAtOrAfter(t, this.config));
+  }
+
+  /**
+   * Writes the batch; if the write fails, withdraws coverage for everything
+   * it may have changed (not only what it would have claimed: a half-written
+   * provisional stretch must be refetched too), tells the owner about a
+   * clear that already happened, and rethrows.
+   */
+  #writeOrWithdraw(
+    points: Columns,
+    authority: SlotRange | undefined,
+    limit: number | undefined,
+    touched: SlotRange | undefined,
+    cleared: boolean,
+  ): SlotWarning[] {
+    try {
+      return this.#write(points, authority, limit);
+    } catch (error) {
+      if (touched !== undefined) this.#coverage.subtract(touched);
+      if (cleared) this.#hooks.onVersionClear?.();
+      throw error;
+    }
   }
 
   /**
