@@ -61,4 +61,13 @@ jobs:
           echo "CI_BASE=${base}" >> "$GITHUB_ENV"
           echo "FALLOW_AUDIT_BASE=${base}" >> "$GITHUB_ENV"
 
+      # Install first so bunx resolves the locked playwright version from
+      # node_modules instead of fetching the latest from the registry.
+      - run: bun install --frozen-lockfile
+
+      # Browser tests (Playwright, Chromium only) start at commit-plan step 10.
+      # The browser build is pinned by the locked playwright version.
+      - name: Install Chromium for Playwright
+        run: bunx playwright install --with-deps chromium
+
       - run: bun run ci
