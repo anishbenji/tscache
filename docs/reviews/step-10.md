@@ -27,4 +27,4 @@ None (no contract tests for this step).
 
 ## Decision concerns
 
-**Tab death without `pagehide` (from A1-3).** When a tab's renderer dies abruptly, no `pagehide` fires and browsers deliver no port-close event to the SharedWorker, so the dead connection stays in `RpcServer` until the worker itself is torn down (which happens once every tab is gone). Escalated to the user 2026-10-08 with the options: a client heartbeat the server uses to drop silent connections; or accept the leak for abrupt death only (bounded by the worker's lifetime).
+**Tab death without `pagehide` (from A1-3).** When a tab's renderer dies abruptly, no `pagehide` fires and browsers deliver no port-close event to the SharedWorker, so the dead connection stays in `RpcServer` until the worker itself is torn down (which happens once every tab is gone). Escalated to the user 2026-10-08 and decided the same day (N28): accept the bounded leak; a heartbeat stays on the roadmap.
