@@ -151,33 +151,34 @@ export class RpcServer {
 
   /** One op, one engine call; the engine validates every value. */
   #dispatch(connection: Connection, req: Req): unknown {
-    const p = (isObject(req.params) ? req.params : {}) as Params;
-    const engine = this.#engine;
-    const id = p.cacheId as string;
-    switch (req.op as Op) {
-      case "cache":
-        return engine.cache(req.params as never);
-      case "get":
-        return engine.get(id, p.range as Range);
-      case "put":
-        return this.#put(connection, req.id, id, p);
-      case "invalidate":
-        return engine.invalidate(id, p.range as Range);
-      case "clear":
-        return engine.clear(id);
-      case "clearAll":
-        return engine.clearAll();
-      case "setFinalizedUntil":
-        return engine.setFinalizedUntil(id, p.t as number);
-      case "updateAuth":
-        return undefined; // delivered to the fetcher at step ⑪
-      case "dispose":
-        this.#drop(connection);
-        return undefined;
-      default:
-        throw new TscacheError(`unknown op ${String(req.op)}`);
+    const handler = this.#handlers[req.op as Op];
+    if (handler === undefined) {
+      throw new TscacheError(`unknown op ${String(req.op)}`);
     }
+    const p = (isObject(req.params) ? req.params : {}) as Params;
+    return handler(connection, req, p);
   }
+
+  readonly #handlers: Record<
+    Op,
+    (connection: Connection, req: Req, p: Params) => unknown
+  > = {
+    cache: (_c, req) => this.#engine.cache(req.params as never),
+    get: (_c, _r, p) => this.#engine.get(p.cacheId as string, p.range as Range),
+    put: (c, req, p) => this.#put(c, req.id, p.cacheId as string, p),
+    invalidate: (_c, _r, p) =>
+      this.#engine.invalidate(p.cacheId as string, p.range as Range),
+    clear: (_c, _r, p) => this.#engine.clear(p.cacheId as string),
+    clearAll: () => this.#engine.clearAll(),
+    setFinalizedUntil: (_c, _r, p) =>
+      this.#engine.setFinalizedUntil(p.cacheId as string, p.t as number),
+    // Delivered to the fetcher at step ⑪.
+    updateAuth: () => undefined,
+    dispose: (c) => {
+      this.#drop(c);
+      return undefined;
+    },
+  };
 
   /** put, then the request-scoped mergeWarning events (N21). */
   #put(

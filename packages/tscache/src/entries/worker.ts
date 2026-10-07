@@ -16,13 +16,11 @@ function dedicatedWorkerScope(): MessagePortLike | undefined {
     onconnect?: unknown;
     importScripts?: unknown;
   };
-  const isWorker =
-    typeof scope.importScripts === "function" &&
-    typeof scope.postMessage === "function" &&
-    typeof scope.addEventListener === "function";
-  // A SharedWorker scope has onconnect; it is handled at step ⑩.
-  if (!isWorker || "onconnect" in scope) return undefined;
-  return scope as MessagePortLike;
+  // Only worker globals have importScripts; a SharedWorker scope also has
+  // onconnect and is handled at step ⑩.
+  const dedicated =
+    typeof scope.importScripts === "function" && !("onconnect" in scope);
+  return dedicated ? (scope as MessagePortLike) : undefined;
 }
 
 /** Builds the engine and server; exported for tests and for step ⑩. */

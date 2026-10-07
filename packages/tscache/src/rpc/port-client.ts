@@ -89,7 +89,10 @@ export class PortClient {
     });
   }
 
-  /** Sends a request; `transfer` moves the listed buffers to the worker. */
+  /**
+   * Sends a request; `transfer` moves the listed buffers to the worker.
+   * @public used by the client facade (step ⑩)
+   */
   request(
     op: Op,
     params: unknown,
@@ -112,7 +115,10 @@ export class PortClient {
     return () => this.#listeners.delete(fn);
   }
 
-  /** Releases the port; pending requests reject. Idempotent. */
+  /**
+   * Releases the port; pending requests reject. Idempotent.
+   * @public used by the client facade (step ⑩)
+   */
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
