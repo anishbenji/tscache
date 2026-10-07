@@ -1,6 +1,6 @@
 # Step 08 — Engine assembly
 
-Branch: `feat/08-engine` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: blocked
+Branch: `feat/08-engine` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: blocked
 
 ## Round 1 — reviewer verdict: block
 
@@ -9,6 +9,15 @@ Branch: `feat/08-engine` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status:
 | R1-1 | P0 | `src/entries/engine.ts` still exported nothing, so `import { Engine } from "tscache/engine"` failed; `dist/engine.js` was empty | accepted | Confirmed from the build output. Fixed in 26b917c: the entry exports `Engine`, `EngineEvents` and the public types and errors a Node consumer needs; a test imports the entry and runs a cache through it (`dist/engine.js` is now 52.8 kB) |
 | R1-2 | P0 | A listener that throws for one cache interrupted `clearAll`, leaving later caches uncleared and unnotified (N22) | accepted | Reproduced. Fixed in 26b917c: every cache is cleared and notified, the first listener error is rethrown at the end; regression test added |
 | R1-3 | P1 | `has("missing")` was left unpinned by the contract tests | accepted | Pinned to `false` in 26b917c (replacing the author's clarification comment; recorded below) |
+
+## Round 2 — reviewer verdict: block
+
+R1-1 to R1-3 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P0 | A version-changing put whose write then failed had already cleared the cache and adopted the version, but its throw bypassed the event; the retry emitted nothing either | accepted | Reproduced. Fixed in 565a6fa: `CacheState` takes an `onVersionClear` hook (architecture §4.5), called after the put applied or, on a failed write, before the error propagates; the engine emits from it. Regression test: event once, error propagated, retry silent. Follow-up 21819df moves the recovery out of `put` for the complexity gate |
+| R2-2 | P2 | `Engine.setFinalizedUntil` lacked TSDoc on the two directions and the need to refetch | accepted | TSDoc added to every `Engine` method in 565a6fa |
 
 ## Contract-test changes
 
