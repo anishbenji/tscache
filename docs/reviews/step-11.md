@@ -1,6 +1,6 @@
 # Step 11 — Fetcher orchestration, dedup and auth events
 
-Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 10 + adversarial (cap reached) · Status: in review (one more round authorized) · Verdict after triage: blocked
+Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 11 + adversarial (cap raised once by the user) · Status: settled · Verdict after triage: merge (round 11 fixes unreviewed, per the user's decision)
 
 Not an engine step: tests were written with the code (fetcher modules served as data: URLs through the real RPC path; one Playwright spec with two pages sharing one fetch).
 
@@ -113,6 +113,17 @@ Adversarial fixes confirmed.
 
 Round 10 is the cap (docs/workflow.md, review loop step 8) and it raised P1s, so the loop was escalated. The user authorized one more round (2026-10-08), after which the pull request opens regardless.
 
+## Round 11 — reviewer verdict: block
+
+R10 fixes confirmed. The round the user authorized beyond the cap.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R11-1 | P0 | A fetcher throwing synchronously with the auth marker invalidated auth before the get's `onInvalid` subscription existed, so a get also waiting on a slow fetch stayed pending until that fetch returned (A1-2 re-raised for the synchronous path) | accepted | Reproduced. Fixed in 2e15f20: `onInvalid` notifies a subscriber at once when auth is already invalid. Test with a fetcher that throws synchronously for one range and stalls on another |
+| R11-2 | P1 | The R10-1 regression test only counted releases, which the original leak also produced; it did not prove the subscription was removed | accepted | Fixed in 2e15f20: `AuthState` exposes its waiter count and the test asserts it is zero after fifty successful gets |
+
+The user decided (2026-10-08): one more round, then open the pull request regardless. Round 11 was that round, so its two fixes are verified by their regression tests and `bun run ci` but have not been through a further Codex round. The pull request records this.
+
 ## Contract-test changes
 
 None (no contract tests for this step).
@@ -120,3 +131,17 @@ None (no contract tests for this step).
 ## Decision concerns
 
 None.
+
+## Merge request
+
+**Scope.** Step ⑪ of the commit plan: fetcher orchestration in the worker (`orchestrator/orchestrator.ts`, `orchestrator/auth.ts`), wired through `RpcServer` so `get` fetches misses and `updateAuth` reaches the fetcher. Architecture §4.9 (new), N29–N31, §2.5 fetcher obligations; the `./fetcher` subpath types. Fetcher loading at `createClient` (N30), slot-based coalescing with a one-slot flank extension clamped to safe grid points, exact-range in-flight dedup keyed by cache and range under the auth and cache generations (N31), a version fence with one retry by subtraction (N29), per-piece miss annotation, and auth state with `authInvalid` broadcast and `onInvalid` subscriptions.
+
+**Decisions taken on this branch** (user-confirmed 2026-10-08). N29: a version mismatch mid-fetch refetches once. N30: the fetcher module loads at `createClient`; a load failure is a startup error. N31: dedup is exact-range only; subtracting in-flight ranges from new requests is on the roadmap. Settled by the implementer and recorded in §4.9: a `get` never blocks on auth (uncached ranges answer `auth-pending` while auth is invalid or a hook transition is running); a stale-generation 401 is ignored; a tab joining with an equal-by-value context runs the fetcher's hook again; the fetcher receives a copy of the range.
+
+**Review outcome.** Eleven rounds plus the scheduled adversarial pass, one round past the cap by the user's decision. Rounds 1–5 circled the auth transition until 94dd109 removed the waiting mechanism (convergence rule); rounds 6–8 fixed `updateAuth` ordering against the first load and the cross-tab dedup spec; round 9 was clean. The adversarial pass raised two P0s (fetcher mutating the orchestrator's range; a get stranded after one of its fetches invalidated auth) and two P1s, all fixed in 81422d1. Round 10 found the per-get subscription leak and a timing gap in the browser spec; round 11 found the synchronous-throw variant of the stranded get and a weak leak test. Both round 11 fixes are covered by regression tests and the full gate but have not been reviewed by Codex, as the user decided.
+
+**Confidence: high on the Node path, medium on the auth edge cases.** 35 orchestrator tests drive a data-URL fetcher through every mode (success, failure, auth marker as rejection and as synchronous throw, slow, malformed): coalescing, flank clamping, dedup across clients, version fence and retry, per-piece misses, `updateAuth` serialization against a pending load, generation fencing of stale 401s, waiter release and cleanup. One Playwright spec proves cross-tab dedup in a real SharedWorker by timing. The auth area drew findings in ten of twelve rounds, which is why the last two fixes are flagged rather than hidden.
+
+**Blast radius: the worker's `get` and `updateAuth` now reach the fetcher.** `RpcServer` constructs the orchestrator; `init` loads the fetcher before `init-ok`. Engine, RPC wire and client surfaces are unchanged beyond the new `authInvalid` client event. 1047 Node tests and 5 browser specs pass under `bun run ci`.
+
+**Known limits, by design.** Exact-range dedup only (N31); a tab that dies mid-fetch leaves its request to finish in the worker (N28 heartbeat on the roadmap); auth events are verified in Node, the multi-tab `authInvalid` broadcast is step ⑫'s Playwright work.
