@@ -1,6 +1,6 @@
 # Step 11 — Fetcher orchestration, dedup and auth events
 
-Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 10 + adversarial (cap reached) · Status: escalated · Verdict after triage: merge, pending the user's call on a further round
+Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 10 + adversarial (cap reached) · Status: in review (one more round authorized) · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (fetcher modules served as data: URLs through the real RPC path; one Playwright spec with two pages sharing one fetch).
 
@@ -111,7 +111,7 @@ Adversarial fixes confirmed.
 | R10-1 | P1 | Every get that waited on fetches raced a shared long-lived "auth invalid" promise, leaving a reaction behind per successful get (≈37 MB after 100 000 gets) | accepted | Fixed in 588cbda: a removable `onInvalid` subscription, unsubscribed when the fetches finish. Test in 2378535 |
 | R10-2 | P1 | The browser dedup spec stamped page B before awaiting `cache()`, so a slow handle could still let B read cached data (A1-4 incomplete) | accepted | Fixed in 2378535: handle first, stamp right before the get, fetch held 1.5 s, B must have posted at least a second before A's fetch ended |
 
-Round 10 is the cap (docs/workflow.md, review loop step 8) and it raised P1s, so the loop is not settled by its own rule and goes to the user. The fixes above have not been seen by the reviewer.
+Round 10 is the cap (docs/workflow.md, review loop step 8) and it raised P1s, so the loop was escalated. The user authorized one more round (2026-10-08), after which the pull request opens regardless.
 
 ## Contract-test changes
 
