@@ -1,6 +1,6 @@
 # Step 11 — Fetcher orchestration, dedup and auth events
 
-Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 2 · Status: in review · Verdict after triage: blocked
+Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (fetcher modules served as data: URLs through the real RPC path; one Playwright spec with two pages sharing one fetch).
 
@@ -29,6 +29,16 @@ Completed on the fourth attempt (three sessions stalled; retried hourly per the 
 | R2-5 | P1 | The R1-5 regression test could not fail: the fixture checked its mode before stalling, so neither fetch threw | accepted | Fixed in 396bc7e: the fixture can fail with the auth marker after its stall; the test now exercises the late 401 |
 
 **Convergence rule.** Range math drew findings in rounds 1 and 2, so 396bc7e moves it wholesale onto slots through `grid.ts` instead of patching the ms arithmetic (the N9 rule applied to the orchestrator as well).
+
+## Round 3 — reviewer verdict: block
+
+R2-1 to R2-5 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P0 | A fence retry could join an in-flight fetch that the same clear had already made stale (dedup checked only the auth generation) | accepted | Reproduced. Fixed in c931a98: in-flight entries carry the cache generation; a stale one is not joined. Test with three fenced fetches |
+| R3-2 | P1 | During an asynchronous `fetcher.updateAuth()` the generation was already bumped, so a fetch issued with the old token carried the new stamp and its late 401 invalidated the new credentials (R1-5 incomplete) | accepted | Reproduced. Fixed in c931a98: the context and generation switch only after the hook completes, and a fetch waits for an in-progress transition. Test with a stalled hook |
+| R3-3 | P1 | A superseded `updateAuth` completing late restored auth after a newer failure | accepted | Fixed in c931a98: updates apply one at a time in arrival order, so no obsolete completion can run after a newer one. Test with two concurrent updates (arrival order across two ports is not fixed; the test asserts one transition at a time) |
 
 ## Contract-test changes
 
