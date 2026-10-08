@@ -26,6 +26,9 @@ interface Log {
   /** What a stalled fetch does once released. */
   afterRelease?: "auth" | "fail";
   release?: () => void;
+  /** updateAuth stalls until releaseAuth is called. */
+  slowAuth?: boolean;
+  releaseAuth?: () => void;
 }
 const log = (): Log => (globalThis as unknown as { __tsc: Log }).__tsc;
 function resetLog(mode: Log["mode"] = "ok"): void {
@@ -57,7 +60,11 @@ const fetcherSource = `
       const meta = req.context && req.context.version ? { version: req.context.version } : undefined;
       return { timestamps: ts, fields: { price: ts, volume: ts.map(() => n) }, ...(meta ? { meta } : {}) };
     },
-    updateAuth(context) { log().auth.push(context); },
+    async updateAuth(context) {
+      const g = log();
+      if (g.slowAuth) await new Promise((r) => { g.releaseAuth = r; });
+      g.auth.push(context);
+    },
   };
 `;
 const dataUrl = (source: string) =>
@@ -114,6 +121,21 @@ function captureReleases(): (() => void)[] {
   (globalThis as unknown as { __tsc: Log }).__tsc = new Proxy(original, {
     set(target, key, value) {
       if (key === "release") releases.push(value as () => void);
+      else Reflect.set(target, key, value);
+      return true;
+    },
+  });
+  return releases;
+}
+
+/** Collects every stalled updateAuth's release function in order. */
+function captureAuthReleases(): (() => void)[] {
+  const releases: (() => void)[] = [];
+  const current = (globalThis as unknown as { __tsc: Log }).__tsc;
+  current.slowAuth = true;
+  (globalThis as unknown as { __tsc: Log }).__tsc = new Proxy(current, {
+    set(target, key, value) {
+      if (key === "releaseAuth") releases.push(value as () => void);
       else Reflect.set(target, key, value);
       return true;
     },
@@ -591,5 +613,109 @@ describe("round 2 regressions", () => {
     delete log().afterRelease;
     releases[2]?.();
     expect((await third).misses).toEqual([]);
+  });
+});
+
+describe("round 3 regressions", () => {
+  it("a fence retry does not join a fetch that the same clear already made stale", async () => {
+    resetLog("slow");
+    const { a, b } = await pair();
+    await a.request("put", {
+      cacheId: "o",
+      batch: {
+        timestamps: [],
+        fields: { price: [], volume: [] },
+        meta: { version: "v1" },
+      },
+    });
+    const releases = captureReleases();
+    const wide = get(a, { start: 3, end: 73 });
+    await new Promise((r) => setTimeout(r, 20));
+    await a.request("put", {
+      cacheId: "o",
+      batch: {
+        timestamps: [23, 33, 43, 53],
+        fields: { price: [23, 33, 43, 53], volume: [0, 0, 0, 0] },
+      },
+      options: { range: { start: 23, end: 53 } },
+    });
+    const flanked = get(b, { start: 3, end: 73 });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(releases).toHaveLength(3);
+    // A version clear fences all three; the flanks finish first.
+    await a.request("put", {
+      cacheId: "o",
+      batch: {
+        timestamps: [],
+        fields: { price: [], volume: [] },
+        meta: { version: "v2" },
+      },
+    });
+    releases[1]?.();
+    releases[2]?.();
+    await new Promise((r) => setTimeout(r, 30));
+    // b's retry must be a fresh fetch, not the stale [3,73] still in flight.
+    expect(releases.length).toBeGreaterThanOrEqual(4);
+    releases[0]?.();
+    for (const r of releases.slice(3)) r();
+    const got = await flanked;
+    expect(got.misses).toEqual([]);
+    await wide;
+  });
+
+  it("a fetch started during a slow updateAuth waits for it and carries the new credentials", async () => {
+    resetLog();
+    const { a } = await pair({ token: "old" });
+    const authReleases = captureAuthReleases();
+    const updating = a.request("updateAuth", { context: { token: "new" } });
+    const pending = get(a, { start: 3, end: 13 });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(authReleases).toHaveLength(1);
+    expect(log().requests).toHaveLength(0);
+    authReleases[0]?.();
+    await updating;
+    const got = await pending;
+    expect(got.misses).toEqual([]);
+    expect(log().requests[0]?.context).toEqual({ token: "new" });
+  });
+
+  it("concurrent updateAuth calls apply one at a time; a 401 under the latest credentials stays invalid", async () => {
+    resetLog();
+    const { a, b } = await pair({ token: "t0" });
+    const authReleases = captureAuthReleases();
+    // Two tabs update at once. Their ports are independent, so the server
+    // may see either first; what matters is one transition at a time.
+    const updates = Promise.all([
+      a.request("updateAuth", { context: { token: "t1" } }),
+      b.request("updateAuth", { context: { token: "t2" } }),
+    ]);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(authReleases).toHaveLength(1);
+    authReleases[0]?.();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(authReleases).toHaveLength(2);
+    authReleases[1]?.();
+    await updates;
+    expect(
+      log()
+        .auth.map((c) => (c as { token: string }).token)
+        .sort(),
+    ).toEqual(["t1", "t2"]);
+    const latest = log().auth.at(-1);
+    log().mode = "auth";
+    const seen: Evt[] = [];
+    a.on((e) => seen.push(e));
+    expect((await get(a, { start: 3, end: 13 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    log().mode = "ok";
+    // Still invalid: nothing fetches until a newer update arrives.
+    expect((await get(b, { start: 23, end: 33 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(1);
+    expect(log().requests[0]?.context).toEqual(latest);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen.filter((e) => e.event === "authInvalid")).toHaveLength(1);
   });
 });

@@ -35,6 +35,8 @@ interface Inflight {
   promise: Promise<Outcome>;
   /** Credentials this fetch started under; a later get must not join a stale one. */
   authGeneration: number;
+  /** Cache generation it started under; a fence-dropped fetch is not joined. */
+  generation: number;
 }
 
 function describe(error: unknown): { name: string; message: string } {
@@ -111,8 +113,10 @@ export class Orchestrator {
   readonly #inflight = new Map<string, Inflight>();
   /** cacheCleared count per cache: the version fence (N29). */
   readonly #generation = new Map<string, number>();
-  /** Bumped by updateAuth: a failure from superseded credentials is stale. */
+  /** Bumped when an updateAuth has taken effect: failures under older credentials are stale. */
   #authGeneration = 0;
+  /** Serializes updateAuth calls; fetches wait for a transition to finish. */
+  #authUpdate: Promise<void> = Promise.resolve();
   #fetcher: Fetcher | undefined;
   /** Reserved on the first load so a concurrent, different module conflicts. */
   #module: string | undefined;
@@ -172,12 +176,22 @@ export class Orchestrator {
     this.#fetcher = fetcher as Fetcher;
   }
 
-  /** New auth material: stored, handed to the fetcher, fetches resume. */
-  async updateAuth(context: unknown): Promise<void> {
-    this.#context = context;
-    this.#authGeneration++;
-    await this.#fetcher?.updateAuth?.(context);
-    this.#auth.restore();
+  /**
+   * New auth material. Updates are applied in call order, one at a time:
+   * the fetcher hears it, then the context and generation switch together
+   * and fetching resumes. A fetch never starts mid-transition, so it is
+   * always stamped with the credentials it actually uses.
+   */
+  updateAuth(context: unknown): Promise<void> {
+    const apply = async () => {
+      await this.#fetcher?.updateAuth?.(context);
+      this.#context = context;
+      this.#authGeneration++;
+      this.#auth.restore();
+    };
+    const next = this.#authUpdate.then(apply, apply);
+    this.#authUpdate = next.catch(() => {});
+    return next;
   }
 
   /**
@@ -249,22 +263,28 @@ export class Orchestrator {
    * unless it started under credentials that updateAuth has since replaced.
    * The get that starts a fetch owns its mergeWarning events.
    */
-  #fetch(
+  async #fetch(
     cacheId: string,
     range: Range,
     requestId: string | undefined,
   ): Promise<Outcome> {
-    if (!this.#auth.valid) return Promise.resolve({ kind: "auth" });
+    // A credential transition is machine-speed: wait for it, so the fetch
+    // uses and is stamped with the credentials that are actually in place.
+    await this.#authUpdate;
+    if (!this.#auth.valid) return { kind: "auth" };
     const key = `${cacheId}\u0000${range.start}\u0000${range.end}`;
+    const generation = this.#generation.get(cacheId) ?? 0;
     const current = this.#inflight.get(key);
     if (
       current !== undefined &&
-      current.authGeneration === this.#authGeneration
+      current.authGeneration === this.#authGeneration &&
+      current.generation === generation
     ) {
       return current.promise;
     }
     const entry: Inflight = {
       authGeneration: this.#authGeneration,
+      generation,
       promise: this.#run(cacheId, range, requestId).finally(() => {
         if (this.#inflight.get(key) === entry) this.#inflight.delete(key);
       }),
