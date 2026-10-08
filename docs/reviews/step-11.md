@@ -1,6 +1,6 @@
 # Step 11 — Fetcher orchestration, dedup and auth events
 
-Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 7 · Status: in review · Verdict after triage: blocked
+Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 8 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (fetcher modules served as data: URLs through the real RPC path; one Playwright spec with two pages sharing one fetch).
 
@@ -78,6 +78,14 @@ R1–R6 fixes confirmed.
 |---|---|---|---|---|
 | R7-1 | P1 | `updateAuth` while the first fetcher import was still pending ran before `#fetcher` existed, skipping the hook (R5-3 covered joins, not direct calls) | accepted | Fixed in e26db5e: the serialized update awaits the pending load before the hook; `get` does not wait. Test with a slow module |
 | R7-2 | P1 | A failed first load reset the module slot but kept its context, which the next successful first load then delivered | accepted | Fixed in e26db5e: a first load sets the context unconditionally (including `undefined`). Test |
+
+## Round 8 — reviewer verdict: merge after fixes
+
+R1–R7 fixes confirmed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R8-1 | P1 | The Playwright cross-tab dedup spec passed without in-flight dedup: the fixture answered within a microtask, so the second page's get was served from cache | accepted | Fixed in dfbb4dc: the fixture holds its answer for `context.delayMs` (400 ms) so both gets overlap, and the spec asserts the overlap |
 
 ## Contract-test changes
 
