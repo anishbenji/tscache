@@ -50,6 +50,33 @@ function describe(error: unknown): { name: string; message: string } {
   return { name: "Error", message: show(error) };
 }
 
+/** Structural equality for structured-cloneable context values. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (
+    typeof a !== "object" ||
+    typeof b !== "object" ||
+    a === null ||
+    b === null
+  ) {
+    return false;
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  return (
+    ka.length === kb.length &&
+    ka.every(
+      (k) =>
+        Object.hasOwn(b, k) &&
+        sameValue(
+          (a as Record<string, unknown>)[k],
+          (b as Record<string, unknown>)[k],
+        ),
+    )
+  );
+}
+
 function overlaps(a: SlotRange, b: SlotRange): boolean {
   return a.start <= b.end && b.start <= a.end;
 }
@@ -143,7 +170,17 @@ export class Orchestrator {
         `this worker already runs fetcher ${this.#module}; cannot also load ${config.module}`,
       );
     }
-    if (config.context !== undefined) this.#context = config.context;
+    if (config.context !== undefined) {
+      if (this.#fetcher === undefined && this.#loading === undefined) {
+        // First load: the context is in place before any fetch can start.
+        this.#context = config.context;
+      } else if (!sameValue(config.context, this.#context)) {
+        // A joining tab with different material: same path as updateAuth,
+        // so the generation advances and no in-flight fetch is wrongly
+        // joined. Tabs with the same config (the normal case) change nothing.
+        await this.updateAuth(config.context);
+      }
+    }
     if (this.#loading === undefined) {
       this.#module = config.module;
       this.#loading = this.#import(config.module).catch((error) => {
@@ -268,8 +305,10 @@ export class Orchestrator {
     range: Range,
     requestId: string | undefined,
   ): Promise<Outcome> {
-    // A credential transition is machine-speed: wait for it, so the fetch
+    // Invalid auth answers at once (design y: never wait for a human). A
+    // transition in progress is machine-speed: wait for it, so the fetch
     // uses and is stamped with the credentials that are actually in place.
+    if (!this.#auth.valid) return { kind: "auth" };
     await this.#authUpdate;
     if (!this.#auth.valid) return { kind: "auth" };
     const key = `${cacheId}\u0000${range.start}\u0000${range.end}`;

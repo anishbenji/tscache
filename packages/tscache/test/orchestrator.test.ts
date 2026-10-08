@@ -22,7 +22,7 @@ const config = {
 interface Log {
   requests: FetchRequest[];
   auth: unknown[];
-  mode: "ok" | "fail" | "auth" | "slow";
+  mode: "ok" | "fail" | "auth" | "slow" | "bad";
   /** What a stalled fetch does once released. */
   afterRelease?: "auth" | "fail";
   release?: () => void;
@@ -48,6 +48,7 @@ const fetcherSource = `
       const g = log();
       g.requests.push(req);
       if (g.mode === "fail") throw new Error("backend down");
+      if (g.mode === "bad") return { timestamps: [req.range.start + 1], fields: { price: [1], volume: [1] } };
       if (g.mode === "auth") { const e = new Error("401"); e.code = "tscache:auth-invalid"; throw e; }
       if (g.mode === "slow") {
         await new Promise((r) => { g.release = r; });
@@ -717,5 +718,83 @@ describe("round 3 regressions", () => {
     expect(log().requests[0]?.context).toEqual(latest);
     await new Promise((r) => setTimeout(r, 10));
     expect(seen.filter((e) => e.event === "authInvalid")).toHaveLength(1);
+  });
+});
+
+describe("round 4 regressions", () => {
+  it("while auth is invalid a get answers auth-pending at once, even with an updateAuth hook in progress", async () => {
+    resetLog("auth");
+    const { a } = await pair({ token: "old" });
+    expect((await get(a, { start: 3, end: 13 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    const authReleases = captureAuthReleases();
+    const updating = a.request("updateAuth", { context: { token: "new" } });
+    // The hook is stalled; this get must not wait for it.
+    const quick = await Promise.race([
+      get(a, { start: 23, end: 33 }),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 200)),
+    ]);
+    expect(quick).not.toBe("timeout");
+    expect((quick as GetResult).misses[0]?.reason).toBe("auth-pending");
+    log().mode = "ok";
+    authReleases[0]?.();
+    await updating;
+    expect((await get(a, { start: 23, end: 33 })).misses).toEqual([]);
+  });
+
+  it("a joining tab's context goes through the auth transition, so an old fetch's late 401 is ignored", async () => {
+    resetLog("slow");
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const connect = async (context: unknown) => {
+      const channel = new MessageChannel();
+      server.attach(channel.port1 as MessagePortLike);
+      const client = await PortClient.connect(
+        channel.port2 as MessagePortLike,
+        {
+          fetcher: { module: fetcherModule, context },
+        },
+      );
+      open.push(client);
+      return client;
+    };
+    const a = await connect({ token: "old" });
+    await a.request("cache", config);
+    const releases = captureReleases();
+    const stale = get(a, { start: 3, end: 13 });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(releases).toHaveLength(1);
+    // A second tab joins with fresh credentials and asks for the same range.
+    const b = await connect({ token: "new" });
+    const fresh = get(b, { start: 3, end: 13 });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(releases).toHaveLength(2);
+    expect(log().requests[1]?.context).toEqual({ token: "new" });
+    log().afterRelease = "auth";
+    releases[0]?.();
+    expect((await stale).misses[0]?.reason).toBe("auth-pending");
+    delete log().afterRelease;
+    releases[1]?.();
+    expect((await fresh).misses).toEqual([]);
+  });
+
+  it("a malformed fetcher response is fetch-failed with the PutError, caches nothing, and the next get retries", async () => {
+    resetLog("bad");
+    const { a } = await pair();
+    const got = await get(a, { start: 3, end: 13 });
+    expect(got.misses).toEqual([
+      {
+        range: { start: 3, end: 13 },
+        reason: "fetch-failed",
+        error: {
+          name: "PutError",
+          message: expect.stringMatching(/not on the grid/),
+        },
+      },
+    ]);
+    expect(Array.from(got.timestamps)).toEqual([]);
+    log().mode = "ok";
+    expect((await get(a, { start: 3, end: 13 })).misses).toEqual([]);
+    expect(log().requests).toHaveLength(2);
   });
 });
