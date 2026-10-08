@@ -276,7 +276,17 @@ export class Orchestrator {
         }),
       ),
     );
-    await Promise.race([all, this.#auth.whenInvalid]);
+    // A removable subscription, not a shared promise: a successful get must
+    // leave nothing behind on the auth state.
+    let unsubscribe = () => {};
+    const released = new Promise<void>((resolve) => {
+      unsubscribe = this.#auth.onInvalid(resolve);
+    });
+    try {
+      await Promise.race([all, released]);
+    } finally {
+      unsubscribe();
+    }
     return settled.map((o) => o ?? { kind: "auth" });
   }
 

@@ -9,23 +9,20 @@ import type { Evt } from "../rpc/protocol";
 export class AuthState {
   readonly #broadcast: (evt: Evt) => void;
   #valid = true;
-  #invalidated: Promise<void>;
-  #signalInvalid: () => void = () => {};
+  /** Gets waiting on fetches; told once when auth flips to invalid. */
+  readonly #waiters = new Set<() => void>();
 
   constructor(broadcast: (evt: Evt) => void) {
     this.#broadcast = broadcast;
-    this.#invalidated = this.#arm();
   }
 
-  /** A promise that settles on the next flip to invalid. */
-  get whenInvalid(): Promise<void> {
-    return this.#invalidated;
-  }
-
-  #arm(): Promise<void> {
-    return new Promise((resolve) => {
-      this.#signalInvalid = resolve;
-    });
+  /**
+   * Calls `fn` once if auth flips to invalid; returns the unsubscribe, which
+   * the waiter must call when its fetches finish so nothing accumulates.
+   */
+  onInvalid(fn: () => void): () => void {
+    this.#waiters.add(fn);
+    return () => this.#waiters.delete(fn);
   }
 
   get valid(): boolean {
@@ -37,7 +34,8 @@ export class AuthState {
     if (!this.#valid) return;
     this.#valid = false;
     // Release gets that are waiting on fetches: they report auth-pending.
-    this.#signalInvalid();
+    for (const fn of [...this.#waiters]) fn();
+    this.#waiters.clear();
     this.#broadcast({
       t: "evt",
       scope: "client",
@@ -48,8 +46,6 @@ export class AuthState {
 
   /** New material arrived: fetches may resume. */
   restore(): void {
-    if (this.#valid) return;
     this.#valid = true;
-    this.#invalidated = this.#arm();
   }
 }
