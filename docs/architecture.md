@@ -36,9 +36,10 @@ type HostingMode = 'shared' | 'dedicated' | 'in-process';
 
 interface ClientOptions {
   /**
-   * Worker script URL as the bundler serves the `tscache/worker` entry
-   * (docs/guides/worker-setup.md: Vite `?worker&url`, webpack
-   * `new URL(..., import.meta.url)`, or a served copy of dist/). Omit only
+   * Worker script URL as your setup serves the `tscache/worker` entry
+   * (docs/guides/worker-setup.md: Vite `?worker&url`; webpack and
+   * no-bundler setups serve a copy of the whole dist/ directory, since a
+   * bare `new URL()` would emit the entry without its chunks). Omit only
    * when pinning 'in-process'.
    */
   workerUrl?: string | URL;
