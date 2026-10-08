@@ -1,6 +1,6 @@
 # Step 10 — SharedWorker, fallback chain and client facade
 
-Branch: `feat/10-client` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 1 · Status: in review · Verdict after triage: blocked
+Branch: `feat/10-client` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 2 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (Node over MessageChannel with fake worker globals, plus the first Playwright suite in Chromium, N26).
 
@@ -20,6 +20,15 @@ Not an engine step: tests were written with the code (Node over MessageChannel w
 | A1-2 | P1 | A dedicated worker's fatal error after the handshake left pending requests hanging: the only error listener had been removed and a `Worker` has no port closure | accepted | Reproduced. Fixed in 401a7ca: the hosting keeps an `error` listener for its lifetime and aborts the `PortClient` (new `abort()`); test with a swallowed request and an injected fatal error |
 | A1-3 | P1 | A tab that closes without disposing stays registered in the SharedWorker: Chromium fires no port `close` event (gated behind a test-only feature), so connections and broadcast work accumulate under tab churn | accepted in part | 401a7ca: the client disposes itself on the page's `pagehide` event, which covers closing and navigating away and is the standard signal. Abrupt renderer death (crash, OOM kill) needs a liveness mechanism: a decision, escalated below |
 | A1-4 | P1 | Throwing listener suppresses later fallback notifications (same as R1-2) | accepted | fixed in 401a7ca |
+
+## Round 2 — reviewer verdict: merge after fixes
+
+R1-1, R1-2, A1-2 confirmed fixed; N28 acknowledged.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | `pagehide` with `persisted: true` (back/forward cache) disposed the client, so a restored page found its handles dead | accepted | Fixed in ab5ab5a: only a non-persisted `pagehide` disposes; test covers both. §4.8 updated |
+| R2-2 | P1 | The webpack recipe (bare `new URL(...)`) emits the worker entry as one asset without its imported chunks, so the worker fails to start (R1-3 partly fixed) | accepted | Fixed in ab5ab5a: the guide explains why webpack cannot bundle a worker it does not see constructed and serves the whole `dist/` directory via `copy-webpack-plugin` instead |
 
 ## Contract-test changes
 
