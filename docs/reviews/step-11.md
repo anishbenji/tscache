@@ -1,6 +1,6 @@
 # Step 11 — Fetcher orchestration, dedup and auth events
 
-Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 · Status: in review · Verdict after triage: blocked
+Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 4 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (fetcher modules served as data: URLs through the real RPC path; one Playwright spec with two pages sharing one fetch).
 
@@ -39,6 +39,16 @@ R2-1 to R2-5 confirmed fixed.
 | R3-1 | P0 | A fence retry could join an in-flight fetch that the same clear had already made stale (dedup checked only the auth generation) | accepted | Reproduced. Fixed in c931a98: in-flight entries carry the cache generation; a stale one is not joined. Test with three fenced fetches |
 | R3-2 | P1 | During an asynchronous `fetcher.updateAuth()` the generation was already bumped, so a fetch issued with the old token carried the new stamp and its late 401 invalidated the new credentials (R1-5 incomplete) | accepted | Reproduced. Fixed in c931a98: the context and generation switch only after the hook completes, and a fetch waits for an in-progress transition. Test with a stalled hook |
 | R3-3 | P1 | A superseded `updateAuth` completing late restored auth after a newer failure | accepted | Fixed in c931a98: updates apply one at a time in arrival order, so no obsolete completion can run after a newer one. Test with two concurrent updates (arrival order across two ports is not fixed; the test asserts one transition at a time) |
+
+## Round 4 — reviewer verdict: block
+
+R1–R3 fixes confirmed present.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P0 | A get under invalid auth awaited an in-progress `updateAuth` hook before answering, so it could hang on a human-speed refresh (design y) | accepted | Reproduced. Fixed in c67e1d4: invalid auth answers `auth-pending` before the transition wait (and again after it). Test races a get against a stalled hook |
+| R4-2 | P1 | A joining tab's `init.fetcher.context` replaced the context without advancing the auth generation, so its get joined an old-token fetch whose late 401 then invalidated the new credentials | accepted | Reproduced. Fixed in c67e1d4: a joining tab whose context differs goes through the serialized `updateAuth` path; one with the same context (the normal case) changes nothing. Test with two tabs and a stale fetch |
+| R4-3 | P1 | No test for a malformed fetcher response | accepted | Added in c67e1d4: misaligned timestamps → `fetch-failed` with the `PutError` name and message, nothing cached, the next get retries |
 
 ## Contract-test changes
 
