@@ -504,6 +504,31 @@ describe("transport without a close event (browser ports)", () => {
   });
 });
 
+describe("pre-aborted handshake", () => {
+  it("rejects with the abort reason and closes the port", async () => {
+    const channel = new MessageChannel();
+    let closed = 0;
+    const port: MessagePortLike = {
+      postMessage: (m, t) => channel.port2.postMessage(m, t ?? []),
+      addEventListener: (type, fn) =>
+        channel.port2.addEventListener(type, fn as EventListener),
+      removeEventListener: (type, fn) =>
+        channel.port2.removeEventListener(type, fn as EventListener),
+      start: () => channel.port2.start(),
+      close: () => {
+        closed++;
+        channel.port2.close();
+      },
+    };
+    const reason = new TscacheError("gave up");
+    await expect(
+      PortClient.connect(port, {}, AbortSignal.abort(reason)),
+    ).rejects.toBe(reason);
+    expect(closed).toBe(1);
+    channel.port1.close();
+  });
+});
+
 describe("hostile protocol values", () => {
   const hostile = { toString: 0, valueOf: 0 };
 

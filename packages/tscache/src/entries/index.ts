@@ -1,5 +1,8 @@
-// '.' entry — public client API. createClient lands at steps ⑨–⑩ per
-// docs/architecture.md §4.
+// '.' entry — public client API (docs/architecture.md §2.1).
+
+export type { CacheHandle } from "../client/cache";
+export type { TscacheClient } from "../client/client";
+export { createClient } from "../client/client";
 
 export type { PutErrorCode } from "../errors";
 export {
@@ -15,10 +18,13 @@ export {
 } from "../errors";
 export type {
   CacheConfig,
+  ClientEvents,
+  ClientOptions,
   Dtype,
   FieldArray,
   GetOptions,
   GetResult,
+  HostingMode,
   MergeWarning,
   Miss,
   MissReason,
@@ -26,5 +32,6 @@ export type {
   PutOptions,
   PutResult,
   Range,
+  RequestId,
 } from "../types";
 export { DTYPES } from "../types";

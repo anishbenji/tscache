@@ -65,17 +65,29 @@ export class PortClient {
   static connect(
     port: MessagePortLike,
     init: { fetcher?: FetcherConfig } = {},
+    signal?: AbortSignal,
   ): Promise<PortClient> {
     return new Promise((resolve, reject) => {
       // hello first, then the init result: anything else is out of order.
       let stage: "hello" | "init" = "hello";
       let clientId = "";
       let unlisten = () => {};
+      // Cancelled by the caller (handshake timeout, worker error): stop
+      // listening and close this side's port, so a late hello completes
+      // nothing. Declared before the aborted check so cleanup always runs.
+      const onAbort = () =>
+        finish(signal?.reason ?? new TscacheError("handshake aborted"));
       const finish = (error: unknown) => {
+        signal?.removeEventListener("abort", onAbort);
         unlisten();
         port.close?.();
         reject(error);
       };
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
       const onHello = (message: Hello) => {
         if (message.protocol !== PROTOCOL_VERSION) {
           finish(
@@ -119,6 +131,7 @@ export class PortClient {
         } else if (message.t === "hello") {
           onHello(message);
         } else if (message.t === "init-ok") {
+          signal?.removeEventListener("abort", onAbort);
           unlisten();
           resolve(new PortClient(port, clientId));
         } else if (message.t === "init-err") {
@@ -184,6 +197,15 @@ export class PortClient {
       // The port is already unusable; nothing more to tell.
     }
     this.#shutDown(new TscacheError("client disposed"));
+  }
+
+  /**
+   * The transport failed underneath (a dedicated worker's fatal error):
+   * pending and later requests reject with `error`. Idempotent.
+   * @public used by the hostings (step ⑩)
+   */
+  abort(error: TscacheError): void {
+    this.#shutDown(error);
   }
 
   #shutDown(error: TscacheError): void {
