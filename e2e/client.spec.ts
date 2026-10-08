@@ -145,11 +145,11 @@ test("two pages share one SharedWorker fetch for the same range", async ({
   const b = await context.newPage();
   await open(a);
   await open(b);
-  // The fixture holds its answer for 400 ms, so both gets are in flight at
+  // The fixture holds its answer for 1.5 s, so both gets are in flight at
   // once; only in-flight deduplication can make them share one fetch.
   const options = {
     workerUrl,
-    fetcher: { module: "/fetcher.js", context: { delayMs: 400 } },
+    fetcher: { module: "/fetcher.js", context: { delayMs: 1500 } },
   };
   expect((await connect(a, options)).mode).toBe("shared");
   expect((await connect(b, options)).mode).toBe("shared");
@@ -169,8 +169,9 @@ test("two pages share one SharedWorker fetch for the same range", async ({
           }>;
         };
       };
-      const issued = Date.now();
       const cache = await w.client.cache(cfg);
+      // Stamp right before the get is posted (handle obtained first).
+      const issued = Date.now();
       const got = await cache.get({ start: 3, end: 33 });
       return {
         issued,
@@ -181,7 +182,8 @@ test("two pages share one SharedWorker fetch for the same range", async ({
       };
     }, config);
   const [ta, tb] = await Promise.all([readTimed(a), readTimed(b)]);
-  expect(tb.issued).toBeLessThan(ta.done - 200);
+  // B posted its get at least a second before A's fetch completed.
+  expect(tb.issued).toBeLessThan(ta.done - 1000);
   const strip = (t: typeof ta) => ({
     timestamps: t.timestamps,
     coverage: t.coverage,

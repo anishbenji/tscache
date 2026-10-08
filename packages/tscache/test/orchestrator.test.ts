@@ -1025,3 +1025,18 @@ describe("adversarial regressions", () => {
     releases[1]?.();
   });
 });
+
+describe("round 10 regression", () => {
+  it("successful gets leave no auth waiters behind", async () => {
+    resetLog();
+    const { a } = await pair({ token: "t" });
+    for (let i = 0; i < 50; i++) {
+      await get(a, { start: 3 + i * 10, end: 3 + i * 10 });
+    }
+    // A 401 now finds nothing to release but the current get.
+    log().mode = "auth";
+    expect((await get(a, { start: 1003, end: 1003 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+  });
+});
