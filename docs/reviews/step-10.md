@@ -1,6 +1,6 @@
 # Step 10 — SharedWorker, fallback chain and client facade
 
-Branch: `feat/10-client` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 2 · Status: in review · Verdict after triage: blocked
+Branch: `feat/10-client` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (Node over MessageChannel with fake worker globals, plus the first Playwright suite in Chromium, N26).
 
@@ -29,6 +29,15 @@ R1-1, R1-2, A1-2 confirmed fixed; N28 acknowledged.
 |---|---|---|---|---|
 | R2-1 | P1 | `pagehide` with `persisted: true` (back/forward cache) disposed the client, so a restored page found its handles dead | accepted | Fixed in ab5ab5a: only a non-persisted `pagehide` disposes; test covers both. §4.8 updated |
 | R2-2 | P1 | The webpack recipe (bare `new URL(...)`) emits the worker entry as one asset without its imported chunks, so the worker fails to start (R1-3 partly fixed) | accepted | Fixed in ab5ab5a: the guide explains why webpack cannot bundle a worker it does not see constructed and serves the whole `dist/` directory via `copy-webpack-plugin` instead |
+
+## Round 3 — reviewer verdict: merge after fixes
+
+R2-1 and R2-2 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | `PortClient.connect` with an already-aborted signal called `finish` before it was declared (temporal dead zone): `ReferenceError` instead of the reason, port left open | accepted | Reproduced. Fixed in 8c5d128: cleanup declared before the aborted check; test asserts the reason and the port closure |
+| R3-2 | P2 | The §2.1 `workerUrl` comment still advertised the bare webpack `new URL()` recipe (R2-2 partly unfixed) | accepted | Fixed in 8c5d128: points at the served-copy recipe |
 
 ## Contract-test changes
 
