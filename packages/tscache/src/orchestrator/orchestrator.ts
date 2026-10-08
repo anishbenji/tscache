@@ -2,10 +2,12 @@
  * Fetch orchestration (docs/architecture.md §2.3, §2.5, §4.9): in front of
  * the Engine, turns a get's misses into deduplicated fetches, applies the
  * responses as authoritative puts, and reports what could not be fetched.
+ * Range math runs on slots (N9); milliseconds appear only at the edges.
  */
 
 import type { Engine } from "../engine/engine";
 import { ConfigError, isAuthInvalidError, show, TscacheError } from "../errors";
+import { type Grid, msOf, type SlotRange, snapOut, toMs } from "../grid";
 import type { Evt, FetcherConfig } from "../rpc/protocol";
 import type {
   Fetcher,
@@ -25,12 +27,15 @@ type Outcome =
   | { kind: "failed"; error: { name: string; message: string } };
 
 interface Settled {
-  range: Range;
+  range: SlotRange;
   outcome: Outcome;
 }
 
-const MAX = Number.MAX_SAFE_INTEGER;
-const MIN = Number.MIN_SAFE_INTEGER;
+interface Inflight {
+  promise: Promise<Outcome>;
+  /** Credentials this fetch started under; a later get must not join a stale one. */
+  authGeneration: number;
+}
 
 function describe(error: unknown): { name: string; message: string } {
   if (error instanceof Error) {
@@ -43,21 +48,22 @@ function describe(error: unknown): { name: string; message: string } {
   return { name: "Error", message: show(error) };
 }
 
-function keyOf(cacheId: string, range: Range): string {
-  return `${cacheId}\u0000${range.start}\u0000${range.end}`;
-}
-
-function overlaps(a: Range, b: Range): boolean {
+function overlaps(a: SlotRange, b: SlotRange): boolean {
   return a.start <= b.end && b.start <= a.end;
 }
 
-/** `range` minus every range in `cuts`, in ms, as ascending pieces. */
-function subtract(range: Range, cuts: Range[]): Range[] {
-  let pieces: Range[] = [range];
+/** Whether a slot and its timestamp both lie in the safe-integer domain. */
+function safeSlot(slot: number, grid: Grid): boolean {
+  return Number.isSafeInteger(slot) && Number.isSafeInteger(msOf(slot, grid));
+}
+
+/** `range` minus every range in `cuts`, as ascending pieces. */
+function subtract(range: SlotRange, cuts: SlotRange[]): SlotRange[] {
+  let pieces: SlotRange[] = [range];
   for (const cut of cuts) {
     pieces = pieces.flatMap((p) => {
       if (!overlaps(p, cut)) return [p];
-      const out: Range[] = [];
+      const out: SlotRange[] = [];
       if (p.start < cut.start) out.push({ start: p.start, end: cut.start - 1 });
       if (p.end > cut.end) out.push({ start: cut.end + 1, end: p.end });
       return out;
@@ -67,33 +73,29 @@ function subtract(range: Range, cuts: Range[]): Range[] {
 }
 
 /**
- * The ranges to fetch for a result's uncached misses: adjacent misses merge,
- * and a miss abutting covered slots is extended by one interval into them
- * (locked: the one-point overlap aids range merge). Extensions never leave
- * the safe-integer domain.
+ * The slot ranges to fetch for the uncached misses: adjacent misses merge,
+ * and a miss abutting a covered slot is extended one slot into it (locked:
+ * the one-point overlap aids range merge), never beyond the safe domain.
  */
 export function coalesce(
-  misses: Range[],
-  coverage: Range[],
-  interval: number,
-): Range[] {
-  const out: Range[] = [];
+  misses: SlotRange[],
+  coverage: SlotRange[],
+  grid: Grid,
+): SlotRange[] {
+  const out: SlotRange[] = [];
   for (const miss of misses) {
     let { start, end } = miss;
     if (
-      start - interval >= MIN &&
-      coverage.some((c) => c.end === start - interval)
+      safeSlot(start - 1, grid) &&
+      coverage.some((c) => c.end === start - 1)
     ) {
-      start -= interval;
+      start -= 1;
     }
-    if (
-      end + interval <= MAX &&
-      coverage.some((c) => c.start === end + interval)
-    ) {
-      end += interval;
+    if (safeSlot(end + 1, grid) && coverage.some((c) => c.start === end + 1)) {
+      end += 1;
     }
     const last = out.at(-1);
-    if (last !== undefined && start <= last.end + interval) {
+    if (last !== undefined && start <= last.end + 1) {
       last.end = Math.max(last.end, end);
     } else {
       out.push({ start, end });
@@ -106,7 +108,7 @@ export class Orchestrator {
   readonly #engine: Engine;
   readonly #auth: AuthState;
   readonly #broadcast: (evt: Evt) => void;
-  readonly #inflight = new Map<string, Promise<Outcome>>();
+  readonly #inflight = new Map<string, Inflight>();
   /** cacheCleared count per cache: the version fence (N29). */
   readonly #generation = new Map<string, number>();
   /** Bumped by updateAuth: a failure from superseded credentials is stale. */
@@ -189,73 +191,62 @@ export class Orchestrator {
     requestId?: string,
   ): Promise<GetResult> {
     let result = this.#engine.get(cacheId, range);
-    if (this.#fetcher === undefined || options?.cacheOnly === true)
+    if (this.#fetcher === undefined || options?.cacheOnly === true) {
       return result;
+    }
+    const grid = this.#engine.configOf(cacheId);
+    const request = snapOut(range, grid);
     const settled: Settled[] = [];
-    let wanted = this.#firstPass(cacheId, range, result);
-    // Two passes at most: the second re-requests only what the version
-    // fence dropped and is still missing (N29).
+    let wanted = this.#plan(cacheId, request, uncached(result, grid), []);
+    // Two passes at most: the second re-requests only what is still
+    // uncached after a version-fence drop, minus what already failed (N29).
     for (let attempt = 0; attempt < 2 && wanted.length > 0; attempt++) {
-      const fetched = await Promise.all(
-        wanted.map((r) => this.#fetch(cacheId, r, requestId)),
+      const outcomes = await Promise.all(
+        wanted.map((r) => this.#fetch(cacheId, toMs(r, grid), requestId)),
       );
       for (const [i, r] of wanted.entries()) {
-        settled.push({ range: r, outcome: fetched[i] as Outcome });
+        settled.push({ range: r, outcome: outcomes[i] as Outcome });
       }
       result = this.#engine.get(cacheId, range);
-      if (attempt === 1 || !settled.some((s) => s.outcome.kind === "dropped"))
-        break;
-      wanted = this.#retryPass(cacheId, range, result, settled);
+      if (attempt === 1 || !outcomes.some((o) => o.kind === "dropped")) break;
+      const blocked = settled
+        .filter((s) => s.outcome.kind === "failed" || s.outcome.kind === "auth")
+        .map((s) => s.range);
+      wanted = this.#plan(cacheId, request, uncached(result, grid), blocked);
     }
     return {
       ...result,
-      misses: result.misses.map((m) => annotate(m, settled)),
+      misses: result.misses.flatMap((m) => annotate(m, settled, grid)),
     };
   }
 
-  /** The coalesced ranges for every uncached miss of the first read. */
-  #firstPass(cacheId: string, range: Range, result: GetResult): Range[] {
-    const misses = result.misses
-      .filter((m) => m.reason === "uncached")
-      .map((m) => m.range);
-    if (misses.length === 0) return [];
-    const { interval } = this.#engine.configOf(cacheId);
-    // Coverage one interval beyond the request too: a miss at the edge may
-    // abut covered slots the result itself cannot show.
-    const around = this.#engine.coverage(cacheId, {
-      start: Math.max(range.start - interval, MIN),
-      end: Math.min(range.end + interval, MAX),
-    });
-    return coalesce(misses, around, interval);
-  }
-
-  /**
-   * After a drop everything still uncached is re-requested once, except
-   * what a fetch of this get already failed or auth-blocked (N29). A clear
-   * may have wiped ranges that were applied, so the dropped range alone
-   * would not do.
-   */
-  #retryPass(
+  /** The coalesced slot ranges to fetch for these misses, minus `blocked`. */
+  #plan(
     cacheId: string,
-    range: Range,
-    result: GetResult,
-    settled: Settled[],
-  ): Range[] {
-    const blocked = settled
-      .filter((s) => s.outcome.kind === "failed" || s.outcome.kind === "auth")
-      .map((s) => s.range);
-    const uncached = result.misses
-      .filter((m) => m.reason === "uncached")
-      .flatMap((m) => subtract(m.range, blocked));
-    if (uncached.length === 0) return [];
-    return this.#firstPass(cacheId, range, {
-      ...result,
-      misses: uncached.map((r) => ({ range: r, reason: "uncached" as const })),
-    });
+    request: SlotRange,
+    misses: SlotRange[],
+    blocked: SlotRange[],
+  ): SlotRange[] {
+    const open = misses.flatMap((m) => subtract(m, blocked));
+    if (open.length === 0) return [];
+    const grid = this.#engine.configOf(cacheId);
+    // Coverage one slot beyond the request too: a miss at the edge may abut
+    // covered slots the result itself cannot show. Only safe grid points.
+    const probe: SlotRange = {
+      start: safeSlot(request.start - 1, grid)
+        ? request.start - 1
+        : request.start,
+      end: safeSlot(request.end + 1, grid) ? request.end + 1 : request.end,
+    };
+    const around = this.#engine
+      .coverage(cacheId, toMs(probe, grid))
+      .map((r) => snapOut(r, grid));
+    return coalesce(open, around, grid);
   }
 
   /**
-   * One fetch per (cacheId, range) in flight; every waiter shares it (N31).
+   * One fetch per (cacheId, range) in flight; every waiter shares it (N31),
+   * unless it started under credentials that updateAuth has since replaced.
    * The get that starts a fetch owns its mergeWarning events.
    */
   #fetch(
@@ -264,15 +255,22 @@ export class Orchestrator {
     requestId: string | undefined,
   ): Promise<Outcome> {
     if (!this.#auth.valid) return Promise.resolve({ kind: "auth" });
-    const key = keyOf(cacheId, range);
-    let pending = this.#inflight.get(key);
-    if (pending === undefined) {
-      pending = this.#run(cacheId, range, requestId).finally(() =>
-        this.#inflight.delete(key),
-      );
-      this.#inflight.set(key, pending);
+    const key = `${cacheId}\u0000${range.start}\u0000${range.end}`;
+    const current = this.#inflight.get(key);
+    if (
+      current !== undefined &&
+      current.authGeneration === this.#authGeneration
+    ) {
+      return current.promise;
     }
-    return pending;
+    const entry: Inflight = {
+      authGeneration: this.#authGeneration,
+      promise: this.#run(cacheId, range, requestId).finally(() => {
+        if (this.#inflight.get(key) === entry) this.#inflight.delete(key);
+      }),
+    };
+    this.#inflight.set(key, entry);
+    return entry.promise;
   }
 
   async #run(
@@ -349,19 +347,56 @@ export class Orchestrator {
   }
 }
 
-/** A remaining miss takes the reason of the fetch that covered it, if any. */
-function annotate(miss: Miss, settled: Settled[]): Miss {
-  for (const { range, outcome } of settled) {
-    if (!overlaps(range, miss.range)) continue;
-    if (outcome.kind === "failed") {
-      return {
-        range: miss.range,
-        reason: "fetch-failed",
-        error: outcome.error,
-      };
+/** The uncached misses of a result, in slots (their ends are aligned). */
+function uncached(result: GetResult, grid: Grid): SlotRange[] {
+  return result.misses
+    .filter((m) => m.reason === "uncached")
+    .map((m) => snapOut(m.range, grid));
+}
+
+/**
+ * A remaining miss is cut at the boundaries of the fetches that covered it:
+ * each piece takes the reason of its fetch (failed, auth-pending) and the
+ * rest stays uncached.
+ */
+function annotate(miss: Miss, settled: Settled[], grid: Grid): Miss[] {
+  const slots = snapOut(miss.range, grid);
+  const labelled = settled.filter(
+    (s) =>
+      (s.outcome.kind === "failed" || s.outcome.kind === "auth") &&
+      overlaps(s.range, slots),
+  );
+  if (labelled.length === 0) return [miss];
+  const out: Miss[] = [];
+  let cursor = slots.start;
+  for (const { range, outcome } of labelled.sort(
+    (a, b) => a.range.start - b.range.start,
+  )) {
+    const start = Math.max(range.start, cursor);
+    const end = Math.min(range.end, slots.end);
+    if (start > end) continue;
+    if (cursor < start) {
+      out.push({
+        range: toMs({ start: cursor, end: start - 1 }, grid),
+        reason: "uncached",
+      });
     }
-    if (outcome.kind === "auth")
-      return { range: miss.range, reason: "auth-pending" };
+    out.push(
+      outcome.kind === "failed"
+        ? {
+            range: toMs({ start, end }, grid),
+            reason: "fetch-failed",
+            error: outcome.error,
+          }
+        : { range: toMs({ start, end }, grid), reason: "auth-pending" },
+    );
+    cursor = end + 1;
   }
-  return miss;
+  if (cursor <= slots.end) {
+    out.push({
+      range: toMs({ start: cursor, end: slots.end }, grid),
+      reason: "uncached",
+    });
+  }
+  return out;
 }

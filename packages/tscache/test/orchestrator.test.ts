@@ -23,6 +23,8 @@ interface Log {
   requests: FetchRequest[];
   auth: unknown[];
   mode: "ok" | "fail" | "auth" | "slow";
+  /** What a stalled fetch does once released. */
+  afterRelease?: "auth" | "fail";
   release?: () => void;
 }
 const log = (): Log => (globalThis as unknown as { __tsc: Log }).__tsc;
@@ -44,7 +46,11 @@ const fetcherSource = `
       g.requests.push(req);
       if (g.mode === "fail") throw new Error("backend down");
       if (g.mode === "auth") { const e = new Error("401"); e.code = "tscache:auth-invalid"; throw e; }
-      if (g.mode === "slow") await new Promise((r) => { g.release = r; });
+      if (g.mode === "slow") {
+        await new Promise((r) => { g.release = r; });
+        if (g.afterRelease === "auth") { const e = new Error("401 late"); e.code = "tscache:auth-invalid"; throw e; }
+        if (g.afterRelease === "fail") throw new Error("late failure");
+      }
       const ts = [];
       for (let t = Math.ceil((req.range.start - req.alignmentOffset) / req.interval) * req.interval + req.alignmentOffset; t <= req.range.end; t += req.interval) ts.push(t);
       const n = g.requests.length;
@@ -101,25 +107,52 @@ async function pair(context?: unknown) {
   return { a, b, server };
 }
 
+/** Collects every stalled fetch's release function in order. */
+function captureReleases(): (() => void)[] {
+  const releases: (() => void)[] = [];
+  const original = log();
+  (globalThis as unknown as { __tsc: Log }).__tsc = new Proxy(original, {
+    set(target, key, value) {
+      if (key === "release") releases.push(value as () => void);
+      else Reflect.set(target, key, value);
+      return true;
+    },
+  });
+  return releases;
+}
+
 const get = (c: PortClient, range: Range, options?: unknown) =>
   c.request("get", { cacheId: "o", range, options }) as Promise<GetResult>;
 
-describe("coalesce", () => {
-  it("merges adjacent misses and extends into abutting coverage by one interval", () => {
+describe("coalesce (slots)", () => {
+  const grid = { interval: 10, alignmentOffset: 3 };
+  it("merges adjacent misses and extends one slot into abutting coverage", () => {
     expect(
-      coalesce([{ start: 43, end: 63 }], [{ start: 3, end: 33 }], 10),
-    ).toEqual([{ start: 33, end: 63 }]);
+      coalesce([{ start: 4, end: 6 }], [{ start: 0, end: 3 }], grid),
+    ).toEqual([{ start: 3, end: 6 }]);
     expect(
       coalesce(
         [
-          { start: 3, end: 13 },
-          { start: 33, end: 43 },
+          { start: 0, end: 1 },
+          { start: 3, end: 4 },
         ],
-        [{ start: 23, end: 23 }],
-        10,
+        [{ start: 2, end: 2 }],
+        grid,
       ),
-    ).toEqual([{ start: 3, end: 43 }]);
-    expect(coalesce([], [], 10)).toEqual([]);
+    ).toEqual([{ start: 0, end: 4 }]);
+    expect(coalesce([], [], grid)).toEqual([]);
+  });
+
+  it("never extends beyond a safe grid point", () => {
+    const unit = { interval: 1, alignmentOffset: 0 };
+    const top = Number.MAX_SAFE_INTEGER;
+    expect(
+      coalesce(
+        [{ start: top, end: top }],
+        [{ start: top + 1, end: top + 1 }],
+        unit,
+      ),
+    ).toEqual([{ start: top, end: top }]);
   });
 });
 
@@ -364,15 +397,7 @@ describe("round 1 regressions", () => {
     // Two misses: [3,13] and [63,73]; the fetcher stalls on every call, so
     // both fetches are in flight when the version changes.
     log().mode = "slow";
-    const releases: (() => void)[] = [];
-    const original = log();
-    (globalThis as unknown as { __tsc: Log }).__tsc = new Proxy(original, {
-      set(target, key, value) {
-        if (key === "release") releases.push(value as () => void);
-        else Reflect.set(target, key, value);
-        return true;
-      },
-    });
+    const releases = captureReleases();
     const pending = get(a, { start: 3, end: 73 });
     await new Promise((r) => setTimeout(r, 30));
     expect(releases).toHaveLength(2);
@@ -388,7 +413,7 @@ describe("round 1 regressions", () => {
         meta: { version: "v2" },
       },
     });
-    original.mode = "ok";
+    log().mode = "ok";
     releases[1]?.();
     const got = await pending;
     expect(got.misses).toEqual([]);
@@ -458,37 +483,113 @@ describe("round 1 regressions", () => {
   it("an auth failure under superseded credentials does not invalidate the new ones", async () => {
     resetLog("slow");
     const { a } = await pair({ token: "old" });
-    const releases: (() => void)[] = [];
-    const original = log();
-    (globalThis as unknown as { __tsc: Log }).__tsc = new Proxy(original, {
-      set(target, key, value) {
-        if (key === "release") releases.push(value as () => void);
-        else Reflect.set(target, key, value);
-        return true;
-      },
-    });
+    const releases = captureReleases();
     const first = get(a, { start: 3, end: 13 });
     const second = get(a, { start: 43, end: 53 });
     await new Promise((r) => setTimeout(r, 30));
     expect(releases).toHaveLength(2);
-    // Make both stalled fetches fail with auth errors once released.
-    original.mode = "auth";
-    // The releases resolve the stall; the fetcher then checks mode... but
-    // the module read mode before stalling, so swap the behaviour by
-    // re-reading: our fixture checks mode before the stall. Instead, let
-    // the first fail by rejecting its promise path: we simulate by having
-    // updateAuth happen between the two completions.
+    // The first stalled fetch fails with 401: auth goes invalid.
+    log().afterRelease = "auth";
     releases[0]?.();
-    await first;
+    expect((await first).misses[0]?.reason).toBe("auth-pending");
+    // New credentials arrive while the second old-token fetch is still out.
     await a.request("updateAuth", { context: { token: "new" } });
-    const generationAfterUpdate = log().auth.length;
     releases[1]?.();
-    await second;
-    expect(generationAfterUpdate).toBe(1);
-    // Auth is still valid: a new get fetches with the new token.
-    original.mode = "ok";
+    expect((await second).misses[0]?.reason).toBe("auth-pending");
+    // Its late 401 must not have invalidated the new credentials.
+    log().mode = "ok";
     const third = await get(a, { start: 63, end: 73 });
     expect(third.misses).toEqual([]);
     expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
+  });
+});
+
+describe("round 2 regressions", () => {
+  it("an aligned single-slot read near the safe boundary on an offset grid probes safely", async () => {
+    resetLog();
+    const { a } = await pair();
+    const t = Number.MAX_SAFE_INTEGER - 8; // ≡ 3 (mod 10)
+    const got = await get(a, { start: t, end: t });
+    expect(got.misses).toEqual([]);
+    expect(Array.from(got.timestamps)).toEqual([t]);
+    expect(log().requests).toHaveLength(1);
+  });
+
+  it("after a failed fetch and a fenced one, the retry asks for aligned ranges and labels each piece", async () => {
+    resetLog("slow");
+    const { a } = await pair();
+    await a.request("put", {
+      cacheId: "o",
+      batch: {
+        timestamps: [23, 33, 43, 53],
+        fields: { price: [23, 33, 43, 53], volume: [0, 0, 0, 0] },
+        meta: { version: "v1" },
+      },
+      options: { range: { start: 23, end: 53 } },
+    });
+    const releases = captureReleases();
+    const pending = get(a, { start: 3, end: 73 });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(releases).toHaveLength(2);
+    // Left fetch [3,23] fails; a version clear fences the right one [53,73].
+    log().afterRelease = "fail";
+    releases[0]?.();
+    await new Promise((r) => setTimeout(r, 10));
+    delete log().afterRelease;
+    await a.request("put", {
+      cacheId: "o",
+      batch: {
+        timestamps: [],
+        fields: { price: [], volume: [] },
+        meta: { version: "v2" },
+      },
+    });
+    releases[1]?.();
+    await new Promise((r) => setTimeout(r, 10));
+    // The retry covers what is still uncached minus the failed range, on grid.
+    const retry = log().requests[2];
+    expect(retry?.range).toEqual({ start: 33, end: 73 });
+    // Fence the retry too: the get then reports each piece by its own fate.
+    await a.request("put", {
+      cacheId: "o",
+      batch: {
+        timestamps: [],
+        fields: { price: [], volume: [] },
+        meta: { version: "v3" },
+      },
+    });
+    releases[2]?.();
+    const got = await pending;
+    expect(got.misses).toEqual([
+      {
+        range: { start: 3, end: 23 },
+        reason: "fetch-failed",
+        error: { name: "Error", message: "late failure" },
+      },
+      { range: { start: 33, end: 73 }, reason: "uncached" },
+    ]);
+  });
+
+  it("a get after updateAuth does not join a fetch started under the old credentials", async () => {
+    resetLog("slow");
+    const { a, b } = await pair({ token: "old" });
+    const releases = captureReleases();
+    const first = get(a, { start: 3, end: 13 });
+    const second = get(a, { start: 43, end: 53 });
+    await new Promise((r) => setTimeout(r, 30));
+    log().afterRelease = "auth";
+    releases[0]?.();
+    await first;
+    await b.request("updateAuth", { context: { token: "new" } });
+    // Same range as the still-pending old-token fetch: a fresh fetch starts.
+    const third = get(b, { start: 43, end: 53 });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(releases).toHaveLength(3);
+    expect(log().requests[2]?.context).toEqual({ token: "new" });
+    releases[1]?.();
+    expect((await second).misses[0]?.reason).toBe("auth-pending");
+    delete log().afterRelease;
+    releases[2]?.();
+    expect((await third).misses).toEqual([]);
   });
 });
