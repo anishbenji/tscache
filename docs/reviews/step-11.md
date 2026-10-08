@@ -1,6 +1,6 @@
 # Step 11 — Fetcher orchestration, dedup and auth events
 
-Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 9 · Status: in review (adversarial pass pending) · Verdict after triage: blocked
+Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 9 + adversarial · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (fetcher modules served as data: URLs through the real RPC path; one Playwright spec with two pages sharing one fetch).
 
@@ -90,6 +90,17 @@ R1–R7 fixes confirmed.
 ## Round 9 — reviewer verdict: merge
 
 No findings; R8-1 confirmed fixed. The scheduled adversarial pass, cut off twice earlier (usage limit, then the 2-hour background limit), runs after this round.
+
+## Adversarial round — focus: dedup keying, flank coalescing, authInvalid/updateAuth races, get never blocking on auth — reviewer verdict: block
+
+Completed on the third attempt (usage limit, then the 2-hour background limit, then the 21:23 reset).
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| A1-1 | P0 | The fetcher received the orchestrator's own range object; a fetcher mutating `req.range` widened the authoritative write (deleting cached points) | accepted | Reproduced. Fixed in 81422d1: the fetcher gets a copy. Test with a mutating fetcher |
+| A1-2 | P0 | A get waiting on several fetches stayed pending after one of them invalidated auth, until the others returned (design y) | accepted | Reproduced. Fixed in 81422d1: `AuthState.whenInvalid` releases the wait; ranges still out are reported `auth-pending` while their fetches finish. Test |
+| A1-3 | P1 | A fetch starting while the fetcher's hook was mid-swap could use the new token but carry the old generation, so its 401 was ignored and auth never flipped (R3-2 beyond the context-only case) | accepted | Fixed in 81422d1: during a hook transition no fetch starts; uncached ranges answer `auth-pending` at once. Two earlier tests rewritten to the new rule; §4.9 updated |
+| A1-4 | P1 | Elapsed time in the Playwright dedup spec did not prove the two gets overlapped (R8-1 incomplete) | accepted | Fixed in 81422d1: page B records when it issued its get and page A when its get completed (same machine clock); the spec asserts B issued before A's fetch ended |
 
 ## Contract-test changes
 
