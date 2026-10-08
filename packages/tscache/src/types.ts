@@ -176,3 +176,28 @@ export interface ClientEvents {
     fields: string[];
   };
 }
+
+/** What the worker asks a fetcher for (§2.5): one coalesced miss range. */
+export interface FetchRequest {
+  cacheId: string;
+  /** Inclusive ms range, already coalesced (flanks extended by one interval). */
+  range: Range;
+  interval: number;
+  alignmentOffset: number;
+  /** The latest context given to createClient or updateAuth. */
+  context: unknown;
+}
+
+/** A fetcher's answer: a PutBatch for the whole requested range (§2.5). */
+export interface FetchResponse {
+  timestamps: Float64Array | number[];
+  fields: Record<string, ArrayBufferView | number[]>;
+  meta?: { version?: string; finalizedUntil?: number };
+}
+
+/** The fetcher module's default export (§2.5). */
+export interface Fetcher {
+  fetch(request: FetchRequest): Promise<FetchResponse>;
+  /** Optional: observe auth updates (e.g. swap a token held in module state). */
+  updateAuth?(context: unknown): void | Promise<void>;
+}

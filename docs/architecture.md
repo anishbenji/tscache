@@ -684,6 +684,9 @@ class CacheState {
 
   put(batch: PutBatch, options?: PutOptions): CachePutResult;
   get(range: Range): GetResult;
+  /** Covered sub-ranges of the range (snapped outward), in ms, without
+   *  reading points; the orchestrator's flank check uses it. */
+  coverage(range: Range): Range[];
   invalidate(range: Range): void;
   clear(): void;
   setFinalizedUntil(t: number): void;
@@ -730,6 +733,8 @@ class Engine {
   has(cacheId: string): boolean;
   /** Current state only: no orchestration (that is step ⑪). */
   get(cacheId: string, range: Range): GetResult;
+  coverage(cacheId: string, range: Range): Range[];
+  configOf(cacheId: string): ResolvedCacheConfig;
   put(cacheId: string, batch: PutBatch, options?: PutOptions): PutResult;
   invalidate(cacheId: string, range: Range): void;
   clear(cacheId: string): void;
@@ -930,7 +935,7 @@ These emerged while making the API concrete (N9–N31 later, at steps ③–⑪)
 | N28 | Tab death without `pagehide` | **Accept the bounded leak.** A tab that crashes fires no `pagehide` and browsers deliver no port-close event to a SharedWorker, so its connection stays in the server until the worker is torn down with the last tab; cost: one map entry and one failed `postMessage` per broadcast. Rejected for now: a client heartbeat with server-side eviction (timers per tab and server, two wire messages, generous windows because hidden tabs throttle timers to once a minute) — roadmap if real-world tab churn shows a problem. User-confirmed 2026-10-08 |
 | N29 | Version fence outcome | **Refetch once, then report**: a response dropped because the cache was cleared by a newer version mid-flight is re-requested once for what is still missing; a second drop returns the range as `'uncached'`. Bounded, and one version bump is invisible to the consumer. Rejected: report the miss immediately (one visible hiccup per bump). User-confirmed 2026-10-08 |
 | N30 | When a broken fetcher module surfaces | **At `createClient`**: `init` imports the module and a failure answers `init-err`, so the client rejects at startup with a `TscacheError` naming the module. Rejected: lazily on the first miss (a broken fetcher would look like a flaky backend). User-confirmed 2026-10-08 |
-| N31 | Dedup granularity | **Exact coalesced range, as locked**: overlapping but different ranges fetch separately; identical ranges across tabs share one fetch. Rejected: subtracting in-flight ranges from new requests (fewer bytes under heavy overlap, more bookkeeping, a reopened locked decision). User-confirmed 2026-10-08 |
+| N31 | Dedup granularity | **Exact coalesced range, as locked**: overlapping but different ranges fetch separately; identical ranges across tabs share one fetch. Deferred to the roadmap, not rejected: subtracting in-flight ranges from new requests (fewer bytes under heavy overlap, more bookkeeping) — the user wants to consider it later. User-confirmed 2026-10-08 |
 
 ## 9. What happens after sign-off
 

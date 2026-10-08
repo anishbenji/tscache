@@ -137,3 +137,38 @@ test("without SharedWorker the chain steps down to a dedicated Worker", async ({
     },
   ]);
 });
+
+test("two pages share one SharedWorker fetch for the same range", async ({
+  context,
+}) => {
+  const a = await context.newPage();
+  const b = await context.newPage();
+  await open(a);
+  await open(b);
+  const options = { workerUrl, fetcher: { module: "/fetcher.js" } };
+  expect((await connect(a, options)).mode).toBe("shared");
+  expect((await connect(b, options)).mode).toBe("shared");
+  const [ra, rb] = await Promise.all([
+    read(a, { start: 3, end: 33 }),
+    read(b, { start: 3, end: 33 }),
+  ]);
+  expect(ra).toEqual({
+    timestamps: [3, 13, 23, 33],
+    coverage: [{ start: 3, end: 33 }],
+    misses: [],
+  });
+  expect(rb).toEqual(ra);
+  // The fetcher ran once for both tabs: volume carries its call count.
+  const volumes = await a.evaluate(async (cfg) => {
+    const w = window as unknown as {
+      client: {
+        cache(c: unknown): Promise<{
+          get(r: unknown): Promise<{ fields: { volume: Int16Array } }>;
+        }>;
+      };
+    };
+    const cache = await w.client.cache(cfg);
+    return Array.from((await cache.get({ start: 3, end: 33 })).fields.volume);
+  }, config);
+  expect(volumes).toEqual([1, 1, 1, 1]);
+});

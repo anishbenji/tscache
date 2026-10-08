@@ -190,6 +190,12 @@ export class CacheState {
     );
   }
 
+  /** The authoritative sub-ranges of `range` in ms, without reading points. */
+  coverage(range: Range): Range[] {
+    const request = snapOut(range, this.config);
+    return this.#coverage.covered(request).map((r) => toMs(r, this.config));
+  }
+
   /** Forgets coverage; the points stay (N16). Snaps outward (N1). */
   invalidate(range: Range): void {
     this.#coverage.subtract(snapOut(range, this.config));
