@@ -886,3 +886,27 @@ describe("round 5 regressions", () => {
     expect(log().requests[0]?.context).toEqual({ token: "new" });
   });
 });
+
+describe("round 6 regression", () => {
+  it("updateAuth before any fetcher is loaded is inert and leaves nothing for a later fetcher", async () => {
+    resetLog();
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const pull = await PortClient.connect(channel.port2 as MessagePortLike);
+    open.push(pull);
+    await pull.request("updateAuth", { context: { token: "old" } });
+    // A later tab brings the worker's first fetcher, without any context.
+    const other = new MessageChannel();
+    server.attach(other.port1 as MessagePortLike);
+    const fetching = await PortClient.connect(other.port2 as MessagePortLike, {
+      fetcher: { module: fetcherModule },
+    });
+    open.push(fetching);
+    await fetching.request("cache", config);
+    const got = await get(fetching, { start: 3, end: 13 });
+    expect(got.misses).toEqual([]);
+    expect(log().requests[0]?.context).toBeUndefined();
+    expect(log().auth).toEqual([]);
+  });
+});

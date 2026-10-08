@@ -198,6 +198,9 @@ export class Orchestrator {
    * never blocks on a credential refresh).
    */
   updateAuth(context: unknown): Promise<void> {
+    // Pure pull-model worker: nothing to deliver to, nothing to remember
+    // (§4.9: a no-op without a fetcher), so a later first load starts clean.
+    if (this.#loading === undefined) return Promise.resolve();
     const apply = async () => {
       await this.#fetcher?.updateAuth?.(context);
       this.#context = context;
