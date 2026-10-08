@@ -1,6 +1,6 @@
 # Step 11 — Fetcher orchestration, dedup and auth events
 
-Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 5 · Status: in review · Verdict after triage: blocked
+Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 6 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (fetcher modules served as data: URLs through the real RPC path; one Playwright spec with two pages sharing one fetch).
 
@@ -61,6 +61,14 @@ Other accepted fixes confirmed; R4-1 and R4-2 found incomplete.
 | R5-3 | P1 | A tab joining while the first import was still pending had its context applied before `#fetcher` existed, skipping the hook | accepted | Fixed in 94dd109: the joining context is applied after the shared load completes. Test with a slow module |
 
 **Convergence rule.** The auth transition drew findings in rounds 3, 4 and 5, so 94dd109 removes the mechanism that kept leaking instead of patching it: no fetch waits for a transition; a fetch started meanwhile carries the credentials and generation still in place, and a stale-generation 401 is ignored. One consequence, recorded in §4.9: a tab joining with an equal-by-value context (every second tab in practice) runs the fetcher's `updateAuth` hook once more and advances the generation; two tests' expectations changed accordingly.
+
+## Round 6 — reviewer verdict: merge after fixes
+
+R1–R5 fixes confirmed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R6-1 | P1 | `updateAuth` from a pull-model tab (no fetcher yet) stored context that the worker's later first fetcher then received instead of `undefined` | accepted | Fixed in 2ebb106: without a fetcher configured `updateAuth` is a no-op, as §4.9 states. Test |
 
 ## Contract-test changes
 
