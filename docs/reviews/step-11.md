@@ -1,6 +1,6 @@
 # Step 11 — Fetcher orchestration, dedup and auth events
 
-Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 8 · Status: in review · Verdict after triage: blocked
+Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 9 · Status: in review (adversarial pass pending) · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (fetcher modules served as data: URLs through the real RPC path; one Playwright spec with two pages sharing one fetch).
 
@@ -86,6 +86,10 @@ R1–R7 fixes confirmed.
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R8-1 | P1 | The Playwright cross-tab dedup spec passed without in-flight dedup: the fixture answered within a microtask, so the second page's get was served from cache | accepted | Fixed in dfbb4dc: the fixture holds its answer for `context.delayMs` (400 ms) so both gets overlap, and the spec asserts the overlap |
+
+## Round 9 — reviewer verdict: merge
+
+No findings; R8-1 confirmed fixed. The scheduled adversarial pass, cut off twice earlier (usage limit, then the 2-hour background limit), runs after this round.
 
 ## Contract-test changes
 
