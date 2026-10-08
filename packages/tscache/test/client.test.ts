@@ -409,9 +409,10 @@ describe("lifecycle (round 1)", () => {
   });
 
   it("disposes itself on pagehide, telling the worker", async () => {
-    const listeners = new Map<string, () => void>();
-    vi.stubGlobal("addEventListener", (type: string, fn: () => void) =>
-      listeners.set(type, fn),
+    const listeners = new Map<string, (e: unknown) => void>();
+    vi.stubGlobal(
+      "addEventListener",
+      (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
     );
     vi.stubGlobal("removeEventListener", (type: string) =>
       listeners.delete(type),
@@ -420,7 +421,13 @@ describe("lifecycle (round 1)", () => {
     const client = await make({ workerUrl: url });
     const server = fakes.servers.get(url);
     expect(server?.connections).toBe(1);
-    listeners.get("pagehide")?.();
+    // Into the back/forward cache: the page may return, so nothing changes.
+    listeners.get("pagehide")?.({ persisted: true });
+    await settled();
+    expect(server?.connections).toBe(1);
+    await client.clearAll();
+    // Really leaving: dispose.
+    listeners.get("pagehide")?.({ persisted: false });
     await settled();
     expect(server?.connections).toBe(0);
     await expect(client.clearAll()).rejects.toBeInstanceOf(TscacheError);

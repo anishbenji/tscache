@@ -22,14 +22,27 @@ const client = await createClient({ workerUrl });
 
 ## webpack 5 (and Rspack)
 
-```ts
-import { createClient } from "tscache";
+webpack bundles a worker only when it sees `new Worker(new URL(...))` in your
+code; `createClient` creates the worker internally, so that syntax is not
+available, and a bare `new URL("tscache/worker", import.meta.url)` emits the
+entry file as a single asset **without** the chunks it imports (the worker
+then fails to start and the client falls back to in-process). Serve the whole
+`dist/` directory instead, for example with `copy-webpack-plugin`:
 
-const client = await createClient({
-  // webpack treats `new URL(specifier, import.meta.url)` as an asset request
-  // and resolves the package entry through its module resolution.
-  workerUrl: new URL("tscache/worker", import.meta.url),
-});
+```js
+// webpack.config.js
+import CopyPlugin from "copy-webpack-plugin";
+export default {
+  plugins: [
+    new CopyPlugin({
+      patterns: [{ from: "node_modules/tscache/dist", to: "vendor/tscache" }],
+    }),
+  ],
+};
+```
+
+```ts
+const client = await createClient({ workerUrl: "/vendor/tscache/worker.js" });
 ```
 
 ## No bundler

@@ -26,6 +26,11 @@ import {
 
 const CHAIN: readonly HostingMode[] = ["shared", "dedicated", "in-process"];
 
+/** The one field of PageTransitionEvent the client looks at. */
+interface PageHide {
+  persisted?: boolean;
+}
+
 /** Surfaces a listener error that no caller can catch. */
 function report(error: unknown): void {
   const page = globalThis as { reportError?: (e: unknown) => void };
@@ -165,10 +170,12 @@ class Client implements TscacheClient {
       }, 0);
     }
     // A tab that closes or navigates away tells the worker (browsers fire
-    // no port-close event a SharedWorker could rely on); best effort.
+    // no port-close event a SharedWorker could rely on); best effort. A page
+    // entering the back/forward cache (persisted) may come back with its
+    // objects intact, so it keeps its client.
     const page = globalThis as {
-      addEventListener?: (type: string, fn: () => void) => void;
-      removeEventListener?: (type: string, fn: () => void) => void;
+      addEventListener?: (type: string, fn: (e: PageHide) => void) => void;
+      removeEventListener?: (type: string, fn: (e: PageHide) => void) => void;
     };
     if (typeof page.addEventListener === "function") {
       this.#unlistenPage = () =>
@@ -177,7 +184,8 @@ class Client implements TscacheClient {
     }
   }
 
-  readonly #onPageHide = () => {
+  readonly #onPageHide = (event: PageHide) => {
+    if (event?.persisted === true) return;
     void this.dispose();
   };
   #unlistenPage: () => void = () => {};
