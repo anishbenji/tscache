@@ -21,8 +21,19 @@ export class AuthState {
    * the waiter must call when its fetches finish so nothing accumulates.
    */
   onInvalid(fn: () => void): () => void {
+    // Already invalid (a fetch may have failed synchronously before the
+    // waiter subscribed): tell it now, nothing to hold.
+    if (!this.#valid) {
+      fn();
+      return () => {};
+    }
     this.#waiters.add(fn);
     return () => this.#waiters.delete(fn);
+  }
+
+  /** Gets currently waiting on fetches (diagnostics and tests). */
+  get waiterCount(): number {
+    return this.#waiters.size;
   }
 
   get valid(): boolean {

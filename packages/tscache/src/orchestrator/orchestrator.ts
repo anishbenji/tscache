@@ -262,6 +262,11 @@ export class Orchestrator {
     };
   }
 
+  /** Gets currently subscribed to auth invalidation (diagnostics and tests). */
+  get authWaiters(): number {
+    return this.#auth.waiterCount;
+  }
+
   /**
    * Waits for the fetches, but no longer than auth stays valid: when a 401
    * flips it, the fetches still out are reported auth-pending (design y)

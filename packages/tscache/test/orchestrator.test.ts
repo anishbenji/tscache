@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createClient } from "../src/client/client";
 import { Engine } from "../src/engine/engine";
 import { TscacheError } from "../src/errors";
-import { coalesce } from "../src/orchestrator/orchestrator";
+import { coalesce, Orchestrator } from "../src/orchestrator/orchestrator";
 import { PortClient } from "../src/rpc/port-client";
 import type { Evt, MessagePortLike } from "../src/rpc/protocol";
 import { RpcServer } from "../src/rpc/server";
@@ -1026,17 +1026,70 @@ describe("adversarial regressions", () => {
   });
 });
 
-describe("round 10 regression", () => {
+describe("round 10 and 11 regressions", () => {
   it("successful gets leave no auth waiters behind", async () => {
-    resetLog();
-    const { a } = await pair({ token: "t" });
+    const engine = new Engine();
+    const o = new Orchestrator(engine, () => {});
+    (globalThis as { __dbg?: unknown }).__dbg = {
+      async fetch(req: FetchRequest) {
+        return {
+          timestamps: [req.range.start],
+          fields: { price: [1], volume: [1] },
+        };
+      },
+    };
+    // Each test imports a distinct URL: the module cache would otherwise
+    // hand the second test the first test's fetcher.
+    await o.load({
+      module:
+        "data:text/javascript,export default globalThis.__dbg; // waiters",
+    });
+    engine.cache(config);
     for (let i = 0; i < 50; i++) {
-      await get(a, { start: 3 + i * 10, end: 3 + i * 10 });
+      await o.get("o", { start: 3 + i * 10, end: 3 + i * 10 });
     }
-    // A 401 now finds nothing to release but the current get.
-    log().mode = "auth";
-    expect((await get(a, { start: 1003, end: 1003 })).misses[0]?.reason).toBe(
-      "auth-pending",
+    expect(o.authWaiters).toBe(0);
+  });
+
+  it("a fetch that fails synchronously with the auth marker still releases a get waiting on another", async () => {
+    resetLog("slow");
+    const engine = new Engine();
+    const o = new Orchestrator(engine, () => {});
+    let stalled: (() => void) | undefined;
+    (globalThis as { __dbg?: unknown }).__dbg = {
+      fetch(req: FetchRequest) {
+        if (req.range.start === 3) {
+          const e = new Error("401") as Error & { code: string };
+          e.code = "tscache:auth-invalid";
+          throw e; // synchronously, not a rejected promise
+        }
+        return new Promise((r) => {
+          stalled = () =>
+            r({ timestamps: [], fields: { price: [], volume: [] } });
+        });
+      },
+    };
+    await o.load({
+      module: "data:text/javascript,export default globalThis.__dbg; // sync",
+    });
+    engine.cache(config);
+    engine.put(
+      "o",
+      {
+        timestamps: [23, 33, 43],
+        fields: { price: [23, 33, 43], volume: [0, 0, 0] },
+      },
+      { range: { start: 23, end: 43 } },
     );
+    const got = await Promise.race([
+      o.get("o", { start: 3, end: 73 }),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 300)),
+    ]);
+    expect(got).not.toBe("timeout");
+    expect((got as GetResult).misses.map((m) => m.reason)).toEqual([
+      "auth-pending",
+      "auth-pending",
+    ]);
+    stalled?.();
   });
 });
