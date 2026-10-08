@@ -1,6 +1,6 @@
 # Step 11 — Fetcher orchestration, dedup and auth events
 
-Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 6 · Status: in review · Verdict after triage: blocked
+Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 7 · Status: in review · Verdict after triage: blocked
 
 Not an engine step: tests were written with the code (fetcher modules served as data: URLs through the real RPC path; one Playwright spec with two pages sharing one fetch).
 
@@ -69,6 +69,15 @@ R1–R5 fixes confirmed.
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R6-1 | P1 | `updateAuth` from a pull-model tab (no fetcher yet) stored context that the worker's later first fetcher then received instead of `undefined` | accepted | Fixed in 2ebb106: without a fetcher configured `updateAuth` is a no-op, as §4.9 states. Test |
+
+## Round 7 — reviewer verdict: merge after fixes
+
+R1–R6 fixes confirmed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R7-1 | P1 | `updateAuth` while the first fetcher import was still pending ran before `#fetcher` existed, skipping the hook (R5-3 covered joins, not direct calls) | accepted | Fixed in e26db5e: the serialized update awaits the pending load before the hook; `get` does not wait. Test with a slow module |
+| R7-2 | P1 | A failed first load reset the module slot but kept its context, which the next successful first load then delivered | accepted | Fixed in e26db5e: a first load sets the context unconditionally (including `undefined`). Test |
 
 ## Contract-test changes
 
