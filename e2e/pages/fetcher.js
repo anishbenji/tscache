@@ -9,7 +9,7 @@ export default {
     calls += 1;
     // Hold the answer when asked (context.delayMs) so concurrent gets from
     // several pages are really in flight together, not served from cache.
-    const delay = req.context && req.context.delayMs;
+    const delay = req.context?.delayMs;
     if (delay) await new Promise((r) => setTimeout(r, delay));
     const first =
       Math.ceil((req.range.start - req.alignmentOffset) / req.interval) *
