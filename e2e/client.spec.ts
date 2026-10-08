@@ -153,12 +153,42 @@ test("two pages share one SharedWorker fetch for the same range", async ({
   };
   expect((await connect(a, options)).mode).toBe("shared");
   expect((await connect(b, options)).mode).toBe("shared");
-  const started = Date.now();
-  const [ra, rb] = await Promise.all([
-    read(a, { start: 3, end: 33 }),
-    read(b, { start: 3, end: 33 }),
-  ]);
-  expect(Date.now() - started).toBeGreaterThanOrEqual(350);
+  // Page B records when it issued its get; page A records when its get came
+  // back (both on the same machine clock). B issued before A's fetch ended,
+  // so B's request reached the worker while A's fetch was still in flight.
+  const readTimed = (page: Page) =>
+    page.evaluate(async (cfg) => {
+      const w = window as unknown as {
+        client: {
+          cache(c: unknown): Promise<{
+            get(r: unknown): Promise<{
+              timestamps: Float64Array;
+              coverage: unknown[];
+              misses: unknown[];
+            }>;
+          }>;
+        };
+      };
+      const issued = Date.now();
+      const cache = await w.client.cache(cfg);
+      const got = await cache.get({ start: 3, end: 33 });
+      return {
+        issued,
+        done: Date.now(),
+        timestamps: Array.from(got.timestamps),
+        coverage: got.coverage,
+        misses: got.misses,
+      };
+    }, config);
+  const [ta, tb] = await Promise.all([readTimed(a), readTimed(b)]);
+  expect(tb.issued).toBeLessThan(ta.done - 200);
+  const strip = (t: typeof ta) => ({
+    timestamps: t.timestamps,
+    coverage: t.coverage,
+    misses: t.misses,
+  });
+  const ra = strip(ta);
+  const rb = strip(tb);
   expect(ra).toEqual({
     timestamps: [3, 13, 23, 33],
     coverage: [{ start: 3, end: 33 }],

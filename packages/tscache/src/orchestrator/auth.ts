@@ -9,9 +9,23 @@ import type { Evt } from "../rpc/protocol";
 export class AuthState {
   readonly #broadcast: (evt: Evt) => void;
   #valid = true;
+  #invalidated: Promise<void>;
+  #signalInvalid: () => void = () => {};
 
   constructor(broadcast: (evt: Evt) => void) {
     this.#broadcast = broadcast;
+    this.#invalidated = this.#arm();
+  }
+
+  /** A promise that settles on the next flip to invalid. */
+  get whenInvalid(): Promise<void> {
+    return this.#invalidated;
+  }
+
+  #arm(): Promise<void> {
+    return new Promise((resolve) => {
+      this.#signalInvalid = resolve;
+    });
   }
 
   get valid(): boolean {
@@ -22,6 +36,8 @@ export class AuthState {
   invalidate(error: { name: string; message: string }): void {
     if (!this.#valid) return;
     this.#valid = false;
+    // Release gets that are waiting on fetches: they report auth-pending.
+    this.#signalInvalid();
     this.#broadcast({
       t: "evt",
       scope: "client",
@@ -32,6 +48,8 @@ export class AuthState {
 
   /** New material arrived: fetches may resume. */
   restore(): void {
+    if (this.#valid) return;
     this.#valid = true;
+    this.#invalidated = this.#arm();
   }
 }

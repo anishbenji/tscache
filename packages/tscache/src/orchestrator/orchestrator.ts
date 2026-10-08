@@ -117,6 +117,8 @@ export class Orchestrator {
   #authGeneration = 0;
   /** Serializes updateAuth calls. */
   #authUpdate: Promise<void> = Promise.resolve();
+  /** True while a fetcher hook is replacing credentials (see #fetch). */
+  #transitioning = false;
   #fetcher: Fetcher | undefined;
   /** Reserved on the first load so a concurrent, different module conflicts. */
   #module: string | undefined;
@@ -205,7 +207,12 @@ export class Orchestrator {
     const apply = async () => {
       // The first import may still be in flight: the hook must hear this.
       await this.#loading?.catch(() => {});
-      await this.#fetcher?.updateAuth?.(context);
+      this.#transitioning = true;
+      try {
+        await this.#fetcher?.updateAuth?.(context);
+      } finally {
+        this.#transitioning = false;
+      }
       this.#context = context;
       this.#authGeneration++;
       this.#auth.restore();
@@ -236,7 +243,7 @@ export class Orchestrator {
     // Two passes at most: the second re-requests only what is still
     // uncached after a version-fence drop, minus what already failed (N29).
     for (let attempt = 0; attempt < 2 && wanted.length > 0; attempt++) {
-      const outcomes = await Promise.all(
+      const outcomes = await this.#awaitFetches(
         wanted.map((r) => this.#fetch(cacheId, toMs(r, grid), requestId)),
       );
       for (const [i, r] of wanted.entries()) {
@@ -253,6 +260,24 @@ export class Orchestrator {
       ...result,
       misses: result.misses.flatMap((m) => annotate(m, settled, grid)),
     };
+  }
+
+  /**
+   * Waits for the fetches, but no longer than auth stays valid: when a 401
+   * flips it, the fetches still out are reported auth-pending (design y)
+   * while they finish in the background.
+   */
+  async #awaitFetches(pending: Promise<Outcome>[]): Promise<Outcome[]> {
+    const settled: (Outcome | undefined)[] = pending.map(() => undefined);
+    const all = Promise.all(
+      pending.map((p, i) =>
+        p.then((o) => {
+          settled[i] = o;
+        }),
+      ),
+    );
+    await Promise.race([all, this.#auth.whenInvalid]);
+    return settled.map((o) => o ?? { kind: "auth" });
   }
 
   /** The coalesced slot ranges to fetch for these misses, minus `blocked`. */
@@ -289,7 +314,10 @@ export class Orchestrator {
     range: Range,
     requestId: string | undefined,
   ): Promise<Outcome> {
-    if (!this.#auth.valid) return { kind: "auth" };
+    // While a hook is swapping credentials the module's state and our stamp
+    // can disagree, so nothing is fetched: the range comes back auth-pending
+    // at once (design y) and the consumer re-gets after the switch.
+    if (!this.#auth.valid || this.#transitioning) return { kind: "auth" };
     const key = `${cacheId}\u0000${range.start}\u0000${range.end}`;
     const generation = this.#generation.get(cacheId) ?? 0;
     const current = this.#inflight.get(key);
@@ -337,7 +365,8 @@ export class Orchestrator {
     try {
       const response = await fetcher.fetch({
         cacheId,
-        range,
+        // A copy: the fetcher may mutate its request, the put must not see it.
+        range: { start: range.start, end: range.end },
         interval,
         alignmentOffset,
         context: this.#context,

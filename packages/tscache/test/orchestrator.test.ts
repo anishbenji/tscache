@@ -666,28 +666,24 @@ describe("round 3 regressions", () => {
     await wide;
   });
 
-  it("a fetch during a slow updateAuth uses the credentials in place; its 401 cannot poison the new ones", async () => {
-    resetLog("slow");
+  it("a get during a slow updateAuth answers auth-pending at once instead of fetching with half-swapped credentials", async () => {
+    resetLog();
     const { a } = await pair({ token: "old" });
     const authReleases = captureAuthReleases();
-    const releases = captureReleases();
     const updating = a.request("updateAuth", { context: { token: "new" } });
-    const pending = get(a, { start: 3, end: 13 });
     await new Promise((r) => setTimeout(r, 20));
-    // Not blocked by the stalled hook: the fetch went out with the old token.
-    expect(releases).toHaveLength(1);
-    expect(log().requests[0]?.context).toEqual({ token: "old" });
+    const during = await Promise.race([
+      get(a, { start: 3, end: 13 }),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 200)),
+    ]);
+    expect(during).not.toBe("timeout");
+    expect((during as GetResult).misses[0]?.reason).toBe("auth-pending");
+    expect(log().requests).toHaveLength(0);
     authReleases[0]?.();
     await updating;
-    // The old-token fetch now fails with 401: a stale generation, ignored.
-    log().afterRelease = "auth";
-    releases[0]?.();
-    expect((await pending).misses[0]?.reason).toBe("auth-pending");
-    delete log().afterRelease;
-    log().mode = "ok";
     const next = await get(a, { start: 3, end: 13 });
     expect(next.misses).toEqual([]);
-    expect(log().requests[1]?.context).toEqual({ token: "new" });
+    expect(log().requests[0]?.context).toEqual({ token: "new" });
   });
 
   it("concurrent updateAuth calls apply one at a time; a 401 under the latest credentials stays invalid", async () => {
@@ -810,7 +806,7 @@ describe("round 4 regressions", () => {
 });
 
 describe("round 5 regressions", () => {
-  it("a get is not held by a stalled updateAuth hook even when a 401 lands meanwhile", async () => {
+  it("a 401 landing during a stalled hook does not disturb the transition; the get issued meanwhile is answered at once", async () => {
     resetLog("slow");
     const { a } = await pair({ token: "old" });
     const releases = captureReleases();
@@ -818,25 +814,18 @@ describe("round 5 regressions", () => {
     const stale = get(a, { start: 3, end: 13 });
     await new Promise((r) => setTimeout(r, 20));
     const updating = a.request("updateAuth", { context: { token: "new" } });
-    const during = get(a, { start: 43, end: 53 });
     await new Promise((r) => setTimeout(r, 20));
-    // Both fetches are out; the hook is stalled.
-    expect(releases).toHaveLength(2);
+    const during = await get(a, { start: 43, end: 53 });
+    expect(during.misses[0]?.reason).toBe("auth-pending");
     log().afterRelease = "auth";
     releases[0]?.();
     expect((await stale).misses[0]?.reason).toBe("auth-pending");
-    // The get issued during the transition is answered without waiting.
-    releases[1]?.();
-    const got = await Promise.race([
-      during,
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 200)),
-    ]);
-    expect(got).not.toBe("timeout");
     authReleases[0]?.();
     await updating;
     delete log().afterRelease;
     log().mode = "ok";
     expect((await get(a, { start: 63, end: 73 })).misses).toEqual([]);
+    expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
   });
 
   it("joining contexts that are not the identical value are treated as new material", async () => {
@@ -964,5 +953,75 @@ describe("round 7 regressions", () => {
     await fetching.request("cache", config);
     await get(fetching, { start: 3, end: 13 });
     expect(log().requests[0]?.context).toBeUndefined();
+  });
+});
+
+describe("adversarial regressions", () => {
+  it("a fetcher that mutates its request range cannot widen the authoritative write", async () => {
+    resetLog();
+    const mutating = dataUrl(`
+      export default {
+        async fetch(req) {
+          globalThis.__tsc.requests.push(req);
+          req.range.end = req.range.end + 100;
+          return { timestamps: [req.range.start], fields: { price: [1], volume: [1] } };
+        },
+      };
+    `);
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const client = await PortClient.connect(channel.port2 as MessagePortLike, {
+      fetcher: { module: mutating },
+    });
+    open.push(client);
+    await client.request("cache", config);
+    await client.request("put", {
+      cacheId: "o",
+      batch: { timestamps: [103], fields: { price: [103], volume: [0] } },
+    });
+    await get(client, { start: 3, end: 3 });
+    // Slot 103 survives and only [3,3] became authoritative.
+    const after = await get(
+      client,
+      { start: 3, end: 103 },
+      { cacheOnly: true },
+    );
+    expect(Array.from(after.timestamps)).toEqual([3, 103]);
+    expect(after.coverage).toEqual([
+      { start: 3, end: 3 },
+      { start: 103, end: 103 },
+    ]);
+  });
+
+  it("a get waiting on several fetches is released when one of them invalidates auth", async () => {
+    resetLog("slow");
+    const { a } = await pair({ token: "t" });
+    await a.request("put", {
+      cacheId: "o",
+      batch: {
+        timestamps: [23, 33, 43],
+        fields: { price: [23, 33, 43], volume: [0, 0, 0] },
+      },
+      options: { range: { start: 23, end: 43 } },
+    });
+    const releases = captureReleases();
+    const pending = get(a, { start: 3, end: 73 });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(releases).toHaveLength(2);
+    // The left fetch fails with 401; the right one stays out.
+    log().afterRelease = "auth";
+    releases[0]?.();
+    const got = await Promise.race([
+      pending,
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 300)),
+    ]);
+    expect(got).not.toBe("timeout");
+    expect((got as GetResult).misses.map((m) => m.reason)).toEqual([
+      "auth-pending",
+      "auth-pending",
+    ]);
+    delete log().afterRelease;
+    releases[1]?.();
   });
 });
