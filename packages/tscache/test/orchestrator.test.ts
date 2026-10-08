@@ -301,7 +301,9 @@ describe("auth (designs b and y)", () => {
     // New material from any tab: the fetcher hears it and fetches resume.
     log().mode = "ok";
     await b.request("updateAuth", { context: { token: "new" } });
-    expect(log().auth).toEqual([{ token: "new" }]);
+    // The second tab's join already delivered {old} once: a cloned context is
+    // not the identical value, so it counts as new material.
+    expect(log().auth).toEqual([{ token: "old" }, { token: "new" }]);
     const third = await get(a, { start: 3, end: 13 });
     expect(third.misses).toEqual([]);
     expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
@@ -664,20 +666,28 @@ describe("round 3 regressions", () => {
     await wide;
   });
 
-  it("a fetch started during a slow updateAuth waits for it and carries the new credentials", async () => {
-    resetLog();
+  it("a fetch during a slow updateAuth uses the credentials in place; its 401 cannot poison the new ones", async () => {
+    resetLog("slow");
     const { a } = await pair({ token: "old" });
     const authReleases = captureAuthReleases();
+    const releases = captureReleases();
     const updating = a.request("updateAuth", { context: { token: "new" } });
     const pending = get(a, { start: 3, end: 13 });
     await new Promise((r) => setTimeout(r, 20));
-    expect(authReleases).toHaveLength(1);
-    expect(log().requests).toHaveLength(0);
+    // Not blocked by the stalled hook: the fetch went out with the old token.
+    expect(releases).toHaveLength(1);
+    expect(log().requests[0]?.context).toEqual({ token: "old" });
     authReleases[0]?.();
     await updating;
-    const got = await pending;
-    expect(got.misses).toEqual([]);
-    expect(log().requests[0]?.context).toEqual({ token: "new" });
+    // The old-token fetch now fails with 401: a stale generation, ignored.
+    log().afterRelease = "auth";
+    releases[0]?.();
+    expect((await pending).misses[0]?.reason).toBe("auth-pending");
+    delete log().afterRelease;
+    log().mode = "ok";
+    const next = await get(a, { start: 3, end: 13 });
+    expect(next.misses).toEqual([]);
+    expect(log().requests[1]?.context).toEqual({ token: "new" });
   });
 
   it("concurrent updateAuth calls apply one at a time; a 401 under the latest credentials stays invalid", async () => {
@@ -701,7 +711,7 @@ describe("round 3 regressions", () => {
       log()
         .auth.map((c) => (c as { token: string }).token)
         .sort(),
-    ).toEqual(["t1", "t2"]);
+    ).toEqual(["t0", "t1", "t2"]);
     const latest = log().auth.at(-1);
     log().mode = "auth";
     const seen: Evt[] = [];
@@ -796,5 +806,83 @@ describe("round 4 regressions", () => {
     log().mode = "ok";
     expect((await get(a, { start: 3, end: 13 })).misses).toEqual([]);
     expect(log().requests).toHaveLength(2);
+  });
+});
+
+describe("round 5 regressions", () => {
+  it("a get is not held by a stalled updateAuth hook even when a 401 lands meanwhile", async () => {
+    resetLog("slow");
+    const { a } = await pair({ token: "old" });
+    const releases = captureReleases();
+    const authReleases = captureAuthReleases();
+    const stale = get(a, { start: 3, end: 13 });
+    await new Promise((r) => setTimeout(r, 20));
+    const updating = a.request("updateAuth", { context: { token: "new" } });
+    const during = get(a, { start: 43, end: 53 });
+    await new Promise((r) => setTimeout(r, 20));
+    // Both fetches are out; the hook is stalled.
+    expect(releases).toHaveLength(2);
+    log().afterRelease = "auth";
+    releases[0]?.();
+    expect((await stale).misses[0]?.reason).toBe("auth-pending");
+    // The get issued during the transition is answered without waiting.
+    releases[1]?.();
+    const got = await Promise.race([
+      during,
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 200)),
+    ]);
+    expect(got).not.toBe("timeout");
+    authReleases[0]?.();
+    await updating;
+    delete log().afterRelease;
+    log().mode = "ok";
+    expect((await get(a, { start: 63, end: 73 })).misses).toEqual([]);
+  });
+
+  it("joining contexts that are not the identical value are treated as new material", async () => {
+    resetLog();
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const connect = async (context: unknown) => {
+      const channel = new MessageChannel();
+      server.attach(channel.port1 as MessagePortLike);
+      const client = await PortClient.connect(
+        channel.port2 as MessagePortLike,
+        {
+          fetcher: { module: fetcherModule, context },
+        },
+      );
+      open.push(client);
+      return client;
+    };
+    await connect(new Map([["token", "old"]]));
+    await connect(new Map([["token", "new"]]));
+    expect(log().auth).toHaveLength(1);
+    expect((log().auth[0] as Map<string, string>).get("token")).toBe("new");
+  });
+
+  it("a tab joining while the module is still importing has its context delivered after the load", async () => {
+    resetLog();
+    const slowModule = dataUrl(
+      `await new Promise((r) => setTimeout(r, 60));
+       export * from ${JSON.stringify(fetcherModule)};
+       export { default } from ${JSON.stringify(fetcherModule)};`,
+    );
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const connect = (context: unknown) => {
+      const channel = new MessageChannel();
+      server.attach(channel.port1 as MessagePortLike);
+      return PortClient.connect(channel.port2 as MessagePortLike, {
+        fetcher: { module: slowModule, context },
+      });
+    };
+    const first = connect({ token: "old" });
+    await new Promise((r) => setTimeout(r, 10));
+    const second = connect({ token: "new" });
+    const [a, b] = await Promise.all([first, second]);
+    open.push(a, b);
+    expect(log().auth).toEqual([{ token: "new" }]);
+    await a.request("cache", config);
+    await get(a, { start: 3, end: 13 });
+    expect(log().requests[0]?.context).toEqual({ token: "new" });
   });
 });
