@@ -910,3 +910,59 @@ describe("round 6 regression", () => {
     expect(log().auth).toEqual([]);
   });
 });
+
+describe("round 7 regressions", () => {
+  const slowModule = () =>
+    dataUrl(
+      `await new Promise((r) => setTimeout(r, 60));
+       export { default } from ${JSON.stringify(fetcherModule)};`,
+    );
+
+  it("updateAuth during the first import waits for it, so the fetcher's hook hears the material", async () => {
+    resetLog();
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const connect = (init?: { fetcher: { module: string } }) => {
+      const channel = new MessageChannel();
+      server.attach(channel.port1 as MessagePortLike);
+      return PortClient.connect(channel.port2 as MessagePortLike, init);
+    };
+    const pull = await connect();
+    open.push(pull);
+    const loading = connect({ fetcher: { module: slowModule() } });
+    await new Promise((r) => setTimeout(r, 10));
+    await pull.request("updateAuth", { context: { token: "fresh" } });
+    const fetching = await loading;
+    open.push(fetching);
+    expect(log().auth).toEqual([{ token: "fresh" }]);
+    await fetching.request("cache", config);
+    await get(fetching, { start: 3, end: 13 });
+    expect(log().requests[0]?.context).toEqual({ token: "fresh" });
+  });
+
+  it("a failed first load leaves no context behind for the next first load", async () => {
+    resetLog();
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const connect = (init?: {
+      fetcher: { module: string; context?: unknown };
+    }) => {
+      const channel = new MessageChannel();
+      server.attach(channel.port1 as MessagePortLike);
+      return PortClient.connect(channel.port2 as MessagePortLike, init);
+    };
+    const pull = await connect();
+    open.push(pull);
+    await expect(
+      connect({
+        fetcher: {
+          module: dataUrl('throw new Error("broken")'),
+          context: { token: "old" },
+        },
+      }),
+    ).rejects.toBeInstanceOf(TscacheError);
+    const fetching = await connect({ fetcher: { module: fetcherModule } });
+    open.push(fetching);
+    await fetching.request("cache", config);
+    await get(fetching, { start: 3, end: 13 });
+    expect(log().requests[0]?.context).toBeUndefined();
+  });
+});

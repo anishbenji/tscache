@@ -144,8 +144,9 @@ export class Orchestrator {
       );
     }
     if (this.#loading === undefined) {
-      // First load: the context is in place before any fetch can start.
-      if (config.context !== undefined) this.#context = config.context;
+      // First load: the context (or its absence) is in place before any
+      // fetch can start; nothing from an earlier failed load survives.
+      this.#context = config.context;
       this.#module = config.module;
       this.#loading = this.#import(config.module).catch((error) => {
         // A failed load leaves the slot free for a retry.
@@ -202,6 +203,8 @@ export class Orchestrator {
     // (§4.9: a no-op without a fetcher), so a later first load starts clean.
     if (this.#loading === undefined) return Promise.resolve();
     const apply = async () => {
+      // The first import may still be in flight: the hook must hear this.
+      await this.#loading?.catch(() => {});
       await this.#fetcher?.updateAuth?.(context);
       this.#context = context;
       this.#authGeneration++;
