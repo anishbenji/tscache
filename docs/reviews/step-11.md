@@ -1,6 +1,6 @@
 # Step 11 — Fetcher orchestration, dedup and auth events
 
-Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 9 + adversarial · Status: in review · Verdict after triage: blocked
+Branch: `feat/11-orchestrator` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 10 + adversarial (cap reached) · Status: escalated · Verdict after triage: merge, pending the user's call on a further round
 
 Not an engine step: tests were written with the code (fetcher modules served as data: URLs through the real RPC path; one Playwright spec with two pages sharing one fetch).
 
@@ -101,6 +101,17 @@ Completed on the third attempt (usage limit, then the 2-hour background limit, t
 | A1-2 | P0 | A get waiting on several fetches stayed pending after one of them invalidated auth, until the others returned (design y) | accepted | Reproduced. Fixed in 81422d1: `AuthState.whenInvalid` releases the wait; ranges still out are reported `auth-pending` while their fetches finish. Test |
 | A1-3 | P1 | A fetch starting while the fetcher's hook was mid-swap could use the new token but carry the old generation, so its 401 was ignored and auth never flipped (R3-2 beyond the context-only case) | accepted | Fixed in 81422d1: during a hook transition no fetch starts; uncached ranges answer `auth-pending` at once. Two earlier tests rewritten to the new rule; §4.9 updated |
 | A1-4 | P1 | Elapsed time in the Playwright dedup spec did not prove the two gets overlapped (R8-1 incomplete) | accepted | Fixed in 81422d1: page B records when it issued its get and page A when its get completed (same machine clock); the spec asserts B issued before A's fetch ended |
+
+## Round 10 — reviewer verdict: merge after fixes
+
+Adversarial fixes confirmed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R10-1 | P1 | Every get that waited on fetches raced a shared long-lived "auth invalid" promise, leaving a reaction behind per successful get (≈37 MB after 100 000 gets) | accepted | Fixed in 588cbda: a removable `onInvalid` subscription, unsubscribed when the fetches finish. Test |
+| R10-2 | P1 | The browser dedup spec stamped page B before awaiting `cache()`, so a slow handle could still let B read cached data (A1-4 incomplete) | accepted | Fixed in 588cbda: handle first, stamp right before the get, fetch held 1.5 s, B must have posted at least a second before A's fetch ended |
+
+Round 10 is the cap (docs/workflow.md, review loop step 8) and it raised P1s, so the loop is not settled by its own rule and goes to the user. The fixes above have not been seen by the reviewer.
 
 ## Contract-test changes
 
