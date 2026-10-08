@@ -258,8 +258,13 @@ export class RpcServer {
     (connection: Connection, req: Req, p: Params) => unknown
   > = {
     cache: (_c, req) => this.#engine.cache(req.params as never),
-    get: (_c, _r, p) =>
-      this.#orchestrator.get(p.cacheId as string, p.range as Range, p.options),
+    get: (c, req, p) =>
+      this.#orchestrator.get(
+        p.cacheId as string,
+        p.range as Range,
+        p.options,
+        `${c.clientId}:${req.id}`,
+      ),
     put: (c, req, p) => this.#put(c, req.id, p.cacheId as string, p),
     invalidate: (_c, _r, p) =>
       this.#engine.invalidate(p.cacheId as string, p.range as Range),
