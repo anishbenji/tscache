@@ -108,8 +108,8 @@ Adversarial fixes confirmed.
 
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
-| R10-1 | P1 | Every get that waited on fetches raced a shared long-lived "auth invalid" promise, leaving a reaction behind per successful get (≈37 MB after 100 000 gets) | accepted | Fixed in 588cbda: a removable `onInvalid` subscription, unsubscribed when the fetches finish. Test |
-| R10-2 | P1 | The browser dedup spec stamped page B before awaiting `cache()`, so a slow handle could still let B read cached data (A1-4 incomplete) | accepted | Fixed in 588cbda: handle first, stamp right before the get, fetch held 1.5 s, B must have posted at least a second before A's fetch ended |
+| R10-1 | P1 | Every get that waited on fetches raced a shared long-lived "auth invalid" promise, leaving a reaction behind per successful get (≈37 MB after 100 000 gets) | accepted | Fixed in 588cbda: a removable `onInvalid` subscription, unsubscribed when the fetches finish. Test in 2378535 |
+| R10-2 | P1 | The browser dedup spec stamped page B before awaiting `cache()`, so a slow handle could still let B read cached data (A1-4 incomplete) | accepted | Fixed in 2378535: handle first, stamp right before the get, fetch held 1.5 s, B must have posted at least a second before A's fetch ended |
 
 Round 10 is the cap (docs/workflow.md, review loop step 8) and it raised P1s, so the loop is not settled by its own rule and goes to the user. The fixes above have not been seen by the reviewer.
 
