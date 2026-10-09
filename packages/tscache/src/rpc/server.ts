@@ -7,7 +7,9 @@
 
 import type { Engine } from "../engine/engine";
 import { ProtocolMismatchError, show, TscacheError } from "../errors";
+import { Orchestrator } from "../orchestrator/orchestrator";
 import type {
+  GetOptions,
   GetResult,
   PutBatch,
   PutOptions,
@@ -17,6 +19,7 @@ import type {
 import {
   type Bye,
   type Evt,
+  type FetcherConfig,
   type Hello,
   type InitResult,
   listen,
@@ -45,8 +48,9 @@ interface Params {
   cacheId?: string;
   range?: Range;
   batch?: PutBatch;
-  options?: PutOptions;
+  options?: PutOptions & GetOptions;
   t?: number;
+  context?: unknown;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -55,6 +59,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 export class RpcServer {
   readonly #engine: Engine;
+  readonly #orchestrator: Orchestrator;
   readonly #lib: string;
   readonly #connections = new Set<Connection>();
   #nextClient = 0;
@@ -62,6 +67,9 @@ export class RpcServer {
   constructor(engine: Engine, lib: string) {
     this.#engine = engine;
     this.#lib = lib;
+    this.#orchestrator = new Orchestrator(engine, (evt) =>
+      this.#broadcast(evt),
+    );
     engine.on("cacheCleared", (payload) => {
       this.#broadcast({
         t: "evt",
@@ -160,13 +168,17 @@ export class RpcServer {
     if (!isObject(data)) return;
     const message = data as ToServer;
     if (message.t === "init") {
-      this.#init(connection, message.protocol);
+      void this.#init(connection, message.protocol, message.fetcher);
       return;
     }
-    if (message.t === "req") this.#request(connection, message);
+    if (message.t === "req") void this.#request(connection, message);
   }
 
-  #init(connection: Connection, protocol: number): void {
+  async #init(
+    connection: Connection,
+    protocol: number,
+    fetcher: FetcherConfig | undefined,
+  ): Promise<void> {
     if (protocol !== PROTOCOL_VERSION) {
       const error = new ProtocolMismatchError(
         `client speaks protocol ${show(protocol)}, worker speaks ${PROTOCOL_VERSION}`,
@@ -180,23 +192,37 @@ export class RpcServer {
       this.#drop(connection);
       return;
     }
+    // A fetcher that fails to load is a startup error (N30).
+    if (isObject(fetcher) && typeof fetcher.module === "string") {
+      try {
+        await this.#orchestrator.load(fetcher);
+      } catch (error) {
+        const reply: InitResult = { t: "init-err", error: toWireError(error) };
+        this.#send(connection, reply);
+        this.#drop(connection);
+        return;
+      }
+    }
+    if (!this.#connections.has(connection)) return;
     connection.ready = true;
     const reply: InitResult = { t: "init-ok" };
     this.#send(connection, reply);
   }
 
-  #request(connection: Connection, req: Req): void {
+  async #request(connection: Connection, req: Req): Promise<void> {
     if (!connection.ready) {
       this.#reply(connection, req.id, new TscacheError("not initialized"));
       return;
     }
     let result: unknown;
     try {
-      result = this.#dispatch(connection, req);
+      result = await this.#dispatch(connection, req);
     } catch (error) {
       this.#reply(connection, req.id, error);
       return;
     }
+    // The port may have gone while an orchestrated get was in flight.
+    if (!this.#connections.has(connection)) return;
     const res: Res = { t: "res", id: req.id, ok: true, result };
     const transfer =
       req.op === "get" ? transferablesOf(result as GetResult) : [];
@@ -232,7 +258,13 @@ export class RpcServer {
     (connection: Connection, req: Req, p: Params) => unknown
   > = {
     cache: (_c, req) => this.#engine.cache(req.params as never),
-    get: (_c, _r, p) => this.#engine.get(p.cacheId as string, p.range as Range),
+    get: (c, req, p) =>
+      this.#orchestrator.get(
+        p.cacheId as string,
+        p.range as Range,
+        p.options,
+        `${c.clientId}:${req.id}`,
+      ),
     put: (c, req, p) => this.#put(c, req.id, p.cacheId as string, p),
     invalidate: (_c, _r, p) =>
       this.#engine.invalidate(p.cacheId as string, p.range as Range),
@@ -240,8 +272,7 @@ export class RpcServer {
     clearAll: () => this.#engine.clearAll(),
     setFinalizedUntil: (_c, _r, p) =>
       this.#engine.setFinalizedUntil(p.cacheId as string, p.t as number),
-    // Delivered to the fetcher at step ⑪.
-    updateAuth: () => undefined,
+    updateAuth: (_c, _r, p) => this.#orchestrator.updateAuth(p.context),
     // Acknowledged first; #request detaches the port afterwards.
     dispose: () => undefined,
   };

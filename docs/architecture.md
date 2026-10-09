@@ -258,6 +258,8 @@ Worker-side orchestration (locked behaviors): in-flight dedup keyed per `(cacheI
 
 Cookie-based auth needs none of this machinery — cookies flow in worker fetches natively.
 
+**What a fetcher must deliver (consequences of N11, N17, N19; documentation debt from step ⑤, committed here).** A response is authoritative for the whole requested range: every point the backend has in `[range.start, range.end]` must be in it, so a fetcher against a paginated API loops until it has all pages before returning; a partial response would record the missing points as confirmed gaps that are never refetched. A backend that publishes late or revises recent points must report `meta.finalizedUntil` (the first timestamp that is not yet final): points at or after it are stored but stay provisional and are refetched, and the response is authoritative only below it. A backend that restates history without reporting a `version` cannot be detected (§2.4); report `meta.version` when the dataset has one. Throw `AuthInvalidError` for an authentication failure (N8); any other thrown error marks the range `'fetch-failed'` for that `get` and is retried by the next `get` that needs it.
+
 ### 2.6 Errors (programmer errors — these reject; see N8)
 
 ```ts
@@ -406,8 +408,9 @@ engine/
                     N20), cacheId-first ops, cacheCleared events; pure in-process API —
                     unit-test target, './engine' export surface
 orchestrator/
-  orchestrator.ts   miss-driven fetch loop, in-flight dedup, miss coalescing, retry-after-auth
-  auth.ts           auth state machine: valid → invalid (broadcast) → updated (retry)
+  orchestrator.ts   fetcher loading, miss coalescing, in-flight dedup, version fence,
+                    orchestrated get, updateAuth
+  auth.ts           auth state: valid → invalid (broadcast once) → valid again on updateAuth
 rpc/
   protocol.ts       PROTOCOL_VERSION, message types, (de)serialization helpers
   server.ts         worker-side shell: ports, envelope dispatch → engine/orchestrator, evt fanout
@@ -681,6 +684,9 @@ class CacheState {
 
   put(batch: PutBatch, options?: PutOptions): CachePutResult;
   get(range: Range): GetResult;
+  /** Covered sub-ranges of the range (snapped outward), in ms, without
+   *  reading points; the orchestrator's flank check uses it. */
+  coverage(range: Range): Range[];
   invalidate(range: Range): void;
   clear(): void;
   setFinalizedUntil(t: number): void;
@@ -727,6 +733,8 @@ class Engine {
   has(cacheId: string): boolean;
   /** Current state only: no orchestration (that is step ⑪). */
   get(cacheId: string, range: Range): GetResult;
+  coverage(cacheId: string, range: Range): Range[];
+  configOf(cacheId: string): ResolvedCacheConfig;
   put(cacheId: string, batch: PutBatch, options?: PutOptions): PutResult;
   invalidate(cacheId: string, range: Range): void;
   clear(cacheId: string): void;
@@ -824,6 +832,33 @@ Rules:
 - **Dispose.** `client.dispose()` sends `dispose`, releases the port, terminates an owned dedicated worker, and rejects later calls with `TscacheError`; idempotent. A SharedWorker is never terminated by a client (other tabs may use it). The client also disposes itself on the page's `pagehide` event when the page is not being persisted (best effort), because browsers fire no port-close event a SharedWorker could use to notice a closed tab; a page entering the back/forward cache (`persisted: true`) keeps its client, since it may be restored with its objects intact. A tab whose renderer dies abruptly fires no `pagehide` either; its connection then stays registered in the worker until the worker is torn down with the last tab — a bounded leak accepted by N28. A handshake that times out or sees a worker `error` is aborted: its listeners go and this side's port closes, so a late `hello` completes nothing. A dedicated worker's `error` after the handshake aborts the client's pending requests (a `Worker` has no port closure to observe).
 - **Browser coverage (N26).** A Playwright suite in Chromium runs: a real dedicated `Worker`; a real `SharedWorker` with two pages of one `BrowserContext` sharing one engine (a put in one page is read in the other); the in-process pin; and the no-`SharedWorker` fallback (the API deleted from `window` before `createClient`, expecting `modeFallback` to `'dedicated'`). CI installs Chromium with `bunx playwright install --with-deps chromium` and `scripts/ci.sh` runs the suite (chore branch). Node tests over `MessageChannel` cover the facade and the chain logic with fake hostings.
 
+### 4.9 Internal contracts — orchestration (N29–N31, approved 2026-10-08)
+
+Not an engine step: tests are written with the code. The orchestrator lives in the worker (and in the in-process server) in front of `Engine`; the RPC server routes `get`, `updateAuth` and `init.fetcher` to it. Without a fetcher configured, `get` stays cache-only and `updateAuth` is a no-op.
+
+```ts
+// orchestrator/orchestrator.ts
+class Orchestrator {
+  constructor(engine: Engine, broadcast: (evt: Evt) => void);
+  /** import()s the module once; a failure rejects (N30). */
+  load(config: FetcherConfig): Promise<void>;
+  get(cacheId: string, range: Range, options?: GetOptions): Promise<GetResult>;
+  updateAuth(context: unknown): Promise<void>;
+}
+// orchestrator/auth.ts — AuthState: 'valid' | 'invalid'; see rules.
+// entries/fetcher.ts — exports Fetcher, FetchRequest, FetchResponse (§2.5).
+```
+
+Rules:
+
+- **Loading (N30).** `init.fetcher` makes the server call `load()` before answering: `import(module)` once per worker (the first connection loads it; later connections reuse it; a different module on a later connection is a `ConfigError` in `init-err`). An import failure, or a module whose default export has no `fetch` function, answers `init-err` with a `TscacheError` naming the module, so `createClient` rejects at startup. `context` is stored and sent with every request; `updateAuth` replaces it. A tab that joins with a context that is not the identical value takes the `updateAuth` path once the module is loaded (structured-cloneable values have no cheap, cycle-safe equality, so anything else is treated as new material).
+- **Orchestrated get (N2).** `get` reads the engine; with `cacheOnly` or no fetcher it returns that. Otherwise the `'uncached'` misses are **coalesced**: adjacent misses merge, and a miss abutting existing coverage is extended by one interval into it (locked: the one-point overlap aids range merge). Each coalesced range becomes one `FetchRequest`; the response is applied with `engine.put(cacheId, response, { range })`, so the fetched range is authoritative (N3, clipped by the response's own watermark, N19). The engine is read again and the result returned. A range whose fetch threw comes back as a miss with `reason: 'fetch-failed'` and `error: { name, message }`; a range not fetched because auth is invalid comes back `'auth-pending'`; `'uncached'` is reserved for slots nobody asked to fetch (only after the fence, below).
+- **Dedup (N31, locked).** In-flight fetches are keyed by `(cacheId, range.start, range.end)` of the coalesced range; a second `get` from any tab that produces the same key awaits the same promise and applies nothing itself. Overlapping but different ranges fetch separately.
+- **Version fence (N29; companion to N19).** The orchestrator counts `cacheCleared` events per cache. A response whose fetch started before the latest clear is **not applied**; the waiting `get` re-issues the fetch for what is still missing **once**, and if that one is dropped too the range is returned as `'uncached'`. A fetch's `put` may itself trigger a version-mismatch clear (its `meta.version` is newer): that clear happens inside the put and does not fence the response that caused it.
+- **Auth (design b/y, locked).** `AuthInvalidError` (detected by `code === 'tscache:auth-invalid'`, never `instanceof`) from a fetch flips the state to `'invalid'` and broadcasts `authInvalid` to every port once per flip; the failed range comes back `'auth-pending'`, and while invalid no fetch is issued (every miss resolves `'auth-pending'` at once). `updateAuth(context)` from any tab is applied in call order, one at a time: the fetcher's `updateAuth` hook runs, then the context and the auth generation switch together and the state flips to `'valid'`; the next `get` fetches again. While the fetcher's hook is running (a credential transition, machine-speed), no fetch starts: the module's own state and the orchestrator's stamp could disagree, so uncached ranges come back `'auth-pending'` at once and the consumer re-gets after the switch. A fetch that was already out carries the generation it started under, and an auth failure from a superseded generation is ignored. A `get` waiting on several fetches is released the moment one of them invalidates auth: the ranges still out come back `'auth-pending'` while their fetches finish in the background. The fetcher receives a copy of the range; the orchestrator's own range object decides the authoritative write. Nothing is retried on behalf of a `get` that already returned: a `get` never waits for a human.
+- **Failure of the fetcher itself.** A fetch that rejects with anything else is `'fetch-failed'` for that `get` only; nothing is cached about the failure and the next `get` tries again. A response that fails engine validation (`PutError`) is likewise `'fetch-failed'` with the error's name and message.
+- **Events.** `authInvalid` is client-scoped (§2.7). Fetch lifecycle events are roadmap.
+
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
 - Vitest/Node against `engine/`, `coverage`, `segment/` directly (~90% of logic), plus RPC protocol over an in-memory port pair; property-style tests for coverage merge/subtraction and segment merge.
@@ -866,7 +901,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (N9–N28 later, at steps ③–⑩) (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9–N31 later, at steps ③–⑪) (working process §2.3: alternatives presented, user decided).
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -898,6 +933,9 @@ These emerged while making the API concrete (N9–N28 later, at steps ③–⑩)
 | N26 | Browser coverage from step ⑩ | **Playwright in Chromium**, installed locally and in CI; the Node tests keep covering logic over `MessageChannel`. Rejected: staying Node-only until step ⑫ (real Worker/SharedWorker behaviour unverified for two more steps). User-confirmed 2026-10-08 |
 | N27 | In-process engine scope | **One `Engine` per `createClient`** behind its own `MessageChannel` pair; matches the SSR use and needs no module-level state. Rejected: a page-wide singleton shared by every in-process client (worker-like semantics, but a global with a disposal story). User-confirmed 2026-10-08 |
 | N28 | Tab death without `pagehide` | **Accept the bounded leak.** A tab that crashes fires no `pagehide` and browsers deliver no port-close event to a SharedWorker, so its connection stays in the server until the worker is torn down with the last tab; cost: one map entry and one failed `postMessage` per broadcast. Rejected for now: a client heartbeat with server-side eviction (timers per tab and server, two wire messages, generous windows because hidden tabs throttle timers to once a minute) — roadmap if real-world tab churn shows a problem. User-confirmed 2026-10-08 |
+| N29 | Version fence outcome | **Refetch once, then report**: a response dropped because the cache was cleared by a newer version mid-flight is re-requested once for what is still missing; a second drop returns the range as `'uncached'`. Bounded, and one version bump is invisible to the consumer. Rejected: report the miss immediately (one visible hiccup per bump). User-confirmed 2026-10-08 |
+| N30 | When a broken fetcher module surfaces | **At `createClient`**: `init` imports the module and a failure answers `init-err`, so the client rejects at startup with a `TscacheError` naming the module. Rejected: lazily on the first miss (a broken fetcher would look like a flaky backend). User-confirmed 2026-10-08 |
+| N31 | Dedup granularity | **Exact coalesced range, as locked**: overlapping but different ranges fetch separately; identical ranges across tabs share one fetch. Deferred to the roadmap, not rejected: subtracting in-flight ranges from new requests (fewer bytes under heavy overlap, more bookkeeping) — the user wants to consider it later. User-confirmed 2026-10-08 |
 
 ## 9. What happens after sign-off
 

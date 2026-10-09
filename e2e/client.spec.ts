@@ -137,3 +137,77 @@ test("without SharedWorker the chain steps down to a dedicated Worker", async ({
     },
   ]);
 });
+
+test("two pages share one SharedWorker fetch for the same range", async ({
+  context,
+}) => {
+  const a = await context.newPage();
+  const b = await context.newPage();
+  await open(a);
+  await open(b);
+  // The fixture holds its answer for 1.5 s, so both gets are in flight at
+  // once; only in-flight deduplication can make them share one fetch.
+  const options = {
+    workerUrl,
+    fetcher: { module: "/fetcher.js", context: { delayMs: 1500 } },
+  };
+  expect((await connect(a, options)).mode).toBe("shared");
+  expect((await connect(b, options)).mode).toBe("shared");
+  // Page B records when it issued its get; page A records when its get came
+  // back (both on the same machine clock). B issued before A's fetch ended,
+  // so B's request reached the worker while A's fetch was still in flight.
+  const readTimed = (page: Page) =>
+    page.evaluate(async (cfg) => {
+      const w = window as unknown as {
+        client: {
+          cache(c: unknown): Promise<{
+            get(r: unknown): Promise<{
+              timestamps: Float64Array;
+              coverage: unknown[];
+              misses: unknown[];
+            }>;
+          }>;
+        };
+      };
+      const cache = await w.client.cache(cfg);
+      // Stamp right before the get is posted (handle obtained first).
+      const issued = Date.now();
+      const got = await cache.get({ start: 3, end: 33 });
+      return {
+        issued,
+        done: Date.now(),
+        timestamps: Array.from(got.timestamps),
+        coverage: got.coverage,
+        misses: got.misses,
+      };
+    }, config);
+  const [ta, tb] = await Promise.all([readTimed(a), readTimed(b)]);
+  // B posted its get at least a second before A's fetch completed.
+  expect(tb.issued).toBeLessThan(ta.done - 1000);
+  const strip = (t: typeof ta) => ({
+    timestamps: t.timestamps,
+    coverage: t.coverage,
+    misses: t.misses,
+  });
+  const ra = strip(ta);
+  const rb = strip(tb);
+  expect(ra).toEqual({
+    timestamps: [3, 13, 23, 33],
+    coverage: [{ start: 3, end: 33 }],
+    misses: [],
+  });
+  expect(rb).toEqual(ra);
+  // The fetcher ran once for both tabs: volume carries its call count.
+  const volumes = await a.evaluate(async (cfg) => {
+    const w = window as unknown as {
+      client: {
+        cache(c: unknown): Promise<{
+          get(r: unknown): Promise<{ fields: { volume: Int16Array } }>;
+        }>;
+      };
+    };
+    const cache = await w.client.cache(cfg);
+    return Array.from((await cache.get({ start: 3, end: 33 })).fields.volume);
+  }, config);
+  expect(volumes).toEqual([1, 1, 1, 1]);
+});

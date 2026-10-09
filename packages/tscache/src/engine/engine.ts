@@ -87,6 +87,11 @@ export class Engine {
     return created.config;
   }
 
+  /** The resolved config a cache was created with; UnknownCacheError otherwise. */
+  configOf(cacheId: string): ResolvedCacheConfig {
+    return this.#state(cacheId).config;
+  }
+
   /** Whether a cache with this id exists; never throws. */
   has(cacheId: string): boolean {
     return this.#caches.has(cacheId);
@@ -109,6 +114,11 @@ export class Engine {
   put(cacheId: string, batch: PutBatch, options?: PutOptions): PutResult {
     const { warnings } = this.#state(cacheId).put(batch, options);
     return { warnings };
+  }
+
+  /** The authoritative sub-ranges of the range (snapped outward), in ms. */
+  coverage(cacheId: string, range: Range): Range[] {
+    return this.#state(cacheId).coverage(range);
   }
 
   /** Forgets coverage over the range (snapped outward); the points stay. */
