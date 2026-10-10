@@ -295,8 +295,10 @@ describe("auth (designs b and y)", () => {
       seen.filter((e) => e.scope === "client" && e.event === "authInvalid");
     expect(authEvents(seenA)).toHaveLength(1);
     expect(authEvents(seenB)).toHaveLength(1);
-    expect(authEvents(seenA)[0]).toMatchObject({
-      payload: { error: { name: "Error", message: "401" } },
+    // N33: the event names the context the refused fetch carried.
+    expect(authEvents(seenA)[0]?.payload).toEqual({
+      error: { name: "Error", message: "401" },
+      context: { token: "old" },
     });
     // New material from any tab: the fetcher hears it and fetches resume.
     log().mode = "ok";
@@ -307,6 +309,39 @@ describe("auth (designs b and y)", () => {
     const third = await get(a, { start: 3, end: 13 });
     expect(third.misses).toEqual([]);
     expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
+  });
+});
+
+describe("refused context (N33)", () => {
+  it("authInvalid carries the context of the refused fetch, not one it was superseded by", async () => {
+    resetLog("slow");
+    log().afterRelease = "auth";
+    const { a, b } = await pair({ token: "t0" });
+    const seen: Evt[] = [];
+    b.on((e) => seen.push(e));
+    // A fetch goes out under t0 and stalls.
+    const stalled = get(a, { start: 3, end: 13 });
+    for (let i = 0; i < 100 && log().release === undefined; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(log().requests.at(-1)?.context).toEqual({ token: "t0" });
+    await b.request("updateAuth", { context: { token: "t1" } });
+    // Its refusal comes after t1 replaced t0: it says nothing about t1.
+    log().release?.();
+    expect((await stalled).misses[0]?.reason).toBe("auth-pending");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen.filter((e) => e.event === "authInvalid")).toEqual([]);
+    // A refusal of t1 is reported with t1.
+    log().mode = "auth";
+    expect((await get(b, { start: 23, end: 33 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(
+      seen.filter((e) => e.event === "authInvalid").map((e) => e.payload),
+    ).toEqual([
+      { error: { name: "Error", message: "401" }, context: { token: "t1" } },
+    ]);
   });
 });
 

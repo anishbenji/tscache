@@ -159,8 +159,12 @@ export type RequestId = string;
 
 /** Three scopes, one channel (N5, §2.7). */
 export interface ClientEvents {
-  /** Fetcher signalled auth failure; broadcast to all tabs (step ⑪). */
-  authInvalid: { error: { name: string; message: string } };
+  /**
+   * Fetcher signalled auth failure; broadcast to all tabs (step ⑪).
+   * `context` is the fetcher context the refused fetch was issued with
+   * (N33), so a tab refreshes only when its credential is the refused one.
+   */
+  authInvalid: { error: { name: string; message: string }; context: unknown };
   /** The fallback chain stepped down while connecting. */
   modeFallback: { from: HostingMode; to: HostingMode; reason: string };
   /**

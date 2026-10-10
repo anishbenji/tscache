@@ -377,6 +377,8 @@ export class Orchestrator {
     const fetcher = this.#fetcher as Fetcher;
     const { interval, alignmentOffset } = this.#engine.configOf(cacheId);
     const authGeneration = this.#authGeneration;
+    // Switches with the generation: the context this fetch is refused with.
+    const context = this.#context;
     try {
       const response = await fetcher.fetch({
         cacheId,
@@ -384,7 +386,7 @@ export class Orchestrator {
         range: { start: range.start, end: range.end },
         interval,
         alignmentOffset,
-        context: this.#context,
+        context,
       });
       return { response };
     } catch (error) {
@@ -394,7 +396,7 @@ export class Orchestrator {
       // A failure under credentials that updateAuth has since replaced
       // says nothing about the new ones.
       if (authGeneration === this.#authGeneration) {
-        this.#auth.invalidate(describe(error));
+        this.#auth.invalidate(describe(error), context);
       }
       return { outcome: { kind: "auth" } };
     }

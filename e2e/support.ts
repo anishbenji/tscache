@@ -46,11 +46,11 @@ interface RefreshSnippet {
   refreshOnAuthInvalid(
     client: TscacheClient,
     options: {
-      access: string;
       load(): Tokens | Promise<Tokens>;
       save(tokens: Tokens): void | Promise<void>;
       refresh(token: string): Promise<Tokens>;
       toContext(access: string): FetcherContext;
+      accessOf(context: FetcherContext): string;
       onSessionLost(error: unknown): void;
       lockName?: string;
     },
@@ -373,7 +373,6 @@ export async function installRefresh(page: Page, ns: string): Promise<void> {
       )) as RefreshSnippet;
       w.sessionLost = [];
       refreshOnAuthInvalid(client, {
-        access: initial.access,
         load: () => JSON.parse(localStorage.getItem(key) ?? "null"),
         save: (tokens) => localStorage.setItem(key, JSON.stringify(tokens)),
         refresh: async (token) => {
@@ -387,6 +386,7 @@ export async function installRefresh(page: Page, ns: string): Promise<void> {
           return (await response.json()) as Tokens;
         },
         toContext: (access) => ({ ns, token: access }),
+        accessOf: (context) => context.token,
         onSessionLost: (error) => w.sessionLost?.push(String(error)),
       });
     },
