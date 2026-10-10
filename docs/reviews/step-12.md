@@ -79,3 +79,13 @@ The two decisions taken during this step, N32 and N33, in one pull request after
 Probe before review: a client's queued shared-mode lock request does not cost the page the back/forward cache. In full Chromium (`channel: 'chromium'`; the headless shell disables the cache for its embedder) a page with a pending request, and one with a tscache shared client, were both restored with `persisted: true` and no blocking reasons; after restore the request was still queued and was granted when the holder went. So no `pagehide`/`pageshow` handling was added.
 
 Checked against mutants: with the client's lock watch disabled, `worker-loss.spec.ts` hangs until its timeout; with the snippet refreshing on every event, four auth specs fail (`queuedStaleEvents`, `lateStaleEvent`, `twoTabsOneRefusal` and the three-tab refresh). Review rounds of this follow-up are numbered from round 5 in `.reviews/step-12/`.
+
+### Round 5 — reviewer verdict: merge after fixes
+
+The first round of the follow-up. CI passed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R5-1 | P1 | The snippet ends the session when an older worker sends `authInvalid` without `context`: `accessOf(undefined)` throws inside the lock callback | accepted | Reproduced with scenario `eventsWithoutContext` (both tabs lost the session). Real: the protocol version stays 1 (N32/N33), and a no-bundler setup serves the worker from a fixed URL, so new tabs join a SharedWorker kept alive by a tab opened before an upgrade. Fixed in 95bcfca: an event without a context counts as a refusal of the stored token, so each tab may rotate once, always with the current refresh token, and never ends the session for it. The snippet header and the §4.8 compatibility sentence say so |
+
+Also in this round: `docs/guides/worker-setup.md` gains a note on `workerLost` with a recovery example (documentation debt for the new event).

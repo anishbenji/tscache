@@ -62,3 +62,20 @@ const client = await createClient({ workerUrl: "/vendor/tscache/worker.js" });
   `Worker` per tab (one `modeFallback` event). Nothing to configure.
 - Check the setup once with `client.mode`: `'shared'` (or `'dedicated'` where
   SharedWorker is unavailable) means the URL resolved.
+- Chromium runs a `SharedWorker` in the process of the tab that created it.
+  If that tab crashes, the worker and its cache go with it; every other tab's
+  client then rejects its calls and emits `workerLost` once. Create a new
+  client to go on (it starts a new worker, with an empty cache). Detection
+  uses Web Locks, so it needs a secure context (HTTPS or `localhost`);
+  elsewhere the calls of those tabs hang.
+
+  ```ts
+  let client = await createClient(options);
+  const recover = () => {
+    void createClient(options).then((next) => {
+      client = next;
+      client.on("workerLost", recover);
+    });
+  };
+  client.on("workerLost", recover);
+  ```
