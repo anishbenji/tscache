@@ -1,0 +1,103 @@
+import {
+  cacheConfig,
+  connect,
+  drainEvents,
+  expect,
+  installRefresh,
+  lockQueue,
+  open,
+  read,
+  test,
+  updateAuth,
+  updateCount,
+} from "./support";
+
+// authInvalid across tabs (§2.5, §4.9, designs b and y): one refused token
+// is broadcast to every tab, gets come back auth-pending without fetching
+// while auth is invalid, and any tab's updateAuth recovers every tab. The
+// backend's expire replaces the access token only, so the refresh token
+// still works.
+
+test("one tab refreshes behind a Web Lock while the others wait", async ({
+  context,
+  backend,
+}) => {
+  const config = cacheConfig();
+  const a = await open(context);
+  const b = await open(context);
+  const c = await open(context);
+  const pages = [a, b, c];
+  for (const page of pages) {
+    await connect(page, backend.clientOptions());
+    await installRefresh(page, backend.ns);
+  }
+  await backend.control({ expire: true, hold: { refresh: 1 } });
+  expect(await read(a, config, { start: 3, end: 33 })).toEqual({
+    timestamps: [],
+    volume: [],
+    coverage: [],
+    misses: [{ range: { start: 3, end: 33 }, reason: "auth-pending" }],
+  });
+  for (const page of pages) {
+    expect(await drainEvents(page, config, "authInvalid")).toEqual([
+      {
+        error: {
+          name: "AuthInvalidError",
+          message: "candles refused token at-0",
+        },
+      },
+    ]);
+  }
+  // One tab's refresh is held at the backend while it holds the lock; the
+  // other two queue behind it instead of spending the same refresh token.
+  await backend.waitHeld("refresh", 1);
+  await expect
+    .poll(() => lockQueue(a, "tscache-auth-refresh"))
+    .toEqual({ held: 1, pending: 2 });
+  await backend.release("refresh");
+  for (const page of pages) await expect.poll(() => updateCount(page)).toBe(1);
+  expect(await backend.state()).toMatchObject({ refreshes: 1, reused: 0 });
+  const reads = [
+    { page: a, range: { start: 3, end: 33 } },
+    { page: b, range: { start: 103, end: 133 } },
+    { page: c, range: { start: 203, end: 233 } },
+  ];
+  for (const { page, range } of reads) {
+    const got = await read(page, config, range);
+    expect(got.coverage).toEqual([range]);
+    expect(got.misses).toEqual([]);
+  }
+  expect((await backend.state()).requests).toEqual({
+    "3-33": 2,
+    "103-133": 1,
+    "203-233": 1,
+  });
+});
+
+test("any tab's updateAuth recovers every tab", async ({
+  context,
+  backend,
+}) => {
+  const config = cacheConfig();
+  const a = await open(context);
+  const b = await open(context);
+  await connect(a, backend.clientOptions());
+  await connect(b, backend.clientOptions());
+  await backend.control({ expire: true });
+  expect((await read(a, config, { start: 3, end: 33 })).misses).toEqual([
+    { range: { start: 3, end: 33 }, reason: "auth-pending" },
+  ]);
+  // While auth is invalid no tab fetches: B's miss comes back at once.
+  expect((await read(b, config, { start: 43, end: 63 })).misses).toEqual([
+    { range: { start: 43, end: 63 }, reason: "auth-pending" },
+  ]);
+  expect((await backend.state()).requests).toEqual({ "3-33": 1 });
+  const { access } = await backend.refresh("rt-0");
+  await updateAuth(b, { ns: backend.ns, token: access });
+  expect(await read(a, config, { start: 3, end: 33 })).toEqual({
+    timestamps: [3, 13, 23, 33],
+    volume: [2, 2, 2, 2],
+    coverage: [{ start: 3, end: 33 }],
+    misses: [],
+  });
+});

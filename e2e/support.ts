@@ -26,6 +26,34 @@ import type {
 
 export const workerUrl = "/dist/worker.js";
 
+/** What the fixture fetcher (pages/fetcher.js) expects as its context. */
+interface FetcherContext {
+  ns: string;
+  token: string;
+}
+
+interface Tokens {
+  access: string;
+  refresh: string;
+}
+
+/** The backend's first pair (scripts/e2e-backend.ts). */
+const initialTokens: Tokens = { access: "at-0", refresh: "rt-0" };
+
+/** pages/auth-refresh.js, the snippet the examples ship. */
+interface RefreshSnippet {
+  refreshOnAuthInvalid(
+    client: TscacheClient,
+    options: {
+      load(): Tokens | Promise<Tokens>;
+      save(tokens: Tokens): void | Promise<void>;
+      refresh(token: string): Promise<Tokens>;
+      toContext(access: string): FetcherContext;
+      lockName?: string;
+    },
+  ): () => void;
+}
+
 /** A get result as plain arrays, which compare with toEqual. */
 interface Got {
   timestamps: number[];
@@ -42,6 +70,8 @@ interface E2EWindow {
   log: { event: keyof ClientEvents; payload: unknown }[];
   /** Gets started by `start`, by key. */
   gets: Map<string, { settled: boolean; promise: Promise<Got> }>;
+  /** updateAuth calls that resolved, counted from `installRefresh` on. */
+  updates?: number;
 }
 
 /** The suites' cache: one point every 10 ms from 3, under a fresh id. */
@@ -200,6 +230,80 @@ export async function drainEvents<E extends keyof ClientEvents>(
   return logged();
 }
 
+/**
+ * Runs the refresh snippet in the page against the backend `ns`, with the
+ * tokens in localStorage, which the pages of a context share; the first
+ * install stores the backend's first pair. From here on the page counts the
+ * client's updateAuth calls that resolved, whoever made them.
+ */
+export async function installRefresh(page: Page, ns: string): Promise<void> {
+  await page.evaluate(
+    async ({ ns, initial }) => {
+      const w = window as unknown as E2EWindow;
+      const client = w.client;
+      const update = client.updateAuth.bind(client);
+      w.updates = 0;
+      client.updateAuth = async (context) => {
+        await update(context);
+        w.updates = (w.updates ?? 0) + 1;
+      };
+      const key = `tscache-e2e-auth:${ns}`;
+      if (localStorage.getItem(key) === null) {
+        localStorage.setItem(key, JSON.stringify(initial));
+      }
+      // A served URL, not a module of this repository's graph.
+      const snippet = "/auth-refresh.js";
+      const { refreshOnAuthInvalid } = (await import(
+        snippet
+      )) as RefreshSnippet;
+      refreshOnAuthInvalid(client, {
+        load: () => JSON.parse(localStorage.getItem(key) ?? "null"),
+        save: (tokens) => localStorage.setItem(key, JSON.stringify(tokens)),
+        refresh: async (token) => {
+          const response = await fetch(`/backend/${ns}/refresh`, {
+            method: "POST",
+            body: JSON.stringify({ refresh: token }),
+          });
+          if (!response.ok) {
+            throw new Error(`refresh answered ${response.status}`);
+          }
+          return (await response.json()) as Tokens;
+        },
+        toContext: (access) => ({ ns, token: access }),
+      });
+    },
+    { ns, initial: initialTokens },
+  );
+}
+
+/** The page's updateAuth calls that resolved since `installRefresh`. */
+export function updateCount(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as E2EWindow).updates ?? 0);
+}
+
+export async function updateAuth(
+  page: Page,
+  context: FetcherContext,
+): Promise<void> {
+  await page.evaluate(async (ctx) => {
+    await (window as unknown as E2EWindow).client.updateAuth(ctx);
+  }, context);
+}
+
+/** How many holders and waiters the Web Lock `name` has in the page's origin. */
+export function lockQueue(
+  page: Page,
+  name: string,
+): Promise<{ held: number; pending: number }> {
+  return page.evaluate(async (n) => {
+    const { held = [], pending = [] } = await navigator.locks.query();
+    return {
+      held: held.filter((lock) => lock.name === n).length,
+      pending: pending.filter((lock) => lock.name === n).length,
+    };
+  }, name);
+}
+
 class Backend {
   /** Fresh per test: every test talks to the one server. */
   readonly ns: string = crypto.randomUUID();
@@ -210,11 +314,9 @@ class Backend {
   }
 
   /** Client options whose fetcher asks this backend with `token`. */
-  clientOptions(token = "at-0"): ClientOptions {
-    return {
-      workerUrl,
-      fetcher: { module: "/fetcher.js", context: { ns: this.ns, token } },
-    };
+  clientOptions(token = initialTokens.access): ClientOptions {
+    const context: FetcherContext = { ns: this.ns, token };
+    return { workerUrl, fetcher: { module: "/fetcher.js", context } };
   }
 
   async control(body: BackendControl): Promise<void> {
@@ -227,6 +329,15 @@ class Backend {
   async state(): Promise<BackendSnapshot> {
     const response = await this.#request.get(`/backend/${this.ns}/state`);
     return (await response.json()) as BackendSnapshot;
+  }
+
+  /** Rotates the tokens the way a client would. */
+  async refresh(token: string): Promise<Tokens> {
+    const response = await this.#request.post(`/backend/${this.ns}/refresh`, {
+      data: { refresh: token },
+    });
+    expect(response.ok()).toBe(true);
+    return (await response.json()) as Tokens;
   }
 
   release(gate: Gate): Promise<void> {
