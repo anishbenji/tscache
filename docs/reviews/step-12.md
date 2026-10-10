@@ -1,6 +1,6 @@
 # Step 12 — Playwright multi-tab suite
 
-Branch: `feat/12-multitab-e2e` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 2 · Status: in review · Verdict after triage: —
+Branch: `feat/12-multitab-e2e` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 · Status: in review · Verdict after triage: —
 
 Not an engine step: tests only, no contract tests and no change under `packages/tscache/src/`. Specs approved by the user on 2026-10-11: cross-tab dedup moved onto a request gate, a context-isolation control, version-mismatch clear propagation with the cross-tab N29 fence, `authInvalid` across tabs with a Web Locks refresh snippet, and a tab dying mid-fetch. The fixtures talk to an in-memory mock backend in the e2e server (user's choice over a worker-local fake), so a test holds a fetch in flight by gating it instead of sleeping, and counts requests on the server.
 
@@ -25,6 +25,10 @@ No new findings; CI passed.
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R2-1 | P2 | R1-1 still reproducible when the second stale event arrives after the first recovery's lock callback adopted the current pair: it captures the adopted token and rotates (re-raises R1-1) | accepted | Validated by reasoning and by the new regression, which the 8cfe1f0 snippet fails (`refreshes: 2`). Second round on this area, so redesigned rather than patched (ddbf7ab): the worker sends events and `updateAuth` answers on one port in order (`PortClient.#receive` settles both synchronously), so an event a tab receives before the answer to its own update concerns a token from before it. The snippet runs one recovery per tab and ignores events until that recovery's `updateAuth` is answered; the dispatch-time capture is gone. Regression: stale events back to back and after the recovery reached `updateAuth`, then one real refusal after the answer (`refreshes: 1`); it fails in under a second instead of hanging when recoveries pile up |
+
+## Round 3 — reviewer verdict: merge
+
+No findings. R1-1 and R2-1 confirmed fixed and covered by the regression; CI passed.
 
 ## Contract-test changes
 
