@@ -21,12 +21,16 @@ export function refreshOnAuthInvalid(
   client,
   { load, save, refresh, toContext, lockName = "tscache-auth-refresh" },
 ) {
-  // The access token this tab last saw: the one that has just been refused.
+  // The access token this tab last saw.
   let seen = Promise.resolve(load()).then((tokens) => tokens.access);
   return client.on("authInvalid", () => {
+    // Taken when the event fires, not when the lock is granted: events queued
+    // behind an earlier recovery concern the token known at that moment, and
+    // must not rotate the newer one.
+    const refused = seen;
     void navigator.locks.request(lockName, async () => {
       let tokens = await load();
-      if (tokens.access === (await seen)) {
+      if (tokens.access === (await refused)) {
         tokens = await refresh(tokens.refresh);
         await save(tokens);
       }

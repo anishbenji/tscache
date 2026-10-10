@@ -7,6 +7,7 @@ import {
   lockQueue,
   open,
   read,
+  replayQueuedAuthEvents,
   test,
   updateAuth,
   updateCount,
@@ -99,5 +100,18 @@ test("any tab's updateAuth recovers every tab", async ({
     volume: [2, 2, 2, 2],
     coverage: [{ start: 3, end: 33 }],
     misses: [],
+  });
+});
+
+test("events queued behind earlier recoveries rotate nothing", async ({
+  context,
+}) => {
+  // A busy tab can receive the events of two recovery cycles another tab
+  // already completed. Both concern tokens that are gone, so the tab adopts
+  // the current pair twice and never spends its refresh token.
+  const page = await open(context);
+  expect(await replayQueuedAuthEvents(page)).toEqual({
+    refreshes: 0,
+    updates: ["at-2", "at-2"],
   });
 });

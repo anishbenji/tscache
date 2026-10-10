@@ -320,6 +320,58 @@ export async function installRefresh(page: Page, ns: string): Promise<void> {
   );
 }
 
+/**
+ * Drives the refresh snippet with a stand-in client: the snippet starts on
+ * the first pair, another tab then rotates twice (the shared tokens move to
+ * the third pair), and two authInvalid events that queued up meanwhile are
+ * dispatched back to back. Returns the refreshes the snippet made and the
+ * access tokens it handed to updateAuth.
+ */
+export async function replayQueuedAuthEvents(
+  page: Page,
+): Promise<{ refreshes: number; updates: string[] }> {
+  return page.evaluate(async () => {
+    let tokens: Tokens = { access: "at-0", refresh: "rt-0" };
+    let refreshes = 0;
+    const updates: string[] = [];
+    const handlers: (() => void)[] = [];
+    const client = {
+      on: (_event: string, fn: () => void) => {
+        handlers.push(fn);
+        return () => {};
+      },
+      updateAuth: async (context: FetcherContext) => {
+        updates.push(context.token);
+      },
+    } as unknown as TscacheClient;
+    const lockName = "tscache-e2e-queued-events";
+    const snippet = "/auth-refresh.js";
+    const { refreshOnAuthInvalid } = (await import(snippet)) as RefreshSnippet;
+    refreshOnAuthInvalid(client, {
+      load: () => tokens,
+      save: (next) => {
+        tokens = next;
+      },
+      refresh: async () => {
+        refreshes++;
+        return { access: `at-x${refreshes}`, refresh: `rt-x${refreshes}` };
+      },
+      toContext: (access) => ({ ns: "unused", token: access }),
+      lockName,
+    });
+    // Let the snippet read the first pair before the other tab moves on.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    tokens = { access: "at-2", refresh: "rt-2" };
+    for (const handler of handlers) {
+      handler();
+      handler();
+    }
+    // Lock requests are granted in order: this one runs after both recoveries.
+    await navigator.locks.request(lockName, () => {});
+    return { refreshes, updates };
+  });
+}
+
 /** The page's updateAuth calls that resolved since `installRefresh`. */
 export function updateCount(page: Page): Promise<number> {
   return page.evaluate(() => (window as unknown as E2EWindow).updates ?? 0);
