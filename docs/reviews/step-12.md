@@ -106,3 +106,31 @@ Decision concerns raised by the reviewer (escalated to the user, not acted on):
 
 - **DC-1. The snippet assumes a refresh issues a new access token.** If a refresh returned the same access token with a new refresh token, two tabs hearing one refusal would both refresh: two rotations, each with the current refresh token, never a reuse. Proposed: state the precondition in the snippet's header; supporting repeated access tokens would need a credential identifier beyond N33.
 - **DC-2. N32 detects a worker whose global is gone, not every way a client can stop being served.** A same-origin script that steals the lifetime lock (`steal: true` with the name from `navigator.locks.query()`) causes a false `workerLost` while the worker runs on; a dedicated worker that calls `self.close()` (only consumer code in the worker, such as a fetcher, could) fires no `error`, and its client's calls hang. Proposed: record both as assumptions in §4.8. The alternative for the second is a lifetime lock in the dedicated worker too, which extends N32 beyond its approved scope.
+
+### Round 7 — reviewer verdict: merge
+
+No findings. R5-1 and A2-1 confirmed fixed and covered; CI passed (1067 Node tests, 20 browser specs). The follow-up has settled. Stability: the worker-loss, tab-death and auth specs passed 240 of 240 runs at 20 repetitions on 10 workers, and the whole browser suite 200 of 200 at 10 repetitions.
+
+### Contract-test changes
+
+None (no contract tests in this follow-up). The refresh-harness scenario `installedAfterRefresh` tested the `access` seed, which N33 removes; it was replaced by `lateStaleEvent`, the former R2-1 limit that N33 fixes.
+
+### Decision concerns
+
+DC-1 and DC-2 from adversarial round 2, escalated to the user and open at the time of the merge request.
+
+## Merge request: `feat/12b-worker-loss` → `main`
+
+**Scope.** The two decisions taken during step ⑫, with the architecture text the user approved on 2026-10-11 (§2.7, §3.1, §4.7–§4.9, §8 rows N32 and N33).
+
+- **N32: loss of the SharedWorker.** Chromium runs a SharedWorker in the renderer of the tab that created it, and a crash of that renderer kills the worker without any signal to the other tabs, whose calls then hang. The worker now holds an exclusive Web Lock `tscache-worker:<uuid>` for its lifetime and names it in an optional `hello.lock`; shared-mode clients queue on it in shared mode after the handshake, and the grant means the worker is gone. A lost client rejects pending and later calls with `TscacheError`, releases what it owns and emits the new client event `workerLost { reason }` once. The same applies to a dedicated worker's fatal error and to a port closed or `bye` from the server after the handshake; `dispose()` withdraws the lock request and never emits it. New module `rpc/lifetime.ts`.
+- **N33: the refused context.** `authInvalid` carries the fetcher context the refused fetch was issued with. The refresh snippet (`e2e/pages/auth-refresh.js`, which step ⑬ copies into the examples) takes `accessOf(context)` and refreshes exactly when the stored access token is the refused one; the `access` seed, the dispatch-time capture and the known-limit header are gone, and the tombstone and `onSessionLost` stay.
+- `docs/guides/worker-setup.md` explains `workerLost` with a recovery example.
+
+**Review outcome.** Three regular rounds and one adversarial pass, numbered from round 5 in `.reviews/step-12/`. R5-1: the snippet ended the session when an older worker (kept alive by a tab opened before an upgrade, protocol still 1) sent `authInvalid` without a context; such an event now counts as a refusal of the stored token. A2-1: the fetcher received the worker's own context object, so a fetcher that mutated it could make the event name no token or make it uncloneable; the fetcher and its hook now get copies, as they already got a copy of the range. Rounds 6 and 7 were clean.
+
+**Confidence: high.** The new Playwright spec crashes the host tab through CDP and requires the survivor's held get and a later call to reject with the loss reason, exactly one `workerLost`, and a new client that serves again from a new worker; with the client's lock watch disabled it hangs until its timeout. The tab-death specs now also require that no survivor hears `workerLost` when a non-host tab crashes or the host tab closes. With a snippet that refreshes on every event, four auth specs fail. A probe in full Chromium showed that a queued lock request does not cost a page the back/forward cache and survives a restore. Stability runs: 240 of 240 and 200 of 200 (above). 1067 Node tests and 20 browser specs pass under `bun run ci`.
+
+**Blast radius.** The public event surface gains `workerLost` and the `context` field of `authInvalid`; both wire changes are optional, so `PROTOCOL_VERSION` stays 1. A dedicated worker that fires `error` after the handshake is now terminated by its client (it used to be abandoned while still running). In SharedWorker mode, hello now waits for the worker's lock grant (an immediate grant for a fresh name). Fetchers now receive a copy of the context on every fetch; identity across fetches was never part of the contract.
+
+**Known limits.** Without Web Locks (a non-secure context) or with a worker script from before this change, a crash of the host tab still leaves the other tabs hanging. With an older worker the snippet may rotate once per tab, always with the current refresh token. Open decision concerns: DC-1 (the snippet assumes a refresh issues a new access token) and DC-2 (a stolen lifetime lock causes a false `workerLost`; a dedicated worker closing itself is not detected); both are proposed as documented assumptions.
