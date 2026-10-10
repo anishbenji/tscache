@@ -89,3 +89,7 @@ The first round of the follow-up. CI passed.
 | R5-1 | P1 | The snippet ends the session when an older worker sends `authInvalid` without `context`: `accessOf(undefined)` throws inside the lock callback | accepted | Reproduced with scenario `eventsWithoutContext` (both tabs lost the session). Real: the protocol version stays 1 (N32/N33), and a no-bundler setup serves the worker from a fixed URL, so new tabs join a SharedWorker kept alive by a tab opened before an upgrade. Fixed in 95bcfca: an event without a context counts as a refusal of the stored token, so each tab may rotate once, always with the current refresh token, and never ends the session for it. The snippet header and the §4.8 compatibility sentence say so |
 
 Also in this round: `docs/guides/worker-setup.md` gains a note on `workerLost` with a recovery example (documentation debt for the new event).
+
+### Round 6 — reviewer verdict: merge
+
+No findings. R5-1 confirmed fixed and covered by `eventsWithoutContext`; earlier fixes still hold. CI passed (1065 Node tests, 20 browser specs). The regular loop has settled; the adversarial pass waits for the Codex usage window (policy: start one only below 60 % of the 5-hour window; 77 % used after round 6).
