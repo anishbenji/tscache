@@ -294,10 +294,16 @@ type RequestId = string;
 
 interface ClientEvents {
   // ── client-scoped ──
-  /** Fetcher signaled auth failure. Broadcast to ALL tabs (design "b"). */
-  authInvalid: { error: { name: string; message: string } };
+  /** Fetcher signaled auth failure. Broadcast to ALL tabs (design "b").
+      `context` is the fetcher context the refused fetch was issued with
+      (N33), so a tab refreshes only when its credential is the refused one. */
+  authInvalid: { error: { name: string; message: string }; context: unknown };
   /** Fallback chain stepped down (e.g. no SharedWorker on Chrome Android). */
   modeFallback: { from: HostingMode; to: HostingMode; reason: string };
+  /** The worker behind this client is gone (N32). Every pending and later
+      call rejects with TscacheError; create a new client to go on (it starts
+      a new worker). At most once per client; never after dispose(). */
+  workerLost: { reason: string };
 
   // ── cache-scoped ──
   /** Cache was cleared. In SharedWorker mode one tab's clear affects all tabs. */
@@ -312,7 +318,7 @@ interface ClientEvents {
 
 The initiating call additionally receives request-scoped results directly — `put()` resolves with its own `warnings` (§2.4) — so the common case needs no event wiring; the event channel serves telemetry and cross-tab observability. Roadmap events slot into existing scopes: dirty-notifications → cache-scoped, fetch lifecycle → request-scoped.
 
-`modeFallback` is an addition beyond the starter's event list — observability for the documented Chrome-Android path (accepted under N5).
+`modeFallback` is an addition beyond the starter's event list — observability for the documented Chrome-Android path (accepted under N5). `workerLost` is another such addition (N32).
 
 ## 3. RPC protocol
 
@@ -324,8 +330,10 @@ On connect, the worker immediately reports its protocol version; the client refu
 const PROTOCOL_VERSION = 1;
 
 // worker → client, unprompted on connect. clientId is assigned by the
-// worker per connection (N23) and prefixes the client's request ids (§2.7):
-{ t: 'hello', protocol: 1, lib: '0.1.0', clientId: 'c1' }
+// worker per connection (N23) and prefixes the client's request ids (§2.7).
+// lock names the Web Lock a SharedWorker holds for its lifetime (N32);
+// absent where there is none:
+{ t: 'hello', protocol: 1, lib: '0.1.0', clientId: 'c1', lock?: 'tscache-worker:<uuid>' }
 // client → worker (also carries fetcher config so the worker can import it):
 { t: 'init', protocol: 1, fetcher?: { module: string, context?: unknown } }
 // worker → client:
@@ -774,7 +782,8 @@ function transferablesOf(value: { timestamps?: ArrayBufferView; fields?: Record<
 
 // rpc/server.ts — worker-side shell around Engine.
 class RpcServer {
-  constructor(engine: Engine, lib: string);
+  /** `lock`: the worker's lifetime Web Lock, reported in hello (N32). */
+  constructor(engine: Engine, lib: string, lock?: string);
   /** Sends hello with a fresh clientId, awaits init (protocol check),
    *  then dispatches req → engine and fans out evt to every attached port. */
   attach(port: MessagePortLike): void;
@@ -786,8 +795,12 @@ class PortClient {
   /** Completes the handshake; rejects with ProtocolMismatchError. */
   static connect(port: MessagePortLike, init?: { fetcher?: FetcherConfig }): Promise<PortClient>;
   readonly clientId: string;
+  /** hello.lock, when the worker holds a lifetime lock (N32). */
+  readonly lock: string | undefined;
   request(op: Op, params: unknown, transfer?: ArrayBuffer[]): Promise<unknown>;
   on(fn: (evt: Evt) => void): () => void;
+  /** Called once when the transport fails underneath; never after dispose(). */
+  onLost(fn: (error: TscacheError) => void): () => void;
   dispose(): void;
 }
 ```
@@ -802,7 +815,7 @@ Rules:
 - **Browser coverage (N24).** Step ⑨ is tested under Node over `MessageChannel`. A real dedicated `Worker` and transfer across a real port are covered at step ⑩ with Playwright (already a dependency; needs `bunx playwright install chromium` locally and a browser-install step in CI, on a chore branch), and the multi-tab suite at step ⑫.
 - **Entries.** `entries/worker.ts` gains the dedicated-worker path: when the module runs inside a dedicated worker (a worker global without `onconnect`), it attaches the worker global as a port at load; messages the worker posts before the page listens are buffered by the browser. SharedWorker `onconnect` arrives at step ⑩. The entry imports `Engine` and `RpcServer` only, and is the package's one side-effecting module (`sideEffects` in `package.json`).
 
-### 4.8 Internal contracts — client and hosting (N25–N27, approved 2026-10-08)
+### 4.8 Internal contracts — client and hosting (N25–N27, approved 2026-10-08; N32, 2026-10-11)
 
 Not an engine step: tests are written with the code. The public surface is §2.1 and §2.3–§2.4; this section fixes the module shapes and the fallback rules.
 
@@ -828,11 +841,12 @@ Rules:
 - **`workerUrl`** is required for `'shared'` and `'dedicated'`; omitting it with the default pin throws `ConfigError` before anything is created (the doc says: omit only when pinning `'in-process'`). Workers are created as module workers (`{ type: 'module' }`).
 - **In-process (N27).** Every `createClient` with the in-process hosting builds its own `Engine` behind a `MessageChannel` pair in the page (no module-level singleton); two in-process clients in one page do not share data — sharing in a page is what the workers are for. The server side is the same `RpcServer`, so the RPC layer is exercised (§3.2).
 - **Handles.** `client.cache(config)` sends `cache` and returns a `CacheHandle` whose methods map one-to-one onto the ops with `cacheId` filled in. `put` transfers the batch's typed-array buffers (§3.3); the TSDoc says the arrays are consumed. `cache.on(event, fn)` filters `client.on` by `cacheId` for cache- and request-scoped events.
-- **Events.** `evt` messages re-emit as `ClientEvents`: `cacheCleared` (cache scope), `mergeWarning` (request scope, with `requestId`), `authInvalid` (client scope, step ⑪), and the client-made `modeFallback`. Listeners run on the page; a throwing listener does not break the port (the emitter's rule).
+- **Events.** `evt` messages re-emit as `ClientEvents`: `cacheCleared` (cache scope), `mergeWarning` (request scope, with `requestId`), `authInvalid` (client scope, step ⑪), and the client-made `modeFallback` and `workerLost`. Listeners run on the page; a throwing listener does not break the port (the emitter's rule).
 - **Dispose.** `client.dispose()` sends `dispose`, releases the port, terminates an owned dedicated worker, and rejects later calls with `TscacheError`; idempotent. A SharedWorker is never terminated by a client (other tabs may use it). The client also disposes itself on the page's `pagehide` event when the page is not being persisted (best effort), because browsers fire no port-close event a SharedWorker could use to notice a closed tab; a page entering the back/forward cache (`persisted: true`) keeps its client, since it may be restored with its objects intact. A tab whose renderer dies abruptly fires no `pagehide` either; its connection then stays registered in the worker until the worker is torn down with the last tab — a bounded leak accepted by N28. A handshake that times out or sees a worker `error` is aborted: its listeners go and this side's port closes, so a late `hello` completes nothing. A dedicated worker's `error` after the handshake aborts the client's pending requests (a `Worker` has no port closure to observe).
+- **Worker loss (N32).** A client is lost when its transport fails underneath it after the handshake: its SharedWorker's lifetime lock is granted to it (below), a dedicated worker fires `error` (which already aborts pending requests), or the port closes or the server sends `bye`. On loss, pending and later calls reject with `TscacheError(reason)`. The client releases what it owns, as `dispose()` would: an owned dedicated worker is terminated and the `pagehide` listener removed, but no `dispose` message is sent. Then it emits `workerLost { reason }` once. `dispose()` withdraws the queued lock request and never emits it. Chromium runs a SharedWorker in the renderer of the tab that created it. A crash of that renderer kills the worker, and the other tabs get no `error` and no port `close`. In a SharedWorker scope with Web Locks, the worker entry requests an exclusive lock `tscache-worker:<random UUID>` at startup and holds it for its lifetime. Ports that connect before the grant wait, then get `hello` with `lock`. After the handshake, a shared-mode client requests that lock in `'shared'` mode with an `AbortSignal`. The browser grants it only once the worker is gone, so a grant means worker loss. Without Web Locks (a non-secure context) or without `hello.lock` (an older worker script), nothing is watched and a host crash hangs as before. Dedicated and in-process hostings hold no lock: a dedicated worker shares its page's renderer and dies with it. Both protocol changes of N32 and N33 are additive and optional (an old client ignores `lock` and `context`; a new client facing an old worker sees no `lock` and skips the watch), so `PROTOCOL_VERSION` stays 1.
 - **Browser coverage (N26).** A Playwright suite in Chromium runs: a real dedicated `Worker`; a real `SharedWorker` with two pages of one `BrowserContext` sharing one engine (a put in one page is read in the other); the in-process pin; and the no-`SharedWorker` fallback (the API deleted from `window` before `createClient`, expecting `modeFallback` to `'dedicated'`). CI installs Chromium with `bunx playwright install --with-deps chromium` and `scripts/ci.sh` runs the suite (chore branch). Node tests over `MessageChannel` cover the facade and the chain logic with fake hostings.
 
-### 4.9 Internal contracts — orchestration (N29–N31, approved 2026-10-08)
+### 4.9 Internal contracts — orchestration (N29–N31, approved 2026-10-08; N33, 2026-10-11)
 
 Not an engine step: tests are written with the code. The orchestrator lives in the worker (and in the in-process server) in front of `Engine`; the RPC server routes `get`, `updateAuth` and `init.fetcher` to it. Without a fetcher configured, `get` stays cache-only and `updateAuth` is a no-op.
 
@@ -855,7 +869,7 @@ Rules:
 - **Orchestrated get (N2).** `get` reads the engine; with `cacheOnly` or no fetcher it returns that. Otherwise the `'uncached'` misses are **coalesced**: adjacent misses merge, and a miss abutting existing coverage is extended by one interval into it (locked: the one-point overlap aids range merge). Each coalesced range becomes one `FetchRequest`; the response is applied with `engine.put(cacheId, response, { range })`, so the fetched range is authoritative (N3, clipped by the response's own watermark, N19). The engine is read again and the result returned. A range whose fetch threw comes back as a miss with `reason: 'fetch-failed'` and `error: { name, message }`; a range not fetched because auth is invalid comes back `'auth-pending'`; `'uncached'` is reserved for slots nobody asked to fetch (only after the fence, below).
 - **Dedup (N31, locked).** In-flight fetches are keyed by `(cacheId, range.start, range.end)` of the coalesced range; a second `get` from any tab that produces the same key awaits the same promise and applies nothing itself. Overlapping but different ranges fetch separately.
 - **Version fence (N29; companion to N19).** The orchestrator counts `cacheCleared` events per cache. A response whose fetch started before the latest clear is **not applied**; the waiting `get` re-issues the fetch for what is still missing **once**, and if that one is dropped too the range is returned as `'uncached'`. A fetch's `put` may itself trigger a version-mismatch clear (its `meta.version` is newer): that clear happens inside the put and does not fence the response that caused it.
-- **Auth (design b/y, locked).** `AuthInvalidError` (detected by `code === 'tscache:auth-invalid'`, never `instanceof`) from a fetch flips the state to `'invalid'` and broadcasts `authInvalid` to every port once per flip; the failed range comes back `'auth-pending'`, and while invalid no fetch is issued (every miss resolves `'auth-pending'` at once). `updateAuth(context)` from any tab is applied in call order, one at a time: the fetcher's `updateAuth` hook runs, then the context and the auth generation switch together and the state flips to `'valid'`; the next `get` fetches again. While the fetcher's hook is running (a credential transition, machine-speed), no fetch starts: the module's own state and the orchestrator's stamp could disagree, so uncached ranges come back `'auth-pending'` at once and the consumer re-gets after the switch. A fetch that was already out carries the generation it started under, and an auth failure from a superseded generation is ignored. A `get` waiting on several fetches is released the moment one of them invalidates auth: the ranges still out come back `'auth-pending'` while their fetches finish in the background. The fetcher receives a copy of the range; the orchestrator's own range object decides the authoritative write. Nothing is retried on behalf of a `get` that already returned: a `get` never waits for a human.
+- **Auth (design b/y, locked).** `AuthInvalidError` (detected by `code === 'tscache:auth-invalid'`, never `instanceof`) from a fetch flips the state to `'invalid'` and broadcasts `authInvalid { error, context }` to every port once per flip, where `context` is the context the refused fetch was issued with (N33). Only a failure under the current auth generation flips the state, so this is the context in place when the event is sent. Every tab of the origin receives it; those tabs supplied it. The failed range comes back `'auth-pending'`, and while invalid no fetch is issued (every miss resolves `'auth-pending'` at once). `updateAuth(context)` from any tab is applied in call order, one at a time: the fetcher's `updateAuth` hook runs, then the context and the auth generation switch together and the state flips to `'valid'`; the next `get` fetches again. While the fetcher's hook is running (a credential transition, machine-speed), no fetch starts: the module's own state and the orchestrator's stamp could disagree, so uncached ranges come back `'auth-pending'` at once and the consumer re-gets after the switch. A fetch that was already out carries the generation it started under, and an auth failure from a superseded generation is ignored. A `get` waiting on several fetches is released the moment one of them invalidates auth: the ranges still out come back `'auth-pending'` while their fetches finish in the background. The fetcher receives a copy of the range; the orchestrator's own range object decides the authoritative write. Nothing is retried on behalf of a `get` that already returned: a `get` never waits for a human.
 - **Failure of the fetcher itself.** A fetch that rejects with anything else is `'fetch-failed'` for that `get` only; nothing is cached about the failure and the next `get` tries again. A response that fails engine validation (`PutError`) is likewise `'fetch-failed'` with the error's name and message.
 - **Events.** `authInvalid` is client-scoped (§2.7). Fetch lifecycle events are roadmap.
 
@@ -863,7 +877,7 @@ Rules:
 
 - Vitest/Node against `engine/`, `coverage`, `segment/` directly (~90% of logic), plus RPC protocol over an in-memory port pair; property-style tests for coverage merge/subtraction and segment merge.
 - Vitest browser mode (single page): worker construction, fallback chain, transferable round-trips.
-- Playwright (one `BrowserContext`, multiple pages → shared SharedWorker): cross-tab dedup, `authInvalid` broadcast + Web Locks recovery, version-mismatch clear propagation, tab death mid-fetch.
+- Playwright (one `BrowserContext`, multiple pages → shared SharedWorker): cross-tab dedup, `authInvalid` broadcast + Web Locks recovery, version-mismatch clear propagation, tab death mid-fetch, loss of the SharedWorker with its host tab (N32).
 - mitata micro-benches: coverage binary search, dense merge, payload transfer; Vitest bench for regression gating.
 
 ## 6. Decision register — locked (starter §3, unchanged)
@@ -901,7 +915,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (N9–N31 later, at steps ③–⑪) (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9–N33 later, at steps ③–⑫) (working process §2.3: alternatives presented, user decided).
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -936,6 +950,8 @@ These emerged while making the API concrete (N9–N31 later, at steps ③–⑪)
 | N29 | Version fence outcome | **Refetch once, then report**: a response dropped because the cache was cleared by a newer version mid-flight is re-requested once for what is still missing; a second drop returns the range as `'uncached'`. Bounded, and one version bump is invisible to the consumer. Rejected: report the miss immediately (one visible hiccup per bump). User-confirmed 2026-10-08 |
 | N30 | When a broken fetcher module surfaces | **At `createClient`**: `init` imports the module and a failure answers `init-err`, so the client rejects at startup with a `TscacheError` naming the module. Rejected: lazily on the first miss (a broken fetcher would look like a flaky backend). User-confirmed 2026-10-08 |
 | N31 | Dedup granularity | **Exact coalesced range, as locked**: overlapping but different ranges fetch separately; identical ranges across tabs share one fetch. Deferred to the roadmap, not rejected: subtracting in-flight ranges from new requests (fewer bytes under heavy overlap, more bookkeeping) — the user wants to consider it later. User-confirmed 2026-10-08 |
+| N32 | Loss of the SharedWorker | **Per-instance lifetime Web Lock.** Chromium hosts a SharedWorker in the renderer of the tab that created it. A crash of that renderer kills the worker without an `error` or port `close` reaching the other tabs (step ⑫ probes). The worker holds an exclusive lock `tscache-worker:<uuid>` for its lifetime and names it in `hello.lock`. Shared-mode clients queue on it after the handshake, and a grant means the worker is gone: pending and later calls reject with `TscacheError` and `workerLost { reason }` fires once. It also fires when a dedicated worker fails or the port closes underneath. The app creates a new client, which starts a new worker with an empty cache. The field is additive and optional, so `PROTOCOL_VERSION` stays 1. Not taken: a heartbeat with server-side timeouts (timers in every tab, hidden tabs throttled to one per minute, and a guess at what counts as dead); recreating the worker inside the client (handles and in-flight gets would need replaying, and the cache contents are lost anyway). User-confirmed 2026-10-11 |
+| N33 | What `authInvalid` says | **The refused fetch's `context`.** Port order says which event came first, not which credential was refused, so the refresh snippet had to guess (step ⑫ R1-1, R2-1, A1-1). With the context in the payload, the snippet refreshes exactly when the shared access token is the refused one and adopts the current tokens otherwise. It needs no seed token and never rotates more than once. The context reaches every tab of the origin, which supplied it. The change is additive, so `PROTOCOL_VERSION` stays 1. Not taken: an auth generation number (the snippet would have to map generations to tokens). User-confirmed 2026-10-11 |
 
 ## 9. What happens after sign-off
 
