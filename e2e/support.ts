@@ -174,6 +174,32 @@ export async function read(
   return settle(page, key);
 }
 
+/**
+ * The page's events of one kind, once at least one has arrived. The page
+ * then makes a round trip to the worker: port messages are ordered, so the
+ * reply means every event sent before it was delivered too, and the caller
+ * can assert an exact count.
+ */
+export async function drainEvents<E extends keyof ClientEvents>(
+  page: Page,
+  config: CacheConfig,
+  event: E,
+): Promise<ClientEvents[E][]> {
+  const logged = () =>
+    page.evaluate(
+      (e) =>
+        (window as unknown as E2EWindow).log
+          .filter((entry) => entry.event === e)
+          .map((entry) => entry.payload as ClientEvents[E]),
+      event,
+    );
+  await expect.poll(async () => (await logged()).length).toBeGreaterThan(0);
+  await page.evaluate(async (cfg) => {
+    await (window as unknown as E2EWindow).client.cache(cfg);
+  }, config);
+  return logged();
+}
+
 class Backend {
   /** Fresh per test: every test talks to the one server. */
   readonly ns: string = crypto.randomUUID();
