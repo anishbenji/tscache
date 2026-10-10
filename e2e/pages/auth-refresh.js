@@ -6,47 +6,72 @@
 // answer that by revoking the whole session. Here one tab refreshes while
 // the others wait on a Web Lock; a tab that gets the lock afterwards finds
 // the tokens already replaced and uses them instead of refreshing again.
-// Events that reach a tab while its own recovery is under way are folded
-// into it.
+//
+// A refresh token is never presented twice: it is cleared from storage
+// before it is spent, so if the refresh or the save of the new tokens fails,
+// every tab ends the session through onSessionLost instead of retrying with
+// it.
+//
+// Known limit: the event does not say which token was refused, so a tab
+// takes it to be the one it last handed to its client. An event about an
+// older token that arrives after the tab adopted a newer one therefore
+// rotates once more than needed. That rotation presents the current refresh
+// token, so it is wasteful but safe.
 
 /**
  * @param client the tscache client of this tab
+ * @param options.access the access token in the context this client was
+ *   created with
  * @param options.load returns the tokens all tabs share, `{ access, refresh }`
  *   (from localStorage, say); may return a promise
- * @param options.save stores new tokens where `load` finds them
- * @param options.refresh exchanges a refresh token for new tokens; a failure
- *   rejects unhandled, so catch it here to send the user to sign in
+ * @param options.save stores tokens where `load` finds them; may return a
+ *   promise, which must reject if they were not stored
+ * @param options.refresh exchanges a refresh token for new tokens
  * @param options.toContext builds the fetcher context for an access token
+ * @param options.onSessionLost called with the error when the session cannot
+ *   be recovered (send the user to sign in)
  * @returns the unsubscribe function
  */
 export function refreshOnAuthInvalid(
   client,
-  { load, save, refresh, toContext, lockName = "tscache-auth-refresh" },
+  {
+    access,
+    load,
+    save,
+    refresh,
+    toContext,
+    onSessionLost,
+    lockName = "tscache-auth-refresh",
+  },
 ) {
-  // The access token this tab last saw: the one that has just been refused.
-  let seen = Promise.resolve(load()).then((tokens) => tokens.access);
-  // From the event that starts a recovery until its updateAuth is answered.
-  let recovering = false;
+  // The access token this tab last handed to its client.
+  let seen = access;
   return client.on("authInvalid", () => {
-    // The worker sends its events and its updateAuth answers in order, so an
-    // event that arrives before that answer is about a token from before the
-    // update, which the recovery under way replaces anyway.
-    if (recovering) return;
-    recovering = true;
-    void navigator.locks.request(lockName, async () => {
-      try {
-        let tokens = await load();
-        if (tokens.access === (await seen)) {
-          tokens = await refresh(tokens.refresh);
-          await save(tokens);
+    // The token known when the event fired, before any recovery queued ahead
+    // of this one replaces it.
+    const refused = seen;
+    void navigator.locks
+      .request(lockName, async () => {
+        let tokens;
+        try {
+          tokens = await load();
+          if (tokens.refresh === null) {
+            throw new Error("the session ended in another tab");
+          }
+          if (tokens.access === refused) {
+            await save({ access: tokens.access, refresh: null });
+            tokens = await refresh(tokens.refresh);
+            await save(tokens);
+          }
+        } catch (error) {
+          onSessionLost(error);
+          return;
         }
-        seen = Promise.resolve(tokens.access);
+        seen = tokens.access;
         // Tabs sharing a SharedWorker would recover from one tab's update,
         // but tabs on their own workers (after a fallback) each need theirs.
         await client.updateAuth(toContext(tokens.access));
-      } finally {
-        recovering = false;
-      }
-    });
+      })
+      .catch(reportError);
   });
 }

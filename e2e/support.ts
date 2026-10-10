@@ -34,7 +34,8 @@ interface FetcherContext {
 
 interface Tokens {
   access: string;
-  refresh: string;
+  /** null once spent by a refresh whose result could not be stored. */
+  refresh: string | null;
 }
 
 /** The backend's first pair (scripts/e2e-backend.ts). */
@@ -45,10 +46,12 @@ interface RefreshSnippet {
   refreshOnAuthInvalid(
     client: TscacheClient,
     options: {
+      access: string;
       load(): Tokens | Promise<Tokens>;
       save(tokens: Tokens): void | Promise<void>;
       refresh(token: string): Promise<Tokens>;
       toContext(access: string): FetcherContext;
+      onSessionLost(error: unknown): void;
       lockName?: string;
     },
   ): () => void;
@@ -72,6 +75,25 @@ interface E2EWindow {
   gets: Map<string, { settled: boolean; promise: Promise<Got> }>;
   /** updateAuth calls that resolved, counted from `installRefresh` on. */
   updates?: number;
+  /** Errors the refresh snippet ended the session with. */
+  sessionLost?: string[];
+}
+
+/** What pages/refresh-harness.js records in a scenario. */
+export interface RefreshLog {
+  /** Refresh tokens presented to the refresh endpoint, in order. */
+  refreshed: string[];
+  /** `tab:access` per updateAuth call, in order. */
+  updates: string[];
+  /** Tabs that ended the session. */
+  lost: string[];
+  /** The shared tokens at the end, where the scenario reports them. */
+  stored?: Tokens;
+}
+
+/** pages/refresh-harness.js */
+interface RefreshHarness {
+  scenarios: Record<string, () => Promise<RefreshLog>>;
 }
 
 /** The suites' cache: one point every 10 ms from 3, under a fresh id. */
@@ -300,7 +322,9 @@ export async function installRefresh(page: Page, ns: string): Promise<void> {
       const { refreshOnAuthInvalid } = (await import(
         snippet
       )) as RefreshSnippet;
+      w.sessionLost = [];
       refreshOnAuthInvalid(client, {
+        access: initial.access,
         load: () => JSON.parse(localStorage.getItem(key) ?? "null"),
         save: (tokens) => localStorage.setItem(key, JSON.stringify(tokens)),
         refresh: async (token) => {
@@ -314,86 +338,30 @@ export async function installRefresh(page: Page, ns: string): Promise<void> {
           return (await response.json()) as Tokens;
         },
         toContext: (access) => ({ ns, token: access }),
+        onSessionLost: (error) => w.sessionLost?.push(String(error)),
       });
     },
     { ns, initial: initialTokens },
   );
 }
 
-/**
- * Drives the refresh snippet with a stand-in client whose updateAuth answers
- * only when the test says so. The snippet starts on the first pair; another
- * tab then rotates twice, so the shared tokens are the third pair. Stale
- * authInvalid events arrive back to back and again after the recovery has
- * reached updateAuth (a port delivers them before that call's answer); one
- * more arrives after the answer, as a real failure of the adopted token.
- * Returns the refreshes the snippet made and the access tokens it handed to
- * updateAuth.
- */
-export async function replayQueuedAuthEvents(
-  page: Page,
-): Promise<{ refreshes: number; updates: string[] }> {
-  return page.evaluate(async () => {
-    let tokens: Tokens = { access: "at-0", refresh: "rt-0" };
-    let refreshes = 0;
-    const updates: string[] = [];
-    const answers: (() => void)[] = [];
-    const handlers: (() => void)[] = [];
-    const emit = () => {
-      for (const handler of handlers) handler();
-    };
-    const client = {
-      on: (_event: string, fn: () => void) => {
-        handlers.push(fn);
-        return () => {};
-      },
-      updateAuth: (context: FetcherContext) => {
-        updates.push(context.token);
-        return new Promise<void>((resolve) => answers.push(resolve));
-      },
-    } as unknown as TscacheClient;
-    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
-    const until = async (done: () => boolean) => {
-      while (!done()) await tick();
-    };
-    const lockName = "tscache-e2e-queued-events";
-    // Answers every update until no recovery holds or awaits the lock.
-    const drain = async () => {
-      for (;;) {
-        for (const answer of answers.splice(0)) answer();
-        const { held = [], pending = [] } = await navigator.locks.query();
-        if (![...held, ...pending].some((lock) => lock.name === lockName)) {
-          return;
-        }
-        await tick();
-      }
-    };
-    const snippet = "/auth-refresh.js";
-    const { refreshOnAuthInvalid } = (await import(snippet)) as RefreshSnippet;
-    refreshOnAuthInvalid(client, {
-      load: () => tokens,
-      save: (next) => {
-        tokens = next;
-      },
-      refresh: async () => {
-        refreshes++;
-        return { access: `at-x${refreshes}`, refresh: `rt-x${refreshes}` };
-      },
-      toContext: (access) => ({ ns: "unused", token: access }),
-      lockName,
-    });
-    // Let the snippet read the first pair before the other tab moves on.
-    await tick();
-    tokens = { access: "at-2", refresh: "rt-2" };
-    emit();
-    emit();
-    await until(() => updates.length > 0);
-    emit();
-    await drain();
-    emit();
-    await drain();
-    return { refreshes, updates };
-  });
+/** Runs a scenario of pages/refresh-harness.js in the page. */
+export function refreshScenario(page: Page, name: string): Promise<RefreshLog> {
+  return page.evaluate(async (scenario) => {
+    // A served URL, not a module of this repository's graph.
+    const url = "/refresh-harness.js";
+    const { scenarios } = (await import(url)) as RefreshHarness;
+    const run = scenarios[scenario];
+    if (run === undefined) throw new Error(`no scenario ${scenario}`);
+    return run();
+  }, name);
+}
+
+/** Errors the page's refresh snippet ended the session with. */
+export function sessionLost(page: Page): Promise<string[]> {
+  return page.evaluate(
+    () => (window as unknown as E2EWindow).sessionLost ?? [],
+  );
 }
 
 /** The page's updateAuth calls that resolved since `installRefresh`. */

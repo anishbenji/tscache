@@ -7,7 +7,8 @@ import {
   lockQueue,
   open,
   read,
-  replayQueuedAuthEvents,
+  refreshScenario,
+  sessionLost,
   test,
   updateAuth,
   updateCount,
@@ -44,7 +45,7 @@ test("one tab refreshes behind a Web Lock while the others wait", async ({
       {
         error: {
           name: "AuthInvalidError",
-          message: "candles refused token at-0",
+          message: "candles refused the access token",
         },
       },
     ]);
@@ -57,6 +58,7 @@ test("one tab refreshes behind a Web Lock while the others wait", async ({
     .toEqual({ held: 1, pending: 2 });
   await backend.release("refresh");
   for (const page of pages) await expect.poll(() => updateCount(page)).toBe(1);
+  for (const page of pages) expect(await sessionLost(page)).toEqual([]);
   expect(await backend.state()).toMatchObject({ refreshes: 1, reused: 0 });
   const reads = [
     { page: a, range: { start: 3, end: 33 } },
@@ -103,16 +105,60 @@ test("any tab's updateAuth recovers every tab", async ({
   });
 });
 
-test("stale events rotate nothing; a later refusal rotates once", async ({
+// The snippet on its own, with stand-in clients (pages/refresh-harness.js):
+// event orders a real port can produce, and storage failures.
+
+test("queued stale events adopt the current tokens", async ({ context }) => {
+  const page = await open(context);
+  expect(await refreshScenario(page, "queuedStaleEvents")).toEqual({
+    refreshed: ["rt-2"],
+    updates: ["a:at-2", "a:at-2", "a:at-x1"],
+    lost: [],
+  });
+});
+
+test("a refusal during a recovery's update is acted on", async ({
   context,
 }) => {
-  // A busy tab can receive the events of recoveries another tab already
-  // completed, before and after its own recovery has taken the lock. All of
-  // them concern tokens that are gone: the tab adopts the current pair once.
-  // A refusal after its update was answered is about the adopted token.
   const page = await open(context);
-  expect(await replayQueuedAuthEvents(page)).toEqual({
-    refreshes: 1,
-    updates: ["at-2", "at-x1"],
+  expect(await refreshScenario(page, "refusalDuringUpdate")).toEqual({
+    refreshed: ["rt-0", "rt-x1"],
+    updates: ["a:at-x1", "a:at-x2"],
+    lost: [],
+  });
+});
+
+test("a tab installed after a refresh adopts the current tokens", async ({
+  context,
+}) => {
+  const page = await open(context);
+  expect(await refreshScenario(page, "installedAfterRefresh")).toEqual({
+    refreshed: [],
+    updates: ["a:at-1"],
+    lost: [],
+  });
+});
+
+test("a failed save ends the session instead of reusing the token", async ({
+  context,
+}) => {
+  const page = await open(context);
+  expect(await refreshScenario(page, "saveFailsAfterRefresh")).toEqual({
+    refreshed: ["rt-0"],
+    updates: [],
+    lost: ["a", "b"],
+    stored: { access: "at-0", refresh: null },
+  });
+});
+
+test("without storage the refresh token is never spent", async ({
+  context,
+}) => {
+  const page = await open(context);
+  expect(await refreshScenario(page, "storageUnavailable")).toEqual({
+    refreshed: [],
+    updates: [],
+    lost: ["a"],
+    stored: { access: "at-0", refresh: "rt-0" },
   });
 });

@@ -20,7 +20,7 @@ export default {
       headers: { authorization: `Bearer ${context.token}` },
     });
     if (response.status === 401) {
-      throw new AuthInvalidError(`candles refused token ${context.token}`);
+      throw new AuthInvalidError("candles refused the access token");
     }
     if (!response.ok) throw new Error(`candles answered ${response.status}`);
     const { timestamps, version, calls } = await response.json();
