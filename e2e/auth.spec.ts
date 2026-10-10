@@ -103,15 +103,16 @@ test("any tab's updateAuth recovers every tab", async ({
   });
 });
 
-test("events queued behind earlier recoveries rotate nothing", async ({
+test("stale events rotate nothing; a later refusal rotates once", async ({
   context,
 }) => {
-  // A busy tab can receive the events of two recovery cycles another tab
-  // already completed. Both concern tokens that are gone, so the tab adopts
-  // the current pair twice and never spends its refresh token.
+  // A busy tab can receive the events of recoveries another tab already
+  // completed, before and after its own recovery has taken the lock. All of
+  // them concern tokens that are gone: the tab adopts the current pair once.
+  // A refusal after its update was answered is about the adopted token.
   const page = await open(context);
   expect(await replayQueuedAuthEvents(page)).toEqual({
-    refreshes: 0,
-    updates: ["at-2", "at-2"],
+    refreshes: 1,
+    updates: ["at-2", "at-x1"],
   });
 });

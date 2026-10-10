@@ -321,11 +321,14 @@ export async function installRefresh(page: Page, ns: string): Promise<void> {
 }
 
 /**
- * Drives the refresh snippet with a stand-in client: the snippet starts on
- * the first pair, another tab then rotates twice (the shared tokens move to
- * the third pair), and two authInvalid events that queued up meanwhile are
- * dispatched back to back. Returns the refreshes the snippet made and the
- * access tokens it handed to updateAuth.
+ * Drives the refresh snippet with a stand-in client whose updateAuth answers
+ * only when the test says so. The snippet starts on the first pair; another
+ * tab then rotates twice, so the shared tokens are the third pair. Stale
+ * authInvalid events arrive back to back and again after the recovery has
+ * reached updateAuth (a port delivers them before that call's answer); one
+ * more arrives after the answer, as a real failure of the adopted token.
+ * Returns the refreshes the snippet made and the access tokens it handed to
+ * updateAuth.
  */
 export async function replayQueuedAuthEvents(
   page: Page,
@@ -334,17 +337,37 @@ export async function replayQueuedAuthEvents(
     let tokens: Tokens = { access: "at-0", refresh: "rt-0" };
     let refreshes = 0;
     const updates: string[] = [];
+    const answers: (() => void)[] = [];
     const handlers: (() => void)[] = [];
+    const emit = () => {
+      for (const handler of handlers) handler();
+    };
     const client = {
       on: (_event: string, fn: () => void) => {
         handlers.push(fn);
         return () => {};
       },
-      updateAuth: async (context: FetcherContext) => {
+      updateAuth: (context: FetcherContext) => {
         updates.push(context.token);
+        return new Promise<void>((resolve) => answers.push(resolve));
       },
     } as unknown as TscacheClient;
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const until = async (done: () => boolean) => {
+      while (!done()) await tick();
+    };
     const lockName = "tscache-e2e-queued-events";
+    // Answers every update until no recovery holds or awaits the lock.
+    const drain = async () => {
+      for (;;) {
+        for (const answer of answers.splice(0)) answer();
+        const { held = [], pending = [] } = await navigator.locks.query();
+        if (![...held, ...pending].some((lock) => lock.name === lockName)) {
+          return;
+        }
+        await tick();
+      }
+    };
     const snippet = "/auth-refresh.js";
     const { refreshOnAuthInvalid } = (await import(snippet)) as RefreshSnippet;
     refreshOnAuthInvalid(client, {
@@ -360,14 +383,15 @@ export async function replayQueuedAuthEvents(
       lockName,
     });
     // Let the snippet read the first pair before the other tab moves on.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await tick();
     tokens = { access: "at-2", refresh: "rt-2" };
-    for (const handler of handlers) {
-      handler();
-      handler();
-    }
-    // Lock requests are granted in order: this one runs after both recoveries.
-    await navigator.locks.request(lockName, () => {});
+    emit();
+    emit();
+    await until(() => updates.length > 0);
+    emit();
+    await drain();
+    emit();
+    await drain();
     return { refreshes, updates };
   });
 }

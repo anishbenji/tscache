@@ -6,6 +6,8 @@
 // answer that by revoking the whole session. Here one tab refreshes while
 // the others wait on a Web Lock; a tab that gets the lock afterwards finds
 // the tokens already replaced and uses them instead of refreshing again.
+// Events that reach a tab while its own recovery is under way are folded
+// into it.
 
 /**
  * @param client the tscache client of this tab
@@ -21,23 +23,30 @@ export function refreshOnAuthInvalid(
   client,
   { load, save, refresh, toContext, lockName = "tscache-auth-refresh" },
 ) {
-  // The access token this tab last saw.
+  // The access token this tab last saw: the one that has just been refused.
   let seen = Promise.resolve(load()).then((tokens) => tokens.access);
+  // From the event that starts a recovery until its updateAuth is answered.
+  let recovering = false;
   return client.on("authInvalid", () => {
-    // Taken when the event fires, not when the lock is granted: events queued
-    // behind an earlier recovery concern the token known at that moment, and
-    // must not rotate the newer one.
-    const refused = seen;
+    // The worker sends its events and its updateAuth answers in order, so an
+    // event that arrives before that answer is about a token from before the
+    // update, which the recovery under way replaces anyway.
+    if (recovering) return;
+    recovering = true;
     void navigator.locks.request(lockName, async () => {
-      let tokens = await load();
-      if (tokens.access === (await refused)) {
-        tokens = await refresh(tokens.refresh);
-        await save(tokens);
+      try {
+        let tokens = await load();
+        if (tokens.access === (await seen)) {
+          tokens = await refresh(tokens.refresh);
+          await save(tokens);
+        }
+        seen = Promise.resolve(tokens.access);
+        // Tabs sharing a SharedWorker would recover from one tab's update,
+        // but tabs on their own workers (after a fallback) each need theirs.
+        await client.updateAuth(toContext(tokens.access));
+      } finally {
+        recovering = false;
       }
-      seen = Promise.resolve(tokens.access);
-      // Tabs sharing a SharedWorker would recover from one tab's update, but
-      // tabs on their own workers (after a fallback) each need theirs.
-      await client.updateAuth(toContext(tokens.access));
     });
   });
 }
