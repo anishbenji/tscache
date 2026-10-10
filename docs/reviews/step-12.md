@@ -93,3 +93,16 @@ Also in this round: `docs/guides/worker-setup.md` gains a note on `workerLost` w
 ### Round 6 — reviewer verdict: merge
 
 No findings. R5-1 confirmed fixed and covered by `eventsWithoutContext`; earlier fixes still hold. CI passed (1065 Node tests, 20 browser specs). The regular loop has settled; the adversarial pass waits for the Codex usage window (policy: start one only below 60 % of the 5-hour window; 77 % used after round 6).
+
+### Adversarial round 2 — focus: worker-loss false positives and negatives, lock lifecycle and races, dedicated and in-process paths, the snippet's rotation safety and old workers, tests passing for the wrong reason — reviewer verdict: merge after fixes
+
+Run after the Codex usage window reset (0 % used at the start). The reviewer found no defect in the lock-grant and handshake ordering, the dispose race or a normal close of the host tab.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| A2-1 | P1 | The fetcher receives the orchestrator's own context object, which `authInvalid` now broadcasts: a fetcher that deletes the token before refusing broadcasts a context without it, so the snippet adopts the refused token; one that adds a function makes the event uncloneable, so no event is sent | accepted | Reproduced with two Node regressions (no event at all; a hook's mutation leaking into later fetches). Fixed in d70f199: the fetcher and its `updateAuth` hook get a `structuredClone` of the context, as they already get a copy of the range (§4.9 now says so). Identity of `req.context` across fetches was never part of the contract (§2.5: structured-cloneable material), so no fetcher can rely on it |
+
+Decision concerns raised by the reviewer (escalated to the user, not acted on):
+
+- **DC-1. The snippet assumes a refresh issues a new access token.** If a refresh returned the same access token with a new refresh token, two tabs hearing one refusal would both refresh: two rotations, each with the current refresh token, never a reuse. Proposed: state the precondition in the snippet's header; supporting repeated access tokens would need a credential identifier beyond N33.
+- **DC-2. N32 detects a worker whose global is gone, not every way a client can stop being served.** A same-origin script that steals the lifetime lock (`steal: true` with the name from `navigator.locks.query()`) causes a false `workerLost` while the worker runs on; a dedicated worker that calls `self.close()` (only consumer code in the worker, such as a fetcher, could) fires no `error`, and its client's calls hang. Proposed: record both as assumptions in §4.8. The alternative for the second is a lifetime lock in the dedicated worker too, which extends N32 beyond its approved scope.
