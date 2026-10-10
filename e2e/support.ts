@@ -46,11 +46,11 @@ interface RefreshSnippet {
   refreshOnAuthInvalid(
     client: TscacheClient,
     options: {
-      access: string;
       load(): Tokens | Promise<Tokens>;
       save(tokens: Tokens): void | Promise<void>;
       refresh(token: string): Promise<Tokens>;
       toContext(access: string): FetcherContext;
+      accessOf(context: FetcherContext): string;
       onSessionLost(error: unknown): void;
       lockName?: string;
     },
@@ -134,6 +134,7 @@ export async function connect(
       "modeFallback",
       "cacheCleared",
       "mergeWarning",
+      "workerLost",
     ] as const;
     for (const event of events) {
       w.client.on(event, (payload) => w.log.push({ event, payload }));
@@ -203,6 +204,43 @@ export function settled(page: Page, key: string): Promise<boolean> {
     (k) => (window as unknown as E2EWindow).gets.get(k)?.settled === true,
     key,
   );
+}
+
+/** A rejection as it crosses page.evaluate. */
+export interface Failure {
+  name: string;
+  message: string;
+}
+
+/** Waits for the get under `key` to reject; fails if it resolved. */
+export function failure(page: Page, key: string): Promise<Failure> {
+  return page.evaluate(async (k) => {
+    const entry = (window as unknown as E2EWindow).gets.get(k);
+    if (entry === undefined) throw new Error(`no get started as ${k}`);
+    try {
+      await entry.promise;
+    } catch (error) {
+      const { name, message } = error as Error;
+      return { name, message };
+    }
+    throw new Error(`the get started as ${k} resolved`);
+  }, key);
+}
+
+/** The rejection of a `cache()` call; fails if it resolved. */
+export function cacheFailure(
+  page: Page,
+  config: CacheConfig,
+): Promise<Failure> {
+  return page.evaluate(async (cfg) => {
+    try {
+      await (window as unknown as E2EWindow).client.cache(cfg);
+    } catch (error) {
+      const { name, message } = error as Error;
+      return { name, message };
+    }
+    throw new Error("cache() resolved");
+  }, config);
 }
 
 /** Waits for the get under `key`. */
@@ -281,19 +319,30 @@ export async function drainEvents<E extends keyof ClientEvents>(
   config: CacheConfig,
   event: E,
 ): Promise<ClientEvents[E][]> {
-  const logged = () =>
-    page.evaluate(
-      (e) =>
-        (window as unknown as E2EWindow).log
-          .filter((entry) => entry.event === e)
-          .map((entry) => entry.payload as ClientEvents[E]),
-      event,
-    );
-  await expect.poll(async () => (await logged()).length).toBeGreaterThan(0);
+  await expect
+    .poll(async () => (await heard(page, event)).length)
+    .toBeGreaterThan(0);
   await page.evaluate(async (cfg) => {
     await (window as unknown as E2EWindow).client.cache(cfg);
   }, config);
-  return logged();
+  return heard(page, event);
+}
+
+/**
+ * The page's events of one kind so far, without a round trip (for a client
+ * whose worker may be gone; `drainEvents` gives exact counts otherwise).
+ */
+export function heard<E extends keyof ClientEvents>(
+  page: Page,
+  event: E,
+): Promise<ClientEvents[E][]> {
+  return page.evaluate(
+    (e) =>
+      (window as unknown as E2EWindow).log
+        .filter((entry) => entry.event === e)
+        .map((entry) => entry.payload as ClientEvents[E]),
+    event,
+  );
 }
 
 /**
@@ -324,7 +373,6 @@ export async function installRefresh(page: Page, ns: string): Promise<void> {
       )) as RefreshSnippet;
       w.sessionLost = [];
       refreshOnAuthInvalid(client, {
-        access: initial.access,
         load: () => JSON.parse(localStorage.getItem(key) ?? "null"),
         save: (tokens) => localStorage.setItem(key, JSON.stringify(tokens)),
         refresh: async (token) => {
@@ -338,6 +386,7 @@ export async function installRefresh(page: Page, ns: string): Promise<void> {
           return (await response.json()) as Tokens;
         },
         toContext: (access) => ({ ns, token: access }),
+        accessOf: (context) => context.token,
         onSessionLost: (error) => w.sessionLost?.push(String(error)),
       });
     },

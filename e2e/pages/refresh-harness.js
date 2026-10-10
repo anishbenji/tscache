@@ -1,7 +1,8 @@
 // In-page harness for the refresh snippet (auth-refresh.js). Stand-in
 // clients share one token store and one Web Lock, as tabs of one origin
 // would, and their updateAuth answers only when the scenario says so, so a
-// scenario can deliver authInvalid events in any order a real port could.
+// scenario can deliver authInvalid events, each naming the refused token,
+// in any order a real port could.
 
 import { refreshOnAuthInvalid } from "/auth-refresh.js";
 
@@ -13,7 +14,7 @@ function harness({ tokens, failSave = () => false }) {
   const log = { refreshed: [], updates: [], lost: [] };
   const answers = [];
 
-  function tab(name, access = store.tokens.access) {
+  function tab(name) {
     const handlers = [];
     const client = {
       on: (_event, fn) => {
@@ -26,7 +27,6 @@ function harness({ tokens, failSave = () => false }) {
       },
     };
     refreshOnAuthInvalid(client, {
-      access,
       load: async () => store.tokens,
       save: async (next) => {
         if (failSave(next)) throw new Error("storage full");
@@ -38,11 +38,16 @@ function harness({ tokens, failSave = () => false }) {
         return { access: `at-x${n}`, refresh: `rt-x${n}` };
       },
       toContext: (token) => ({ token }),
+      accessOf: (context) => context.token,
       onSessionLost: () => log.lost.push(name),
       lockName,
     });
-    return () => {
-      for (const handler of handlers) handler();
+    // Delivers authInvalid for a refusal of `token`; without one, the event
+    // carries no context, as a worker from before tscache sent it does.
+    return (token) => {
+      const event = { error: { name: "AuthInvalidError", message: "refused" } };
+      if (token !== undefined) event.context = { token };
+      for (const handler of handlers) handler(event);
     };
   }
 
@@ -73,35 +78,59 @@ export const scenarios = {
     const h = harness({ tokens: { access: "at-0", refresh: "rt-0" } });
     const emit = h.tab("a");
     h.store.tokens = { access: "at-2", refresh: "rt-2" };
-    emit();
-    emit();
+    emit("at-0");
+    emit("at-1");
     await h.drain();
-    emit();
+    emit("at-2");
     await h.drain();
     return h.log;
   },
 
-  // A refusal that arrives while the recovery's updateAuth is unanswered is
-  // acted on: it may concern the token just handed over.
+  // A refusal of the token just handed over, arriving while the recovery's
+  // updateAuth is unanswered, is acted on.
   async refusalDuringUpdate() {
     const h = harness({ tokens: { access: "at-0", refresh: "rt-0" } });
     const emit = h.tab("a");
-    emit();
+    emit("at-0");
     await h.until(() => h.log.updates.length > 0);
-    emit();
+    emit("at-x1");
     await h.drain();
     return h.log;
   },
 
-  // The tab was created with the first pair, but another tab refreshed
-  // before this one installed the snippet; the refusal is about the first
-  // pair, so the tab adopts the current one.
-  async installedAfterRefresh() {
-    const h = harness({ tokens: { access: "at-1", refresh: "rt-1" } });
-    const emit = h.tab("a", "at-0");
-    // The event comes long after the install.
-    await tick();
-    emit();
+  // A refusal of the first pair arrives after the tab refreshed and adopted
+  // the second (an event from before its update, delivered late): nothing
+  // is rotated again.
+  async lateStaleEvent() {
+    const h = harness({ tokens: { access: "at-0", refresh: "rt-0" } });
+    const emit = h.tab("a");
+    emit("at-0");
+    await h.drain();
+    emit("at-0");
+    await h.drain();
+    return h.log;
+  },
+
+  // Two tabs connected to an older worker hear a refusal without a context:
+  // the refused token is unknown, so each refreshes in turn, every time with
+  // the current refresh token, and the session goes on.
+  async eventsWithoutContext() {
+    const h = harness({ tokens: { access: "at-0", refresh: "rt-0" } });
+    const emitA = h.tab("a");
+    const emitB = h.tab("b");
+    emitA();
+    emitB();
+    await h.drain();
+    return h.log;
+  },
+
+  // Two tabs hear the same refusal: one refreshes, the other adopts.
+  async twoTabsOneRefusal() {
+    const h = harness({ tokens: { access: "at-0", refresh: "rt-0" } });
+    const emitA = h.tab("a");
+    const emitB = h.tab("b");
+    emitA("at-0");
+    emitB("at-0");
     await h.drain();
     return h.log;
   },
@@ -115,8 +144,8 @@ export const scenarios = {
     });
     const emitA = h.tab("a");
     const emitB = h.tab("b");
-    emitA();
-    emitB();
+    emitA("at-0");
+    emitB("at-0");
     await h.drain();
     return { ...h.log, stored: h.store.tokens };
   },
@@ -128,7 +157,7 @@ export const scenarios = {
       failSave: () => true,
     });
     const emit = h.tab("a");
-    emit();
+    emit("at-0");
     await h.drain();
     return { ...h.log, stored: h.store.tokens };
   },
