@@ -151,6 +151,17 @@ test("two tabs hearing one refusal refresh once", async ({ context }) => {
   });
 });
 
+test("events from an older worker, without a context, still recover", async ({
+  context,
+}) => {
+  const page = await open(context);
+  expect(await refreshScenario(page, "eventsWithoutContext")).toEqual({
+    refreshed: ["rt-0", "rt-x1"],
+    updates: ["a:at-x1", "b:at-x2"],
+    lost: [],
+  });
+});
+
 test("a failed save ends the session instead of reusing the token", async ({
   context,
 }) => {

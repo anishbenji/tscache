@@ -42,12 +42,11 @@ function harness({ tokens, failSave = () => false }) {
       onSessionLost: () => log.lost.push(name),
       lockName,
     });
-    // Delivers authInvalid for a refusal of `token`.
+    // Delivers authInvalid for a refusal of `token`; without one, the event
+    // carries no context, as a worker from before tscache sent it does.
     return (token) => {
-      const event = {
-        error: { name: "AuthInvalidError", message: "refused" },
-        context: { token },
-      };
+      const event = { error: { name: "AuthInvalidError", message: "refused" } };
+      if (token !== undefined) event.context = { token };
       for (const handler of handlers) handler(event);
     };
   }
@@ -108,6 +107,19 @@ export const scenarios = {
     emit("at-0");
     await h.drain();
     emit("at-0");
+    await h.drain();
+    return h.log;
+  },
+
+  // Two tabs connected to an older worker hear a refusal without a context:
+  // the refused token is unknown, so each refreshes in turn, every time with
+  // the current refresh token, and the session goes on.
+  async eventsWithoutContext() {
+    const h = harness({ tokens: { access: "at-0", refresh: "rt-0" } });
+    const emitA = h.tab("a");
+    const emitB = h.tab("b");
+    emitA();
+    emitB();
     await h.drain();
     return h.log;
   },

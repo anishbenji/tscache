@@ -12,6 +12,11 @@
 // before it is spent, so if the refresh or the save of the new tokens fails,
 // every tab ends the session through onSessionLost instead of retrying with
 // it.
+//
+// A SharedWorker from a tscache version that did not name the refused
+// context yet (kept alive by a tab opened before an upgrade) sends the event
+// without one. The refused token is then unknown, so the tab refreshes: tabs
+// may rotate once each, always with the current refresh token.
 
 /**
  * @param client the tscache client of this tab
@@ -44,13 +49,12 @@ export function refreshOnAuthInvalid(
       .request(lockName, async () => {
         let tokens;
         try {
-          const refused = accessOf(context);
           tokens = await load();
           if (tokens.refresh === null) {
             throw new Error("the session ended in another tab");
           }
           // Otherwise another tab already replaced the refused token.
-          if (tokens.access === refused) {
+          if (context === undefined || tokens.access === accessOf(context)) {
             await save({ access: tokens.access, refresh: null });
             tokens = await refresh(tokens.refresh);
             await save(tokens);
