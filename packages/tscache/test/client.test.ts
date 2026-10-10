@@ -369,12 +369,13 @@ describe("lifecycle (round 1)", () => {
   it("a dedicated worker's fatal error after the handshake rejects pending requests", async () => {
     vi.stubGlobal("SharedWorker", undefined);
     let fake: ReturnType<typeof workerLike> | undefined;
+    let terminated = 0;
     vi.stubGlobal("Worker", function FakeWorker() {
       const channel = new MessageChannel();
       new RpcServer(new Engine(), "0.0.0").attach(
         channel.port1 as MessagePortLike,
       );
-      fake = workerLike(channel.port2, () => {});
+      fake = workerLike(channel.port2, () => terminated++);
       // Swallow requests so one stays pending.
       const original = fake.postMessage;
       fake.postMessage = (m: unknown, t?: Transferable[]) => {
@@ -384,12 +385,21 @@ describe("lifecycle (round 1)", () => {
     });
     const client = await make({ workerUrl: url });
     expect(client.mode).toBe("dedicated");
+    const lost: ClientEvents["workerLost"][] = [];
+    client.on("workerLost", (e) => lost.push(e));
     const pending = client.clearAll();
     fake?.fail("out of memory");
+    const reason = "Worker failed: out of memory";
     await expect(pending).rejects.toMatchObject({
       name: "TscacheError",
-      message: expect.stringMatching(/out of memory/),
+      message: reason,
     });
+    // N32: the page hears it once, and the abandoned worker is terminated.
+    expect(lost).toEqual([{ reason }]);
+    expect(terminated).toBe(1);
+    await expect(client.clearAll()).rejects.toMatchObject({ message: reason });
+    await client.dispose();
+    expect(terminated).toBe(1);
   });
 
   it("delivers every fallback step even when a listener throws", async () => {
@@ -432,5 +442,179 @@ describe("lifecycle (round 1)", () => {
     expect(server?.connections).toBe(0);
     await expect(client.clearAll()).rejects.toBeInstanceOf(TscacheError);
     expect(listeners.has("pagehide")).toBe(false);
+  });
+});
+
+interface LockRequest {
+  name: string;
+  mode: string;
+  signal: AbortSignal | undefined;
+  grant(): void;
+}
+
+/** A fake navigator.locks recording requests; the test grants them. */
+function installFakeLocks(): LockRequest[] {
+  const requests: LockRequest[] = [];
+  vi.stubGlobal("navigator", {
+    locks: {
+      request: (
+        name: string,
+        options: { mode: string; signal?: AbortSignal },
+        callback: () => unknown,
+      ) =>
+        new Promise((resolve, reject) => {
+          options.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("withdrawn", "AbortError")),
+            { once: true },
+          );
+          requests.push({
+            name,
+            mode: options.mode,
+            signal: options.signal,
+            grant: () => {
+              Promise.resolve(callback()).then(resolve, reject);
+            },
+          });
+        }),
+    },
+  });
+  return requests;
+}
+
+/**
+ * A SharedWorker global backed by one server that names `lock` in hello;
+ * `swallow` makes the port drop requests so one stays pending.
+ */
+function installLockedSharedWorker(lock: string | undefined) {
+  const state = {
+    server: new RpcServer(new Engine(), "0.0.0", lock),
+    ports: [] as MessagePortLike[],
+    swallow: false,
+  };
+  vi.stubGlobal("Worker", undefined);
+  vi.stubGlobal(
+    "SharedWorker",
+    class {
+      port: unknown;
+      constructor() {
+        const channel = new MessageChannel();
+        state.ports.push(channel.port1 as MessagePortLike);
+        state.server.attach(channel.port1 as MessagePortLike);
+        const port = channel.port2;
+        this.port = {
+          postMessage: (m: unknown, t?: Transferable[]) => {
+            if (state.swallow && (m as { t?: string }).t === "req") return;
+            port.postMessage(m, t ?? []);
+          },
+          addEventListener: (type: string, fn: EventListener) =>
+            port.addEventListener(type, fn),
+          removeEventListener: (type: string, fn: EventListener) =>
+            port.removeEventListener(type, fn),
+          start: () => port.start(),
+          close: () => port.close(),
+        };
+      }
+      addEventListener() {}
+      removeEventListener() {}
+    },
+  );
+  return state;
+}
+
+describe("worker loss (N32)", () => {
+  const lock = "tscache-worker:w1";
+  const reason =
+    "SharedWorker stopped running (its lifetime lock was released)";
+
+  it("a granted lifetime lock rejects pending and later calls and emits workerLost once", async () => {
+    const requests = installFakeLocks();
+    const fake = installLockedSharedWorker(lock);
+    const client = await make({ workerUrl: url });
+    expect(client.mode).toBe("shared");
+    expect(requests.map((r) => [r.name, r.mode])).toEqual([[lock, "shared"]]);
+    const handle = await client.cache(config);
+    const lost: ClientEvents["workerLost"][] = [];
+    client.on("workerLost", (e) => lost.push(e));
+    fake.swallow = true;
+    const pending = client.clearAll();
+    requests[0]?.grant();
+    await expect(pending).rejects.toMatchObject({
+      name: "TscacheError",
+      message: reason,
+    });
+    expect(lost).toEqual([{ reason }]);
+    // Later calls, on the client and on handles made before, reject too.
+    await expect(client.cache(config)).rejects.toMatchObject({
+      name: "TscacheError",
+      message: reason,
+    });
+    await expect(handle.get({ start: 3, end: 13 })).rejects.toMatchObject({
+      message: reason,
+    });
+    await client.dispose();
+    expect(lost).toHaveLength(1);
+  });
+
+  it("dispose withdraws the lock request and never emits workerLost", async () => {
+    const requests = installFakeLocks();
+    installLockedSharedWorker(lock);
+    const client = await make({ workerUrl: url });
+    const lost: unknown[] = [];
+    client.on("workerLost", (e) => lost.push(e));
+    await client.dispose();
+    expect(requests[0]?.signal?.aborted).toBe(true);
+    // A grant racing the withdrawal changes nothing.
+    requests[0]?.grant();
+    await settled();
+    expect(lost).toEqual([]);
+    await expect(client.clearAll()).rejects.toMatchObject({
+      message: "client disposed",
+    });
+  });
+
+  it("watches nothing without hello.lock or without Web Locks", async () => {
+    const requests = installFakeLocks();
+    installLockedSharedWorker(undefined);
+    const unlocked = await make({ workerUrl: url });
+    await unlocked.clearAll();
+    expect(requests).toEqual([]);
+
+    vi.stubGlobal("navigator", {});
+    installLockedSharedWorker(lock);
+    const noLocks = await make({ workerUrl: url });
+    expect(noLocks.mode).toBe("shared");
+    await noLocks.clearAll();
+  });
+
+  it("a server detach after the handshake emits workerLost", async () => {
+    const fake = installLockedSharedWorker(undefined);
+    const client = await make({ workerUrl: url });
+    const lost: ClientEvents["workerLost"][] = [];
+    client.on("workerLost", (e) => lost.push(e));
+    fake.server.detach(fake.ports[0] as MessagePortLike);
+    for (let i = 0; i < 50 && lost.length === 0; i++) await settled();
+    expect(lost).toEqual([{ reason: "port closed" }]);
+    await expect(client.clearAll()).rejects.toMatchObject({
+      message: "port closed",
+    });
+  });
+
+  it("a throwing workerLost listener is reported; the others still hear it", async () => {
+    const requests = installFakeLocks();
+    installLockedSharedWorker(lock);
+    const client = await make({ workerUrl: url });
+    const reported: unknown[] = [];
+    vi.stubGlobal("reportError", (e: unknown) => reported.push(e));
+    const heard: string[] = [];
+    client.on("workerLost", () => {
+      heard.push("first");
+      throw new Error("listener failed");
+    });
+    client.on("workerLost", () => heard.push("second"));
+    requests[0]?.grant();
+    await settled();
+    expect(heard).toEqual(["first", "second"]);
+    expect(reported).toHaveLength(1);
   });
 });

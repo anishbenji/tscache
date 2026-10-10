@@ -423,8 +423,11 @@ rpc/
   protocol.ts       PROTOCOL_VERSION, message types, (de)serialization helpers
   server.ts         worker-side shell: ports, envelope dispatch → engine/orchestrator, evt fanout
   port-client.ts    client-side port wrapper: req/res correlation, handshake, evt re-emit
+  lifetime.ts       the worker's lifetime Web Lock: held by the SharedWorker, watched by
+                    shared-mode clients (N32)
 client/
   client.ts         createClient: fallback chain (shared → dedicated → in-process), pinning
+  hosting.ts        the three hostings: each a connected PortClient or a HostingError
   cache.ts          CacheHandle facade
   events.ts         typed emitter
 entries/

@@ -61,12 +61,15 @@ export class RpcServer {
   readonly #engine: Engine;
   readonly #orchestrator: Orchestrator;
   readonly #lib: string;
+  readonly #lock: string | undefined;
   readonly #connections = new Set<Connection>();
   #nextClient = 0;
 
-  constructor(engine: Engine, lib: string) {
+  /** `lock`: the Web Lock the worker holds for its lifetime, sent in hello (N32). */
+  constructor(engine: Engine, lib: string, lock?: string) {
     this.#engine = engine;
     this.#lib = lib;
+    this.#lock = lock;
     this.#orchestrator = new Orchestrator(engine, (evt) =>
       this.#broadcast(evt),
     );
@@ -101,6 +104,7 @@ export class RpcServer {
       lib: this.#lib,
       clientId: connection.clientId,
     };
+    if (this.#lock !== undefined) hello.lock = this.#lock;
     this.#send(connection, hello);
   }
 

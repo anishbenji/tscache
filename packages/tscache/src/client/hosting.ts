@@ -6,6 +6,7 @@
 
 import { Engine } from "../engine/engine";
 import { TscacheError } from "../errors";
+import { lockManager, watchLifetimeLock } from "../rpc/lifetime";
 import { PortClient } from "../rpc/port-client";
 import type { FetcherConfig, MessagePortLike } from "../rpc/protocol";
 import { RpcServer } from "../rpc/server";
@@ -20,7 +21,10 @@ export class HostingError extends TscacheError {}
 export interface Hosting {
   mode: HostingMode;
   client: PortClient;
-  /** Releases what this client owns (a dedicated worker); never a SharedWorker. */
+  /**
+   * Releases what this client owns (a dedicated worker, a queued lock
+   * request); never a SharedWorker. Idempotent.
+   */
   terminate(): void;
 }
 
@@ -115,8 +119,21 @@ export async function openShared(
     timeoutMs,
     "SharedWorker",
   );
+  // The worker can die with the tab hosting it and nothing else would tell
+  // this one (N32): queue on its lifetime lock, granted only once it is gone.
+  const watch = new AbortController();
+  const locks = lockManager();
+  if (client.lock !== undefined && locks !== undefined) {
+    watchLifetimeLock(locks, client.lock, watch.signal, () =>
+      client.abort(
+        new TscacheError(
+          "SharedWorker stopped running (its lifetime lock was released)",
+        ),
+      ),
+    );
+  }
   // Never terminated by one client: other tabs may be using it.
-  return { mode: "shared", client, terminate: () => {} };
+  return { mode: "shared", client, terminate: () => watch.abort() };
 }
 
 export async function openDedicated(
