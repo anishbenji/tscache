@@ -1,6 +1,6 @@
 # Step 12 — Playwright multi-tab suite
 
-Branch: `feat/12-multitab-e2e` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 1 · Status: in review · Verdict after triage: —
+Branch: `feat/12-multitab-e2e` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 2 · Status: in review · Verdict after triage: —
 
 Not an engine step: tests only, no contract tests and no change under `packages/tscache/src/`. Specs approved by the user on 2026-10-11: cross-tab dedup moved onto a request gate, a context-isolation control, version-mismatch clear propagation with the cross-tab N29 fence, `authInvalid` across tabs with a Web Locks refresh snippet, and a tab dying mid-fetch. The fixtures talk to an in-memory mock backend in the e2e server (user's choice over a worker-local fake), so a test holds a fetch in flight by gating it instead of sleeping, and counts requests on the server.
 
@@ -17,6 +17,14 @@ Throwaway Playwright probes in Chromium, run before the specs were written:
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R1-1 | P1 | The refresh snippet rotates again when a busy tab handles the queued `authInvalid` events of two recoveries another tab already completed: the first event adopts the current pair and updates `seen`, the second then matches it and refreshes | accepted (as P2) | Reproduced with a stand-in client that fires two queued events after the shared tokens moved on (`refreshes: 1`). Fixed in 8cfe1f0: each event keeps the token known when it fired, so stale events only adopt the current pair. Regression test `events queued behind earlier recoveries rotate nothing`. Severity lowered: the rotation always presented the current refresh token under the lock, so no spent token was ever reused; the cost was one needless rotation |
+
+## Round 2 — reviewer verdict: merge after fixes
+
+No new findings; CI passed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P2 | R1-1 still reproducible when the second stale event arrives after the first recovery's lock callback adopted the current pair: it captures the adopted token and rotates (re-raises R1-1) | accepted | Validated by reasoning and by the new regression, which the 8cfe1f0 snippet fails (`refreshes: 2`). Second round on this area, so redesigned rather than patched (ddbf7ab): the worker sends events and `updateAuth` answers on one port in order (`PortClient.#receive` settles both synchronously), so an event a tab receives before the answer to its own update concerns a token from before it. The snippet runs one recovery per tab and ignores events until that recovery's `updateAuth` is answered; the dispatch-time capture is gone. Regression: stale events back to back and after the recovery reached `updateAuth`, then one real refusal after the answer (`refreshes: 1`); it fails in under a second instead of hanging when recoveries pile up |
 
 ## Contract-test changes
 
