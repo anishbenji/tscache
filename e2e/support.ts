@@ -204,6 +204,50 @@ export async function read(
   return settle(page, key);
 }
 
+/** Clears the cache, for every tab of a SharedWorker. */
+export async function clear(page: Page, config: CacheConfig): Promise<void> {
+  await page.evaluate(async (cfg) => {
+    const cache = await (window as unknown as E2EWindow).client.cache(cfg);
+    await cache.clear();
+  }, config);
+}
+
+/**
+ * Fails within 5 s unless the page's worker answers a cache-only get. A
+ * failure detector, not a timing assumption: a dead worker would otherwise
+ * leave the caller hanging until the test timeout.
+ */
+export async function expectWorkerAlive(
+  page: Page,
+  config: CacheConfig,
+  range: Range,
+): Promise<void> {
+  await page.evaluate(
+    async ({ cfg, range }) => {
+      const w = window as unknown as E2EWindow;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new Error(
+              "the SharedWorker did not answer within 5 s; it dies with the renderer of the tab that created it (N32)",
+            ),
+          );
+        }, 5000);
+      });
+      const answer = w.client
+        .cache(cfg)
+        .then((cache) => cache.get(range, { cacheOnly: true }));
+      try {
+        await Promise.race([answer, timeout]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    { cfg: config, range },
+  );
+}
+
 /**
  * The page's events of one kind, once at least one has arrived. The page
  * then makes a round trip to the worker: port messages are ordered, so the
