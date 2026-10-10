@@ -209,7 +209,9 @@ export class Orchestrator {
       await this.#loading?.catch(() => {});
       this.#transitioning = true;
       try {
-        await this.#fetcher?.updateAuth?.(context);
+        // A copy: the hook may keep and change it; what fetches carry and
+        // authInvalid names must not change with it.
+        await this.#fetcher?.updateAuth?.(structuredClone(context));
       } finally {
         this.#transitioning = false;
       }
@@ -382,11 +384,12 @@ export class Orchestrator {
     try {
       const response = await fetcher.fetch({
         cacheId,
-        // A copy: the fetcher may mutate its request, the put must not see it.
+        // Copies: the fetcher may mutate its request; neither the put nor
+        // the authInvalid event (N33) nor later fetches must see it.
         range: { start: range.start, end: range.end },
         interval,
         alignmentOffset,
-        context,
+        context: structuredClone(context),
       });
       return { response };
     } catch (error) {
