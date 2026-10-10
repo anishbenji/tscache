@@ -1,6 +1,6 @@
 # Step 12 — Playwright multi-tab suite
 
-Branch: `feat/12-multitab-e2e` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 3 + adversarial · Status: in review · Verdict after triage: —
+Branch: `feat/12-multitab-e2e` · Reviewer: GPT-6.1 Sol (high; xhigh for adversarial) · Rounds: 4 + adversarial · Status: settled · Verdict after triage: merge
 
 Not an engine step: tests only, no contract tests and no change under `packages/tscache/src/`. Specs approved by the user on 2026-10-11: cross-tab dedup moved onto a request gate, a context-isolation control, version-mismatch clear propagation with the cross-tab N29 fence, `authInvalid` across tabs with a Web Locks refresh snippet, and a tab dying mid-fetch. The fixtures talk to an in-memory mock backend in the e2e server (user's choice over a worker-local fake), so a test holds a fetch in flight by gating it instead of sleeping, and counts requests on the server.
 
@@ -40,6 +40,10 @@ No findings. R1-1 and R2-1 confirmed fixed and covered by the regression; CI pas
 
 R2-1 is now a documented limit rather than a fix: a stale event that arrives after a tab adopted newer tokens rotates once more, presenting the current refresh token (wasteful, never a reuse). The snippet's header says so; N33 removes it. Every scenario was checked against a mutant of the defect it covers (suppression, seeding from storage, no tombstone, tombstone ignored): each mutant fails its scenario. The fixture fetcher's error message no longer contains the token, since the message is broadcast to every tab.
 
+## Round 4 — reviewer verdict: merge
+
+No findings. A1-1 to A1-3 confirmed fixed and covered; the remaining extra rotation is the documented limit pending N33, and the host-renderer crash is deferred under N32. CI passed.
+
 ## Contract-test changes
 
 None (no contract tests in this step). The cross-tab dedup spec from step ⑪ moved from `e2e/client.spec.ts` to `e2e/dedup.spec.ts` and was rewritten onto the gate: the 1.5 s fixture delay and the wall-clock comparison are gone; a get held at the backend, the second tab's get still unsettled after a round trip, and one backend request prove the shared fetch.
@@ -50,3 +54,17 @@ None raised by the reviewer. Decisions taken with the user during this step:
 
 - **N32 (2026-10-11).** A crash of the SharedWorker's host renderer kills the worker and leaves other tabs' clients hanging. The worker will hold a per-instance Web Lock; clients queue on it and treat its grant as worker loss: pending and later calls reject and a new client event fires. Separate pull request after this step.
 - **N33 (2026-10-11).** `authInvalid` cannot say which credential was refused, so the refresh snippet has to guess (the source of R1-1, R2-1 and A1-1). The event payload will carry the refused fetch's `context`; the snippet then refreshes exactly when the shared token is the refused one. Library change in the same follow-up pull request as N32; until then the snippet ships with the limit stated in its header.
+
+## Merge request
+
+**Scope.** Step ⑫ of the commit plan: the Playwright multi-tab suite (architecture §5), tests only. A mock backend in the e2e server (`scripts/e2e-backend.ts`: namespaced per test, bearer tokens, refresh-token rotation, request counters, and gates that hold a request until the test releases it) replaces sleeps and wall-clock comparisons. Specs: cross-tab dedup on the gate plus a separate-contexts control (`dedup.spec.ts`); version-mismatch clear propagation and the cross-tab N29 fence (`version.spec.ts`); `authInvalid` across three tabs with a Web Locks refresh, recovery by any tab's `updateAuth`, and the refresh snippet's own scenarios (`auth.spec.ts`); a tab crashing mid-fetch and the host tab closing mid-fetch (`tab-death.spec.ts`). The copy-pasteable refresh snippet (`e2e/pages/auth-refresh.js`) is what step ⑬ copies into the examples. No change under `packages/tscache/src/`.
+
+**Decisions taken on this branch** (user-confirmed 2026-10-11). Spec list and the mock-backend fixture. N32: a crash of the SharedWorker's host renderer kills the worker and leaves other tabs hanging; detection with a per-instance Web Lock, reject and a new client event, in a separate pull request. N33: `authInvalid` will carry the refused fetch's `context` so the snippet can refresh exactly; same follow-up pull request. The snippet fails closed when storage fails (tombstone and `onSessionLost`).
+
+**Review outcome.** Four rounds plus the scheduled adversarial pass. Every finding was in the refresh snippet: R1-1 and R2-1 (redundant rotation from stale events), then A1-1 (the R2-1 redesign could drop a real refusal), A1-2 (a failed save let another tab reuse the spent token) and A1-3 (asynchronous seeding). After the third review on that area the root cause, an event that cannot name the refused credential, went to the user as N33. Round 4 was clean. No finding concerned the specs themselves (pages versus contexts, flakiness, timing), which the adversarial pass targeted.
+
+**Confidence: high.** Each proof is built so that a broken mechanism fails it: the dedup spec requires the second tab to be still waiting while the gate holds and one backend request in total, and the separate-contexts control shows two; event counts are taken after a round trip on the same port, so they are exact; the snippet scenarios were each run against a mutant of the defect they cover and fail it. The suite passed 360 of 360 runs at 30 repetitions on 10 workers before the review fixes, and the auth spec 70 of 70 at 10 repetitions after them. The only time-based code is the 5-second worker-alive check in the tab-death spec, which can only fail a test, never pass one.
+
+**Blast radius: test infrastructure only.** The e2e server gains `/backend/` routes and no longer times out idle requests (held requests would be cut off after Bun's default 10 s). The fixture fetcher talks HTTP to the backend. `e2e/client.spec.ts` keeps its hosting tests on the shared helpers. 1047 Node tests and 17 browser specs pass under `bun run ci`.
+
+**Known limits.** A crash of the tab whose renderer hosts the SharedWorker is not tested here (N32, follow-up). Until N33, the snippet can rotate once more than needed when a stale event arrives after a tab adopted newer tokens; the rotation presents the current refresh token. `e2e/` and `scripts/` are not type-checked by `bun run ci` (checked locally with a temporary configuration); adding them is a tooling change for a `chore/` branch. `e2e/pages/fetcher.js` carries one Fallow suppression for its import of `/dist/fetcher.js`, a URL the e2e server serves rather than a repository path.
