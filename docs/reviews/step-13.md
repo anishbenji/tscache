@@ -29,6 +29,14 @@ Test configuration the examples need, changed in this step: the root workspaces 
 
 The three framework apps were written by Claude subagents from a written brief, reviewed and integrated by the implementer; each was checked against mutants of the mechanism its spec covers (for example, a cache cleared before every `get`, a client never replaced after `workerLost`, every tab refreshing on `authInvalid`).
 
+## Round 1 — reviewer verdict: merge after fixes
+
+CI passed (1102 Node tests, 36 browser specs).
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | On the events page a slow answer to **Show the whole week** overwrites a later zoom: the reset waits on a fetch while the zoom is answered from the cache, so the reset draws last | accepted | Reproduced with a new spec, `a slow answer for the whole week does not undo a later zoom` (the zoom was undone: 9,791 empty slots shown instead of under half). Every reset fetches the slot after now, which the backend's watermark leaves uncovered, so the race needs no special timing beyond the latency. Fixed in 2894596: each load takes a ticket and only the latest draws. The other pages were checked for the same race: the vanilla metrics poll and the React polling allow one request in flight, and the Solid apps derive their data from async memos, where a newer computation supersedes an older one |
+
 ## Contract-test changes
 
 None (no contract tests in this step).
