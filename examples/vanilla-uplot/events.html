@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tscache · sparse event counts</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Sparse event counts</h1>
+      <nav><a href="/">← Live server metrics</a></nav>
+    </header>
+    <p class="stats">
+      Mode <output data-testid="mode">…</output> ·
+      backend fetches <output data-testid="fetches">0</output> ·
+      events <output data-testid="points">0</output> ·
+      empty slots known <output data-testid="empty">0</output> ·
+      <output data-testid="status">connecting</output>
+    </p>
+    <div id="chart"></div>
+    <p>
+      Drag across the chart to zoom in; zooming inside the loaded week asks the
+      backend for nothing.
+      <button type="button" id="reset">Show the whole week</button>
+    </p>
+    <h2>Log</h2>
+    <ol id="log" reversed></ol>
+    <script type="module" src="/src/events.ts"></script>
+  </body>
+</html>

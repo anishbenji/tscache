@@ -1,0 +1,31 @@
+body {
+  font:
+    15px / 1.5 system-ui,
+    sans-serif;
+  margin: 1.5rem auto;
+  max-width: 64rem;
+  padding: 0 1rem;
+  color: #1d2433;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+h1 {
+  font-size: 1.4rem;
+}
+h2 {
+  font-size: 1rem;
+}
+.stats output {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+#log {
+  font:
+    13px / 1.4 ui-monospace,
+    monospace;
+  max-height: 14rem;
+  overflow-y: auto;
+}
