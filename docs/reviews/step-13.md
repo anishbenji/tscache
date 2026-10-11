@@ -61,6 +61,12 @@ Convergence check: the mock backend drew findings in rounds 2 and 3, but on unre
 
 No findings. R1-1, R2-1 and R3-1 confirmed fixed and covered. CI passed (1103 Node tests, 37 browser specs). The review has settled; step ⑬ is not on the adversarial-review schedule.
 
+## GitHub CI on the pull request
+
+The first GitHub run failed at Fallow, which local runs had passed. A fresh checkout has no `packages/tscache/dist` when `bun run ci` reaches Fallow and Vitest (the build comes later), and the package's exports point into `dist/`: every `tscache` import in the examples was unresolved, and the mock backend's fetcher test, which imports the package at runtime, would have failed next. Reproduced locally by moving `dist/` aside. Fixed in e9af8d8: Fallow ignores unresolved `tscache` specifiers (`ignoreUnresolvedImports`; the examples consume the built package on purpose), and Vitest resolves `tscache` and `tscache/fetcher` to the package source, as the package's own tests do. `bun run ci` then passed in a clean worktree with `CI=1`.
+
+Why local runs missed it: `dist/` existed locally, and once the branch was pushed, a local `fallow audit` compares against the branch's upstream rather than `main`, so the later local runs audited only unpushed changes (Fallow's documented default; `FALLOW_AUDIT_BASE` pins the base). Pinning it in `scripts/ci.sh` is a tooling change for a `chore/` branch.
+
 ## Contract-test changes
 
 None (no contract tests in this step).
@@ -81,4 +87,6 @@ None (no contract tests in this step).
 
 **Blast radius: examples and test configuration.** The root workspaces include `examples/*`; Vitest includes `examples/*/test`; Playwright gains an `examples` project whose web servers build each app (type-checking it) and serve it with `vite preview`, which adds four Vite builds to the Playwright step of `bun run ci`; Fallow takes the apps' HTML pages as entries and keeps `examples/**` out of its complexity thresholds, as it does for tests.
 
-**Known limits.** A `get` that ends at now always fetches the slot after now, which the backend's watermark leaves uncovered; the READMEs explain it. Each app's specs share that app's in-memory backend, so they run serially and cannot be repeated in parallel. `e2e/` and `scripts/` are still not type-checked by `bun run ci` (backlog). The Vite fetcher plugin lives in the examples; whether the library should ship one is for the architecture review. Solid is pinned to 2.0.0-rc.14 until 2.0 ships.
+**GitHub CI fix after the review settled.** The first GitHub run failed at Fallow because a fresh checkout has no `dist/` before the build step, so the examples' `tscache` imports did not resolve; Fallow now ignores those specifiers and Vitest resolves the package to its source ({h}). Reviewed in round 5 below.
+
+**Known limits.** A `get` that ends at now always fetches the slot after now, which the backend's watermark leaves uncovered; the READMEs explain it. Each app's specs share that app's in-memory backend, so they run serially and cannot be repeated in parallel. `e2e/` and `scripts/` are still not type-checked by `bun run ci`, and a local `fallow audit` on a pushed branch compares against its upstream, not `main` (both tooling changes for a `chore/` branch). The Vite fetcher plugin lives in the examples; whether the library should ship one is for the architecture review. Solid is pinned to 2.0.0-rc.14 until 2.0 ships.
