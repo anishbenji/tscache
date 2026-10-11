@@ -2,6 +2,9 @@
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   // Scripts run directly by Bun are entry points too (the e2e server).
   "entry": ["packages/*/src/entries/*.ts", "scripts/*.ts", "examples/*/*.html"],
+  // The examples import the built package (its exports point into dist/),
+  // which does not exist yet when `bun run ci` runs Fallow before the build.
+  "ignoreUnresolvedImports": ["tscache", "tscache/**"],
   "workspaces": {
     "packages": ["packages/*", "examples/*"]
   },
