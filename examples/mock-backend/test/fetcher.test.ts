@@ -57,6 +57,20 @@ describe("fetcher", () => {
     expect(await noticed).toMatchObject({ pages: 3, outcome: "ok" });
   });
 
+  it("keeps the earliest watermark of its pages", async () => {
+    // The clock moves on between pages, so each page reports a later
+    // watermark than the one before.
+    let now = NOW;
+    const backend = createBackend({ latencyMs: 0, now: () => now });
+    serve(async (req) => {
+      const response = await backend(req);
+      now += MINUTE;
+      return response;
+    });
+    const response = await fetcher.fetch(request());
+    expect(response.meta?.finalizedUntil).toBe(NOW);
+  });
+
   it("refuses to mix two dataset versions in one range", async () => {
     const backend = createBackend({ latencyMs: 0, now: () => NOW });
     let pages = 0;
