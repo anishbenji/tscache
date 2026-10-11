@@ -59,6 +59,18 @@ describe("createBackend", () => {
       400,
     );
     expect((await call(backend, "/api/elsewhere")).status).toBe(404);
+    expect(
+      (await call(backend, `/api/series/metrics/%E0%A4?${query}`)).status,
+    ).toBe(200);
+    // An interval too small to advance a timestamp would never end the scan.
+    const tiny = "start=1e12&end=1e12&interval=0.000001&offset=0";
+    expect((await call(backend, `/api/series/metrics/x?${tiny}`)).status).toBe(
+      400,
+    );
+    const fraction = `start=${NOW + 0.5}&end=${NOW + MINUTE}&interval=${MINUTE}&offset=0`;
+    expect(
+      (await call(backend, `/api/series/metrics/x?${fraction}`)).status,
+    ).toBe(400);
   });
 
   it("restates the data under a new version", async () => {
@@ -115,5 +127,11 @@ describe("createBackend", () => {
     await call(backend, `/api/series/events/x?${query}`);
     expect(performance.now() - started).toBeGreaterThanOrEqual(35);
     expect((await stats(backend)).latencyMs).toBe(40);
+    for (const latencyMs of [-1, 1.5, "9", null]) {
+      await call(backend, "/api/control", post({ latencyMs }));
+    }
+    expect((await stats(backend)).latencyMs).toBe(40);
+    await call(backend, "/api/control", post({ latencyMs: 1e12 }));
+    expect((await stats(backend)).latencyMs).toBe(60_000);
   });
 });

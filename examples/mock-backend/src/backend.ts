@@ -52,6 +52,8 @@ export interface BackendControl {
 export type Backend = (request: Request) => Promise<Response | undefined>;
 
 const SERIES = /^\/api\/series\/([^/]+)\/([^/]+)$/;
+/** Longer delays would overflow setTimeout, which then fires at once. */
+const MAX_LATENCY = 60_000;
 
 function newToken(kind: "at" | "rt"): string {
   return `${kind}-${crypto.randomUUID()}`;
@@ -79,8 +81,10 @@ function parseQuery(url: URL): SeriesQuery | undefined {
     interval: value("interval"),
     offset: value("offset"),
   };
-  const finite = Object.values(query).every(Number.isFinite);
-  return finite && query.interval > 0 && query.start <= query.end
+  // Integers only: a fractional interval can be too small to advance a
+  // timestamp, and the scan would never end. tscache asks on its grid.
+  const integral = Object.values(query).every(Number.isSafeInteger);
+  return integral && query.interval > 0 && query.start <= query.end
     ? query
     : undefined;
 }
@@ -116,7 +120,9 @@ export function createBackend(options: BackendOptions = {}): Backend {
       !auth ||
       request.headers.get("authorization") === `Bearer ${tokens.access}`;
     const tag = `v${version}`;
-    const seed = seedOf(`${dataset}/${decodeURIComponent(symbol)}/${tag}`);
+    // The symbol seeds the series as it appears in the path, undecoded: a
+    // malformed escape is just another name.
+    const seed = seedOf(`${dataset}/${symbol}/${tag}`);
     const page = authorized
       ? seriesPage(datasets[dataset], seed, query, now())
       : undefined;
@@ -154,8 +160,9 @@ export function createBackend(options: BackendOptions = {}): Backend {
   async function control(request: Request): Promise<Response> {
     const body = (await readJson(request)) as BackendControl | undefined;
     if (typeof body !== "object" || body === null) return text(400, "bad body");
-    if (typeof body.latencyMs === "number" && body.latencyMs >= 0) {
-      latencyMs = body.latencyMs;
+    const latency = body.latencyMs ?? Number.NaN;
+    if (Number.isSafeInteger(latency) && latency >= 0) {
+      latencyMs = Math.min(latency, MAX_LATENCY);
     }
     if (body.bumpVersion === true) version++;
     if (body.expireAccess === true) {
