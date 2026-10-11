@@ -1,6 +1,7 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { appUrl } from "./apps";
-import { notices, recordNotices, span, waitNotices } from "./support";
+import { control, notices, recordNotices, span, waitNotices } from "./support";
 
 // examples/vanilla-uplot: a live dashboard over a volatile tail, and sparse
 // event counts.
@@ -9,6 +10,17 @@ test.use({ baseURL: appUrl("vanilla-uplot") });
 test.describe.configure({ mode: "serial" });
 
 const MINUTE = 60_000;
+
+/** Drags across the plot from one fraction of its width to another. */
+async function dragAcross(page: Page, from: number, to: number) {
+  const box = await page.locator(".u-over").boundingBox();
+  if (!box) throw new Error("the chart has no plot area");
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * from, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * to, y, { steps: 5 });
+  await page.mouse.up();
+}
 
 test("the live dashboard fetches its history once, then only the tail", async ({
   page,
@@ -63,17 +75,35 @@ test("zooming into the loaded week of events asks the backend for nothing", asyn
   expect(events).toBeGreaterThan(0);
   expect(events + empty).toBeGreaterThan(7 * 24 * 60);
 
-  const over = page.locator(".u-over");
-  const box = await over.boundingBox();
-  if (!box) throw new Error("the chart has no plot area");
-  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2, {
-    steps: 5,
-  });
-  await page.mouse.up();
+  await dragAcross(page, 0.4, 0.6);
   await expect
     .poll(async () => Number(await page.getByTestId("empty").textContent()))
     .toBeLessThan(empty / 2);
   expect(await notices(page)).toHaveLength(1);
+});
+
+test("a slow answer for the whole week does not undo a later zoom", async ({
+  page,
+}) => {
+  await recordNotices(page);
+  await page.goto("/events.html");
+  await expect(page.getByTestId("status")).toHaveText("ready");
+  const week = Number(await page.getByTestId("empty").textContent());
+  // Every reset fetches the slot after now, so its answer takes the
+  // backend's latency while a zoom inside the week is answered at once.
+  await control(page, { latencyMs: 2000 });
+  try {
+    await page.getByRole("button", { name: /whole week/i }).click();
+    await dragAcross(page, 0.4, 0.6);
+    await expect
+      .poll(async () => Number(await page.getByTestId("empty").textContent()))
+      .toBeLessThan(week / 2);
+    await waitNotices(page, 2);
+    await page.waitForTimeout(500);
+    expect(Number(await page.getByTestId("empty").textContent())).toBeLessThan(
+      week / 2,
+    );
+  } finally {
+    await control(page, { latencyMs: 300 });
+  }
 });

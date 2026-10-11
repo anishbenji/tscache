@@ -22,6 +22,8 @@ const config: CacheConfig = {
 let cache: CacheHandle | undefined;
 /** Set while this module moves the x scale, so the zoom hook ignores it. */
 let moving = false;
+/** Numbers each load; only the latest one may draw. */
+let latest = 0;
 
 function coveredSlots(coverage: Range[]): number {
   let slots = 0;
@@ -31,7 +33,11 @@ function coveredSlots(coverage: Range[]): number {
 
 async function load(range: Range): Promise<void> {
   if (cache === undefined) return;
+  const ticket = ++latest;
   const result = await cache.get(range);
+  // A slower answer to an earlier request (a reset waiting on a fetch)
+  // would otherwise undo the zoom that came after it.
+  if (ticket !== latest) return;
   const { count } = result.fields;
   if (!count) return;
   moving = true;
