@@ -1,0 +1,21 @@
+{
+  "name": "@examples/mock-backend",
+  "private": true,
+  "type": "module",
+  "description": "Synthetic time-series backend and fetcher shared by the tscache examples",
+  "exports": {
+    "./datasets": "./src/datasets.ts",
+    "./fetcher": "./src/fetcher.ts",
+    "./notices": "./src/notices.ts",
+    "./vite": "./src/vite.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "tscache": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  }
+}

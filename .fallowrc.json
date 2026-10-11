@@ -1,15 +1,20 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   // Scripts run directly by Bun are entry points too (the e2e server).
-  "entry": ["packages/*/src/entries/*.ts", "scripts/*.ts"],
+  "entry": ["packages/*/src/entries/*.ts", "scripts/*.ts", "examples/*/*.html"],
+  // The examples import the built package (its exports point into dist/),
+  // which does not exist yet when `bun run ci` runs Fallow before the build.
+  "ignoreUnresolvedImports": ["tscache", "tscache/**"],
   "workspaces": {
-    "packages": ["packages/*"]
+    "packages": ["packages/*", "examples/*"]
   },
   // Consumed by tsdown's publint/attw integration, not imported anywhere.
   "ignoreDependencies": ["@arethetypeswrong/cli", "publint"],
   "health": {
-    // Test tables run long by design; size thresholds gate src only.
-    "ignore": ["packages/*/test/**"]
+    // Test tables run long by design; size thresholds gate src only. The
+    // example apps are demo code covered by their Playwright specs, which
+    // the coverage-based CRAP estimate cannot see.
+    "ignore": ["packages/*/test/**", "examples/**"]
   },
   "duplicates": {
     // Hide pair-only clones; focus on widespread copy-paste
