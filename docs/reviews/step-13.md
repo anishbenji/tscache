@@ -37,6 +37,14 @@ CI passed (1102 Node tests, 36 browser specs).
 |---|---|---|---|---|
 | R1-1 | P1 | On the events page a slow answer to **Show the whole week** overwrites a later zoom: the reset waits on a fetch while the zoom is answered from the cache, so the reset draws last | accepted | Reproduced with a new spec, `a slow answer for the whole week does not undo a later zoom` (the zoom was undone: 9,791 empty slots shown instead of under half). Every reset fetches the slot after now, which the backend's watermark leaves uncovered, so the race needs no special timing beyond the latency. Fixed in 2894596: each load takes a ticket and only the latest draws. The other pages were checked for the same race: the vanilla metrics poll and the React polling allow one request in flight, and the Solid apps derive their data from async memos, where a newer computation supersedes an older one |
 
+## Round 2 — reviewer verdict: merge after fixes
+
+R1-1 confirmed fixed and covered. CI passed (1102 Node tests, 37 browser specs).
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | The fetcher keeps the earliest watermark of its pages, so a later page cannot claim an earlier page's provisional points, but every fetcher test runs on a fixed clock and nothing pins it | accepted (test gap) | dd39b26: a test whose backend clock moves on by one interval after each page, so the three pages report rising watermarks; the response must keep the first. A fetcher that keeps the last page's watermark fails it (NOW + 2 min instead of NOW) |
+
 ## Contract-test changes
 
 None (no contract tests in this step).
