@@ -1,0 +1,11 @@
+{
+  // Shared by the example apps: browser code bundled by Vite, so the
+  // library-only isolatedDeclarations rule does not apply.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "isolatedDeclarations": false,
+    "declaration": false
+  }
+}
