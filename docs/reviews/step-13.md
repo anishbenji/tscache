@@ -1,6 +1,6 @@
 # Step 13 — Examples and mock backend
 
-Branch: `feat/13-examples` (⑬a) · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: settled · Verdict after triage: merge
+Branch: `feat/13-examples` (⑬a) · Reviewer: GPT-6.1 Sol (high) · Rounds: 5 · Status: settled · Verdict after triage: merge
 
 Step ⑬ ships in two pull requests (user's choice, 2026-10-11): ⑬a, the shared mock backend and the four client-only apps (`feat/13-examples`), then ⑬b, the two SSR apps. Not an engine step: no contract tests and no change under `packages/tscache/src/`; tests are written with the code.
 
@@ -67,6 +67,10 @@ The first GitHub run failed at Fallow, which local runs had passed. A fresh chec
 
 Why local runs missed it: `dist/` existed locally, and once the branch was pushed, a local `fallow audit` compares against the branch's upstream rather than `main`, so the later local runs audited only unpushed changes (Fallow's documented default; `FALLOW_AUDIT_BASE` pins the base). Pinning it in `scripts/ci.sh` is a tooling change for a `chore/` branch.
 
+## Round 5 — reviewer verdict: merge
+
+Run over the GitHub CI fix, with `FALLOW_AUDIT_BASE=main` so the host CI audited the whole branch. No findings; R1-1 to R3-1 still fixed and covered. CI passed (1103 Node tests, 37 browser specs), and so did GitHub CI on the pull request.
+
 ## Contract-test changes
 
 None (no contract tests in this step).
@@ -81,12 +85,12 @@ None (no contract tests in this step).
 
 **Decisions taken with the user** (2026-10-11): two pull requests for step ⑬; the backend as a workspace package mounted by a Vite plugin; the dependencies listed above, with Solid 2.0 RC; SSR hydration through the public API only (for ⑬b). DC-1 and DC-2 from step ⑫ wait for the architecture review after the initial build.
 
-**Review outcome.** Four rounds, each P1 accepted and fixed with a test that failed before the fix. R1-1: on the events page a slow answer for the whole week redrew over a later zoom (each load now takes a ticket). R2-1: nothing pinned the fetcher's earliest watermark across pages (new test with a moving clock, checked against a mutant). R3-1: a fractional interval hung the mock backend (queries take safe integers); a follow-up audit of the backend's other inputs fixed a malformed escape and an unbounded latency. Round 4 was clean.
+**Review outcome.** Five rounds. In the first three, each P1 accepted and fixed with a test that failed before the fix. R1-1: on the events page a slow answer for the whole week redrew over a later zoom (each load now takes a ticket). R2-1: nothing pinned the fetcher's earliest watermark across pages (new test with a moving clock, checked against a mutant). R3-1: a fractional interval hung the mock backend (queries take safe integers); a follow-up audit of the backend's other inputs fixed a malformed escape and an unbounded latency. Rounds 4 and 5 (the latter over the GitHub CI fix) were clean.
 
 **Confidence: high.** Every app's spec asserts the mechanism it demonstrates through the backend's own fetch notices, so a broken mechanism fails it: each was run against mutants (a cache cleared before every `get`, a client never replaced after `workerLost`, every tab refreshing on `authInvalid`, a scroll that moves the start on every event). The specs also crash the SharedWorker's host tab and require the survivor to recover. The full browser suite (core and examples) passed on every run under `bun run ci`; the React spec passed 20 of 20 at five repetitions, the vanilla spec 12 of 12 at three. 1103 Node tests and 37 browser specs pass.
 
 **Blast radius: examples and test configuration.** The root workspaces include `examples/*`; Vitest includes `examples/*/test`; Playwright gains an `examples` project whose web servers build each app (type-checking it) and serve it with `vite preview`, which adds four Vite builds to the Playwright step of `bun run ci`; Fallow takes the apps' HTML pages as entries and keeps `examples/**` out of its complexity thresholds, as it does for tests.
 
-**GitHub CI fix after the review settled.** The first GitHub run failed at Fallow because a fresh checkout has no `dist/` before the build step, so the examples' `tscache` imports did not resolve; Fallow now ignores those specifiers and Vitest resolves the package to its source ({h}). Reviewed in round 5 below.
+**GitHub CI fix after the review settled.** The first GitHub run failed at Fallow because a fresh checkout has no `dist/` before the build step, so the examples' `tscache` imports did not resolve; Fallow now ignores those specifiers and Vitest resolves the package to its source ({h}). Round 5 reviewed it: no findings.
 
 **Known limits.** A `get` that ends at now always fetches the slot after now, which the backend's watermark leaves uncovered; the READMEs explain it. Each app's specs share that app's in-memory backend, so they run serially and cannot be repeated in parallel. `e2e/` and `scripts/` are still not type-checked by `bun run ci`, and a local `fallow audit` on a pushed branch compares against its upstream, not `main` (both tooling changes for a `chore/` branch). The Vite fetcher plugin lives in the examples; whether the library should ship one is for the architecture review. Solid is pinned to 2.0.0-rc.14 until 2.0 ships.
