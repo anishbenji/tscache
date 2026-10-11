@@ -4,6 +4,7 @@
 
 export const apps = {
   "vanilla-uplot": 5101,
+  "solid-uplot": 5102,
 } as const;
 
 export type App = keyof typeof apps;

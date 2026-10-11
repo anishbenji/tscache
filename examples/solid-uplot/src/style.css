@@ -1,0 +1,79 @@
+body {
+  font:
+    15px / 1.5 system-ui,
+    sans-serif;
+  margin: 1.5rem auto;
+  max-width: 64rem;
+  padding: 0 1rem;
+  color: #1d2433;
+}
+header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+h1 {
+  font-size: 1.4rem;
+}
+h2 {
+  font-size: 1rem;
+}
+.presets {
+  display: flex;
+  gap: 0.25rem;
+}
+.presets button {
+  font: inherit;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid #c3c2b7;
+  border-radius: 0.375rem;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+}
+.presets button[aria-pressed="true"] {
+  background: #1d2433;
+  border-color: #1d2433;
+  color: #fff;
+}
+.stats output {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.shown {
+  margin: 0;
+  color: #52514e;
+  font-variant-numeric: tabular-nums;
+}
+.chart {
+  margin: 0.75rem 0 0;
+}
+.key {
+  color: #52514e;
+}
+.swatch {
+  display: inline-block;
+  width: 1.25rem;
+  height: 0.75rem;
+  vertical-align: -0.05rem;
+  border: 1px solid #c3c2b7;
+}
+.swatch.gap {
+  background: rgba(82, 81, 78, 0.16);
+}
+.swatch.unloaded {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 3px,
+    rgba(82, 81, 78, 0.5) 3px 4px
+  );
+}
+.log {
+  font:
+    13px / 1.4 ui-monospace,
+    monospace;
+  max-height: 14rem;
+  overflow-y: auto;
+}
