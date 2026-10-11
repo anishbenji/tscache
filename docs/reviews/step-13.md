@@ -45,6 +45,16 @@ R1-1 confirmed fixed and covered. CI passed (1102 Node tests, 37 browser specs).
 |---|---|---|---|---|
 | R2-1 | P1 | The fetcher keeps the earliest watermark of its pages, so a later page cannot claim an earlier page's provisional points, but every fetcher test runs on a fixed clock and nothing pins it | accepted (test gap) | dd39b26: a test whose backend clock moves on by one interval after each page, so the three pages report rising watermarks; the response must keep the first. A fetcher that keeps the last page's watermark fails it (NOW + 2 min instead of NOW) |
 
+## Round 3 — reviewer verdict: merge after fixes
+
+R1-1 and R2-1 confirmed fixed and covered. CI passed (1103 Node tests, 37 browser specs).
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | The mock backend accepts a fractional interval such as `0.000001`; at a timestamp near 10¹², adding it leaves the value unchanged, so the page scan never ends and the example server hangs | accepted | Reproduced with a backend test (the Vitest worker ran out of memory). Fixed in 56c44b3: series queries take safe integers only, which is what tscache's grid sends; a fractional start is rejected too |
+
+Convergence check: the mock backend drew findings in rounds 2 and 3, but on unrelated concerns (a missing test for correct code, then input validation), so no fix is leaking. Instead of waiting for another round, the implementer audited the backend's remaining inputs and fixed two more in 56c44b3: a malformed percent escape in the symbol made `decodeURIComponent` throw (the symbol now seeds its series undecoded), and a latency set through the controls was accepted as any number, so a huge value overflowed `setTimeout` and fired at once (it must now be a non-negative integer, capped at a minute). Both are covered by backend tests.
+
 ## Contract-test changes
 
 None (no contract tests in this step).
