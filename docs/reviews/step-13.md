@@ -1,5 +1,7 @@
 # Step 13 — Examples and mock backend
 
+Branch: `feat/13-examples` (⑬a) · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: settled · Verdict after triage: merge
+
 Step ⑬ ships in two pull requests (user's choice, 2026-10-11): ⑬a, the shared mock backend and the four client-only apps (`feat/13-examples`), then ⑬b, the two SSR apps. Not an engine step: no contract tests and no change under `packages/tscache/src/`; tests are written with the code.
 
 ## Decisions taken with the user (2026-10-11)
@@ -55,10 +57,28 @@ R1-1 and R2-1 confirmed fixed and covered. CI passed (1103 Node tests, 37 browse
 
 Convergence check: the mock backend drew findings in rounds 2 and 3, but on unrelated concerns (a missing test for correct code, then input validation), so no fix is leaking. Instead of waiting for another round, the implementer audited the backend's remaining inputs and fixed two more in 56c44b3: a malformed percent escape in the symbol made `decodeURIComponent` throw (the symbol now seeds its series undecoded), and a latency set through the controls was accepted as any number, so a huge value overflowed `setTimeout` and fired at once (it must now be a non-negative integer, capped at a minute). Both are covered by backend tests.
 
+## Round 4 — reviewer verdict: merge
+
+No findings. R1-1, R2-1 and R3-1 confirmed fixed and covered. CI passed (1103 Node tests, 37 browser specs). The review has settled; step ⑬ is not on the adversarial-review schedule.
+
 ## Contract-test changes
 
 None (no contract tests in this step).
 
-## Merge request
+## Merge request: `feat/13-examples` → `main` (⑬a)
 
-To be written when the review settles.
+**Scope.** The first half of step ⑬ (starter §7 and §11): the shared mock backend and the four client-only example apps; the two SSR apps follow in ⑬b. No change under `packages/tscache/src/`.
+
+- `examples/mock-backend`, a private workspace package: deterministic series (OHLCV in weekday sessions, server metrics with a late-arriving tail, a sensor with dropouts, sparse event counts) served in pages with a dataset version and a watermark; bearer auth with refresh-token rotation; controls for latency, restatement and token expiry; counters. Vite plugins mount it on each example's dev and preview servers and give the URL of the shared fetcher module, which loops over pages, never mixes two versions, keeps the earliest watermark and announces each fetch for the apps' counters.
+- `vanilla-uplot`: live metrics over a volatile tail with version restatement; sparse events with coverage and pagination. `solid-uplot`: confirmed gaps, one presence bit per point, the integer-field limitation. `solid-lwcharts`: scroll-back over nights and weekends, fetching only the uncovered fortnight. `react-lwcharts`: two tabs on one SharedWorker, `authInvalid` with the Web Locks refresh snippet (a typed copy of `e2e/pages/auth-refresh.js`), and recovery after a lost worker. Each app is a narrative README naming the decisions it shows, and every app replaces its client on `workerLost`.
+- `docs/guides/worker-setup.md` explains how to serve the fetcher module under Vite, whose `?worker&url` drops the module's default export; the README lists the examples.
+
+**Decisions taken with the user** (2026-10-11): two pull requests for step ⑬; the backend as a workspace package mounted by a Vite plugin; the dependencies listed above, with Solid 2.0 RC; SSR hydration through the public API only (for ⑬b). DC-1 and DC-2 from step ⑫ wait for the architecture review after the initial build.
+
+**Review outcome.** Four rounds, each P1 accepted and fixed with a test that failed before the fix. R1-1: on the events page a slow answer for the whole week redrew over a later zoom (each load now takes a ticket). R2-1: nothing pinned the fetcher's earliest watermark across pages (new test with a moving clock, checked against a mutant). R3-1: a fractional interval hung the mock backend (queries take safe integers); a follow-up audit of the backend's other inputs fixed a malformed escape and an unbounded latency. Round 4 was clean.
+
+**Confidence: high.** Every app's spec asserts the mechanism it demonstrates through the backend's own fetch notices, so a broken mechanism fails it: each was run against mutants (a cache cleared before every `get`, a client never replaced after `workerLost`, every tab refreshing on `authInvalid`, a scroll that moves the start on every event). The specs also crash the SharedWorker's host tab and require the survivor to recover. The full browser suite (core and examples) passed on every run under `bun run ci`; the React spec passed 20 of 20 at five repetitions, the vanilla spec 12 of 12 at three. 1103 Node tests and 37 browser specs pass.
+
+**Blast radius: examples and test configuration.** The root workspaces include `examples/*`; Vitest includes `examples/*/test`; Playwright gains an `examples` project whose web servers build each app (type-checking it) and serve it with `vite preview`, which adds four Vite builds to the Playwright step of `bun run ci`; Fallow takes the apps' HTML pages as entries and keeps `examples/**` out of its complexity thresholds, as it does for tests.
+
+**Known limits.** A `get` that ends at now always fetches the slot after now, which the backend's watermark leaves uncovered; the READMEs explain it. Each app's specs share that app's in-memory backend, so they run serially and cannot be repeated in parallel. `e2e/` and `scripts/` are still not type-checked by `bun run ci` (backlog). The Vite fetcher plugin lives in the examples; whether the library should ship one is for the architecture review. Solid is pinned to 2.0.0-rc.14 until 2.0 ships.
