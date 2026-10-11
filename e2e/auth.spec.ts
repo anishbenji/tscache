@@ -40,6 +40,7 @@ test("one tab refreshes behind a Web Lock while the others wait", async ({
     coverage: [],
     misses: [{ range: { start: 3, end: 33 }, reason: "auth-pending" }],
   });
+  // Every tab hears which context was refused (N33).
   for (const page of pages) {
     expect(await drainEvents(page, config, "authInvalid")).toEqual([
       {
@@ -47,6 +48,7 @@ test("one tab refreshes behind a Web Lock while the others wait", async ({
           name: "AuthInvalidError",
           message: "candles refused the access token",
         },
+        context: { ns: backend.ns, token: "at-0" },
       },
     ]);
   }
@@ -106,7 +108,8 @@ test("any tab's updateAuth recovers every tab", async ({
 });
 
 // The snippet on its own, with stand-in clients (pages/refresh-harness.js):
-// event orders a real port can produce, and storage failures.
+// event orders a real port can produce, and storage failures. Each event
+// names the refused token, so only a refusal of the stored one refreshes.
 
 test("queued stale events adopt the current tokens", async ({ context }) => {
   const page = await open(context);
@@ -128,13 +131,33 @@ test("a refusal during a recovery's update is acted on", async ({
   });
 });
 
-test("a tab installed after a refresh adopts the current tokens", async ({
+test("a late event about a replaced token rotates nothing", async ({
   context,
 }) => {
   const page = await open(context);
-  expect(await refreshScenario(page, "installedAfterRefresh")).toEqual({
-    refreshed: [],
-    updates: ["a:at-1"],
+  expect(await refreshScenario(page, "lateStaleEvent")).toEqual({
+    refreshed: ["rt-0"],
+    updates: ["a:at-x1", "a:at-x1"],
+    lost: [],
+  });
+});
+
+test("two tabs hearing one refusal refresh once", async ({ context }) => {
+  const page = await open(context);
+  expect(await refreshScenario(page, "twoTabsOneRefusal")).toEqual({
+    refreshed: ["rt-0"],
+    updates: ["a:at-x1", "b:at-x1"],
+    lost: [],
+  });
+});
+
+test("events from an older worker, without a context, still recover", async ({
+  context,
+}) => {
+  const page = await open(context);
+  expect(await refreshScenario(page, "eventsWithoutContext")).toEqual({
+    refreshed: ["rt-0", "rt-x1"],
+    updates: ["a:at-x1", "b:at-x2"],
     lost: [],
   });
 });

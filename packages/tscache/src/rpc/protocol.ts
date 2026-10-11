@@ -47,6 +47,8 @@ export type Hello = {
   protocol: number;
   lib: string;
   clientId: string;
+  /** The Web Lock a SharedWorker holds for its lifetime (N32). */
+  lock?: string;
 };
 export type Init = { t: "init"; protocol: number; fetcher?: FetcherConfig };
 export type InitResult = { t: "init-ok" } | { t: "init-err"; error: WireError };

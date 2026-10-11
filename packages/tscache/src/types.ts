@@ -159,10 +159,20 @@ export type RequestId = string;
 
 /** Three scopes, one channel (N5, §2.7). */
 export interface ClientEvents {
-  /** Fetcher signalled auth failure; broadcast to all tabs (step ⑪). */
-  authInvalid: { error: { name: string; message: string } };
+  /**
+   * Fetcher signalled auth failure; broadcast to all tabs (step ⑪).
+   * `context` is the fetcher context the refused fetch was issued with
+   * (N33), so a tab refreshes only when its credential is the refused one.
+   */
+  authInvalid: { error: { name: string; message: string }; context: unknown };
   /** The fallback chain stepped down while connecting. */
   modeFallback: { from: HostingMode; to: HostingMode; reason: string };
+  /**
+   * The worker behind this client is gone (N32): every pending and later
+   * call rejects with TscacheError; create a new client to go on (it starts
+   * a new worker). At most once per client; never after dispose().
+   */
+  workerLost: { reason: string };
   /** A cache was cleared; in SharedWorker mode one tab's clear affects all. */
   cacheCleared: {
     cacheId: string;

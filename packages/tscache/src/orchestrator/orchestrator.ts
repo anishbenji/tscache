@@ -209,7 +209,9 @@ export class Orchestrator {
       await this.#loading?.catch(() => {});
       this.#transitioning = true;
       try {
-        await this.#fetcher?.updateAuth?.(context);
+        // A copy: the hook may keep and change it; what fetches carry and
+        // authInvalid names must not change with it.
+        await this.#fetcher?.updateAuth?.(structuredClone(context));
       } finally {
         this.#transitioning = false;
       }
@@ -377,14 +379,17 @@ export class Orchestrator {
     const fetcher = this.#fetcher as Fetcher;
     const { interval, alignmentOffset } = this.#engine.configOf(cacheId);
     const authGeneration = this.#authGeneration;
+    // Switches with the generation: the context this fetch is refused with.
+    const context = this.#context;
     try {
       const response = await fetcher.fetch({
         cacheId,
-        // A copy: the fetcher may mutate its request, the put must not see it.
+        // Copies: the fetcher may mutate its request; neither the put nor
+        // the authInvalid event (N33) nor later fetches must see it.
         range: { start: range.start, end: range.end },
         interval,
         alignmentOffset,
-        context: this.#context,
+        context: structuredClone(context),
       });
       return { response };
     } catch (error) {
@@ -394,7 +399,7 @@ export class Orchestrator {
       // A failure under credentials that updateAuth has since replaced
       // says nothing about the new ones.
       if (authGeneration === this.#authGeneration) {
-        this.#auth.invalidate(describe(error));
+        this.#auth.invalidate(describe(error), context);
       }
       return { outcome: { kind: "auth" } };
     }

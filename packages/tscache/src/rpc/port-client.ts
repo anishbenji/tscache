@@ -39,21 +39,30 @@ function rebuild(wire: unknown): TscacheError {
 
 export class PortClient {
   readonly clientId: string;
+  /** hello.lock: the worker's lifetime lock, when it holds one (N32). */
+  readonly lock: string | undefined;
   readonly #port: MessagePortLike;
   readonly #pending = new Map<number, Pending>();
   readonly #listeners = new Set<(evt: Evt) => void>();
+  readonly #lostListeners = new Set<(error: TscacheError) => void>();
   readonly #unlisten: () => void;
   #seq = 0;
-  #disposed = false;
+  /** Why requests reject from now on; set once by dispose or a loss. */
+  #ended: string | undefined;
 
-  private constructor(port: MessagePortLike, clientId: string) {
+  private constructor(
+    port: MessagePortLike,
+    clientId: string,
+    lock: string | undefined,
+  ) {
     this.#port = port;
     this.clientId = clientId;
+    this.lock = lock;
     this.#unlisten = listen(port, {
       onMessage: (data) => this.#receive(data),
       // The other side went away (worker died, server detached): nothing
       // pending can be answered any more.
-      onClose: () => this.#shutDown(new TscacheError("port closed")),
+      onClose: () => this.#shutDown(new TscacheError("port closed"), true),
     });
   }
 
@@ -71,6 +80,7 @@ export class PortClient {
       // hello first, then the init result: anything else is out of order.
       let stage: "hello" | "init" = "hello";
       let clientId = "";
+      let lock: string | undefined;
       let unlisten = () => {};
       // Cancelled by the caller (handshake timeout, worker error): stop
       // listening and close this side's port, so a late hello completes
@@ -105,6 +115,8 @@ export class PortClient {
           return;
         }
         clientId = message.clientId;
+        // Only a name can be queued on; anything else watches nothing.
+        lock = typeof message.lock === "string" ? message.lock : undefined;
         stage = "init";
         const reply: Init = { t: "init", protocol: PROTOCOL_VERSION };
         if (init.fetcher !== undefined) reply.fetcher = init.fetcher;
@@ -133,7 +145,7 @@ export class PortClient {
         } else if (message.t === "init-ok") {
           signal?.removeEventListener("abort", onAbort);
           unlisten();
-          resolve(new PortClient(port, clientId));
+          resolve(new PortClient(port, clientId, lock));
         } else if (message.t === "init-err") {
           finish(fromWireError(message.error));
         }
@@ -160,8 +172,8 @@ export class PortClient {
     params: unknown,
     transfer: ArrayBuffer[] = [],
   ): Promise<unknown> {
-    if (this.#disposed) {
-      return Promise.reject(new TscacheError("client disposed"));
+    if (this.#ended !== undefined) {
+      return Promise.reject(new TscacheError(this.#ended));
     }
     const id = ++this.#seq;
     const req: Req = { t: "req", id, op, params };
@@ -183,11 +195,21 @@ export class PortClient {
   }
 
   /**
+   * Calls `fn` once when the transport fails underneath (abort, port
+   * closed, bye), after pending requests were rejected; never after
+   * dispose(). Returns the unsubscribe.
+   */
+  onLost(fn: (error: TscacheError) => void): () => void {
+    this.#lostListeners.add(fn);
+    return () => this.#lostListeners.delete(fn);
+  }
+
+  /**
    * Releases the port; pending requests reject. Idempotent.
    * @public used by the client facade (step ⑩)
    */
   dispose(): void {
-    if (this.#disposed) return;
+    if (this.#ended !== undefined) return;
     // Tell the server first: a dedicated Worker has no close() to signal
     // with, so the server would otherwise keep this connection forever.
     const bye: Req = { t: "req", id: ++this.#seq, op: "dispose", params: {} };
@@ -196,25 +218,28 @@ export class PortClient {
     } catch {
       // The port is already unusable; nothing more to tell.
     }
-    this.#shutDown(new TscacheError("client disposed"));
+    this.#shutDown(new TscacheError("client disposed"), false);
   }
 
   /**
-   * The transport failed underneath (a dedicated worker's fatal error):
-   * pending and later requests reject with `error`. Idempotent.
+   * The transport failed underneath (a dedicated worker's fatal error, the
+   * SharedWorker's lifetime lock granted): pending and later requests
+   * reject with `error`'s message. Idempotent.
    * @public used by the hostings (step ⑩)
    */
   abort(error: TscacheError): void {
-    this.#shutDown(error);
+    this.#shutDown(error, true);
   }
 
-  #shutDown(error: TscacheError): void {
-    if (this.#disposed) return;
-    this.#disposed = true;
+  #shutDown(error: TscacheError, lost: boolean): void {
+    if (this.#ended !== undefined) return;
+    this.#ended = error.message;
     this.#unlisten();
     this.#port.close?.();
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
+    if (!lost) return;
+    for (const fn of [...this.#lostListeners]) fn(error);
   }
 
   #receive(data: unknown): void {
@@ -230,7 +255,7 @@ export class PortClient {
       for (const fn of [...this.#listeners]) fn(message);
     } else if (message.t === "bye") {
       // Controlled detach on the other side (no close event in browsers).
-      this.#shutDown(new TscacheError("port closed"));
+      this.#shutDown(new TscacheError("port closed"), true);
     }
   }
 }

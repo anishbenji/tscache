@@ -48,6 +48,10 @@ export interface TscacheClient {
   clearAll(): Promise<void>;
   /** Delivers new auth material to the fetcher (step ⑪). */
   updateAuth(context: unknown): Promise<void>;
+  /**
+   * Events, including workerLost (N32): the worker behind this client is
+   * gone, every pending and later call rejects, and a new client is needed.
+   */
   on<E extends keyof ClientEvents>(
     event: E,
     fn: (payload: ClientEvents[E]) => void,
@@ -143,13 +147,15 @@ class Client implements TscacheClient {
   readonly #hosting: Hosting;
   readonly #port: PortClient;
   readonly #events = new ClientEmitter();
-  #disposed = false;
+  /** Why calls reject from now on: disposed, or the worker was lost. */
+  #ended: string | undefined;
 
   constructor(hosting: Hosting, fallbacks: ClientEvents["modeFallback"][]) {
     this.#hosting = hosting;
     this.#port = hosting.client;
     this.mode = hosting.mode;
     this.#port.on((evt) => this.#events.receive(evt));
+    this.#port.onLost((error) => this.#lose(error));
     // The chain ran before anyone could subscribe: deliver its steps on the
     // next macrotask, after the awaiting caller has had its turn. Every
     // step is delivered even if a listener throws; the first error surfaces
@@ -224,15 +230,33 @@ class Client implements TscacheClient {
   }
 
   async dispose(): Promise<void> {
-    if (this.#disposed) return;
-    this.#disposed = true;
+    if (this.#ended !== undefined) return;
+    this.#ended = "client disposed";
     this.#unlistenPage();
     this.#port.dispose();
     this.#hosting.terminate();
   }
 
+  /**
+   * The transport failed underneath (N32): the port has already rejected
+   * what was pending. Release what this client owns, as dispose() would,
+   * then tell the page once.
+   */
+  #lose(error: TscacheError): void {
+    if (this.#ended !== undefined) return;
+    this.#ended = error.message;
+    this.#unlistenPage();
+    this.#hosting.terminate();
+    try {
+      this.#events.emit("workerLost", { reason: error.message });
+    } catch (failure) {
+      // Raised inside a port or lock callback, where nobody awaits it.
+      report(failure);
+    }
+  }
+
   #live(): void {
-    if (this.#disposed) throw new TscacheError("client disposed");
+    if (this.#ended !== undefined) throw new TscacheError(this.#ended);
   }
 }
 

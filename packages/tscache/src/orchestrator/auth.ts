@@ -40,8 +40,11 @@ export class AuthState {
     return this.#valid;
   }
 
-  /** Flips to invalid; broadcasts authInvalid only on the first flip. */
-  invalidate(error: { name: string; message: string }): void {
+  /**
+   * Flips to invalid; broadcasts authInvalid only on the first flip, with
+   * the context the refused fetch was issued with (N33).
+   */
+  invalidate(error: { name: string; message: string }, context: unknown): void {
     if (!this.#valid) return;
     this.#valid = false;
     // Release gets that are waiting on fetches: they report auth-pending.
@@ -51,7 +54,7 @@ export class AuthState {
       t: "evt",
       scope: "client",
       event: "authInvalid",
-      payload: { error },
+      payload: { error, context },
     });
   }
 

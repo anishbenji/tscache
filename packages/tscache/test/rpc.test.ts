@@ -645,3 +645,114 @@ describe("wire errors", () => {
     expect(rebuilt.message).toBe("SomethingElse: x");
   });
 });
+
+describe("lifetime lock and transport loss (N32)", () => {
+  /** The first message the server posts on a fresh port. */
+  async function helloFrom(server: RpcServer): Promise<unknown> {
+    const channel = new MessageChannel();
+    const first = new Promise((resolve) =>
+      channel.port2.addEventListener("message", (e) => resolve(e.data), {
+        once: true,
+      }),
+    );
+    channel.port2.start();
+    server.attach(channel.port1 as MessagePortLike);
+    const hello = await first;
+    server.detach(channel.port1 as MessagePortLike);
+    channel.port2.close();
+    return hello;
+  }
+
+  it("hello names the server's lifetime lock, and only when it has one", async () => {
+    const lock = "tscache-worker:w1";
+    expect(await helloFrom(new RpcServer(new Engine(), "0.0.0", lock))).toEqual(
+      {
+        t: "hello",
+        protocol: PROTOCOL_VERSION,
+        lib: "0.0.0",
+        clientId: "c1",
+        lock,
+      },
+    );
+    expect(
+      await helloFrom(new RpcServer(new Engine(), "0.0.0")),
+    ).not.toHaveProperty("lock");
+    expect(
+      (await connect(new RpcServer(new Engine(), "0.0.0", lock))).lock,
+    ).toBe(lock);
+    expect((await connect(new RpcServer(new Engine(), "0.0.0"))).lock).toBe(
+      undefined,
+    );
+  });
+
+  it("a lock that is not a string names nothing", async () => {
+    const channel = new MessageChannel();
+    channel.port1.addEventListener("message", (e) => {
+      if ((e.data as { t?: string }).t === "init") {
+        channel.port1.postMessage({ t: "init-ok" });
+      }
+    });
+    channel.port1.start();
+    channel.port1.postMessage({
+      t: "hello",
+      protocol: PROTOCOL_VERSION,
+      lib: "0.0.0",
+      clientId: "c1",
+      lock: { name: "x" },
+    });
+    const client = await PortClient.connect(channel.port2 as MessagePortLike);
+    expect(client.lock).toBeUndefined();
+    client.dispose();
+    channel.port1.close();
+  });
+
+  it("onLost fires once after pending requests were rejected, and later requests reject with the reason", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const client = await PortClient.connect(withoutCloseEvent(channel.port2));
+    const lost: { message: string; pendingThen: number }[] = [];
+    client.onLost((error) =>
+      lost.push({ message: error.message, pendingThen: client.pendingCount }),
+    );
+    const pending = client.request("clearAll", {});
+    server.detach(channel.port1 as MessagePortLike);
+    await expect(pending).rejects.toMatchObject({ message: "port closed" });
+    expect(lost).toEqual([{ message: "port closed", pendingThen: 0 }]);
+    // Nothing more is reported, whatever happens next.
+    client.abort(new TscacheError("again"));
+    client.dispose();
+    expect(lost).toHaveLength(1);
+    await expect(client.request("clearAll", {})).rejects.toMatchObject({
+      name: "TscacheError",
+      message: "port closed",
+    });
+  });
+
+  it("abort and a peer closing the port are losses; dispose is not", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const aborted = await connect(server);
+    const reasons: string[] = [];
+    aborted.onLost((error) => reasons.push(`a:${error.message}`));
+    aborted.abort(new TscacheError("worker gone"));
+    await expect(aborted.request("clearAll", {})).rejects.toMatchObject({
+      message: "worker gone",
+    });
+
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const closed = await PortClient.connect(channel.port2 as MessagePortLike);
+    closed.onLost((error) => reasons.push(`c:${error.message}`));
+    channel.port1.close();
+    await until(() => reasons.length === 2);
+
+    const disposed = await connect(server);
+    disposed.onLost((error) => reasons.push(`d:${error.message}`));
+    disposed.dispose();
+    await tick();
+    await expect(disposed.request("clearAll", {})).rejects.toMatchObject({
+      message: "client disposed",
+    });
+    expect(reasons).toEqual(["a:worker gone", "c:port closed"]);
+  });
+});

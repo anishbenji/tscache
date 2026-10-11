@@ -5,6 +5,7 @@ import {
   drainEvents,
   expect,
   expectWorkerAlive,
+  heard,
   open,
   read,
   settle,
@@ -16,9 +17,9 @@ import {
 // Tabs that go away while a fetch they started is in flight (§4.8, N28): the
 // SharedWorker finishes the fetch, applies it and keeps serving the others.
 // Chromium runs a SharedWorker in the renderer of the tab that created it,
-// the first to connect; if that renderer crashes the worker dies with it and
-// the surviving tabs hang (N32, fixed on a separate branch). These tests
-// therefore never crash the first tab.
+// the first to connect; a crash of that renderer kills the worker, which is
+// worker-loss.spec.ts (N32). These tests never crash the first tab, and no
+// survivor hears workerLost.
 
 const range = { start: 3, end: 33 };
 const fetched = {
@@ -70,6 +71,8 @@ test("a tab that crashes mid-fetch leaves the others served", async ({
   expect((await read(s, config, next)).misses).toEqual([]);
   expect((await backend.state()).requests).toEqual({ "3-33": 1, "43-63": 1 });
   expect(crashed).toEqual([]);
+  for (const page of [h, s])
+    expect(await heard(page, "workerLost")).toEqual([]);
 });
 
 test("the host tab closing mid-fetch leaves its fetch applied", async ({
@@ -95,4 +98,5 @@ test("the host tab closing mid-fetch leaves its fetch applied", async ({
   // Abuts the applied range, so the flank point 33 is fetched with it.
   expect((await read(s, config, next)).misses).toEqual([]);
   expect((await backend.state()).requests).toEqual({ "3-33": 1, "33-63": 1 });
+  expect(await heard(s, "workerLost")).toEqual([]);
 });

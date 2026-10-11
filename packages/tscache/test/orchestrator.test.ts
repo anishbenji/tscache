@@ -22,7 +22,9 @@ const config = {
 interface Log {
   requests: FetchRequest[];
   auth: unknown[];
-  mode: "ok" | "fail" | "auth" | "slow" | "bad";
+  mode: "ok" | "fail" | "auth" | "slow" | "bad" | "auth-mutate";
+  /** The auth hook vandalizes the context it is given. */
+  mutateOnAuth?: boolean;
   /** What a stalled fetch does once released. */
   afterRelease?: "auth" | "fail";
   release?: () => void;
@@ -50,6 +52,12 @@ const fetcherSource = `
       if (g.mode === "fail") throw new Error("backend down");
       if (g.mode === "bad") return { timestamps: [req.range.start + 1], fields: { price: [1], volume: [1] } };
       if (g.mode === "auth") { const e = new Error("401"); e.code = "tscache:auth-invalid"; throw e; }
+      if (g.mode === "auth-mutate") {
+        // Vandalizes its context, then refuses: the worker's own copy must not change.
+        delete req.context.token;
+        req.context.fn = () => {};
+        const e = new Error("401"); e.code = "tscache:auth-invalid"; throw e;
+      }
       if (g.mode === "slow") {
         await new Promise((r) => { g.release = r; });
         if (g.afterRelease === "auth") { const e = new Error("401 late"); e.code = "tscache:auth-invalid"; throw e; }
@@ -64,7 +72,8 @@ const fetcherSource = `
     async updateAuth(context) {
       const g = log();
       if (g.slowAuth) await new Promise((r) => { g.releaseAuth = r; });
-      g.auth.push(context);
+      g.auth.push(structuredClone(context));
+      if (g.mutateOnAuth) { context.token = "vandalized"; context.fn = () => {}; }
     },
   };
 `;
@@ -295,8 +304,10 @@ describe("auth (designs b and y)", () => {
       seen.filter((e) => e.scope === "client" && e.event === "authInvalid");
     expect(authEvents(seenA)).toHaveLength(1);
     expect(authEvents(seenB)).toHaveLength(1);
-    expect(authEvents(seenA)[0]).toMatchObject({
-      payload: { error: { name: "Error", message: "401" } },
+    // N33: the event names the context the refused fetch carried.
+    expect(authEvents(seenA)[0]?.payload).toEqual({
+      error: { name: "Error", message: "401" },
+      context: { token: "old" },
     });
     // New material from any tab: the fetcher hears it and fetches resume.
     log().mode = "ok";
@@ -307,6 +318,82 @@ describe("auth (designs b and y)", () => {
     const third = await get(a, { start: 3, end: 13 });
     expect(third.misses).toEqual([]);
     expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
+  });
+});
+
+describe("refused context (N33)", () => {
+  it("authInvalid carries the context of the refused fetch, not one it was superseded by", async () => {
+    resetLog("slow");
+    log().afterRelease = "auth";
+    const { a, b } = await pair({ token: "t0" });
+    const seen: Evt[] = [];
+    b.on((e) => seen.push(e));
+    // A fetch goes out under t0 and stalls.
+    const stalled = get(a, { start: 3, end: 13 });
+    for (let i = 0; i < 100 && log().release === undefined; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(log().requests.at(-1)?.context).toEqual({ token: "t0" });
+    await b.request("updateAuth", { context: { token: "t1" } });
+    // Its refusal comes after t1 replaced t0: it says nothing about t1.
+    log().release?.();
+    expect((await stalled).misses[0]?.reason).toBe("auth-pending");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen.filter((e) => e.event === "authInvalid")).toEqual([]);
+    // A refusal of t1 is reported with t1.
+    log().mode = "auth";
+    expect((await get(b, { start: 23, end: 33 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(
+      seen.filter((e) => e.event === "authInvalid").map((e) => e.payload),
+    ).toEqual([
+      { error: { name: "Error", message: "401" }, context: { token: "t1" } },
+    ]);
+  });
+});
+
+describe("context copies (adversarial A2-1)", () => {
+  it("a fetcher mutating its context changes neither the event nor later fetches", async () => {
+    resetLog("auth-mutate");
+    const { a, b } = await pair({ token: "t0" });
+    const seen: Evt[] = [];
+    b.on((e) => seen.push(e));
+    expect((await get(a, { start: 3, end: 13 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    // Still cloneable and still naming the refused token.
+    expect(
+      seen.filter((e) => e.event === "authInvalid").map((e) => e.payload),
+    ).toEqual([
+      { error: { name: "Error", message: "401" }, context: { token: "t0" } },
+    ]);
+    await b.request("updateAuth", { context: { token: "t1" } });
+    log().mode = "ok";
+    expect((await get(a, { start: 3, end: 13 })).misses).toEqual([]);
+    expect(log().requests.at(-1)?.context).toEqual({ token: "t1" });
+  });
+
+  it("an auth hook mutating its argument changes neither later fetches nor the event", async () => {
+    resetLog();
+    const { a, b } = await pair({ token: "t0" });
+    const seen: Evt[] = [];
+    a.on((e) => seen.push(e));
+    log().mutateOnAuth = true;
+    await b.request("updateAuth", { context: { token: "t1" } });
+    log().mode = "auth";
+    expect((await get(a, { start: 3, end: 13 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests.at(-1)?.context).toEqual({ token: "t1" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(
+      seen.filter((e) => e.event === "authInvalid").map((e) => e.payload),
+    ).toEqual([
+      { error: { name: "Error", message: "401" }, context: { token: "t1" } },
+    ]);
   });
 });
 
