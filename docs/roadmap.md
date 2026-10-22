@@ -111,7 +111,7 @@ are rows N34–N44 in `docs/architecture.md` §8.
   cannot land between the check and the put (`docs/reviews/step-14.md`, R2-2). N34–N39; built in
   step ⑮ (`get(range, { snapshot: true })`, `CacheHandle.hydrate`, `encodeSnapshot`/`decodeSnapshot`).
 - A `tscache/vite` entry exporting the fetcher-URL plugin, with file URLs for server builds. The SSR page
-  plugin stays in the examples. N40–N41; step ⑯.
+  plugin stays in the examples. N40–N41; built in step ⑯ (`import { fetcherUrl } from "tscache/vite"`).
 - DC-1 and DC-2 from step ⑫ (`docs/reviews/step-12.md`): the refresh snippet's assumption that a refresh
   issues a new access token, and the two ways a client can stop being served that N32 does not detect,
   are documented as assumptions (N42–N44), not changed.
