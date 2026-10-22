@@ -1,6 +1,6 @@
 # Step 14 — Integration snippets, documentation and roadmap
 
-Branch: `feat/14-integrations` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: in progress
+Branch: `feat/14-integrations` · Reviewer: GPT-6.1 Sol (high) · Rounds: 5 · Status: settled · Verdict after triage: merge
 
 ## Decisions taken with the user (2026-10-22)
 
@@ -91,3 +91,37 @@ The Solid, Svelte, Vue and Angular probes were rerun against the redesigned conn
 | R4-1 | P1 | React's server render misses a seed whose config spells defaults differently | accepted; escalated per the convergence note | Validated in the React probe against the previous commit: the seed config omitting `alignmentOffset` and the hook's setting it to 0 made the server render the fallback. `serverAnswer` now matches by cache id and range; the README's limits state the accepted cost. The probe gained four regressions: on the server, a reordered config, an explicit default and a conflicting interval all render the seed; in the browser the explicit default hydrates without mismatch and turns live, and the conflicting interval reaches the error boundary with `ConfigError`. Its 29 earlier checks pass (39d6515). |
 
 **Escalation.** The fourth finding in the config-equivalence area went to the user as round 3's note committed. Options put to the user: match the seed by cache id and let the browser's client judge the config (recommended); resolve the library's defaults in `keyOf` (exact, but copies library internals that can drift); document that `useSeries` must be given the seed's own config and reject. **User decision (2026-10-23): match by id.** It finishes round 3's rule that the library alone decides config identity; its accepted cost is that a truly conflicting config renders the seed's data on the server before the browser shows `ConfigError`.
+
+## Round 5 — reviewer verdict: merge
+
+No findings. The reviewer checked that every accepted finding of rounds 1–4 is fixed and saw no basis to re-raise the escalated seed race (R2-2).
+
+## Contract-test changes
+
+None. Step ⑭ is not an engine step; its tests were written with the code.
+
+## Decision concerns
+
+None raised by the reviewer. R2-2 is escalated as a finding (above), and R4-1 was decided by the user.
+
+## Merge request: `feat/14-integrations` → `main`
+
+**Scope.** Step ⑭ of the commit plan (starter §7, §8, §10, §11), the last step. No change under `packages/tscache/src/` except one TSDoc paragraph.
+
+- `integrations/`, a private workspace never published: type-checked snippets for vanilla JavaScript, React 19, Solid 2.0, Vue 3.5, Svelte 5 and Angular 22, each client-only and server-rendered with hydration. They share a framework-neutral core in `integrations/shared/`: `connection.ts` (connect once, a new client when the worker is lost, the server's seeds for the first client only, dispose), `hydration.ts` (a server's read through JSON, its covered ranges into the browser's cache), `server.ts` (one in-process client per server process) and `candles.ts` (the demo dataset). A framework folder adds only the step from a promise to its own reactivity, the surface starter §7 describes; `integrations/README.md` compares them.
+- Checks: `bun run check:integrations` type-checks every snippet against the built package and runs in `bun run ci` after the build; Vitest runs the core and the vanilla snippet (28 tests) against in-process clients. Knip and Fallow know the workspace; Fallow's health gate skips the five framework folders, as it skips the examples, since nothing in CI runs them.
+- Docs: `docs/roadmap.md` completed (the IndexedDB persistence sketch, sketches for dirty notifications and eviction, the reference clients' shape, the items for the post-build architecture review); `docs/guides/patterns.md` for the starter §8 debts that had no home; the integer-field caveat in `CacheConfig.fields` TSDoc; the README's guides and integrations sections. Every §8 debt now ships (table above).
+
+**Decisions taken with the user** (2026-10-22 and 2026-10-23): the six snippets in current idioms with plain server renderers; `vue`, `svelte`, `@angular/core` and `@angular/common` (with `rxjs`) as devDependencies of the integrations workspace only; types for every snippet plus runtime tests for the core; reference clients as tested source to copy; React's server render matches its seed by cache id (R4-1).
+
+**Review outcome.** Five rounds. Round 1: a field named `__proto__` lost in hydration (R1-1), a cache handle reused for a conflicting config (R1-2), React evicting reads that suspended renders still needed (R1-3, which also exposed a replay fault while connecting), Svelte showing an overtaken answer for a range asked again (R1-4). Round 2: React's read cache keyed by id (R2-1), the seed's check-then-put race (R2-2, escalated), a test that broke the type check (R2-3). Round 3: a config changed in place, a seed put under a conflicting config, and property order in React's key (R3-1 to R3-3). The config-equivalence area drew findings in rounds 1–3, so round 3 redesigned it instead of patching again: the snippets no longer decide whether two configs name one cache, `client.cache()` does (one message to the worker per read). Round 4's finding in that area (R4-1) went to the user, who chose matching the server's seed by id. Round 5 was clean.
+
+**Confidence: high for the core and the vanilla snippet, medium-high for the framework snippets.** The core's tests are checked against mutants (seeding every client, ignoring the browser's coverage, no latest-wins, transferring the page's arrays, the `__proto__` assignment, seeding with the reader's config, reading before the seed). Each framework snippet was run in a throwaway probe against the built package, the server half under Node or Bun and the browser half in Chromium, with mutants that must fail it (counts in the scope section); the probes were rerun after the round 3 redesign. They live outside the repository, so CI does not repeat them. `bun run ci` passed with 1137 Node tests and 48 browser specs.
+
+**Blast radius: tooling and docs.** `scripts/ci.sh` gains `bun run check:integrations` after the build; the root workspaces gain `integrations`; Vitest includes `integrations/test/`; Knip and Fallow gain the workspace. The new framework dependencies are confined to the private integrations workspace. The library changes by one TSDoc paragraph.
+
+**Known limits.** A seed carries no dataset version, and the browser's coverage check and the seed's put are two requests (R2-2): either matters only when the backend changed covered history after the server's read. Not proven at runtime anywhere: a real worker loss (every probe simulated it the way the client signals it), production builds other than Solid's, Angular's ahead-of-time compiler, and the Svelte component under `svelte-check`. `resourceFromSnapshots` (Angular) is experimental in Angular 22, and Solid is a release candidate.
+
+**For the user.**
+- R2-2: closing the seed race needs a library-level put that fills only uncovered slots in one engine step, recorded with the snapshot API for the post-build architecture review. The ⑬b examples' `putSeeds` has the same race. Say if you want it sooner.
+- Learning loop for R2-3 (a test that broke the type check reached a commit): no local hook type-checks `integrations/`. Smallest durable fix, on a `chore/` branch: run `bun run check:integrations` in pre-push, which needs the built package or a `paths` mapping from `tscache` to `src`. Related to backlog item 5 (type-check `e2e/` and `scripts/`).
