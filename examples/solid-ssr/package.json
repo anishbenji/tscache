@@ -1,0 +1,21 @@
+{
+  "name": "@examples/solid-ssr",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader runner",
+    "build": "tsc -p . && vite build --app --configLoader runner",
+    "preview": "vite preview --configLoader runner"
+  },
+  "dependencies": {
+    "@examples/mock-backend": "workspace:*",
+    "@solidjs/web": "2.0.0-rc.14",
+    "solid-js": "2.0.0-rc.14",
+    "tscache": "workspace:*",
+    "uplot": "^1.6.32"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4",
+    "vite-plugin-solid": "3.0.0-next.27"
+  }
+}
