@@ -68,8 +68,10 @@ const unsubscribed = () => () => {};
 
 /**
  * The cache's answer for `range`, suspending until there is one; only a
- * first answer shows the Suspense fallback. Pass `config` as a constant.
- * Only the latest range's answer shows: React drops a background render
+ * first answer shows the Suspense fallback. Pass `config` as a constant,
+ * and keep `range` in state: a range computed while rendering, from
+ * Date.now() say, differs on every retry and never settles. Only the
+ * latest range's answer shows: React drops a background render
  * that a newer range overtook. A failed connection, or a read that failed
  * on a live client, throws to the nearest error boundary; a read cut short
  * by a lost worker is asked again of the client replacing it.
@@ -125,7 +127,7 @@ function serverAnswer(
   start: number,
   end: number,
 ): GetResult {
-  const read = seeds.find((seed) => seed.config.id === config.id)?.read;
+  const read = seeds.find((seed) => keyOf(seed.config) === keyOf(config))?.read;
   if (read?.range.start !== start || read.range.end !== end) {
     throw new Error(
       `useSeries has no connection and no server read of ${config.id} from ${start} to ${end}; check the TscacheProvider above it`,
@@ -185,7 +187,23 @@ class Read {
   }
 }
 
-/** The reads made through each client's promise, by cache and range. */
+const keys = new WeakMap<CacheConfig, string>();
+
+/**
+ * A config's whole value as a key. Equal configs share their reads; one
+ * that conflicts with another of the same id gets reads of its own, which
+ * reach the client and fail with its ConfigError.
+ */
+function keyOf(config: CacheConfig): string {
+  let key = keys.get(config);
+  if (key === undefined) {
+    key = JSON.stringify(config);
+    keys.set(config, key);
+  }
+  return key;
+}
+
+/** The reads made through each client's promise, by config and range. */
 const readsOf = new WeakMap<Promise<TscacheClient>, Map<string, Read>>();
 
 /**
@@ -205,7 +223,7 @@ function readOf(
     reads = new Map();
     readsOf.set(client, reads);
   }
-  const key = `${config.id} ${start} ${end}`;
+  const key = `${keyOf(config)} ${start} ${end}`;
   let read = reads.get(key);
   if (read === undefined) {
     read = new Read(answer(connection, client, config, start, end), reads, key);

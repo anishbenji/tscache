@@ -24,9 +24,8 @@ only.
 
 ## Why it is shaped this way
 
-- The connection lives outside React, where app-lifetime resources belong.
-  StrictMode mounts effects twice; an effect that created the client would
-  open a second one.
+- The connection lives outside React, where app-lifetime resources belong:
+  StrictMode runs effects twice, so an effect would open a second client.
 - The connection's state reaches React through `useSyncExternalStore`. A
   store update cannot be a transition, so suspending on it directly would
   replace the chart with the fallback on every reconnect (react.dev,
@@ -36,11 +35,12 @@ only.
   React drops a background render that a newer range overtook, so an
   overtaken answer never shows. Only a first answer shows the fallback.
 - `use()` needs the same promise on every render of a read, a suspended
-  render's retry included. Reads are cached per client, cache id and
-  range, and none is dropped during a render: a pending or shown read
-  stays, any other goes 30 s after it settled or was last shown (like
-  TanStack Query's `gcTime`). A read made while connecting belongs to the
-  client it awaited. A new client starts with no reads.
+  render's retry included. Reads are cached per client, config and range,
+  and none is dropped during a render: a pending or shown read stays, any
+  other goes 30 s after it settled or was last shown (like TanStack
+  Query's `gcTime`). A read made while connecting belongs to the client it
+  awaited. A config conflicting with another of its id fails its own
+  reads with `ConfigError`.
 - A read rejected because the worker was lost is asked again of the client
   replacing it, so it never reaches an error boundary. A failed connection,
   or a read that failed on a live client, throws to the nearest one.
