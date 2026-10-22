@@ -4,11 +4,18 @@ Browser time-series cache: SharedWorker multi-tab sharing, worker-side fetch
 orchestration, and coverage tracking that distinguishes "not fetched yet" from
 "confirmed empty" (weekends, sensor dropouts).
 
-**Status: pre-release, under active development.** The design is settled — see
+**Status: pre-release.** The design is settled; see
 [`docs/architecture.md`](docs/architecture.md) for the API surface, RPC
-protocol, and decision register. Implementation is proceeding through the
-commit plan described there; deferred work is listed in
-[`docs/roadmap.md`](docs/roadmap.md).
+protocol and decision register, and [`docs/roadmap.md`](docs/roadmap.md) for
+what v1 leaves out.
+
+## Guides
+
+- [`docs/guides/worker-setup.md`](docs/guides/worker-setup.md): serving the
+  worker and fetcher with Vite, webpack or no bundler; server rendering.
+- [`docs/guides/patterns.md`](docs/guides/patterns.md): what tscache leaves to
+  the application (expiry, restatements, credentials, a lost worker) and the
+  limits to design around.
 
 ## Examples
 
@@ -30,6 +37,15 @@ server mounts under `/api/`.
 bun install && bun run build
 bun run --cwd examples/vanilla-uplot dev
 ```
+
+## Framework integrations
+
+Type-checked snippets under [`integrations/`](integrations/) for vanilla
+JavaScript, React, Solid, Vue, Svelte and Angular, each client-only and
+server-rendered with hydration. They share a small framework-neutral core:
+the client's lifecycle (connect once, replace it when its worker is lost,
+dispose on teardown) and the hydration of a server's read. A framework adds
+only the step from a promise to its own reactivity.
 
 ## License
 
