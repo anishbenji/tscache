@@ -530,9 +530,14 @@ entries/
   worker.ts         './worker' → SharedWorker (onconnect) + dedicated (onmessage) entry
   engine.ts         './engine' → Engine direct (SSR/Node, tests)
   fetcher.ts        './fetcher' → fetcher author surface: types + AuthInvalidError, zero other imports (N6)
+  vite.ts           './vite' → fetcherUrl(), the Vite plugin for the fetcher module (N40, N41);
+                    imports Vite's types only, so it adds no runtime dependency
+vite/
+  fetcher-url.ts    the plugin: a `?fetcher` import resolves to the module's URL with its
+                    exports kept; a chunk of its own in a build, a file URL for server code
 ```
 
-`package.json` exports: `.`, `./worker`, `./engine` (locked) + `./fetcher` (N6, accepted 2026-06-11). ESM-only (resolved decision #6). `tsconfig` strict with `isolatedDeclarations: true`.
+`package.json` exports: `.`, `./worker`, `./engine` (locked) + `./fetcher` (N6, accepted 2026-06-11) + `./vite` (N40, 2026-10-23; `vite ^8.0.0` as an optional peer dependency, the one major the tests build with). ESM-only (resolved decision #6). `tsconfig` strict with `isolatedDeclarations: true`.
 
 ### 4.1 Internal contracts — `grid.ts` and `coverage.ts` (N9, approved 2026-10-03)
 

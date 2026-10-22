@@ -1,0 +1,98 @@
+/**
+ * The Vite plugin for the fetcher module (docs/architecture.md N40–N41;
+ * docs/guides/worker-setup.md). Vite bundles a `?worker&url` import as a
+ * worker entry without its exports, and tscache's worker needs the
+ * fetcher's default export. Nothing is imported from Vite, not even its
+ * types: they reference Node's, which would let Node APIs into the browser
+ * library's type check. The plugin declares the shapes it uses, and the
+ * examples' type check of their vite.config.ts proves it fits Vite's
+ * Plugin type.
+ */
+
+/** The parts of Vite's plugin context the hooks use. */
+interface Context {
+  resolve(
+    source: string,
+    importer: string | undefined,
+    options: { skipSelf: boolean },
+  ): Promise<{ id: string } | null>;
+  emitFile(file: {
+    type: "chunk";
+    id: string;
+    preserveSignature: "strict";
+  }): string;
+  environment: { config: { consumer: "client" | "server" } };
+}
+
+/** A Vite plugin (Vite 8's `Plugin`, structurally). */
+export interface FetcherUrlPlugin {
+  name: string;
+  enforce: "pre";
+  configResolved(config: { command: "build" | "serve" }): void;
+  resolveId(
+    this: Context,
+    source: string,
+    importer: string | undefined,
+  ): Promise<string | undefined>;
+  load(this: Context, id: string): string | undefined;
+  resolveFileUrl(
+    this: Context,
+    options: { referenceId: string; relativePath: string },
+  ): string | null;
+}
+
+const QUERY = "?fetcher";
+/** A virtual id: the `\0` prefix keeps other plugins off it. */
+const PREFIX = "\0tscache-fetcher-url:";
+
+/**
+ * `import url from "./fetcher.ts?fetcher"` gives the URL of that module
+ * with its exports intact, for `createClient({ fetcher: { module: url } })`.
+ * In a build the module becomes a chunk of its own with its signature
+ * preserved; in dev it is served from source. Server code (an in-process
+ * client during server rendering) gets a URL it can `import()` too: in a
+ * server build, a file URL of the chunk; in dev, the same path as the
+ * browser, which Vite's module runner resolves.
+ *
+ * TypeScript needs the import's type once per project:
+ * `declare module "*?fetcher" { const url: string; export default url; }`.
+ */
+export function fetcherUrl(): FetcherUrlPlugin {
+  let serve = false;
+  const chunks = new Set<string>();
+  return {
+    name: "tscache:fetcher-url",
+    enforce: "pre",
+    configResolved(config) {
+      serve = config.command === "serve";
+    },
+    async resolveId(source, importer) {
+      if (!source.endsWith(QUERY)) return undefined;
+      const target = source.slice(0, -QUERY.length);
+      const resolved = await this.resolve(target, importer, { skipSelf: true });
+      return resolved ? PREFIX + resolved.id : undefined;
+    },
+    load(id) {
+      if (!id.startsWith(PREFIX)) return undefined;
+      const file = id.slice(PREFIX.length);
+      if (serve) return `export default ${JSON.stringify(`/@fs${file}`)};`;
+      const ref = this.emitFile({
+        type: "chunk",
+        id: file,
+        preserveSignature: "strict",
+      });
+      chunks.add(ref);
+      return `export default import.meta.ROLLUP_FILE_URL_${ref};`;
+    },
+    // Vite renders a file URL as a path under the base, which only a
+    // browser can load; server code needs a file URL.
+    resolveFileUrl({ referenceId, relativePath }) {
+      if (this.environment.config.consumer !== "server") return null;
+      if (!chunks.has(referenceId)) return null;
+      const path = relativePath.startsWith(".")
+        ? relativePath
+        : `./${relativePath}`;
+      return `new URL(${JSON.stringify(path)}, import.meta.url).href`;
+    },
+  };
+}

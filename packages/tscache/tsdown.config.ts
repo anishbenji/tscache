@@ -6,6 +6,7 @@ export default defineConfig({
     worker: "src/entries/worker.ts",
     engine: "src/entries/engine.ts",
     fetcher: "src/entries/fetcher.ts",
+    vite: "src/entries/vite.ts",
   },
   format: "esm",
   platform: "browser",

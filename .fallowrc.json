@@ -4,6 +4,8 @@
   // so are the SSR examples' server entries, which their Vite config names.
   "entry": [
     "packages/*/src/entries/*.ts",
+    // Read by tsdown, not imported.
+    "packages/*/tsdown.config.ts",
     "scripts/*.ts",
     "examples/*/*.html",
     "examples/*/src/entry-server.tsx",
