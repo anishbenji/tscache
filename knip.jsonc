@@ -11,7 +11,12 @@
     },
     // The SSR examples' server entries are named only by their Vite config.
     "examples/react-ssr": { "entry": ["src/entry-server.tsx"] },
-    "examples/solid-ssr": { "entry": ["src/entry-server.tsx"] }
+    "examples/solid-ssr": { "entry": ["src/entry-server.tsx"] },
+    // Every snippet is an entry: an app copies it, nothing imports it.
+    "integrations": {
+      "entry": ["*/*.{ts,tsx}", "test/**/*.test.ts"],
+      "project": ["**/*.{ts,tsx}"]
+    }
   },
   // Consumed by tsdown's attw integration, not imported anywhere.
   "ignoreDependencies": ["@arethetypeswrong/cli"]

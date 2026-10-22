@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // As an Angular CLI project sets it; Angular's compiler (ngc) compiles
+    // the decorators away, and its templates are not type-checked here.
+    "experimentalDecorators": true
+  },
+  "include": ["."]
+}

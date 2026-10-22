@@ -4,7 +4,8 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "integrations"
   ],
   "engines": {
     "node": ">=22.12"
@@ -12,6 +13,7 @@
   "scripts": {
     "check": "biome check .",
     "typecheck": "tsc -p packages/tscache",
+    "check:integrations": "bun run --cwd integrations check",
     "test": "vitest run --passWithNoTests",
     "build": "bun run --filter tscache build",
     "knip": "knip",

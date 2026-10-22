@@ -1,0 +1,11 @@
+{
+  // Shared by the snippets: application code a reader copies, so the
+  // library-only isolatedDeclarations rule does not apply. They type-check
+  // against the built package (`bun run build` first), as an app would.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "isolatedDeclarations": false,
+    "declaration": false
+  }
+}
