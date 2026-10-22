@@ -1,6 +1,6 @@
 # Step 13 — Examples and mock backend
 
-Branches: `feat/13-examples` (⑬a, merged in #22: rounds 1–5, settled) and `feat/13b-ssr-examples` (⑬b: rounds from 6 on) · Reviewer: GPT-6.1 Sol (high) · Status of ⑬b: in review
+Branches: `feat/13-examples` (⑬a, merged in #22: rounds 1–5, settled) and `feat/13b-ssr-examples` (⑬b: rounds from 6 on) · Reviewer: GPT-6.1 Sol (high) · Status of ⑬b: settled after 2 rounds · Verdict after triage: merge
 
 Step ⑬ ships in two pull requests (user's choice, 2026-10-11): ⑬a, the shared mock backend and the four client-only apps (`feat/13-examples`), then ⑬b, the two SSR apps. Not an engine step: no contract tests and no change under `packages/tscache/src/`; tests are written with the code.
 
@@ -136,3 +136,29 @@ CI passed (1109 Node tests, 48 browser specs).
 | R6-3 | P2 | The Solid README says a put without a range would leave each dropout looking unfetched; a put without a range covers its own span, interior gaps included (N3) | accepted | Correct per architecture §2.4 (N3). Both READMEs (the React one made the same claim about weekends) now say the range matters at the edges: an empty start or end of the window, or a seed with no point (2312b9d, e1d8011) |
 
 After the fixes both SSR specs passed 33 of 33 (three repetitions). One earlier run had a single failure, the React drag test timing out after 7.7 minutes while the machine's load average was about 146 from other work; at normal load it passed every run.
+
+## Round 7 (⑬b round 2) — reviewer verdict: merge
+
+No findings. R6-1 to R6-3 confirmed fixed. CI passed (1109 Node tests, 48 browser specs). The review of ⑬b has settled; step ⑬ is not on the adversarial-review schedule.
+
+## Merge request: `feat/13b-ssr-examples` → `main` (⑬b)
+
+**Scope.** The second half of step ⑬ (starter §7 and §11): the two server-rendered example apps, and what they share. No change under `packages/tscache/src/`.
+
+- `examples/mock-backend`: the fetcher takes the backend's `origin` in its context, since a server has no page origin; `fetcherUrl()` gives server code a file URL of the fetcher chunk; `ssrPage({ entry })` renders `/` with an app's server entry on `vite` and `vite preview`, and builds browser and server with `vite build --app`; `@examples/mock-backend/hydration` turns a server's `get` result into seeds (each covered range with its points, as base64 of the typed arrays, so NaN survives) and puts them into the browser's cache with their ranges, only where that cache does not cover them yet.
+- `react-ssr`: ACME daily candles, read on the server and rendered with `renderToString`; the browser hydrates, puts the seeds and fetches only the provisional day; Lightweight Charts loads after hydration; scroll-back fetches only the uncovered older half-year. `solid-ssr`: the greenhouse sensor with Solid 2.0; the confirmed gaps travel with the coverage, so the browser knows the empty minutes without fetching them; uPlot draws the readings as the cache returns them. In both, one in-process client per server process serves every render, the page works without JavaScript, and a lost worker is replaced by a new client that fetches its window.
+- Docs: a server-rendering section in `docs/guides/worker-setup.md`; the README lists the two apps; `docs/roadmap.md` is started, with the reference clients the user asked for.
+
+**Decisions taken with the user** (2026-10-22): candles for React and the sensor for Solid; one server client per process, shared by every render (public data only, no eviction in v1); no new dependencies; reference clients in vanilla JavaScript, React and Solid on the roadmap.
+
+**Review outcome.** Two rounds. Round 6: R6-1 (P0), after a lost worker the Solid page seeded the new worker again, which could revive history from before a restatement the page had since fetched; only the first client is seeded now, and the crash test, which failed against the old session, requires a full refetch. R6-2 (P1), the React spec assumed the render's day is the backend's, which midnight UTC can break; it now reads the provisional day from the seeds. R6-3 (P2), both READMEs overstated what a put's range adds. Round 7 was clean.
+
+**Confidence: high.** Each spec is checked against mutants that fail it: no seeds put in the browser, a server client per render, a hydration mismatch (React), a scroll-back that asks again on every event (React), and re-seeding after a lost worker (Solid). The hydration module's Vitest suite fails against seeds that overwrite covered ranges and against seeds that include the provisional tail. Both SSR specs passed 33 of 33 at three repetitions; `bun run ci` passed with 1109 Node tests and 48 browser specs.
+
+**Blast radius: examples and configuration.** Knip gains a workspace entry per SSR app and Fallow an entry pattern for their server entries, which only the Vite config names. Playwright's `examples` project builds and serves two more apps (ports 5105 and 5106), which adds two builds to the browser step of `bun run ci`.
+
+**Known limits.** A seed carries no dataset version, because the public `get` result does not report one: a restatement between the server's read and the browser's put goes unnoticed for the seeded ranges (the READMEs say so). The preview plugin loads the built server entry with `require()` of an ES module (Node 22.12 or later, the repository's minimum), because Vite's config runner is closed by the time a request arrives; in dev, the server entry disposes its client on `vite:beforeFullReload`, since Vite's module runner calls no dispose hook on a reload. Solid is pinned to 2.0.0-rc.14.
+
+**For the post-build architecture review.** A snapshot API over the segment payload (§3.4) that carries the dataset version and watermark would close the seed-version gap and make hydration exact. The two Vite plugins the examples need (`fetcherUrl`, now with server file URLs, and the SSR page plugin) are candidates for a `tscache/vite` entry.
+
+**For the user.** The roadmap entry reads "client" as a complete, tested integration for each platform (vanilla JavaScript, React and Solid), beyond step ⑭'s type-checked snippets; whether they ship as packages or as source to copy is left open there.
