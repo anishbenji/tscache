@@ -1,6 +1,6 @@
 # Step 14 — Integration snippets, documentation and roadmap
 
-Branch: `feat/14-integrations` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in progress
+Branch: `feat/14-integrations` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in progress
 
 ## Decisions taken with the user (2026-10-22)
 
@@ -71,3 +71,15 @@ Changes the implementer made in review: the Solid series had dropped the lost-wo
 | R2-3 | P1 | The R1-1 test broke `check:integrations` | accepted | Validated: `tsc -p integrations/test` failed (dtypes widened to `string` by `Object.fromEntries`; `.constructor` read the inherited `Function`), so the round's CI failed. The config is typed and both fields are read as own properties; the test still fails against the old `mapFields` (96fb37b). |
 
 **Convergence check.** R1-2 and R2-1 are one root cause in two places: a memo keyed by cache id in front of the client's N4/N20 check. R2-1 is fixed at the key (React keys reads by the whole config), and no other adapter memoises by id in front of `cache()`. R1-1 and R2-2 both touch `hydration.ts` but are unrelated (field-name encoding; request atomicity); R2-2 is escalated rather than patched.
+
+## Round 3 — reviewer verdict: block
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P0 | A config changed in place after its open skips the client's check | accepted | Validated by reading: the R1-2 shortcut returned the first handle for the same config object, whatever its current contents. Redesigned with R3-2 (below): every `Connection.cache` call now goes to `client.cache()`, so a changed config is judged afresh; tested (29c9925). |
+| R3-2 | P0 | A seed is put into whatever config first asks for its id | accepted | Validated by reading: `openCache` applied a seed by id to the cache opened with the asking config, so coverage read on one grid could become confirmed gaps on another. Each seed is now put once, on the first client, into the cache opened with the seed's own config, before any handle for its id is given out; a reader with a conflicting config is refused with `ConfigError`. Tested, with mutants (no first-client guard, seed never put, read before the seed) each failing a test (29c9925). |
+| R3-3 | P1 | React's seed match depends on property order | accepted | Validated in the React probe against the previous commit: a seed config and a hook config with the same values in another property order made the server write a client-rendered boundary. The key is now canonical (the config's and its fields' entries sorted, computed on each render); the probe gained the reordered config on the server and through hydration (no fallback, no mismatch) and a config changed in place (error boundary with `ConfigError`), and its 26 earlier checks pass against the redesigned connection (900adba). |
+
+**Convergence check.** R1-2, R2-1, R3-1, R3-2 and R3-3 share one area: the snippets deciding whether two configs name the same cache, each fix re-implementing N4/N20 a little further and missing a case (identity, id, mutation, seed config, property order). Redesigned instead of patched again: the snippets no longer decide it. `Connection.cache` sends every call to `client.cache()`, which costs one message to the worker per read and is the library's own N4/N20 check; a seed is opened with its own config. React's promise cache still needs a key; it is the config's canonical form, computed on each render, and only decides which reads share a promise, never whether a config is accepted. A further finding in this area goes to the user.
+
+The Solid, Svelte, Vue and Angular probes were rerun against the redesigned connection and pass.
