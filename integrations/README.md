@@ -61,7 +61,10 @@ not type-checked.
 
 Limits every variant shares:
 
-- A seed carries no dataset version (`docs/roadmap.md`, post-build architecture review).
+- A seed carries no dataset version, and checking what the browser's cache covers and putting the
+  seed are two requests: another tab's fetch landing between them is replaced by the seed. Either
+  matters only if the backend changed covered history after the server's read. Closing both needs a
+  library-level snapshot API (`docs/roadmap.md`, post-build architecture review).
 - `get` takes no abort signal: an overtaken read is dropped, not cancelled, and its fetch still fills
   the cache.
 - Reading a range again (after `updateAuth`, say) means asking for it again: the vanilla series reads

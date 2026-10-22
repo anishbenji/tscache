@@ -152,6 +152,12 @@ function uncovered(range: Range, coverage: Range[], interval: number): Range[] {
  * SharedWorker, another tab may hold a range from a later fetch than the
  * server's, and a seed must not replace it. Points outside the coverage,
  * such as a provisional tail, stay out; the browser fetches them itself.
+ *
+ * The check and the puts are separate requests, and tscache's public API
+ * has no put that applies only where nothing is covered. Another tab's
+ * fetch that lands between them is replaced by the seed. That changes
+ * values only if the backend changed covered history since the server's
+ * read, the limit a seed has anyway, since it carries no dataset version.
  */
 export async function putCovered(
   cache: CacheHandle,
