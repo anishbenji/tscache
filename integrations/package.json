@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Type-checked integration snippets for tscache, one per framework (never published)",
   "scripts": {
-    "check": "tsc -p shared && tsc -p test && tsc -p vanilla && tsc -p react && tsc -p solid && tsc -p vue"
+    "check": "tsc -p shared && tsc -p test && tsc -p vanilla && tsc -p react && tsc -p solid && tsc -p vue && tsc -p svelte"
   },
   "dependencies": {
     "tscache": "workspace:*"
@@ -16,6 +16,7 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "solid-js": "2.0.0-rc.14",
+    "svelte": "^5.57.2",
     "vue": "^3.5.44"
   }
 }
