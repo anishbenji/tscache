@@ -42,8 +42,11 @@ origin to resolve the backend's paths against.
 
 **Decision shown: coverage travels with the points.** In the browser,
 `putSeeds` puts each seed with `put(batch, { range })`. A put that states its
-range records the whole range as covered (§2.4), so the 26 weekends inside
-the half-year arrive as confirmed empty days, not as holes. The browser's
+range records the whole range as covered (§2.4), so every day in it without
+a bar, the 26 weekends included, arrives as a confirmed empty day. The range
+matters at the edges: a put without one claims only the span from its first
+bar to its last (N3), so a window that starts on a weekend would leave those
+days looking unfetched. The browser's
 cache then knows what the server's knew, and its first `get` fetches only
 what the server's answer did not cover: the provisional day. The log shows
 that one fetch. It starts at the last seeded day, because a miss that abuts
