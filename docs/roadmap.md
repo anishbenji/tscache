@@ -103,7 +103,9 @@ evicted page stays on disk and is loaded again on demand, which needs the lazy l
 ## For the post-build architecture review
 
 - A snapshot API over the segment payload (§3.4) that carries the dataset version and watermark, so SSR
-  hydration is exact and a seed can no longer outlive a restatement (`docs/reviews/step-13.md`, ⑬b).
+  hydration is exact and a seed can no longer outlive a restatement (`docs/reviews/step-13.md`, ⑬b),
+  applied in one engine step only where the browser's cache covers nothing, so another tab's fetch
+  cannot land between the check and the put (`docs/reviews/step-14.md`, R2-2).
 - A `tscache/vite` entry for the two Vite plugins the examples needed: the fetcher URL, with file URLs for
   server builds, and the SSR page plugin.
 - DC-1 and DC-2 from step ⑫ (`docs/reviews/step-12.md`): the refresh snippet's assumption that a refresh
