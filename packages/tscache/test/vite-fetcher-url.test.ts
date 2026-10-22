@@ -1,7 +1,7 @@
 // The package has no Node type definitions (batch-realms.test.ts); Vitest
 // runs under Node.
 // @ts-expect-error -- no Node types
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 // @ts-expect-error -- no Node types
 import { tmpdir } from "node:os";
 // @ts-expect-error -- no Node types
@@ -29,24 +29,33 @@ interface Vite {
 const VITE = "vite";
 const { build, createServer } = (await import(VITE)) as Vite;
 
-// Implementer tests (N40): real Vite builds of a tiny app that imports a
-// fetcher with `?fetcher`, checking what tscache's worker relies on: the
-// URL loads a module whose default export survived.
+// Implementer tests (N40): real Vite builds and dev servers of a tiny app
+// that imports a fetcher with `?fetcher`, checking what tscache's worker
+// relies on: the URL loads a module whose default export survived. The
+// fetcher lives outside the app's root, in a directory whose name holds a
+// space and a literal `%`, so dev URLs go through /@fs/ and must be encoded
+// (step 16 R2-1).
 
+let base = "";
 let root = "";
+const LIB = "lib %41";
 beforeAll(async () => {
-  root = await mkdtemp(join(tmpdir(), "tscache-vite-"));
+  // The real path: fs.allow compares real paths, and macOS links /var.
+  base = await realpath(await mkdtemp(join(tmpdir(), "tscache-vite-")));
+  root = join(base, "app");
+  await mkdir(join(base, LIB), { recursive: true });
+  await mkdir(root, { recursive: true });
   await writeFile(
-    join(root, "fetcher.js"),
+    join(base, LIB, "fetcher.js"),
     "export default { fetch: () => 'fetched' };\n",
   );
   await writeFile(
     join(root, "main.js"),
-    'import url from "./fetcher.js?fetcher";\nexport { url };\n',
+    `import url from "../${LIB}/fetcher.js?fetcher";\nexport { url };\n`,
   );
 });
 afterAll(async () => {
-  await rm(root, { recursive: true, force: true });
+  await rm(base, { recursive: true, force: true });
 });
 
 interface Main {
@@ -56,15 +65,20 @@ interface FetcherModule {
   default: { fetch(): string };
 }
 
+/** Options every dev server here shares: serving files outside the root. */
+const devOptions = () => ({
+  root,
+  configFile: false,
+  logLevel: "silent",
+  plugins: [fetcherUrl()],
+});
+
 describe("fetcherUrl (tscache/vite)", () => {
   it("a client build emits the fetcher as its own chunk, default export kept, at a URL under the base", async () => {
     const outDir = join(root, "client");
     await build({
-      root,
-      configFile: false,
-      logLevel: "silent",
+      ...devOptions(),
       base: "/app/",
-      plugins: [fetcherUrl()],
       build: {
         outDir,
         rollupOptions: {
@@ -85,10 +99,7 @@ describe("fetcherUrl (tscache/vite)", () => {
 
   it("a server build gives a file URL that server code can import()", async () => {
     await build({
-      root,
-      configFile: false,
-      logLevel: "silent",
-      plugins: [fetcherUrl()],
+      ...devOptions(),
       build: { ssr: "main.js", outDir: join(root, "server") },
     });
     const main = (await import(
@@ -99,63 +110,62 @@ describe("fetcherUrl (tscache/vite)", () => {
     expect(fetcher.default.fetch()).toBe("fetched");
   });
 
-  it("the dev server serves the fetcher from source under /@fs", async () => {
+  it("a dev server under a base gives the browser an encoded /@fs/ URL inside that base (R1-2, R2-1)", async () => {
     const server = await createServer({
-      root,
-      configFile: false,
-      logLevel: "silent",
-      plugins: [fetcherUrl()],
-      server: { middlewareMode: true, hmr: false, ws: false },
-      appType: "custom",
-    });
-    try {
-      const main = (await server.ssrLoadModule("/main.js")) as unknown as Main;
-      expect(main.url).toMatch(/^\/@fs\/.*\/fetcher\.js$/);
-      const fetcher = (await server.ssrLoadModule(
-        main.url,
-      )) as unknown as FetcherModule;
-      expect(fetcher.default.fetch()).toBe("fetched");
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("leaves other imports alone", async () => {
-    const plugin = fetcherUrl();
-    const context = {} as ThisParameterType<typeof plugin.resolveId>;
-    expect(
-      await plugin.resolveId.call(context, "./fetcher.js", undefined),
-    ).toBeUndefined();
-  });
-
-  it("a dev server under a base serves the fetcher at a URL inside that base (R1-2)", async () => {
-    const server = await createServer({
-      root,
-      configFile: false,
-      logLevel: "silent",
+      ...devOptions(),
       base: "/app/",
-      plugins: [fetcherUrl()],
-      server: { port: 0, hmr: false, ws: false },
+      server: { port: 0, hmr: false, ws: false, fs: { allow: [base] } },
     });
     try {
       await server.listen();
       const origin = new URL(server.resolvedUrls?.local[0] ?? "").origin;
       const get = async (path: string) => {
         const response = await fetch(new URL(path, origin));
-        expect(response.status).toBe(200);
+        if (response.status !== 200) {
+          throw new Error(
+            `${path}: ${response.status} ${await response.text()}`,
+          );
+        }
         return response.text();
       };
-      // main.js imports the virtual module; it exports the fetcher's URL.
-      const main = await get("/app/main.js");
-      const virtual = /from\s+"([^"]*tscache-fetcher-url[^"]*)"/.exec(
-        main,
-      )?.[1];
-      expect(virtual).toBeDefined();
-      const url = /export default "([^"]+)"/.exec(
-        await get(virtual ?? ""),
-      )?.[1];
+      /** Follows the module's imports to the string it default-exports. */
+      const exported = async (path: string): Promise<string> => {
+        const code = await get(path);
+        const value = /export default "([^"]+)"/.exec(code)?.[1];
+        if (value !== undefined) return value;
+        const next = /from\s+"([^"]+)"/.exec(code)?.[1];
+        if (next === undefined) throw new Error(`${path} exports no string`);
+        return exported(next);
+      };
+      const url = await exported("/app/main.js");
       expect(url).toMatch(/^\/app\/@fs\/.*\/fetcher\.js$/);
-      expect(await get(url ?? "")).toContain("fetched");
+      // The space and the literal % arrive encoded.
+      expect(url).toContain("lib%20%2541");
+      expect(await get(url)).toContain("fetched");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("the dev server's module runner loads the fetcher from its URL", async () => {
+    const server = await createServer({
+      ...devOptions(),
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        ws: false,
+        fs: { allow: [base] },
+      },
+      appType: "custom",
+    });
+    try {
+      const main = (await server.ssrLoadModule("/main.js")) as unknown as Main;
+      // An absolute path, which the runner resolves without decoding.
+      expect(main.url).toBe(join(base, LIB, "fetcher.js"));
+      const fetcher = (await server.ssrLoadModule(
+        main.url,
+      )) as unknown as FetcherModule;
+      expect(fetcher.default.fetch()).toBe("fetched");
     } finally {
       await server.close();
     }
@@ -175,14 +185,16 @@ describe("fetcherUrl (tscache/vite)", () => {
     );
     await writeFile(
       join(root, "ssr.js"),
-      'import { load } from "tscache";\nimport url from "./fetcher.js?fetcher";\nexport const fetcher = () => load(url);\n',
+      `import { load } from "tscache";\nimport url from "../${LIB}/fetcher.js?fetcher";\nexport const fetcher = () => load(url);\n`,
     );
     const server = await createServer({
-      root,
-      configFile: false,
-      logLevel: "silent",
-      plugins: [fetcherUrl()],
-      server: { middlewareMode: true, hmr: false, ws: false },
+      ...devOptions(),
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        ws: false,
+        fs: { allow: [base] },
+      },
       appType: "custom",
     });
     try {
@@ -194,16 +206,23 @@ describe("fetcherUrl (tscache/vite)", () => {
       await server.close();
     }
   });
+
+  it("leaves other imports alone", async () => {
+    const plugin = fetcherUrl();
+    const context = {} as ThisParameterType<typeof plugin.resolveId>;
+    expect(
+      await plugin.resolveId.call(context, "./fetcher.js", undefined),
+    ).toBeUndefined();
+  });
 });
 
-describe("devUrl (R1-2, R1-3)", () => {
+describe("devUrl (R1-3, R2-1)", () => {
   it.each([
     ["/", "/repo/fetcher.ts", "/@fs/repo/fetcher.ts"],
-    ["/app/", "/repo/fetcher.ts", "/app/@fs/repo/fetcher.ts"],
     ["/app", "/repo/fetcher.ts", "/app/@fs/repo/fetcher.ts"],
     ["/", "C:/repo/fetcher.ts", "/@fs/C:/repo/fetcher.ts"],
-    ["/app/", "C:/repo/fetcher.ts", "/app/@fs/C:/repo/fetcher.ts"],
-  ])("base %s, file %s → %s", (base, file, url) => {
-    expect(devUrl(base, file)).toBe(url);
+    ["/app/", "C:/a b/%41/f.ts", "/app/@fs/C:/a%20b/%2541/f.ts"],
+  ])("base %s, file %s → %s", (prefix, file, url) => {
+    expect(devUrl(prefix, file)).toBe(url);
   });
 });

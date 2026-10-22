@@ -52,8 +52,8 @@ const PREFIX = "\0tscache-fetcher-url:";
  * In a build the module becomes a chunk of its own with its signature
  * preserved; in dev it is served from source. Server code (an in-process
  * client during server rendering) gets a URL it can `import()` too: in a
- * server build, a file URL of the chunk; in dev, the same path as the
- * browser, which Vite's module runner resolves.
+ * server build, a file URL of the chunk; in dev, the file's absolute path,
+ * which Vite's module runner resolves.
  *
  * TypeScript needs the import's type once per project:
  * `declare module "*?fetcher" { const url: string; export default url; }`.
@@ -61,6 +61,9 @@ const PREFIX = "\0tscache-fetcher-url:";
 export function fetcherUrl(): FetcherUrlPlugin {
   let serve = false;
   let base = "/";
+  // Virtual ids carry a number, never the path: Vite puts an id into a URL
+  // unencoded and decodes the request, so a `%` in a path would not match.
+  const files: string[] = [];
   const chunks = new Set<string>();
   return {
     name: "tscache:fetcher-url",
@@ -78,15 +81,22 @@ export function fetcherUrl(): FetcherUrlPlugin {
       if (!source.endsWith(QUERY)) return undefined;
       const target = source.slice(0, -QUERY.length);
       const resolved = await this.resolve(target, importer, { skipSelf: true });
-      return resolved ? PREFIX + resolved.id : undefined;
+      if (!resolved) return undefined;
+      let n = files.indexOf(resolved.id);
+      if (n < 0) n = files.push(resolved.id) - 1;
+      return `${PREFIX}${n}`;
     },
     load(id) {
       if (!id.startsWith(PREFIX)) return undefined;
-      const file = id.slice(PREFIX.length);
+      const file = files[Number(id.slice(PREFIX.length))];
+      if (file === undefined) return undefined;
       if (serve) {
-        // The browser requests under the base; the runner resolves /@fs/.
-        const server = this.environment.config.consumer === "server";
-        return `export default ${JSON.stringify(devUrl(server ? "/" : base, file))};`;
+        // Server code gets the absolute path, which Vite's module runner
+        // resolves as it is (it does not decode URLs); the browser, an
+        // encoded URL under the base.
+        return this.environment.config.consumer === "server"
+          ? `export default ${JSON.stringify(file)};`
+          : `export default ${JSON.stringify(devUrl(base, file))};`;
       }
       const ref = this.emitFile({
         type: "chunk",
@@ -110,11 +120,15 @@ export function fetcherUrl(): FetcherUrlPlugin {
 }
 
 /**
- * The dev server's URL of an absolute file under `base`: Vite serves files
- * outside the root at `<base>@fs/<path>`, and a Windows path (`C:/…`) has
- * no leading slash of its own.
+ * The dev server's URL of a file: Vite serves any allowed file at
+ * `<base>@fs/<path>`, and its module middleware decodes the request with
+ * `decodeURI`, whose inverse is `encodeURI`: a space or a literal `%` is
+ * encoded, a Windows drive's `:` is not. A path holding `#` or `?` cannot
+ * be served that way at all. A Windows path (`C:/…`) has no leading slash
+ * of its own. Vite's own `?url` import is not used: it decodes a literal
+ * `%41` in a path to `A`.
  */
 export function devUrl(base: string, file: string): string {
-  const root = base.endsWith("/") ? base : `${base}/`;
-  return `${root}@fs/${file.replace(/^\/+/, "")}`;
+  const prefix = base.endsWith("/") ? base : `${base}/`;
+  return `${prefix}@fs/${encodeURI(file.replace(/^\/+/, ""))}`;
 }
