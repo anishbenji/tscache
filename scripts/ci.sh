@@ -26,5 +26,8 @@ bun run fallow
 bunx vitest run --passWithNoTests
 bun run --filter tscache build   # includes publint + attw (esm-only profile)
 (cd packages/tscache && npm pack --dry-run)
+# The integration snippets type-check against the built package, as an
+# app would see it (starter §5, §7).
+bun run check:integrations
 bunx playwright test --pass-with-no-tests
 # bench smoke joins here with the first bench files (commit plan step ⑥+)

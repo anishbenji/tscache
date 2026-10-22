@@ -21,7 +21,11 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["packages/*/test/**/*.test.ts", "examples/*/test/**/*.test.ts"],
+    include: [
+      "packages/*/test/**/*.test.ts",
+      "examples/*/test/**/*.test.ts",
+      "integrations/test/**/*.test.ts",
+    ],
     passWithNoTests: true,
   },
 });

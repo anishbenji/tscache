@@ -1,0 +1,12 @@
+{
+  "name": "@tscache/integrations",
+  "private": true,
+  "type": "module",
+  "description": "Type-checked integration snippets for tscache, one per framework (never published)",
+  "scripts": {
+    "check": "tsc -p shared && tsc -p vanilla && tsc -p test"
+  },
+  "dependencies": {
+    "tscache": "workspace:*"
+  }
+}

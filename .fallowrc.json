@@ -6,13 +6,15 @@
     "packages/*/src/entries/*.ts",
     "scripts/*.ts",
     "examples/*/*.html",
-    "examples/*/src/entry-server.tsx"
+    "examples/*/src/entry-server.tsx",
+    // The integration snippets, which an app copies and nothing imports.
+    "integrations/*/*.{ts,tsx}"
   ],
   // The examples import the built package (its exports point into dist/),
   // which does not exist yet when `bun run ci` runs Fallow before the build.
   "ignoreUnresolvedImports": ["tscache", "tscache/**"],
   "workspaces": {
-    "packages": ["packages/*", "examples/*"]
+    "packages": ["packages/*", "examples/*", "integrations"]
   },
   // Consumed by tsdown's publint/attw integration, not imported anywhere.
   "ignoreDependencies": ["@arethetypeswrong/cli", "publint"],
