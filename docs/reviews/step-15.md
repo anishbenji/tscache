@@ -1,6 +1,6 @@
 # Step 15 — Snapshot API (hydrate, encode/decode) and the migration of server-rendering hydration
 
-Branch: `feat/15-snapshot` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: implemented; review loop in progress · Verdict after triage: —
+Branch: `feat/15-snapshot` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: implemented; review loop in progress · Verdict after triage: —
 
 Step ⑮ is the first item of the post-build architecture review (`docs/architecture-review.md`, item 1; decisions N34–N39 in `docs/architecture.md` §8). An engine step: the architecture text comes first, then Codex writes the contract tests from it (prompt A, `docs/workflow.md`), then the implementation, the migration of the ⑬b and ⑭ helpers and the guide's server-rendering section, then the review loop.
 
@@ -37,6 +37,13 @@ Two ambiguities Codex left unpinned, settled in the text before implementation (
 | f539868 | `docs(guides)`: the server-rendering section of `docs/guides/worker-setup.md` shows the snapshot flow; roadmap pointer |
 
 Only an older worker's `unknown op` rejection counts as "not seeded" in the two helpers (N37); every other failure propagates. `main` (PR #26) was merged into the branch before the implementation commits.
+
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | Both hydration helpers swallow any error whose message contains "unknown op", including a validation error for a payload whose dtype is that text | accepted | Validated with a failing test in each helper's suite (a rejection whose message embeds the phrase must propagate). The helpers now match the RPC server's exact answer, `unknown op hydrate`, on a `TscacheError`; a wiring test pins that message format. The earlier tests had used a quoted message the server never sends (1df6e43, e8a7186) |
+| R1-2 | P1 | `decodeSnapshot` accepts sparse arrays: `map()` skips holes in `segments`, `coverage` and payload `fields` | accepted | Validated with failing tests for each array. `Array.from` visits every position, so a hole reaches the shape check as `undefined` and is rejected (e8a7186). `hydrate`'s own validation already iterated with `entries()`, which visits holes |
 
 ## Contract-test changes
 
