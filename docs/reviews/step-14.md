@@ -1,6 +1,6 @@
 # Step 14 — Integration snippets, documentation and roadmap
 
-Branch: `feat/14-integrations` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in progress
+Branch: `feat/14-integrations` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: in progress
 
 ## Decisions taken with the user (2026-10-22)
 
@@ -83,3 +83,11 @@ Changes the implementer made in review: the Solid series had dropped the lost-wo
 **Convergence check.** R1-2, R2-1, R3-1, R3-2 and R3-3 share one area: the snippets deciding whether two configs name the same cache, each fix re-implementing N4/N20 a little further and missing a case (identity, id, mutation, seed config, property order). Redesigned instead of patched again: the snippets no longer decide it. `Connection.cache` sends every call to `client.cache()`, which costs one message to the worker per read and is the library's own N4/N20 check; a seed is opened with its own config. React's promise cache still needs a key; it is the config's canonical form, computed on each render, and only decides which reads share a promise, never whether a config is accepted. A further finding in this area goes to the user.
 
 The Solid, Svelte, Vue and Angular probes were rerun against the redesigned connection and pass.
+
+## Round 4 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P1 | React's server render misses a seed whose config spells defaults differently | accepted; escalated per the convergence note | Validated in the React probe against the previous commit: the seed config omitting `alignmentOffset` and the hook's setting it to 0 made the server render the fallback. `serverAnswer` now matches by cache id and range; the README's limits state the accepted cost. The probe gained four regressions: on the server, a reordered config, an explicit default and a conflicting interval all render the seed; in the browser the explicit default hydrates without mismatch and turns live, and the conflicting interval reaches the error boundary with `ConfigError`. Its 29 earlier checks pass (39d6515). |
+
+**Escalation.** The fourth finding in the config-equivalence area went to the user as round 3's note committed. Options put to the user: match the seed by cache id and let the browser's client judge the config (recommended); resolve the library's defaults in `keyOf` (exact, but copies library internals that can drift); document that `useSeries` must be given the seed's own config and reject. **User decision (2026-10-23): match by id.** It finishes round 3's rule that the library alone decides config identity; its accepted cost is that a truly conflicting config renders the seed's data on the server before the browser shows `ConfigError`.
