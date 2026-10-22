@@ -1,6 +1,6 @@
 # Step 16 — `tscache/vite` entry
 
-Branch: `feat/16-vite-entry` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: review loop in progress · Verdict after triage: —
+Branch: `feat/16-vite-entry` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: review loop in progress · Verdict after triage: —
 
 Item 2 of the post-build architecture review (`docs/architecture-review.md`; decisions N40–N41). Not an engine step: tests are written with the code.
 
@@ -28,6 +28,16 @@ Item 2 of the post-build architecture review (`docs/architecture-review.md`; dec
 | R1-2 | P1 | In dev, the URL ignores Vite's `base`, so a normal dev server under `/app/` answers 404 | accepted | Reproduced with a real dev server under `/app/` that requests the URL over HTTP (the earlier test used middleware mode, which bypasses the base check). The browser now gets `<base>@fs/<path>` |
 | R1-3 | P1 | A Windows path `C:/…` gives `/@fsC:/…` | accepted | Validated by reading; `devUrl(base, file)` now builds the URL with exactly one slash before the path, with unit cases for POSIX and drive paths |
 | R1-4 | P1 | An installed `tscache` is externalized in dev SSR, so its `import()` of the `/@fs/` URL runs in plain Node and fails | accepted | Reproduced with a stand-in `node_modules/tscache` whose `import()` loads the fetcher under `ssrLoadModule`: "Cannot find module '/@fs/…'". The plugin's `config` hook now adds `tscache` to `ssr.noExternal`, so the import goes through Vite's module runner; server code keeps the `/@fs/` path without the base, which the runner resolves. The guide says so |
+
+Commit note: the Node-platform tsdown config of R1-1 landed in the round 1 triage commit (99a6f21) rather than its own, because its own commit was refused by commitlint and the file stayed staged. The branch was already under review, so the history was left as it is.
+
+## Round 2 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | A literal `%` in the checkout path breaks the dev URL: `/repo/a%20b` is requested as `/repo/a b` | accepted; area redesigned | Reproduced with the fetcher in a directory named `lib %41`. **Convergence check:** dev-URL construction drew findings in rounds 1 and 2, so the area was redesigned rather than patched. Delegating to Vite's own `?url` import was tried first and failed: Vite turns `lib %41` into `lib%20A`. Probes then fixed the design on evidence: Vite's module middleware decodes with `decodeURI`, so the browser gets `<base>@fs/` + `encodeURI(path)`, its exact inverse; Vite's module runner does not decode at all, so server code gets the plain absolute path (also free of the Windows `/@fs` slash). The virtual module's id no longer embeds the path either: Vite puts ids into URLs unencoded and decodes the request, which failed with a 500 for the same directory. The test now keeps the fetcher outside the app's root in that directory and checks the URL and its fetch over a real dev server under a base, the runner's load, and the installed-package case. A path holding `#` or `?` cannot be served by Vite's middleware at all; the code says so |
+
+Observed while verifying: one CI run timed out an unrelated heavy test (`merge-failures.test.ts`, 5 s) while the new Vite builds ran in the same Vitest pool; the rerun passed. Recorded as a load risk, not changed.
 
 ## Contract-test changes
 
