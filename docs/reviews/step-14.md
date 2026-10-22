@@ -1,0 +1,54 @@
+# Step 14 — Integration snippets, documentation and roadmap
+
+Branch: `feat/14-integrations` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: in progress
+
+## Decisions taken with the user (2026-10-22)
+
+- **Snippets.** Six, each client-only and server-rendered with hydration, in current idioms: vanilla JavaScript; React 19 (a provider and a Suspense hook on `use()`); Solid 2.0 (async `createMemo` with `Loading`; 2.0 has no `createResource`, which the starter names); Vue 3.5 (a plugin and a composable); Svelte 5 (runes in `.svelte.ts`); Angular 22 (a root service with signals; `TransferState` for the server's read). Server rendering through each framework's plain renderer, no meta-framework, as ⑬b decided for the examples. All share one framework-neutral core. Rejected: Solid 1.9 `createResource` as the starter names it (a second Solid version in the repository); meta-framework server rendering (Next, Nuxt, SvelteKit, SolidStart, Angular SSR: five large dependencies and their configuration).
+- **Dependencies.** Approved as devDependencies of the private `integrations` workspace only, never of the published package: `vue` 3.5.44, `svelte` 5.57.2, `@angular/core` and `@angular/common` 22.2.3 with their `rxjs` 7.8 peer. React 19.3 and Solid 2.0.0-rc.14 were already in the repository (the examples' versions).
+- **Checks.** `bun run check:integrations` type-checks every snippet against the built package (one `tsconfig.json` per framework) and runs in `bun run ci` after the build; Vitest runs the shared core and the vanilla snippet against in-process clients. The CI line ships on this branch because it checks only this step's code, as ⑬a's Playwright project did. Rejected: types only (the core would be proven only by compiling); runtime tests for all six (jsdom, a Svelte plugin and Angular's testing packages).
+- **Reference clients** (the roadmap's open question from ⑬b): tested source to copy, grown from these snippets, not packages. Recorded in `docs/roadmap.md`. Rejected: subpath adapters (`tscache/react`, `tscache/solid`; every hook becomes semver surface); deferring to the architecture review.
+
+## Findings from the probes (before round 1)
+
+- Plain `tsc` 6.0.3 type-checks all three new frameworks without their own tooling: Svelte's runes are global declarations once a file imports from `svelte`, so `.svelte.ts` modules check; Angular 22's `@Injectable` checks with standard decorators. Neither `svelte-check` nor the Angular compiler is needed. Not covered: `.svelte` and Angular templates, which no snippet type-checks.
+
+## Scope
+
+- `integrations/shared/` (3384ed9): `connection.ts` connects once, replaces the client when its worker is lost, seeds only the first client (⑬b R6-1 made structural), and disposes; `hydration.ts` carries a whole server read through JSON (base64 typed arrays, so NaN survives) and puts its covered ranges into the browser's cache where it does not cover them yet; `server.ts` gives a server process one shared in-process client; `candles.ts` is the demo dataset and its one-line view. A framework adapter adds only the step from a promise to its reactivity, the surface starter §7 describes.
+- `integrations/vanilla/` (3384ed9): a latest-wins series that reads again on the client replacing a lost one, without reporting the loss; client-only and server-rendered pages, the server half split from the browser half so no server code reaches the browser bundle.
+- `integrations/react/` (5d1220a): `TscacheProvider` and `useSeries`, which suspends through `use()` on a promise cached per client, cache id and range (bounded: answers a mounted component shows stay, plus the eight used last per client). The connection's state comes through `useSyncExternalStore`; state, config and range pass through `useDeferredValue`, so a reconnect or a new range loads in a background render with the previous answer on screen (a store update cannot be a transition). The server reads before `renderToString` and hands the read to the hydration render through the provider's seeds.
+- `integrations/solid/` (e457349): `createConnection` and `createSeries`, an async `createMemo` over the connection's state and the range; `isPending` instead of a fallback; after hydration settles, the live chart mounts with the server's read as `loadingValue`.
+- `integrations/vue/` (0c3c41b): a `createTscache` plugin (disposed by `app.onUnmount`) and `useSeries` returning shallow readonly refs; everything live starts in `onMounted`, so a server render subscribes to nothing; the range goes through `toRaw`, since a worker cannot be posted a reactive proxy.
+- `integrations/svelte/` (13aad11): a `Series` runes class (`$state.raw`), the connection's state bridged with `createSubscriber`, failures thrown to `<svelte:boundary>`; `svelte/server` renders, `hydrate` takes the same props. No `.svelte` files (tsc cannot check them); the component is in the README.
+- `integrations/angular/` (0485a1b): `provideTscache`, a root `Tscache` service (`@Service()`) whose state is a signal, and `cacheResource()` over `resource()`, keeping the previous value with Angular's `linkedSignal` and `resourceFromSnapshots` recipe (experimental in 22); the server's read travels in `TransferState`. Bootstrap code that needs `@angular/platform-browser` or `platform-server`, not installed, is in the README.
+- Docs: `integrations/README.md` and the root README's section (bb58474); `docs/roadmap.md` (06769d2) with the persistence sketch from the settled §3.7 notes, sketches for dirty notifications and eviction, the reference clients' shape and the items for the post-build architecture review; `docs/guides/patterns.md` (b6cd741) for the starter §8 debts that had no home; the integer-field caveat in `CacheConfig.fields` TSDoc (26005b9).
+
+The five framework snippets were written by Claude subagents (Opus 5.5) from one written brief, one per framework, each confined to its folder, and reviewed by the implementer. Each subagent proved its snippet in a throwaway probe outside the repository, against the built package, and checked the probe with mutants that must fail it:
+
+| Snippet | Server half | Browser half | Mutants caught |
+|---|---|---|---|
+| React | Node, `renderToString` against an in-process client | Chromium, a real SharedWorker: hydration without fallback or mismatch (a tampered number in the markup does report one), only the uncovered day fetched, latest wins, StrictMode issues one read | n/a (negative control for the mismatch) |
+| Solid | Node (`renderToString`) | Chromium, dev and production builds of Solid: 26 checks | 5 of 5 |
+| Vue | Bun | Chromium, a real SharedWorker: no hydration warning, only the tail fetched; a `ref()` range without `toRaw` fails with `DataCloneError` | 5 of 7; the two survivors are a guard that the real port's ordering never reaches and `toRaw`, which only the browser run shows |
+| Svelte | Node, `svelte/server` with the README's component compiled as written | Chromium: 32 checks | 5 of 5 |
+| Angular | Node, `renderApplication` from `@angular/platform-server` (installed in the probe only), JIT | Chromium: hydration of 1 component and 3 nodes, none skipped; only the tail fetched | 4 of 4 |
+
+Not proven at runtime anywhere: a real worker loss (every probe simulated it with a facade like `integrations/test/helpers.ts`, which rejects pending calls and then emits `workerLost`, as the client does), the frameworks' production builds other than Solid's, and Angular's ahead-of-time compiler.
+
+Changes the implementer made in review: the Solid series had dropped the lost-worker guard, relying on the client rejecting pending calls before it emits `workerLost` and on Solid re-running the memo before the rejection arrives; the guard is back, so the read stays pending after a loss whatever the order (the Solid probe passes 26 of 26 with it). The server read every `ssr-server` repeated moved into `shared/server.ts` (`serverReader`, 476a059), which also cleared Fallow's clone groups. Fallow's health gate, which takes code no test references as uncovered, skips the five framework folders, as it skips the examples; `shared/` and `vanilla/` stay gated.
+
+### Documentation debts (starter §8)
+
+| Debt | Where it ships (⑭ marks this step's part) |
+|---|---|
+| Coverage-index alternatives | `docs/architecture.md` §6.1 |
+| Auth designs (a)/(b)/(c) and the Web Locks snippet | §6.2; snippet in `examples/react-lwcharts/src/auth-refresh.ts`; pointer in `docs/guides/patterns.md` (⑭) |
+| TTL as a consumer pattern | `docs/guides/patterns.md` (⑭) |
+| Integer per-field missingness | §2.2, `examples/solid-uplot`; `docs/guides/patterns.md` and `CacheConfig.fields` TSDoc (⑭) |
+| Chrome Android SharedWorker | `docs/guides/worker-setup.md` |
+| Multi-tab `clear()` warning | §2.4, §2.7, TSDoc of `clear`/`clearAll`; `docs/guides/patterns.md` (⑭) |
+| Version-signal honesty | §2.4; `docs/guides/patterns.md` (⑭) |
+| Bundler and worker-entry setup | `docs/guides/worker-setup.md` |
+| Persistence design sketch | `docs/roadmap.md` (⑭) |
+| Roadmap | `docs/roadmap.md` (started in ⑬b, completed in ⑭) |
