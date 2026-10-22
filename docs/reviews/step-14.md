@@ -126,6 +126,10 @@ Documentation only, no change under `packages/tscache/src/`. The user held the p
 
 No findings. The reviewer checked that N34–N44 match the options the agenda recommended and that the round 6 fixes are still in place. **Settled** after one round, as planned for a documentation branch.
 
+## Follow-up: review tooling (`chore/17-review-tooling`)
+
+Tooling only, no change under `packages/tscache/src/`; backlog items the user parked for after the build (2026-10-11). `scripts/review-watch.sh` commits the silence watchdog every review since step ⑫ ran from a copy in `/tmp`: it runs `scripts/codex-review.sh` with stdin closed and kills the session after `REVIEW_SILENCE_SECONDS` (default 600) without output, exiting 124. Tested against stand-in review scripts: a silent one is killed after 35 s with no process left behind, a busy one exits 0. `scripts/ci.sh` now sets `FALLOW_AUDIT_BASE` to its own base when unset, so a pushed branch is audited against `main` rather than its upstream. `docs/workflow.md` points the review step at the watchdog. Not done, since each needs a decision: type-checking `e2e/` and `scripts/` needs Node or Bun type definitions, a new dependency; running `check:integrations` in pre-push needs a build first. Rounds continue from round 8 in `.reviews/step-14/`.
+
 ## Merge request: `docs/14b-assumptions` → `main`
 
 **Scope.** Documentation only; nothing under `packages/tscache/src/` changes. The post-build architecture review's decisions, recorded, and the two outcomes that need only documentation.
