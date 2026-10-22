@@ -1,4 +1,4 @@
-import type { TscacheClient } from "tscache";
+import { ConfigError, type TscacheClient } from "tscache";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Connection, connect } from "../shared/connection";
 import type { ServerRead } from "../shared/hydration";
@@ -102,6 +102,37 @@ describe("connect", () => {
     await connection.cache(client, config);
     const known = await handle.get(seed.range, { cacheOnly: true });
     expect(Array.from(known.fields.v ?? [])).toEqual([9, 2]);
+  });
+
+  it("lets the client refuse a config that conflicts with the open one (N4)", async () => {
+    const { connection, connected } = lossyConnection();
+    await until(() => connected() !== null);
+    const client = connected() as TscacheClient;
+    await connection.cache(client, config);
+    await expect(
+      connection.cache(client, { ...config, interval: 20 }),
+    ).rejects.toThrow(ConfigError);
+  });
+
+  it("refuses a conflicting config asked for while the first still opens", async () => {
+    const { connection, connected } = lossyConnection([seed]);
+    await until(() => connected() !== null);
+    const client = connected() as TscacheClient;
+    const first = connection.cache(client, config);
+    const conflict = connection.cache(client, { ...config, interval: 20 });
+    await expect(conflict).rejects.toThrow(ConfigError);
+    await expect(first).resolves.toBeDefined();
+  });
+
+  it("opens an equal config given as another object, after the seed", async () => {
+    const { connection, connected } = lossyConnection([seed]);
+    await until(() => connected() !== null);
+    const client = connected() as TscacheClient;
+    const first = connection.cache(client, config);
+    const twin = await connection.cache(client, { ...config });
+    const known = await twin.get(seed.range, { cacheOnly: true });
+    expect(known.coverage).toEqual([{ start: 0, end: 20 }]);
+    await first;
   });
 
   it("forgets a failed open, so the next call tries again", async () => {

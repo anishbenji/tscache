@@ -31,9 +31,11 @@ export interface Connection {
   /** Calls `listener` after each change of `state`; returns the unsubscribe. */
   subscribe(listener: () => void): () => void;
   /**
-   * `client`'s handle for `config`, opened once per client and cache id.
-   * The first client puts a cache's seed in before handing the cache out,
-   * so no read runs ahead of it.
+   * `client`'s handle for `config`, opened once per client and config. The
+   * first client puts a cache's seed in before handing the cache out, so no
+   * read runs ahead of it. Another config with the same id goes to the
+   * client, which returns the same cache for an equal config and rejects a
+   * conflicting one with ConfigError (N4, N20).
    */
   cache(client: TscacheClient, config: CacheConfig): Promise<CacheHandle>;
   /** Disposes the client and stops replacing it. Idempotent. */
@@ -41,6 +43,12 @@ export interface Connection {
 }
 
 const CONNECTING: ConnectionState = { status: "connecting" };
+
+/** A cache a client opened, with the config it was opened with. */
+interface Opened {
+  config: CacheConfig;
+  handle: Promise<CacheHandle>;
+}
 
 /**
  * Connects with `open`, and again each time the worker behind the client
@@ -64,10 +72,7 @@ export function connect(
     seeds.map(({ config, read }) => [config.id, read]),
   );
   const seedsOf = new WeakMap<TscacheClient, Map<string, ServerRead>>();
-  const handles = new WeakMap<
-    TscacheClient,
-    Map<string, Promise<CacheHandle>>
-  >();
+  const handles = new WeakMap<TscacheClient, Map<string, Opened>>();
   const listeners = new Set<() => void>();
 
   function set(next: ConnectionState): void {
@@ -96,7 +101,7 @@ export function connect(
     );
   }
 
-  function handlesOf(client: TscacheClient): Map<string, Promise<CacheHandle>> {
+  function handlesOf(client: TscacheClient): Map<string, Opened> {
     let opened = handles.get(client);
     if (opened === undefined) {
       opened = new Map();
@@ -130,13 +135,21 @@ export function connect(
     },
     cache(client, config) {
       const opened = handlesOf(client);
-      let handle = opened.get(config.id);
-      if (handle === undefined) {
-        handle = openCache(client, config);
-        opened.set(config.id, handle);
-        // A failed open is not kept: the next call tries again.
-        handle.catch(() => opened.delete(config.id));
+      const first = opened.get(config.id);
+      if (first?.config === config) return first.handle;
+      if (first !== undefined) {
+        // After the first open, so its seed is in before this handle reads.
+        return first.handle.then(
+          () => client.cache(config),
+          () => client.cache(config),
+        );
       }
+      const handle = openCache(client, config);
+      opened.set(config.id, { config, handle });
+      // A failed open is not kept: the next call tries again.
+      handle.catch(() => {
+        if (opened.get(config.id)?.handle === handle) opened.delete(config.id);
+      });
       return handle;
     },
     async dispose() {
