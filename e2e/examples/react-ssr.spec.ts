@@ -43,18 +43,23 @@ function seededSpan({ seeds }: Hydration): { from: number; until: number } {
   };
 }
 
-/**
- * The day the server rendered on, which the backend's watermark kept
- * provisional. Taken from the page, not the test's clock, so a render just
- * before midnight UTC is judged by its own day.
- */
+/** The day the server rendered on, from the page rather than the test's clock. */
 function renderDay({ range }: Hydration): number {
   return Math.floor(range.end / DAY) * DAY;
 }
 
+/**
+ * The day the backend's watermark kept provisional: the one after the last
+ * seeded day. It is the render's day, or the next one when midnight UTC
+ * passed between the render's clock read and the backend's.
+ */
+function provisionalDay(hydration: Hydration): number {
+  return seededSpan(hydration).until + DAY;
+}
+
 /** 1 when the backend had a bar forming that day (a weekday), else 0. */
 function formingBars(hydration: Hydration): number {
-  return isTradingBar(renderDay(hydration), DAY) ? 1 : 0;
+  return isTradingBar(provisionalDay(hydration), DAY) ? 1 : 0;
 }
 
 /**
@@ -113,12 +118,13 @@ test.describe("without JavaScript", () => {
     await expect(page.locator(".sessions tbody tr")).toHaveCount(5);
     const hydration = await hydrationOf(page);
     // From the window's first day up to the provisional day, excluded.
-    expect(hydration.seeds.map((seed) => seed.range)).toEqual([
-      {
-        start: Math.floor(hydration.range.start / DAY) * DAY,
-        end: renderDay(hydration) - DAY,
-      },
-    ]);
+    expect(hydration.seeds).toHaveLength(1);
+    expect(seededSpan(hydration).from).toBe(
+      Math.floor(hydration.range.start / DAY) * DAY,
+    );
+    expect([renderDay(hydration), renderDay(hydration) + DAY]).toContain(
+      provisionalDay(hydration),
+    );
     expect(seededBars(hydration) + formingBars(hydration)).toBe(bars);
   });
 
@@ -136,7 +142,11 @@ test.describe("without JavaScript", () => {
     expect(pages(after) - pages(before)).toBeLessThanOrEqual(1);
     const bars = await value(page, "bars");
     const forming = formingBars(await hydrationOf(page));
-    expect(await value(page, "server-cached")).toBe(bars - forming);
+    // Every final bar, but the day that turned final if midnight UTC passed
+    // between the two renders.
+    const cached = await value(page, "server-cached");
+    expect(cached).toBeLessThanOrEqual(bars - forming);
+    expect(cached).toBeGreaterThanOrEqual(bars - forming - 1);
   });
 });
 
@@ -158,9 +168,12 @@ test("the browser fetches only what the seeds do not cover", async ({
     seededSpan(hydration).until,
   ]);
   await expect(page.getByTestId("fetches")).toHaveText("1");
-  expect(await value(page, "bars")).toBe(
-    seededBars(hydration) + formingBars(hydration),
-  );
+  // The seeded bars and the forming one; if midnight UTC passed since the
+  // server's read, the day that turned final too.
+  const bars = await value(page, "bars");
+  const expected = seededBars(hydration) + formingBars(hydration);
+  expect(bars).toBeGreaterThanOrEqual(expected);
+  expect(bars).toBeLessThanOrEqual(expected + 1);
   // A hydration mismatch is reported as an error.
   expect(errors).toEqual([]);
 });
