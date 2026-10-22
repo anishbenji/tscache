@@ -118,6 +118,10 @@ Documentation only, no change under `packages/tscache/src/`. Steps ①–⑭ are
 
 **Settled.** No P0 or P1. Per the workflow, P2s do not trigger another round, so round 6's fixes, one of which changes a recommendation (D3), are not Codex-reviewed; say if you want a round 7 before the review.
 
+## Follow-up: the review's decisions and the DC-1/DC-2 assumptions (`docs/14b-assumptions`)
+
+Documentation only, no change under `packages/tscache/src/`. The user held the post-build architecture review and took the recommended option at every decision point of `docs/architecture-review.md` (D1–D11). This branch records the decisions as rows N34–N44 in `docs/architecture.md` §8, each with the alternatives it rejected, and lands the two documentation-only outcomes: DC-1 (N42) as a precondition in the refresh snippet's header, its copy in the examples and `docs/guides/patterns.md`; DC-2 (N43, N44) as assumptions of loss detection in §4.8, one sentence in the fetcher contract (§2.5) and a note in `docs/guides/worker-setup.md`. The roadmap, the README and the agenda point at the rows. The snapshot API (N34–N39) and `tscache/vite` (N40–N41) are built in steps ⑮ and ⑯. What a review of this branch checks: that each row matches the option the agenda recommended and the alternatives it listed, and that the stated assumptions match the code (`rpc/lifetime.ts`, the snippet) and Web Locks behaviour; not the decisions themselves. Rounds continue from round 7 in `.reviews/step-14/`.
+
 ## Merge request: `docs/14-architecture-review-agenda` → `main`
 
 **Scope.** Documentation only; nothing under `packages/tscache/src/` changes. `docs/architecture-review.md` prepares the post-build architecture review: for each deferred question, the context with its sources, the decision points, the options with pros and cons, and a recommendation. `docs/roadmap.md` and the README point at it; this file gains the follow-up section.
