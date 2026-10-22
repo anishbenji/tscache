@@ -181,10 +181,19 @@ describe("hydrateRead", () => {
         hydrate: () => Promise.reject(new TscacheError(message)),
       }) as unknown as CacheHandle;
     await expect(
-      hydrateRead(refusing('unknown op "hydrate"'), read),
+      hydrateRead(refusing("unknown op hydrate"), read),
     ).resolves.toEqual({ applied: [] });
     await expect(
       hydrateRead(refusing("invalid snapshot: interval differs"), read),
     ).rejects.toThrow(/invalid snapshot/);
+    // A validation error that merely mentions the phrase is still an error.
+    await expect(
+      hydrateRead(
+        refusing(
+          'invalid segment payload: field "v" has dtype unknown op, the schema says f64',
+        ),
+        read,
+      ),
+    ).rejects.toThrow(/invalid segment payload/);
   });
 });

@@ -15,6 +15,7 @@ import {
   type HydrateResult,
   type Range,
   type Snapshot,
+  TscacheError,
 } from "tscache";
 
 /** What the server read: the range it asked for and its snapshot. */
@@ -81,7 +82,11 @@ export async function seed(
   try {
     return await cache.hydrate(decodeSnapshot(snapshot));
   } catch (error) {
-    if (error instanceof Error && /unknown op/.test(error.message)) {
+    // Exactly the RPC server's answer to an op it lacks (§4.7).
+    if (
+      error instanceof TscacheError &&
+      error.message === "unknown op hydrate"
+    ) {
       return { applied: [] };
     }
     throw error;

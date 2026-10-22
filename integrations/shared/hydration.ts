@@ -19,6 +19,7 @@ import {
   type Miss,
   type Range,
   type Snapshot,
+  TscacheError,
 } from "tscache";
 
 /**
@@ -146,7 +147,11 @@ export async function hydrateRead(
   try {
     return await cache.hydrate(snapshot);
   } catch (error) {
-    if (error instanceof Error && /unknown op/.test(error.message)) {
+    // Exactly the RPC server's answer to an op it lacks (§4.7).
+    if (
+      error instanceof TscacheError &&
+      error.message === "unknown op hydrate"
+    ) {
       return { applied: [] };
     }
     throw error;
