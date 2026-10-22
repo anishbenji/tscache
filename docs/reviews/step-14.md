@@ -104,6 +104,40 @@ None. Step ⑭ is not an engine step; its tests were written with the code.
 
 None raised by the reviewer. R2-2 is escalated as a finding (above), and R4-1 was decided by the user.
 
+## Follow-up: the post-build architecture review's agenda (`docs/14-architecture-review-agenda`)
+
+Documentation only, no change under `packages/tscache/src/`. Steps ①–⑭ are merged; the user holds an architecture review next, and `docs/architecture-review.md` prepares it: for the snapshot API (with the seed race R2-2), a `tscache/vite` entry, DC-1 and DC-2 (`docs/reviews/step-12.md`), the context with its sources, the decision points, the options with pros and cons, and a recommendation. `docs/roadmap.md` and the README point at it. What a review of this branch checks is the agenda's claims about the code and the documents it cites (one engine call per op and which calls are synchronous, what `put` with `meta.version` does, what `segmentFromPayload` validates, what the lifetime lock does after a steal, how the snippets render a seed), not the recommendations, which are the user's to decide. Rounds continue from round 6 in `.reviews/step-14/`.
+
+### Round 6 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R6-1 | P2 | A snapshot without a segment (a confirmed gap) carries no grid or schema, so nothing validates it against the receiving cache | accepted | Validated by reading: option D1-A relied on `segmentFromPayload`, which never runs for `segments: []`. The envelope now carries `interval`, `alignmentOffset` and `fields`, checked before anything is applied, and the errors rule says so (a0bdeb9) |
+| R6-2 | P2 | A server read and a separate snapshot can see different versions; the agenda said "no race" | accepted | Validated by reading `integrations/shared/server.ts`: one client serves every render, so another render's fetch, and a version change with it, can land between a render's `get` and its `snapshot`. The window is documented under the two-method option, and one `get` with a snapshot option, which takes both from one engine read, is now the recommended shape (a0bdeb9) |
+| R6-3 | P2 | A reissued access token need not be refused again: an opaque token renewed in place lets a single tab's retry succeed, so the agenda's single-tab loop does not follow | accepted | Validated by reading: the inference is gone; the context names the renewed opaque token as the realistic case and notes that the mock backend does not exercise it (a0bdeb9) |
+
+**Settled.** No P0 or P1. Per the workflow, P2s do not trigger another round, so round 6's fixes, one of which changes a recommendation (D3), are not Codex-reviewed; say if you want a round 7 before the review.
+
+## Merge request: `docs/14-architecture-review-agenda` → `main`
+
+**Scope.** Documentation only; nothing under `packages/tscache/src/` changes. `docs/architecture-review.md` prepares the post-build architecture review: for each deferred question, the context with its sources, the decision points, the options with pros and cons, and a recommendation. `docs/roadmap.md` and the README point at it; this file gains the follow-up section.
+
+- **Snapshot API and the seed race (R2-2).** One problem in two forms: a seed carries no version or watermark, and the coverage check and the put are two requests. Recommended: a snapshot of segment payloads clipped to the range, with the grid, schema, coverage, version and watermark (D1-A, the §3.4 invariant and the persistence sketch's cache record); one `hydrate` engine call that refuses a differing version, fills only uncovered ranges and carries the watermark forwards only (D2), dropping the snapshot's own provisional tail; `get(range, { snapshot: true })` returning the read and its snapshot from one engine state, plus `CacheHandle.hydrate` (D3-A); protocol stays 1 (D4); shipped text encoders (D5-A); both helpers and both SSR examples migrated in the same step (D6). An engine step with Codex contract tests after approved architecture text.
+- **`tscache/vite` (D7, D8).** Recommended: ship `fetcherUrl()` as a subpath with `vite` as an optional peer and a programmatic-build test; `ssrPage()` stays in the examples. Rejected: a second package (starter §5).
+- **DC-1 (D9).** Recommended: state the precondition in the snippet headers and the guide; the realistic case is an opaque token renewed in place, where the cost is one redundant refresh per extra tab, each with the current refresh token. A snippet-level rotation stamp is the upgrade if a backend needs it.
+- **DC-2 (D10, D11).** Recommended: record both as assumptions in §4.8 and §2.5. Found while preparing: a stolen lock is never requested again by the worker, so once freed every later client is granted it at once and a recovery loop reconnects without end; a `navigator.locks.query()` check before watching is listed as the cheap guard (D10-C).
+- **Not on this agenda**, listed for scheduling: N28, N31, IndexedDB persistence, the reference clients, the tooling chores. A suggested sequence with branches and model suggestions closes the document.
+
+**Review outcome.** One round (round 6 of this file's numbering), three P2 findings, all accepted and fixed: the envelope needed its own grid and schema for gap-only snapshots; the two-call server flow has a version window on the shared client, which moved the recommendation to one `get` with a snapshot option; and DC-1's single-tab inference was wrong. Settled without a further round per the P2 rule; the fixes are not Codex-reviewed.
+
+**Confidence: medium-high.** Every claim about the code cites the module or section it rests on and was checked by reading it (`rpc/server.ts` dispatch, `rpc/lifetime.ts`, `engine/cache.ts` version rules, `segment/payload.ts` validation, `integrations/shared/server.ts` and `connection.ts`, `integrations/react/series.tsx`). The reviewer checked the same claims and found the three above. The recommendations are judgement; the user decides them at the review.
+
+**Blast radius: docs.** `bun run ci` passed on the branch: 1137 Node tests and 48 browser specs.
+
+**Known limits.** No code or probe backs the snapshot-size claims (a dense payload's zeros bounded by the K-gap split) or the Vite peer-range claim (the environments API from Vite 6); both are stated from the docs and should be checked in their steps. The watchdog wrapper still lives outside the repository (backlog).
+
+**For the user.** The review itself: decisions D1–D11, each with a recommended option. Then the sequence at the end of the agenda, starting with the DC-1/DC-2 docs commit.
+
 ## Merge request: `feat/14-integrations` → `main`
 
 **Scope.** Step ⑭ of the commit plan (starter §7, §8, §10, §11), the last step. No change under `packages/tscache/src/` except one TSDoc paragraph.

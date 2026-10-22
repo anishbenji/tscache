@@ -102,6 +102,9 @@ evicted page stays on disk and is loaded again on demand, which needs the lazy l
 
 ## For the post-build architecture review
 
+The agenda for the review, with the context, options and a recommendation for each item below, is
+`docs/architecture-review.md`.
+
 - A snapshot API over the segment payload (§3.4) that carries the dataset version and watermark, so SSR
   hydration is exact and a seed can no longer outlive a restatement (`docs/reviews/step-13.md`, ⑬b),
   applied in one engine step only where the browser's cache covers nothing, so another tab's fetch
