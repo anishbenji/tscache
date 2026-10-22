@@ -9,10 +9,12 @@ import type {
   ClientEvents,
   GetOptions,
   GetResult,
+  HydrateResult,
   PutBatch,
   PutOptions,
   PutResult,
   Range,
+  Snapshot,
 } from "../types";
 import type { ClientEmitter } from "./events";
 
@@ -31,8 +33,9 @@ export class CacheHandle {
   }
 
   /**
-   * Every present point in the range with coverage and misses (§2.3). Until
-   * orchestration (step ⑪) every get is cache-only.
+   * Every present point in the range with coverage and misses (§2.3). With
+   * `snapshot: true` the result also carries a Snapshot taken from the same
+   * state (§2.8); its buffers are transferred to this page with the result.
    */
   get(range: Range, options?: GetOptions): Promise<GetResult> {
     return this.#port.request("get", {
@@ -52,6 +55,22 @@ export class CacheHandle {
       { cacheId: this.id, batch, options },
       transferablesOf(batch),
     ) as Promise<PutResult>;
+  }
+
+  /**
+   * Applies a snapshot where this cache knows nothing (§2.8, N35): taken by
+   * `get(range, { snapshot: true })`, typically on a server, and carried in
+   * the page with `encodeSnapshot`. A snapshot of another dataset version is
+   * refused (`skipped: 'version-mismatch'`); covered and provisional slots
+   * are never touched. The snapshot is cloned, not transferred, so it stays
+   * usable. A worker from before this op rejects with TscacheError: treat
+   * that as not seeded and let the cache fetch (N37).
+   */
+  hydrate(snapshot: Snapshot): Promise<HydrateResult> {
+    return this.#port.request("hydrate", {
+      cacheId: this.id,
+      snapshot,
+    }) as Promise<HydrateResult>;
   }
 
   /** Forgets coverage over the range (snapped outward); the points stay. */
