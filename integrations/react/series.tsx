@@ -187,20 +187,21 @@ class Read {
   }
 }
 
-const keys = new WeakMap<CacheConfig, string>();
+const byName = ([a]: [string, unknown], [b]: [string, unknown]) =>
+  a < b ? -1 : a > b ? 1 : 0;
 
 /**
- * A config's whole value as a key. Equal configs share their reads; one
- * that conflicts with another of the same id gets reads of its own, which
- * reach the client and fail with its ConfigError.
+ * A config's whole value as a key, the same however its properties are
+ * ordered. Equal configs share their reads; one that conflicts with
+ * another of the same id gets reads of its own, which reach the client and
+ * fail with its ConfigError. Computed on each render, so a config changed
+ * in place is judged afresh.
  */
-function keyOf(config: CacheConfig): string {
-  let key = keys.get(config);
-  if (key === undefined) {
-    key = JSON.stringify(config);
-    keys.set(config, key);
-  }
-  return key;
+function keyOf({ fields, ...rest }: CacheConfig): string {
+  return JSON.stringify([
+    Object.entries(rest).sort(byName),
+    Object.entries(fields).sort(byName),
+  ]);
 }
 
 /** The reads made through each client's promise, by config and range. */
