@@ -2,7 +2,7 @@
 // render shows what the server read (AppProps), in the server and in the
 // browser's hydration render alike, so the two produce the same markup.
 // After that the figures come from the browser's own cache, which starts
-// from the server's seeds.
+// from the server's snapshot.
 
 import type { Hydration } from "@examples/mock-backend/hydration";
 import { useState, useSyncExternalStore } from "react";
@@ -32,7 +32,7 @@ export interface AppProps {
 
 /**
  * 'server-rendered' until the browser takes over; 'hydrating' until its
- * cache, started from the seeds, has answered; 'loading' while it answers
+ * cache, started from the snapshot, has answered; 'loading' while it answers
  * for a new window or a new client.
  */
 type Status = "server-rendered" | "hydrating" | "loading" | "ready";

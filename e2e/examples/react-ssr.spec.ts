@@ -5,7 +5,17 @@ import {
   type Hydration,
 } from "../../examples/mock-backend/src/hydration";
 import { appUrl } from "./apps";
-import { notices, recordNotices, span, stats, waitNotices } from "./support";
+import {
+  coveredPoints,
+  coveredSpan,
+  logCount,
+  logSince,
+  notices,
+  recordNotices,
+  span,
+  stats,
+  waitNotices,
+} from "./support";
 
 // examples/react-ssr: the server reads the last half-year of daily candles
 // with one in-process client shared by every render, and writes the covered
@@ -28,19 +38,13 @@ async function hydrationOf(page: Page): Promise<Hydration> {
   return JSON.parse(text ?? "null");
 }
 
-/** The bars the seeds carry: every bar of the server's answer but a forming one. */
-function seededBars({ seeds }: Hydration): number {
-  return seeds.reduce(
-    (bars, seed) => bars + atob(seed.timestamps).length / 8,
-    0,
-  );
+/** The bars the snapshot seeds: every bar of the server's answer but a forming one. */
+function seededBars({ snapshot }: Hydration): number {
+  return coveredPoints(snapshot).length;
 }
 
-function seededSpan({ seeds }: Hydration): { from: number; until: number } {
-  return {
-    from: Math.min(...seeds.map((seed) => seed.range.start)),
-    until: Math.max(...seeds.map((seed) => seed.range.end)),
-  };
+function seededSpan({ snapshot }: Hydration): { from: number; until: number } {
+  return coveredSpan(snapshot);
 }
 
 /** The day the server rendered on, from the page rather than the test's clock. */
@@ -118,7 +122,7 @@ test.describe("without JavaScript", () => {
     await expect(page.locator(".sessions tbody tr")).toHaveCount(5);
     const hydration = await hydrationOf(page);
     // From the window's first day up to the provisional day, excluded.
-    expect(hydration.seeds).toHaveLength(1);
+    expect(hydration.snapshot.coverage).toHaveLength(1);
     expect(seededSpan(hydration).from).toBe(
       Math.floor(hydration.range.start / DAY) * DAY,
     );
@@ -225,16 +229,21 @@ test("when the worker's host tab crashes, another tab connects a new client", as
   await dead;
 
   await expect(survivor.locator(".log")).toContainText("worker lost");
-  // The new worker starts with an empty cache and no seeds, so the window is
-  // fetched again.
+  // The new worker starts empty and the page's snapshot seeds it (N39,
+  // every client): something is applied, and the window is not fetched
+  // again, only what the snapshot does not cover.
   await expect
-    .poll(async () =>
-      (await notices(survivor))
-        .slice(seen)
-        .filter((notice) => span(notice) >= HALF_YEAR),
-    )
-    .toHaveLength(1);
+    .poll(() => logCount(survivor, "snapshot from the server"))
+    .toBe(2);
   await expect(survivor.getByTestId("status")).toHaveText("ready");
+  const replaced = await logSince(survivor, "worker lost");
+  expect(replaced).toContain("snapshot from the server");
+  expect(replaced).not.toContain("snapshot from the server: nothing");
+  expect(
+    (await notices(survivor))
+      .slice(seen)
+      .filter((notice) => span(notice) >= HALF_YEAR),
+  ).toEqual([]);
   await expect(survivor.getByTestId("mode")).toHaveText("shared");
   expect(await value(survivor, "bars")).toBeGreaterThan(100);
 });

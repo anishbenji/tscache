@@ -10,6 +10,7 @@ import {
   dehydrate,
   hydrationScript,
   jsonScript,
+  snapshotOf,
 } from "@examples/mock-backend/hydration";
 import type { RenderedPage, RenderRequest } from "@examples/mock-backend/vite";
 import { generateHydrationScript, renderToString } from "@solidjs/web";
@@ -54,7 +55,8 @@ export async function render({ origin }: RenderRequest): Promise<RenderedPage> {
   const client = await serverClient(origin);
   const cache = await client.cache(config);
   const known = await cache.get(range, { cacheOnly: true });
-  const result = await cache.get(range);
+  // The page's figures and its snapshot come from one read (N36).
+  const result = await cache.get(range, { snapshot: true });
   // The page shows what the cache has; the browser fetches the rest itself.
   // The minute after now is always an 'uncached' miss; any other is news.
   for (const { reason, range: missed } of result.misses) {
@@ -71,7 +73,7 @@ export async function render({ origin }: RenderRequest): Promise<RenderedPage> {
   return {
     head:
       generateHydrationScript() +
-      hydrationScript(dehydrate(range, result)) +
+      hydrationScript(dehydrate(range, snapshotOf(result))) +
       jsonScript(APP_PROPS, props),
     html: renderToString(() => <App {...props} />),
   };

@@ -25,13 +25,15 @@ to now. Bars exist on weekdays only. The backend's watermark
 forming.
 
 On every request the server entry (`src/entry-server.tsx`) asks its cache
-for the window and renders the page from the answer with `renderToString`:
+for the window with `get(range, { snapshot: true })` and renders the page
+from the answer with `renderToString`:
 the figures, a table of the last five sessions and an empty container for
 the chart. The page works without JavaScript; the chart is the only part
 drawn in the browser. Into the page's head go two JSON script elements: the
-props the page was rendered with, and the seeds, the covered parts of the
-answer, each with the points inside it (`dehydrate` in
-`examples/mock-backend/src/hydration.ts`).
+props the page was rendered with, and the snapshot of the same read, which
+the cache took from the state it answered from (architecture §2.8; `dehydrate`
+in `examples/mock-backend/src/hydration.ts` encodes it with
+`encodeSnapshot`).
 
 **Decision shown: the server reads through the same API as the browser.**
 The in-process engine needs no worker and no DOM (§2.1), so the server
@@ -40,27 +42,25 @@ fetcher module the browser's worker loads. The fetcher context carries the
 server's own address (`ExampleContext.origin`), because a server has no
 origin to resolve the backend's paths against.
 
-**Decision shown: coverage travels with the points.** In the browser,
-`putSeeds` puts each seed with `put(batch, { range })`. A put that states its
-range records the whole range as covered (§2.4), so every day in it without
-a bar, the 26 weekends included, arrives as a confirmed empty day. The range
-matters at the edges: a put without one claims only the span from its first
-bar to its last (N3), so a window that starts on a weekend would leave those
-days looking unfetched. The browser's
-cache then knows what the server's knew, and its first `get` fetches only
-what the server's answer did not cover: the provisional day. The log shows
-that one fetch. It starts at the last seeded day, because a miss that abuts
-coverage is extended by one interval into it (§2.5), and it ends tomorrow,
-because `get` snaps the end of the window, now, outward to the next day
-(§2.3).
+**Decision shown: coverage travels with the points.** In the browser, `seed`
+decodes the snapshot and calls `cache.hydrate`. The snapshot carries the
+server's coverage, so every day in it without a bar, the 26 weekends
+included, arrives as a confirmed empty day. The browser's cache then knows
+what the server's knew, and its first `get` fetches only what the snapshot
+did not cover: the provisional day, which hydrate never applies. The log
+shows that one fetch. It starts at the last seeded day, because a miss that
+abuts coverage is extended by one interval into it (§2.5), and it ends
+tomorrow, because `get` snaps the end of the window, now, outward to the
+next day (§2.3).
 
-**Decision shown: seeds never replace what the browser's cache covers.**
-With a SharedWorker every tab of the origin shares one cache, and another
-tab may hold those days from a fetch made after this page's server render.
-`putSeeds` first asks the cache what it covers
-(`get(range, { cacheOnly: true })`) and puts only the gaps. In a second tab,
-the seeds find every day already covered by the first tab's worker, so
-nothing is put.
+**Decision shown: a snapshot never replaces what the browser's cache
+covers.** With a SharedWorker every tab of the origin shares one cache, and
+another tab may hold those days from a fetch made after this page's server
+render. `hydrate` writes only where the cache has no coverage, in one call
+inside the worker, so no other tab's fetch can land between its check and
+its write. In a second tab, the snapshot finds every day already covered by
+the first tab's worker, and the log says nothing was applied. A snapshot of
+another dataset version would be refused outright.
 
 **Decision shown: one server client for every render.** The server creates
 its client on the first render, and every later render of the process
@@ -101,7 +101,7 @@ does:
   too, so it is not part of the bundle the page waits on to hydrate.
 
 After hydration the page connects its client (`src/session.ts`), opens the
-cache, puts the seeds and asks for the window. The figures then come from
+cache, applies the snapshot and asks for the window. The figures then come from
 the browser's cache, and the status reads `ready`.
 
 ## Scroll back
@@ -125,27 +125,28 @@ Chromium runs a SharedWorker in the process of the tab that created it.
 Crash that tab (type `chrome://crash` in its address bar) and the worker and
 its cache go with it; every other tab's client emits `workerLost`. The page
 then connects a new client, as `docs/guides/worker-setup.md` shows. The new
-worker starts with an empty cache. The page does not put the seeds again:
-they are as old as the page, and the new worker can fetch the window in one
-request.
+worker starts with an empty cache, and the page applies its snapshot to it
+too: a stale snapshot of another dataset version would be refused, and the
+history it carries does not change, so the new client fetches only the
+provisional day.
 
 ## What to watch
 
 - With JavaScript turned off, the page still shows every figure and the
   table, read on the server; the status reads `server-rendered`.
 - The log of a fresh tab reads, oldest first: the client connected
-  (`shared`), the seeds from the server, and one fetch, from the last seeded
-  day to tomorrow. The browser fetch count reads 1.
+  (`shared`), the snapshot from the server and what it applied, and one
+  fetch, from the last seeded day to tomorrow. The browser fetch count reads 1.
 - Reload the page: the server line counts every final bar as read from the
   server's cache.
 
 ## Known limits
 
-- A seed carries no dataset version, because the public `get` result does
-  not report one. If the backend restated the series between the server's
-  read and the browser's put, the seeded days would keep the old values,
-  and nothing would detect it (§2.4: restatements without a version signal
-  are undetectable).
+- The mock backend reports no dataset version, so the snapshot carries
+  none. A backend that reports one gets the protection for free: a snapshot
+  of another version is refused by `hydrate` (architecture §2.8). Without
+  one, a restatement between the server's read and the browser's hydrate is
+  undetectable (§2.4).
 
 ## What else is in here
 

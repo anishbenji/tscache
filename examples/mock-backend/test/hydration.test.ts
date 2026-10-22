@@ -1,11 +1,18 @@
-import { type CacheConfig, createClient, type TscacheClient } from "tscache";
+import {
+  type CacheConfig,
+  type CacheHandle,
+  createClient,
+  type Range,
+  type TscacheClient,
+  TscacheError,
+} from "tscache";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   dehydrate,
   type Hydration,
   hydrationScript,
-  putSeeds,
   readHydration,
+  seed,
 } from "../src/hydration";
 
 const MINUTE = 60_000;
@@ -35,6 +42,13 @@ function roundTrip(hydration: Hydration): Hydration {
       id === "tscache-hydration" ? { textContent: text } : null,
   });
   return readHydration();
+}
+
+/** The server's read of `range` with its snapshot, as the page carries it. */
+async function served(server: CacheHandle, range: Range): Promise<Hydration> {
+  const { snapshot } = await server.get(range, { snapshot: true });
+  if (snapshot === undefined) throw new Error("no snapshot");
+  return dehydrate(range, snapshot);
 }
 
 afterEach(async () => {
@@ -75,7 +89,9 @@ describe("SSR hydration", () => {
     expect(answer.coverage).toEqual([{ start: at(0), end: at(9) }]);
 
     const browser = await cacheOf();
-    await putSeeds(browser, config, roundTrip(dehydrate(range, answer)));
+    expect(await seed(browser, roundTrip(await served(server, range)))).toEqual(
+      { applied: [{ start: at(0), end: at(9) }] },
+    );
     const planted = await browser.get(range);
 
     expect(planted.coverage).toEqual([{ start: at(0), end: at(9) }]);
@@ -92,7 +108,7 @@ describe("SSR hydration", () => {
     );
   });
 
-  it("seeds each covered range with its own points", async () => {
+  it("applies each covered range with its own points", async () => {
     const server = await cacheOf();
     await server.put(
       {
@@ -106,16 +122,16 @@ describe("SSR hydration", () => {
       { range: { start: at(5), end: at(7) } },
     );
     const range = { start: at(0), end: at(9) };
-    const hydration = dehydrate(range, await server.get(range));
-    expect(hydration.seeds.map((seed) => seed.range)).toEqual([
+    const hydration = await served(server, range);
+    expect(hydration.snapshot.coverage).toEqual([
       { start: at(0), end: at(2) },
       { start: at(5), end: at(7) },
     ]);
 
     const browser = await cacheOf();
-    await putSeeds(browser, config, roundTrip(hydration));
+    await seed(browser, roundTrip(hydration));
     const planted = await browser.get(range);
-    expect(planted.coverage).toEqual(hydration.seeds.map((seed) => seed.range));
+    expect(planted.coverage).toEqual(hydration.snapshot.coverage);
     expect([...planted.timestamps]).toEqual([at(0), at(2), at(6)]);
     expect([...(planted.fields.value ?? [])]).toEqual([1, 2, 3]);
   });
@@ -131,7 +147,7 @@ describe("SSR hydration", () => {
       { range: { start: at(0), end: at(5) } },
     );
     const range = { start: at(0), end: at(5) };
-    const hydration = dehydrate(range, await server.get(range));
+    const hydration = await served(server, range);
 
     // Another tab's fetch already covered slots 2–3, with later values.
     const browser = await cacheOf();
@@ -142,7 +158,12 @@ describe("SSR hydration", () => {
       },
       { range: { start: at(2), end: at(3) } },
     );
-    await putSeeds(browser, config, roundTrip(hydration));
+    expect(await seed(browser, roundTrip(hydration))).toEqual({
+      applied: [
+        { start: at(0), end: at(1) },
+        { start: at(4), end: at(5) },
+      ],
+    });
     const planted = await browser.get(range);
     expect(planted.coverage).toEqual([range]);
     expect([...(planted.fields.value ?? [])]).toEqual([1, 1, 9, 9, 1, 1]);
@@ -151,17 +172,57 @@ describe("SSR hydration", () => {
   it("escapes < so no value can close the script element", () => {
     const hydration: Hydration = {
       range: { start: 0, end: 0 },
-      seeds: [
-        {
-          range: { start: 0, end: 0 },
-          timestamps: "",
-          fields: { "</script><b>": "" },
-        },
-      ],
+      snapshot: {
+        format: 1,
+        interval: 1,
+        alignmentOffset: 0,
+        fields: { "</script><b>": "f64" },
+        range: { start: 0, end: 0 },
+        coverage: [],
+        segments: [],
+      },
     };
     const html = hydrationScript(hydration);
     expect(html.indexOf("</script>")).toBe(html.length - "</script>".length);
     expect(roundTrip(hydration)).toEqual(hydration);
+  });
+
+  it("counts an older worker's unknown op as nothing applied, and lets other failures through", async () => {
+    const server = await cacheOf();
+    const hydration = await served(server, { start: at(0), end: at(1) });
+    const refusing = (message: string) =>
+      ({
+        hydrate: () => Promise.reject(new TscacheError(message)),
+      }) as unknown as CacheHandle;
+    await expect(
+      seed(refusing('unknown op "hydrate"'), hydration),
+    ).resolves.toEqual({ applied: [] });
+    await expect(
+      seed(refusing("invalid snapshot: interval differs"), hydration),
+    ).rejects.toThrow(/invalid snapshot/);
+  });
+
+  it("refuses a snapshot of another dataset version", async () => {
+    const server = await cacheOf();
+    await server.put(
+      {
+        timestamps: [at(0)],
+        fields: { value: [1], level: [1], battery: [1] },
+        meta: { version: "old" },
+      },
+      { range: { start: at(0), end: at(1) } },
+    );
+    const hydration = await served(server, { start: at(0), end: at(1) });
+    const browser = await cacheOf();
+    await browser.put({
+      timestamps: [at(5)],
+      fields: { value: [5], level: [5], battery: [5] },
+      meta: { version: "new" },
+    });
+    expect(await seed(browser, roundTrip(hydration))).toEqual({
+      applied: [],
+      skipped: "version-mismatch",
+    });
   });
 
   it("says so when the page carries no hydration", () => {

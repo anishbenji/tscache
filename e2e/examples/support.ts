@@ -11,6 +11,7 @@ import {
   type FetchNotice,
   NOTICE_CHANNEL,
 } from "../../examples/mock-backend/src/notices";
+import type { EncodedSnapshot } from "../../packages/tscache/src/types";
 
 declare global {
   interface Window {
@@ -60,4 +61,54 @@ export async function control(page: Page, body: BackendControl): Promise<void> {
 /** The span of a notice's range in ms. */
 export function span({ range }: FetchNotice): number {
   return range.end - range.start;
+}
+
+/** Where a snapshot's coverage starts and ends. */
+export function coveredSpan(snapshot: EncodedSnapshot): {
+  from: number;
+  until: number;
+} {
+  const first = snapshot.coverage.at(0);
+  const last = snapshot.coverage.at(-1);
+  if (first === undefined || last === undefined) {
+    throw new Error("the snapshot covers nothing");
+  }
+  return { from: first.start, until: last.end };
+}
+
+/**
+ * The timestamps of a snapshot's present points inside its coverage: what
+ * hydrate puts into an empty cache. Decoded from the payload masks
+ * (architecture §3.4: slot i is bit i & 7 of byte i >> 3).
+ */
+export function coveredPoints(snapshot: EncodedSnapshot): number[] {
+  const out: number[] = [];
+  for (const payload of snapshot.segments) {
+    const mask = atob(payload.mask);
+    for (let i = 0; i < payload.count; i++) {
+      if (((mask.charCodeAt(i >> 3) >> (i & 7)) & 1) === 0) continue;
+      const t = payload.start + i * payload.interval;
+      if (snapshot.coverage.some((r) => r.start <= t && t <= r.end)) {
+        out.push(t);
+      }
+    }
+  }
+  return out;
+}
+
+/** How often `text` appears in the page's log. */
+export async function logCount(page: Page, text: string): Promise<number> {
+  const log = (await page.locator(".log").textContent()) ?? "";
+  return log.split(text).length - 1;
+}
+
+/**
+ * The page's log entries written since the latest `marker` entry. The logs
+ * list the newest entry first, so that is the text before the marker's
+ * first occurrence.
+ */
+export async function logSince(page: Page, marker: string): Promise<string> {
+  const log = (await page.locator(".log").textContent()) ?? "";
+  const at = log.indexOf(marker);
+  return at < 0 ? "" : log.slice(0, at);
 }
