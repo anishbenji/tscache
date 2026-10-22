@@ -1,12 +1,12 @@
 # Step 15 — Snapshot API (hydrate, encode/decode) and the migration of server-rendering hydration
 
-Branch: `feat/15-snapshot` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: architecture text awaiting the user's approval · Verdict after triage: —
+Branch: `feat/15-snapshot` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: architecture text approved; contract tests in progress · Verdict after triage: —
 
 Step ⑮ is the first item of the post-build architecture review (`docs/architecture-review.md`, item 1; decisions N34–N39 in `docs/architecture.md` §8). An engine step: the architecture text comes first, then Codex writes the contract tests from it (prompt A, `docs/workflow.md`), then the implementation, the migration of the ⑬b and ⑭ helpers and the guide's server-rendering section, then the review loop.
 
-## Architecture text (2026-10-23, awaiting approval)
+## Architecture text (approved 2026-10-23)
 
-Commit `docs(architecture): snapshot api text for step 15` adds §2.8 Snapshots, the `hydrate` op in §3.2, the envelope note in §3.4, two modules in the §4 layout, and the `CacheState`, `Engine`, RPC, handle and orchestrator contracts in §4.5–§4.9. Everything follows N34–N39; the points below are where the text fixes a shape or rule the rows left open, each with the alternatives considered. The user decides; the text is adjusted where the user picks otherwise.
+Commit `docs(architecture): snapshot api text for step 15` adds §2.8 Snapshots, the `hydrate` op in §3.2, the envelope note in §3.4, two modules in the §4 layout, and the `CacheState`, `Engine`, RPC, handle and orchestrator contracts in §4.5–§4.9. Everything follows N34–N39; the points below are where the text fixes a shape or rule the rows left open, each with the alternatives considered. The user approved the recommended option at every point (2026-10-23), so the text stands as committed.
 
 | # | Point | Text says (recommended) | Alternatives |
 |---|---|---|---|

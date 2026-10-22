@@ -324,7 +324,7 @@ The initiating call additionally receives request-scoped results directly — `p
 
 `modeFallback` is an addition beyond the starter's event list — observability for the documented Chrome-Android path (accepted under N5). `workerLost` is another such addition (N32).
 
-### 2.8 Snapshots (N34–N39, proposed 2026-10-23)
+### 2.8 Snapshots (N34–N39, approved 2026-10-23)
 
 A snapshot is what a cache knows about a range: the §3.4 payloads of its present points, clipped to the range, in an envelope that names the grid and schema they belong to, the dataset version and watermark in force, and the covered sub-ranges. It is the server-rendering hydration payload the one-format invariant promised (starter §3.7) and the cache record of the persistence sketch (`docs/roadmap.md`). It is applied in one engine call, so a seed can neither outlive a restatement nor overwrite what another tab fetched (step ⑭ R2-2).
 
@@ -760,7 +760,7 @@ Rules:
 - **Programming errors** throw `RangeError` for a malformed `request` (not safe integers, start > end), as the store does. None is reachable from consumer input: `snapOut` validates first.
 - **Not here.** Snapping the consumer's ms range outward is the engine's job (step ⑧); excluding the volatile region from the coverage passed in is the engine's job (step ⑦), as is the version check; miss reasons other than `'uncached'` are set by the orchestrator (step ⑪), which rewrites the misses of a request after fetching.
 
-### 4.5 Internal contracts — per-cache state (N17, N18, approved 2026-10-06; N34–N36 proposed 2026-10-23)
+### 4.5 Internal contracts — per-cache state (N17, N18, approved 2026-10-06; N34–N36 approved 2026-10-23)
 
 Internal module: not exported from any package entry. Contract tests (step ⑦) pin this surface. `CacheState` is one cache: its resolved config, a `SegmentStore`, a `CoverageIndex`, the finalized watermark and the dataset version. It speaks milliseconds to its callers and slots to the modules beneath it; every conversion goes through `grid.ts`. Step ⑧'s `Engine` is a map of these plus events.
 
@@ -823,7 +823,7 @@ Rules:
 
 Out of step ⑦ by design: the caches map, `clearAll`, config conflicts (N4) and event emission (step ⑧); orchestration (step ⑪).
 
-### 4.6 Internal contracts — engine assembly (N20–N22, approved 2026-10-07; N34–N36 proposed 2026-10-23)
+### 4.6 Internal contracts — engine assembly (N20–N22, approved 2026-10-07; N34–N36 approved 2026-10-23)
 
 `Engine` is the `./engine` export surface (SSR/Node, tests) and what the RPC server (step ⑨) drives. Contract tests (step ⑧) pin this surface. It is a map of `CacheState` (§4.5) keyed by cache id, with the cache-scoped events; it speaks milliseconds and consumer types only. Zero DOM/worker imports at module top level (locked, §2.1).
 
