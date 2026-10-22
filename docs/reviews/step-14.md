@@ -122,6 +122,29 @@ Documentation only, no change under `packages/tscache/src/`. Steps ①–⑭ are
 
 Documentation only, no change under `packages/tscache/src/`. The user held the post-build architecture review and took the recommended option at every decision point of `docs/architecture-review.md` (D1–D11). This branch records the decisions as rows N34–N44 in `docs/architecture.md` §8, each with the alternatives it rejected, and lands the two documentation-only outcomes: DC-1 (N42) as a precondition in the refresh snippet's header, its copy in the examples and `docs/guides/patterns.md`; DC-2 (N43, N44) as assumptions of loss detection in §4.8, one sentence in the fetcher contract (§2.5) and a note in `docs/guides/worker-setup.md`. The roadmap, the README and the agenda point at the rows. The snapshot API (N34–N39) and `tscache/vite` (N40–N41) are built in steps ⑮ and ⑯. What a review of this branch checks: that each row matches the option the agenda recommended and the alternatives it listed, and that the stated assumptions match the code (`rpc/lifetime.ts`, the snippet) and Web Locks behaviour; not the decisions themselves. Rounds continue from round 7 in `.reviews/step-14/`.
 
+### Round 7 — reviewer verdict: merge
+
+No findings. The reviewer checked that N34–N44 match the options the agenda recommended and that the round 6 fixes are still in place. **Settled** after one round, as planned for a documentation branch.
+
+## Merge request: `docs/14b-assumptions` → `main`
+
+**Scope.** Documentation only; nothing under `packages/tscache/src/` changes. The post-build architecture review's decisions, recorded, and the two outcomes that need only documentation.
+
+- **Decisions N34–N44** in `docs/architecture.md` §8, one row per decision point D1–D11 of `docs/architecture-review.md`, each with the alternatives it rejected: the snapshot API (N34 envelope of range-clipped segment payloads, N35 one `hydrate` engine call that refuses a differing version and fills only uncovered ranges, N36 `get(range, { snapshot: true })` plus `CacheHandle.hydrate`, N37 protocol stays 1, N38 shipped text encoders with both forms on the page, N39 migration in the same step), `tscache/vite` (N40 `fetcherUrl()` with `vite` as an optional peer, N41 `ssrPage()` stays in the examples), DC-1 (N42) and DC-2 (N43, N44).
+- **DC-1 (N42).** The refresh snippet's header, its copy in the examples and `docs/guides/patterns.md` state that a refresh must issue a new access token, and what a backend that renews one in place costs: one redundant refresh per extra tab, each with the current refresh token.
+- **DC-2 (N43, N44).** §4.8 states what loss detection assumes: same-origin scripts are trusted, and a stolen and released lifetime lock gives false `workerLost` events and an endless recovery loop; a fetcher must not close its worker, also stated in the fetcher contract (§2.5). `docs/guides/worker-setup.md` repeats both under its recovery example.
+- **Pointers.** The agenda gains a "Decided" line, the roadmap's review section lists the outcomes with their steps (and no longer says the SSR page plugin goes into `tscache/vite`, which N41 rejects), the README points at the rows.
+
+**Review outcome.** One round (round 7 of this file's numbering), no findings, verdict merge.
+
+**Confidence: high** for the transcription: each row follows the agenda's recommended option and its listed alternatives, which the reviewer checked. One wording was checked against the Web Locks specification while writing: a `steal: true` request is granted ahead of the queued client requests, so the false loss fires when the thief releases the lock, not at the steal; §4.8 and the guide say so.
+
+**Blast radius: docs and two comment headers.** `bun run ci` passed on the branch: 1137 Node tests and 48 browser specs.
+
+**Known limits.** The decision list in the user's message was the template placeholder; the rows record "all recommended options", which every other instruction in that message matched. D6 left one point open (whether `connection.ts` keeps seeding only the first client); N39 defers it to the step ⑮ architecture text.
+
+**For the user.** Confirm the rows match your decisions, then merge. Next: `feat/15-snapshot`, architecture text first for your approval.
+
 ## Merge request: `docs/14-architecture-review-agenda` → `main`
 
 **Scope.** Documentation only; nothing under `packages/tscache/src/` changes. `docs/architecture-review.md` prepares the post-build architecture review: for each deferred question, the context with its sources, the decision points, the options with pros and cons, and a recommendation. `docs/roadmap.md` and the README point at it; this file gains the follow-up section.
