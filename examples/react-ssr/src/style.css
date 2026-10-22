@@ -1,0 +1,68 @@
+body {
+  font:
+    15px / 1.5 system-ui,
+    sans-serif;
+  margin: 1.5rem auto;
+  max-width: 64rem;
+  padding: 0 1rem;
+  color: #1d2433;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+h1 {
+  font-size: 1.4rem;
+}
+h2 {
+  font-size: 1rem;
+}
+.lede {
+  color: #52514e;
+  margin: 0;
+}
+.stats output {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.chart {
+  height: 420px;
+}
+/* Until the browser draws the chart, and for good without JavaScript. */
+.chart:empty {
+  display: grid;
+  place-items: center;
+  border: 1px dashed #e4e4e0;
+  border-radius: 6px;
+  color: #52514e;
+}
+.chart:empty::before {
+  content: "The chart is drawn in the browser.";
+}
+.sessions {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.sessions caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 0.25rem;
+}
+.sessions th,
+.sessions td {
+  padding: 0.2rem 0.75rem 0.2rem 0;
+  border-bottom: 1px solid #e4e4e0;
+  text-align: right;
+}
+.sessions th:first-child {
+  text-align: left;
+}
+.log {
+  font:
+    13px / 1.4 ui-monospace,
+    monospace;
+  max-height: 14rem;
+  overflow-y: auto;
+}

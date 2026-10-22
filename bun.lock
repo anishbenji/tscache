@@ -45,6 +45,22 @@
         "vite": "^8.3.4",
       },
     },
+    "examples/react-ssr": {
+      "name": "@examples/react-ssr",
+      "dependencies": {
+        "@examples/mock-backend": "workspace:*",
+        "lightweight-charts": "^5.2.1",
+        "react": "^19.3.0",
+        "react-dom": "^19.3.0",
+        "tscache": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
+        "@vitejs/plugin-react": "^6.1.2",
+        "vite": "^8.3.4",
+      },
+    },
     "examples/solid-lwcharts": {
       "name": "@examples/solid-lwcharts",
       "dependencies": {
@@ -203,6 +219,8 @@
     "@examples/mock-backend": ["@examples/mock-backend@workspace:examples/mock-backend"],
 
     "@examples/react-lwcharts": ["@examples/react-lwcharts@workspace:examples/react-lwcharts"],
+
+    "@examples/react-ssr": ["@examples/react-ssr@workspace:examples/react-ssr"],
 
     "@examples/solid-lwcharts": ["@examples/solid-lwcharts@workspace:examples/solid-lwcharts"],
 
