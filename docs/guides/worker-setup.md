@@ -98,8 +98,10 @@ Two things differ from the browser:
 - The module URL must be one the server can `import()`. Vite renders an
   emitted chunk's URL as a path under `base`, which only a browser can load,
   so `fetcherUrl()` gives server code a file URL in a server build instead.
-  In dev, Vite's module runner resolves the same `/@fs/` path the browser
-  gets. Nothing to configure.
+  In dev, server code gets an `/@fs/` path, which Vite's module runner
+  resolves; the plugin adds `tscache` to `ssr.noExternal`, so the library's
+  `import()` of the fetcher goes through that runner rather than plain Node.
+  Nothing to configure.
 - A server has no page origin, so a fetcher that requests relative paths
   needs the backend's origin from its context. The examples' fetcher reads
   `context.origin`; the browser's client omits it.

@@ -1,6 +1,6 @@
 # Step 16 — `tscache/vite` entry
 
-Branch: `feat/16-vite-entry` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: review loop in progress · Verdict after triage: —
+Branch: `feat/16-vite-entry` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: review loop in progress · Verdict after triage: —
 
 Item 2 of the post-build architecture review (`docs/architecture-review.md`; decisions N40–N41). Not an engine step: tests are written with the code.
 
@@ -18,7 +18,16 @@ Item 2 of the post-build architecture review (`docs/architecture-review.md`; dec
 |---|---|---|---|
 | V1 | Supported Vite range (N40 left it to this step) | `^8.0.0`: the one major the test and the examples build with. Widening later is not breaking | `^6.0.0 \|\| ^7.0.0 \|\| ^8.0.0`, since the environments API the plugin uses exists from Vite 6, but nothing here tests 6 or 7 |
 | V2 | How the plugin is typed | A structural type (`FetcherUrlPlugin`) declaring the hooks and context members it uses; nothing imported from `vite`. Vite's types reference Node's, so importing them would put Node globals into the package's type check and let Node APIs into the browser library unnoticed (the guard `batch-realms.test.ts` relies on). The examples' type check of their `vite.config.ts` against Vite's real `Plugin` type proves the fit, and `dist/vite.d.ts` references neither Vite nor Node | Import `type { Plugin } from "vite"`: exact types for users, but Node types throughout `src/` and `test/` |
-| V3 | Build platform | The same browser-platform tsdown build as the other entries: the plugin uses no Node API, so the agenda's separate Node-platform entry is unnecessary | A second tsdown config with `platform: "node"` |
+| V3 | Build platform | Withdrawn after round 1 (R1-1): the entry now has its own `platform: "node"` tsdown config, as N40 states | — |
+
+## Round 1 — reviewer verdict: block
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P0 | The entry shares the browser-platform build, where N40 says a Node-platform entry, without recorded approval | accepted | Validated against the N40 row. Rather than ask for the deviation, the build now has a second tsdown config with `platform: "node"` and plain `.js` output for `./vite`; tsdown cleans `dist/` once for both configs before either writes (checked in its source) |
+| R1-2 | P1 | In dev, the URL ignores Vite's `base`, so a normal dev server under `/app/` answers 404 | accepted | Reproduced with a real dev server under `/app/` that requests the URL over HTTP (the earlier test used middleware mode, which bypasses the base check). The browser now gets `<base>@fs/<path>` |
+| R1-3 | P1 | A Windows path `C:/…` gives `/@fsC:/…` | accepted | Validated by reading; `devUrl(base, file)` now builds the URL with exactly one slash before the path, with unit cases for POSIX and drive paths |
+| R1-4 | P1 | An installed `tscache` is externalized in dev SSR, so its `import()` of the `/@fs/` URL runs in plain Node and fails | accepted | Reproduced with a stand-in `node_modules/tscache` whose `import()` loads the fetcher under `ssrLoadModule`: "Cannot find module '/@fs/…'". The plugin's `config` hook now adds `tscache` to `ssr.noExternal`, so the import goes through Vite's module runner; server code keeps the `/@fs/` path without the base, which the runner resolves. The guide says so |
 
 ## Contract-test changes
 
