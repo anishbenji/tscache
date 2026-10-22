@@ -1,6 +1,6 @@
 # Step 14 — Integration snippets, documentation and roadmap
 
-Branch: `feat/14-integrations` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: in progress
+Branch: `feat/14-integrations` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in progress
 
 ## Decisions taken with the user (2026-10-22)
 
@@ -52,3 +52,12 @@ Changes the implementer made in review: the Solid series had dropped the lost-wo
 | Bundler and worker-entry setup | `docs/guides/worker-setup.md` |
 | Persistence design sketch | `docs/roadmap.md` (⑭) |
 | Roadmap | `docs/roadmap.md` (started in ⑬b, completed in ⑭) |
+
+## Round 1 — reviewer verdict: block
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P0 | Hydration drops a field named `__proto__` | accepted | Validated: the library treats Object.prototype names as legal fields (`segment-field-names.test.ts`), and `mapFields` assigned into `{}`, hitting the inherited setter. `mapFields` now uses `Object.fromEntries`, and `rehydrate` reads dtypes from own properties only; a round trip of `__proto__` and `constructor` through JSON and into a second client's cache is tested (854d0d0). |
+| R1-2 | P0 | `Connection.cache` reuses a handle for a conflicting config | accepted | Validated by reading: the memo was keyed by cache id alone, so a second config never reached the client's N4/N20 check. The handle is reused only for the same config object; another config goes to `client.cache()` once the first open (and its seed) has finished, so a conflict rejects with `ConfigError` and an equal config opens the same cache. Tested after and during the first open (ec0460b). |
+| R1-3 | P1 | React evicts promises that suspended renders still need | accepted | Validated, and worse than reported: twelve cold series under one boundary livelocked (nothing shown in 10 s, 13 to 14 reads per range), because the count-based bound ran during render and judged reads by the components showing them, which a suspended render never is. Redesigned rather than patched: a read is dropped only 30 s after it settled or was last shown, never during a render and never while pending (as TanStack Query's `gcTime`). The repro exposed a second fault: a render that suspended while the client connected met a different promise when React replayed it after the connect. Reads are now kept under the promise their client is known by, which the client keeps once connected. The React probe's twelve-series regression shows one read per range in 847 ms with no warning; its other 23 checks pass (257aa9e). |
+| R1-4 | P1 | Svelte can show an overtaken answer for a range asked again (A → B → A) | accepted | Validated: the guard compared range identity, which a read asked again for the same object passes. Each read now takes a generation from a private counter and lands, answer or failure, only if it is still the latest; the range check stays for the microtask before Svelte re-runs the effect. The Svelte probe gained A → B → A with the first A answered last and failed last, and a window case; removing the generation check fails 6 of its checks, removing the range check 2 (4908088). |
