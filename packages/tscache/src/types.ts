@@ -96,11 +96,98 @@ export interface GetResult {
   coverage: Range[];
   /** Always present (possibly empty) — cannot be overlooked. */
   misses: Miss[];
+  /** Present when {@link GetOptions.snapshot} was set (§2.8). */
+  snapshot?: Snapshot;
 }
 
 export interface GetOptions {
   /** Skip orchestration, return current cache state immediately. Default false (N2). */
   cacheOnly?: boolean;
+  /**
+   * Also return a {@link Snapshot} of the request, taken from the same state
+   * as the result (docs/architecture.md §2.8, N36). Default false.
+   */
+  snapshot?: boolean;
+}
+
+/**
+ * Self-describing segment transfer payload (architecture §3.4). One format,
+ * three uses: RPC message, IndexedDB value and SSR hydration payload, so it
+ * must stay a plain structured-cloneable object.
+ */
+export interface DenseSegmentPayload {
+  /** Payload schema version. */
+  format: 1;
+  layout: "dense";
+  /** Timestamp of the first slot. */
+  start: number;
+  /** Slot count; slot i is at start + i * interval. */
+  count: number;
+  interval: number;
+  alignmentOffset: number;
+  /** ceil(count / 8) bytes; slot i is bit (i & 7) of byte (i >> 3). */
+  mask: Uint8Array;
+  /** Schema declaration order; little-endian; absent slots hold zero. */
+  fields: { name: string; dtype: Dtype; data: ArrayBuffer }[];
+}
+
+/**
+ * What a cache knows about a range (docs/architecture.md §2.8, N34): the
+ * §3.4 payloads of its present points, clipped to the range, in an envelope
+ * naming the grid and schema, the dataset version and watermark in force,
+ * and the covered sub-ranges. Take one with `get(range, { snapshot: true })`;
+ * apply one with `CacheHandle.hydrate`.
+ */
+export interface Snapshot {
+  /** The envelope's schema version; each payload carries its own `format`. */
+  format: 1;
+  /** The grid and schema of the cache it was taken from; hydrate refuses any other. */
+  interval: number;
+  alignmentOffset: number;
+  fields: Record<string, Dtype>;
+  /** The request it answers, snapped outward (N1), in ms. */
+  range: Range;
+  /** The dataset version in force when it was taken, if any. */
+  version?: string;
+  /** The finalized watermark in force when it was taken, if any. */
+  finalizedUntil?: number;
+  /** Authoritative sub-ranges of `range`, ascending; equals the read's coverage. */
+  coverage: Range[];
+  /**
+   * The present points inside `range`, covered or not (N16): one payload per
+   * segment with a point inside the range, holding exactly those points;
+   * ascending and disjoint; fresh buffers.
+   */
+  segments: DenseSegmentPayload[];
+}
+
+/** What `hydrate` did (§2.8, N35). */
+export interface HydrateResult {
+  /**
+   * The ranges written, in ms, ascending and disjoint: the snapshot's
+   * coverage minus what the cache already covered or holds as provisional.
+   */
+  applied: Range[];
+  /** Set when nothing was applied because the two dataset versions differ. */
+  skipped?: "version-mismatch";
+}
+
+/** A {@link DenseSegmentPayload} with its binary parts as base64 text (N38). */
+export interface EncodedSegmentPayload
+  extends Omit<DenseSegmentPayload, "mask" | "fields"> {
+  /** Base64 of the mask bytes. */
+  mask: string;
+  /** Each field's data as base64 of its little-endian bytes. */
+  fields: { name: string; dtype: Dtype; data: string }[];
+}
+
+/**
+ * A {@link Snapshot} as a plain JSON value (N38): `encodeSnapshot` makes one,
+ * `decodeSnapshot` restores the snapshot. `NaN` survives, as JSON numbers
+ * would not.
+ */
+export interface EncodedSnapshot extends Omit<Snapshot, "segments"> {
+  segments: EncodedSegmentPayload[];
 }
 
 export interface PutBatch {

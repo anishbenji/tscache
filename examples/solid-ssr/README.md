@@ -38,12 +38,12 @@ to resolve `/api/` against (`docs/guides/worker-setup.md`, "Server
 rendering"). The render does all its async work first, two `get`s, and then
 renders synchronously over plain props.
 
-**Decision shown: coverage travels with the points.** The server writes its
-answer into the page as seeds: each covered range of the `get` result with
-the points inside it (`dehydrate` in `examples/mock-backend/src/hydration.ts`).
-The browser puts each seed back with `put(batch, { range })`, so its cache
-records the whole range as covered, not just the minutes that hold a reading
-(§2.4, N3). The sensor's dropouts and offline blocks inside the range are
+**Decision shown: coverage travels with the points.** The server reads with
+`get(range, { snapshot: true })` and writes the snapshot of that read into
+the page (architecture §2.8; `dehydrate` in
+`examples/mock-backend/src/hydration.ts` encodes it with `encodeSnapshot`).
+The browser decodes it and calls `cache.hydrate`, so its cache records the
+server's coverage, not just the minutes that hold a reading. The sensor's dropouts and offline blocks inside the range are
 then confirmed gaps in the browser too: the "slots known to be empty" figure
 keeps every one the server reported, and none of those minutes is fetched. The
 browser's first `get` asks for the same window ending a moment later and
@@ -69,13 +69,14 @@ over long ranges should clear its caches on its own clock (`clear`,
 again; in dev, the client is disposed before the dev server evaluates the
 server entry again after a change.
 
-**Decision shown: seeds never replace what the browser's cache covers.**
-In the browser all tabs share one cache through the SharedWorker. A second
-tab is rendered later than the first, but the first tab may have fetched
-newer minutes since, and its cache may hold ranges the second tab's server
-render never saw. `putSeeds` therefore asks the cache what it already covers
-inside each seed's range (`cacheOnly`) and puts only the parts it does not
-cover: a seed fills holes, it never overwrites. Open the page in two tabs
+**Decision shown: a snapshot never replaces what the browser's cache
+covers.** In the browser all tabs share one cache through the SharedWorker.
+A second tab is rendered later than the first, but the first tab may have
+fetched newer minutes since, and its cache may hold ranges the second tab's
+server render never saw. `hydrate` writes only the parts the cache does not
+cover, in one call inside the worker, so no other tab's fetch can land
+between its check and its write: a snapshot fills holes, it never
+overwrites. Open the page in two tabs
 and the second tab's one fetch starts where the coverage of the first tab's
 fetches ends.
 
@@ -100,17 +101,18 @@ over. The page makes that structural:
   button, which becomes enabled; the figures stay until the browser's first
   answer.
 
-The data never goes through Solid's own serializer: the seeds are the
-mechanism this page demonstrates, and they are plain tscache put payloads.
+The data never goes through Solid's own serializer: the snapshot is the
+mechanism this page demonstrates, and it is tscache's own segment payload
+format, encoded as JSON.
 
 ## What to watch
 
-- The status goes from `server-rendered` to `hydrating` (connecting, putting
-  the seeds, asking for the window) to `ready`. With JavaScript turned off
+- The status goes from `server-rendered` to `hydrating` (connecting, applying
+  the snapshot, asking for the window) to `ready`. With JavaScript turned off
   it stays `server-rendered`, the client is `in-process`, and the button is
   disabled.
 - After hydration the log shows one fetch: the minutes since the server's
-  read, starting at the minute the seeds end. The day itself is never
+  read, starting at the minute the snapshot's coverage ends. The day itself is never
   fetched by the browser.
 - **Load the previous day** fetches one day, which ends exactly where the
   loaded range began (the miss is extended by one interval into the coverage
@@ -121,13 +123,9 @@ mechanism this page demonstrates, and they are plain tscache put payloads.
 
 ## Known limits
 
-- A seed carries no dataset version. The server's `get` result does not
-  report the version of the points it returns, so the browser puts the seeds
-  without one (`meta.version`, §2.4). If the backend restated the series
-  between the server's read and the browser's first fetch, the browser
-  could not tell the seeded points are of the old version. A snapshot API
-  that carries the version is a candidate for the post-build architecture
-  review.
+- The mock backend reports no dataset version, so the snapshot carries
+  none. A backend that reports one gets the protection for free: a snapshot
+  of another version is refused by `hydrate` (§2.8).
 - Every `get` up to now fetches again. A `get` snaps its end outward to the
   minute after now, which the backend's watermark keeps provisional, so it
   stays outside coverage (§2.4); and its miss, which abuts the coverage, is
@@ -138,13 +136,12 @@ mechanism this page demonstrates, and they are plain tscache put payloads.
 ## What else is in here
 
 - `src/session.ts` holds the browser's client and cache as async memos. The
-  cache memo puts the seeds before it hands the cache out, so no `get` can
-  run ahead of them. When the worker is lost, as when the tab hosting the
-  SharedWorker crashes, the `workerLost` handler refreshes the client memo:
-  the new client starts a new worker with an empty cache, which fetches the
-  window. Only the first client gets the seeds: they are as old as the page,
-  which may have seen a newer dataset version since, and a seed carries no
-  version, so in an empty cache it would pass for the newer one.
+  cache memo applies the snapshot before it hands the cache out, so no
+  `get` can run ahead of it. When the worker is lost, as when the tab
+  hosting the SharedWorker crashes, the `workerLost` handler refreshes the
+  client memo: the new client starts a new worker with an empty cache, and
+  the snapshot seeds it too, so it fetches only the minutes since the
+  server's read.
 - `src/App.tsx` derives the browser's answer as one async memo over the
   cache and the window's start, so loading the previous day is a write to
   the `start` signal, and a newer answer always supersedes an older one

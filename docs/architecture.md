@@ -147,11 +147,15 @@ interface GetResult {
   coverage: Range[];
   /** Always present (possibly empty) — cannot be overlooked. */
   misses: Miss[];
+  /** Present when `GetOptions.snapshot` was set (§2.8). */
+  snapshot?: Snapshot;
 }
 
 interface GetOptions {
   /** Skip orchestration, return current cache state immediately. Default false (N2). */
   cacheOnly?: boolean;
+  /** Also return a snapshot of the request, from the same read (§2.8, N36). Default false. */
+  snapshot?: boolean;
 }
 
 // CacheHandle
@@ -320,6 +324,89 @@ The initiating call additionally receives request-scoped results directly — `p
 
 `modeFallback` is an addition beyond the starter's event list — observability for the documented Chrome-Android path (accepted under N5). `workerLost` is another such addition (N32).
 
+### 2.8 Snapshots (N34–N39, approved 2026-10-23)
+
+A snapshot is what a cache knows about a range: the §3.4 payloads of its present points, clipped to the range, in an envelope that names the grid and schema they belong to, the dataset version and watermark in force, and the covered sub-ranges. It is the server-rendering hydration payload the one-format invariant promised (starter §3.7) and the cache record of the persistence sketch (`docs/roadmap.md`). It is applied in one engine call, so a seed can neither outlive a restatement nor overwrite what another tab fetched (step ⑭ R2-2).
+
+```ts
+/** What a cache knows about a range (N34): §3.4 payloads in an envelope. */
+interface Snapshot {
+  /** The envelope's schema version; each payload carries its own `format`. */
+  format: 1;
+  /** The grid and schema of the cache it was taken from; hydrate refuses any other. */
+  interval: number;
+  alignmentOffset: number;
+  fields: Record<string, Dtype>;
+  /** The request it answers, snapped outward (N1), in ms. */
+  range: Range;
+  /** The dataset version in force when it was taken, if any. */
+  version?: string;
+  /** The finalized watermark in force when it was taken, if any. */
+  finalizedUntil?: number;
+  /** Authoritative sub-ranges of `range`, ascending; equals GetResult.coverage. */
+  coverage: Range[];
+  /**
+   * The present points inside `range`, covered or not (N16): one payload per
+   * segment of the cache with a point inside the range, holding exactly those
+   * points; ascending and disjoint; fresh buffers.
+   */
+  segments: DenseSegmentPayload[];
+}
+
+interface GetOptions {
+  cacheOnly?: boolean;                 // §2.3
+  /** Also return `snapshot`, from the same state as the result (N36). Default false. */
+  snapshot?: boolean;
+}
+
+interface GetResult {
+  // …as §2.3, plus:
+  /** Present when `GetOptions.snapshot` was set. */
+  snapshot?: Snapshot;
+}
+
+interface HydrateResult {
+  /** The ranges written, in ms, ascending and disjoint: the snapshot's coverage
+   *  minus what the cache already covered or holds as provisional. */
+  applied: Range[];
+  /** Set when nothing was applied because the two versions differ. */
+  skipped?: 'version-mismatch';
+}
+
+// CacheHandle
+hydrate(snapshot: Snapshot): Promise<HydrateResult>;
+
+/** A Snapshot with its binary parts as base64 text: a plain JSON value (N38). */
+interface EncodedSnapshot extends Omit<Snapshot, 'segments'> {
+  segments: EncodedSegmentPayload[];
+}
+interface EncodedSegmentPayload extends Omit<DenseSegmentPayload, 'mask' | 'fields'> {
+  mask: string;
+  fields: { name: string; dtype: Dtype; data: string }[];
+}
+// Exported from '.' and './engine'; no DOM, no engine code.
+function encodeSnapshot(snapshot: Snapshot): EncodedSnapshot;
+function decodeSnapshot(encoded: EncodedSnapshot): Snapshot;
+```
+
+**Taking a snapshot.** `get(range, { snapshot: true })` resolves with the result and its `snapshot`, both from the one engine read whose result the call returns (§4.9): with a fetcher, the read after the fetches the call awaited; with `cacheOnly` or without a fetcher, the only read. They cannot disagree: `snapshot.coverage` equals `result.coverage`, and the payloads hold the result's points. The buffers are fresh copies, never cache-owned memory (§3.3), and are transferred to the page. Equal cache state yields equal snapshots (the layout rule N15 and the tight extent of §4.2), so a snapshot can be compared and stored. `Engine.snapshot(cacheId, range)` gives the same snapshot without a read, for persistence and tests.
+
+**Applying a snapshot: `hydrate`.** One engine call, and between two messages no other write runs (§4.7), so another tab's fetch cannot land between the check and the write. Its rules:
+
+- *Checked first, in full.* The envelope must describe this cache: `format` 1, `interval` and `alignmentOffset` equal to the grid, `fields` the schema's names and dtypes (key order irrelevant); then every range and every payload (by the §4.2 decoding rules). Any failure throws `TscacheError` before anything changes, as an invalid payload does (N10); an unknown cache throws `UnknownCacheError`. A snapshot with no segment, a confirmed gap, is therefore checked too (step ⑭ R6-1). A malformed snapshot is rejected, never snapped or repaired: snapshots are made by the library, so a malformation is corruption.
+- *Version precondition.* When the snapshot and the cache both have a version and they differ, nothing is applied, not even the watermark, and the result is `{ applied: [], skipped: 'version-mismatch' }`. A versioned `put` clears and adopts (§2.4); a seed never does, since a stale page would wipe a newer cache. A cache without a version adopts the snapshot's without clearing, as N18 does for the first versioned put; a snapshot without a version leaves the cache's alone.
+- *Watermark.* The snapshot's `finalizedUntil` advances the cache's watermark as a put's `meta.finalizedUntil` does: forwards only (N17), never back.
+- *Fill only where nothing is known.* The parts written are each covered range of the snapshot minus the slots the cache already covers and minus the cache's volatile region (after the advance). Inside a part the points end up exactly the snapshot's (a replace, N11: what was there had been invalidated or was provisional, never authoritative), and the part is recorded as coverage. Covered slots are never touched, so a later fetch by another tab survives; volatile slots are never touched, so a seed neither covers nor replaces a slot the browser calls provisional; and the snapshot's own provisional tail, its points outside its coverage, is not applied: the browser fetches it, as its first live `get` does anyway.
+- *No events, no warnings.* `hydrate` never clears, so it emits no `cacheCleared`; it reports no `mergeWarning`, since the points it replaces were never authoritative and may differ.
+- *Result.* `applied` lists the parts written, in ms: empty when the cache already covered everything, or when the snapshot covered nothing.
+- *Ownership.* The snapshot is cloned to the worker, not transferred: it stays usable, so a page can hydrate a replacement client from the same object. A `get` result's snapshot is transferred the other way, as the result's arrays are: the page owns it.
+
+**Old workers (N37).** The op is additive and `PROTOCOL_VERSION` stays 1. A worker from before it (a stale cached script, §3.1) answers `unknown op`, so `hydrate` rejects with `TscacheError` and the cache is as it was; a `get` with `snapshot: true` from such a worker returns no `snapshot`. An app treats a failed `hydrate` as "not seeded" and lets the cache fetch: hydration is an optimisation, never a requirement for correctness.
+
+**Encoding for HTML (N38).** A snapshot holds `ArrayBuffer`s and a `Uint8Array`; a page carries text. `encodeSnapshot` returns the snapshot with each payload's mask and field data as base64 strings: a plain JSON value the app serialises with `JSON.stringify` next to its own data (the columns it renders, say), and `decodeSnapshot` restores it. The byte form survives what JSON loses: `NaN`, a legal field value, becomes `null` in JSON. `decodeSnapshot` checks the shape only: an object with the envelope's fields of the right JavaScript types (`format` 1, numbers, strings, arrays, `fields` an object of strings, and in each payload a `mask` and every `data` as a base64 string that `atob` accepts), and throws `TscacheError` for anything else, leaving its input unchanged. It restores the buffers and checks nothing more: lengths, ordering, alignment and the schema are `hydrate`'s to check against the cache. Escaping for a `<script>` element (every `<` as `<`) stays with the app, since it depends on how the page is built. Both functions use `btoa`/`atob`, which browsers and Node provide, and no DOM. Persistence needs neither: IndexedDB stores the buffers.
+
+**Server rendering.** The server reads with an in-process client, `get(range, { snapshot: true })`. The page carries two forms of the answer: the result's columns, so the server's render and the browser's hydration render agree before any client exists, and the encoded snapshot, for the cache. The browser decodes the snapshot and calls `hydrate` before its first live read; that read then fetches only what the snapshot did not cover, typically the provisional tail. A page's snapshot is as old as the page. With a versioned dataset a stale snapshot is refused; a cache created without a version adopts the snapshot's, and the first response reporting a newer version clears it and is applied, with fetches then in flight re-issued once (N29). Without a version a seed is no staler than the server's render was. The helpers of the examples and integrations (`putSeeds`, `putCovered` and their encodings) are replaced by this API in the step that adds it (N39). A public reader that derives `GetResult` columns from a snapshot can be added later without changing the format (N38).
+
 ## 3. RPC protocol
 
 ### 3.1 Handshake (locked)
@@ -357,14 +444,15 @@ type WireError = { name: string; message: string; code?: string; data?: unknown 
 { t: 'evt', scope: 'request', cacheId: string, requestId: string, event: string, payload: unknown }
 
 type Op = 'cache' | 'get' | 'put' | 'invalidate' | 'clear' | 'clearAll'
-        | 'setFinalizedUntil' | 'updateAuth' | 'dispose';
+        | 'setFinalizedUntil' | 'updateAuth' | 'dispose'
+        | 'hydrate';   // §2.8 (N36); additive, so the protocol stays 1 (N37)
 ```
 
 SharedWorker: one RPC server, N ports; `evt` fans out to all ports. Dedicated worker / in-process: same protocol over one port (in-process uses a direct in-memory port pair — the RPC layer is exercised even without a worker, and unit tests run against the engine beneath it).
 
 ### 3.3 Transfer semantics (locked)
 
-`get` results: the worker copies requested slices out of cache-owned buffers, then **transfers** the copies (zero-copy move of the copy; cache-owned memory is never transferred). `put`/`FetchResponse` typed arrays are transferred into the worker where possible and are consumed — documented. No SharedArrayBuffer in v1.
+`get` results: the worker copies requested slices out of cache-owned buffers, then **transfers** the copies (zero-copy move of the copy; cache-owned memory is never transferred). `put`/`FetchResponse` typed arrays are transferred into the worker where possible and are consumed — documented. No SharedArrayBuffer in v1. A `get` result's snapshot (§2.8) is made of fresh payloads and is transferred with the result; a `hydrate` request's snapshot is cloned, so the caller keeps it.
 
 ### 3.4 Segment transfer payload — one format, three uses (locked invariant)
 
@@ -383,6 +471,8 @@ interface DenseSegmentPayload {
 }
 ```
 
+A `Snapshot` (§2.8, N34) is a set of these payloads, clipped to a request, in an envelope naming the grid, the schema, the dataset version, the watermark and the coverage: the SSR hydration payload of this invariant, and the cache record of the persistence sketch in `docs/roadmap.md`.
+
 Settled persistence notes (roadmap §3.7): write-behind only (dirty-segment set, debounce + `pagehide` flush), volatile region excluded, coverage reconciled against actual segment presence on hydrate, `format` field mandatory.
 
 ## 4. Module layout — `packages/tscache/src`
@@ -390,11 +480,14 @@ Settled persistence notes (roadmap §3.7): write-behind only (dirty-segment set,
 Dependency rule: `engine/*`, `grid`, `coverage`, `segment/*` import nothing from `rpc/`, `client/`, or `orchestrator/` and contain no DOM/worker references. Arrows point at importers.
 
 ```
-types.ts            public shared types (Range, Dtype, CacheConfig, GetResult, Miss, events)
+types.ts            public shared types (Range, Dtype, CacheConfig, GetResult, Miss, events,
+                    Snapshot, HydrateResult, EncodedSnapshot, DenseSegmentPayload)
 errors.ts           §2.6 taxonomy
 grid.ts             ms↔slot conversion — the single fencepost site (N1, N9)
 coverage.ts         coverage index on slot ranges: sorted disjoint ranges, binary
                     search, splice on merge, subtraction (invalidate), miss computation
+snapshot.ts         encodeSnapshot/decodeSnapshot: a Snapshot as a JSON value and back (N38);
+                    imports types and errors only, so the '.' entry carries no engine code
 segment/
   types.ts          Segment interface: lookup / slice / mergeFrom / transferPayload
   assert.ts         programming-error checks shared by segments and the merge path
@@ -409,6 +502,8 @@ engine/
   overlap.ts        overlap-diff detection for the opt-in merge warning
   read.ts           read path: present-point extraction across segments, coverage
                     intersection, 'uncached' misses, ms conversion of the result
+  snapshot.ts       snapshots: payloads clipped to a request, validation of an incoming
+                    snapshot, and the hydrate plan in slot terms (N34–N36)
   cache.ts          CacheState: one cache's store, coverage, watermark and version;
                     put/get/invalidate/clear/setFinalizedUntil in ms
   emitter.ts        minimal typed emitter for engine events (engine/ must not import client/)
@@ -665,7 +760,7 @@ Rules:
 - **Programming errors** throw `RangeError` for a malformed `request` (not safe integers, start > end), as the store does. None is reachable from consumer input: `snapOut` validates first.
 - **Not here.** Snapping the consumer's ms range outward is the engine's job (step ⑧); excluding the volatile region from the coverage passed in is the engine's job (step ⑦), as is the version check; miss reasons other than `'uncached'` are set by the orchestrator (step ⑪), which rewrites the misses of a request after fetching.
 
-### 4.5 Internal contracts — per-cache state (N17, N18, approved 2026-10-06)
+### 4.5 Internal contracts — per-cache state (N17, N18, approved 2026-10-06; N34–N36 approved 2026-10-23)
 
 Internal module: not exported from any package entry. Contract tests (step ⑦) pin this surface. `CacheState` is one cache: its resolved config, a `SegmentStore`, a `CoverageIndex`, the finalized watermark and the dataset version. It speaks milliseconds to its callers and slots to the modules beneath it; every conversion goes through `grid.ts`. Step ⑧'s `Engine` is a map of these plus events.
 
@@ -694,7 +789,12 @@ class CacheState {
   readonly finalizedUntil: number | undefined;
 
   put(batch: PutBatch, options?: PutOptions): CachePutResult;
-  get(range: Range): GetResult;
+  /** `snapshot: true` adds a Snapshot taken from the same state, in the same call. */
+  get(range: Range, options?: { snapshot?: boolean }): GetResult;
+  /** §2.8: what this cache knows about the range (snapped outward). */
+  snapshot(range: Range): Snapshot;
+  /** §2.8: applies a snapshot where nothing is known; one synchronous call. */
+  hydrate(snapshot: Snapshot): HydrateResult;
   /** Covered sub-ranges of the range (snapped outward), in ms, without
    *  reading points; the orchestrator's flank check uses it. */
   coverage(range: Range): Range[];
@@ -715,9 +815,15 @@ Rules:
 - **`get`** snaps the range outward (N1) and returns `read()` over the store and the index; since the index never holds volatile slots, no further filtering is needed. **`invalidate`** snaps outward and subtracts; the points stay (N16). **`clear`** drops segments and coverage and keeps config, version and watermark, which describe the dataset rather than its contents.
 - **Errors.** `get`/`invalidate` throw `InvalidRangeError` for a malformed range (as `snapOut`), `setFinalizedUntil` as `slotAtOrAfter` does; `put` throws as `validateBatch` does; a `config.finalizedUntil` that `slotAtOrAfter` rejects makes the constructor throw `ConfigError`. Nothing is changed by a call that throws, except the recorded coverage withdrawal above.
 
+- **Snapshot (N34, N36).** `snapshot(range)` builds, from the current state in one synchronous call: `range` = `toMs(snapOut(range))`; `coverage` = `covered(request)` in ms, ascending; `version` and `finalizedUntil` as the getters report them (omitted when undefined); `fields`, a copy of the schema; `segments`: for each segment of the store, ascending, that has at least one present point inside the request, the payload (§4.2 layout) of a segment holding exactly the present points of that segment inside the request, so `start` is the first of them and `count` their tight span. An implementation may build each from `slice()` into a fresh `DenseSegment`. Payloads are fresh buffers; `coverage` and `range` are fresh objects. Because the store's layout is a function of the present points (N15) and the extent is tight, the snapshot is a function of the state and the request. `get(range, { snapshot: true })` adds this snapshot to the result from the same state: its `coverage` equals the result's, and the payloads' present points, concatenated, are the result's `timestamps` and `fields`. Errors: `InvalidRangeError` as `get`.
+- **Hydrate: validation (N35).** Before anything changes, in this order, each failure throwing `TscacheError` whose message starts with `invalid snapshot:` (a payload keeps `segmentFromPayload`'s own message): (1) the snapshot is an object with `format === 1`, `interval` and `alignmentOffset` equal to the grid's, and `fields` an object naming exactly the schema's fields with equal dtypes; (2) `range` is an object whose `start` and `end` are aligned safe-integer timestamps (`isAligned`) with `start <= end`; its slots are the request, and an unaligned endpoint is a malformation (§2.8: a snapshot is never snapped), unlike a call argument; (3) `version`, when present, is a non-empty string, and `finalizedUntil`, when present, is accepted by `slotAtOrAfter` (as `put` validates `meta`); (4) `coverage` is an array of ranges with aligned safe-integer endpoints and `start <= end`, each inside the request, ascending, disjoint and not adjacent (as `CoverageIndex.ranges()` yields them); (5) `segments` is an array of payloads, each accepted by `segmentFromPayload` with this cache's options and with its extent inside the request, their extents ascending and disjoint. Anything else, including a missing field or a value of the wrong type, fails. A failure inside the snapshot is a `TscacheError` even where the same value as a call argument would be an `InvalidRangeError`. Field values are not otherwise checked: `NaN` is legal, as in `put`.
+- **Hydrate: application (N35).** (1) Version precondition: both set and different → return `{ applied: [], skipped: 'version-mismatch' }` with nothing changed; cache unversioned and snapshot versioned → adopt it, no clear, no hook; snapshot unversioned → the cache's version is untouched. (2) Watermark: `finalizedUntil`, when present, advances the watermark exactly as a put's `meta.finalizedUntil` does (N17: a value at or below the current one is ignored). (3) Parts: for each coverage range, in order, subtract the cache's covered slots and, when the cache has a volatile region after step 2, the slots at or after `volatileFrom`; the pieces, ascending, are the parts. (4) For each part, ascending: the decoded present points inside it are written with the part as authority (`store.put(points, part)`, a replace, N11), then the part is recorded as coverage (`#cover`, which cannot clip it further). Points outside every part are not written. Warnings from `store.put` are dropped. (5) Result: `applied` = the parts in ms (`toMs`), ascending and disjoint; two parts are never adjacent, since covered or volatile slots separate them.
+- **Hydrate: failure part-way.** A write that fails (an allocation failure, §4.3) withdraws coverage for its part, as a put does, and rethrows; parts already applied stay, as do the version and watermark steps; the store is then as §4.3 describes after a failed put.
+- **Properties the contract tests pin.** (a) Round trip: for any state `S` and request `R`, hydrating `S.snapshot(R)` into an empty cache `E` of the same structural config, created without a version or watermark, gives `E.get(R)` whose `coverage` equals `S.get(R).coverage` and whose points are `S`'s points inside that coverage; `E.version` is `S.version` when set, and `E.finalizedUntil` is `S.finalizedUntil`. (b) Idempotence: hydrating the same snapshot again applies nothing. (c) Never overwrites: for a cache `C` that covers part of `R` with other values, `C.hydrate(S.snapshot(R))` leaves `C`'s covered points unchanged, and `applied` is exactly `S`'s coverage of `R` minus `C`'s coverage and `C`'s volatile region. (d) `get(R, { snapshot: true }).snapshot` deep-equals `snapshot(R)`. (e) `decodeSnapshot(JSON.parse(JSON.stringify(encodeSnapshot(s))))` deep-equals `s`, `NaN` included.
+
 Out of step ⑦ by design: the caches map, `clearAll`, config conflicts (N4) and event emission (step ⑧); orchestration (step ⑪).
 
-### 4.6 Internal contracts — engine assembly (N20–N22, approved 2026-10-07)
+### 4.6 Internal contracts — engine assembly (N20–N22, approved 2026-10-07; N34–N36 approved 2026-10-23)
 
 `Engine` is the `./engine` export surface (SSR/Node, tests) and what the RPC server (step ⑨) drives. Contract tests (step ⑧) pin this surface. It is a map of `CacheState` (§4.5) keyed by cache id, with the cache-scoped events; it speaks milliseconds and consumer types only. Zero DOM/worker imports at module top level (locked, §2.1).
 
@@ -743,7 +849,10 @@ class Engine {
   cache(config: CacheConfig): ResolvedCacheConfig;
   has(cacheId: string): boolean;
   /** Current state only: no orchestration (that is step ⑪). */
-  get(cacheId: string, range: Range): GetResult;
+  get(cacheId: string, range: Range, options?: { snapshot?: boolean }): GetResult;
+  /** §2.8. */
+  snapshot(cacheId: string, range: Range): Snapshot;
+  hydrate(cacheId: string, snapshot: Snapshot): HydrateResult;
   coverage(cacheId: string, range: Range): Range[];
   configOf(cacheId: string): ResolvedCacheConfig;
   put(cacheId: string, batch: PutBatch, options?: PutOptions): PutResult;
@@ -763,6 +872,7 @@ Rules:
 - **Delegation.** `get`, `put`, `invalidate`, `setFinalizedUntil` delegate to the `CacheState` and keep its errors and results; `put` returns `{ warnings }` (§2.4); the engine registers `onVersionClear` on each state, so a version-mismatch clear emits `cacheCleared` with `reason: 'version-mismatch'` **after** the put has been applied — or, when the write fails after the clear, before the error propagates (the cache is empty either way, and a retry emits nothing more). In that failure path the write error is the one the caller sees; an error thrown by a listener is dropped. `clear(id)` clears that cache and emits `'manual'`.
 - **`clearAll` (N22).** Clears every cache's data and coverage and emits `cacheCleared` with `reason: 'clear-all'` for each, in creation order; the caches themselves, their configs, versions and watermarks stay, so handles in every tab remain valid. An engine with no caches emits nothing.
 - **Events (N21).** The engine emits only cache-scoped events. Request-scoped `mergeWarning` (requestId `clientId:seq`, §2.7) is emitted by the RPC server from `put`'s return value (step ⑨); the engine never carries request identity. Listeners run synchronously inside the emitting call, after the state change they describe.
+- **Snapshots (N34–N36).** `get` passes `options.snapshot` through; `snapshot` and `hydrate` delegate to the `CacheState` and keep its errors and results, after the id check (`UnknownCacheError`). `hydrate` emits nothing: it never clears. All three are synchronous, so under the RPC server's one-call-per-message dispatch a `hydrate` cannot interleave with another tab's write (step ⑭ R2-2): the atomicity the public API lacked. `encodeSnapshot`, `decodeSnapshot` and the types `Snapshot`, `EncodedSnapshot`, `EncodedSegmentPayload`, `HydrateResult` and `DenseSegmentPayload` are exported from `./engine` as from `.`.
 - **No DOM, no worker, no timers** at module top level or in any method: the module is importable and usable in Node.
 
 Out of step ⑧ by design: orchestration and `cacheOnly` (step ⑪ — until then every `get` is cache-only), RPC envelopes and request ids (step ⑨), `updateAuth`/`dispose` (client and worker layers).
@@ -812,8 +922,8 @@ Rules:
 
 - **`MessagePortLike`** is the structural subset both `MessagePort` (browser, Node) and a dedicated worker's global/`Worker` object satisfy: `postMessage(message, transfer?)`, `addEventListener('message' | 'messageclose', …)`, `start?()`, `close?()`. In-process mode builds a `MessageChannel` and attaches the server to one port and the client to the other (§3.2, locked), so the RPC layer has one code path and its tests run under Node.
 - **Handshake.** On `attach`, the server posts `hello` with `PROTOCOL_VERSION`, `lib` and the new `clientId` (`'c' + counter`, N23). The client answers `init`; a `protocol` other than the server's gets `init-err` with a `ProtocolMismatchError` wire error and the port is detached; the client likewise rejects `connect()` with `ProtocolMismatchError` when `hello.protocol` differs. A `req` before `init-ok` is answered with an error.
-- **Dispatch.** `op` maps one-to-one onto `Engine` (`cache`, `get`, `put`, `invalidate`, `clear`, `clearAll`, `setFinalizedUntil`) plus `updateAuth` (accepted and ignored until step ⑪) and `dispose` (detaches the port). Params are passed through to the engine, which validates them; any thrown error travels back as `res ok:false` with `toWireError`, so `PutError` fields and `code` survive the wire and the client rethrows the same class.
-- **Transfer (§3.3).** The server transfers the buffers of a `get` result (already copies) and the client transfers the batch's typed arrays on `put` where it owns them; the sender's arrays are detached afterwards (documented in `put`).
+- **Dispatch.** `op` maps one-to-one onto `Engine` (`cache`, `get`, `put`, `invalidate`, `clear`, `clearAll`, `setFinalizedUntil`, `hydrate` with `params.snapshot`, §2.8) plus `updateAuth` (accepted and ignored until step ⑪) and `dispose` (detaches the port). Params are passed through to the engine, which validates them; any thrown error travels back as `res ok:false` with `toWireError`, so `PutError` fields and `code` survive the wire and the client rethrows the same class.
+- **Transfer (§3.3).** The server transfers the buffers of a `get` result (already copies) and the client transfers the batch's typed arrays on `put` where it owns them; the sender's arrays are detached afterwards (documented in `put`). A `get` result's `snapshot` payloads are fresh too and go in the same transfer list (`transferablesOf` lists each payload's mask buffer and field data); a `hydrate` request carries no transfer list, so the snapshot is cloned and stays usable (§2.8).
 - **Events.** `Engine` `cacheCleared` → `evt scope:'cache'` to every attached port. `mergeWarning` (N21) is sent by the server from `put`'s warnings as `evt scope:'request'` with `requestId = clientId + ':' + req.id`, to every port (cross-tab observability, §2.7). The client re-emits `evt` to its `on` listeners as received.
 - **Browser coverage (N24).** Step ⑨ is tested under Node over `MessageChannel`. A real dedicated `Worker` and transfer across a real port are covered at step ⑩ with Playwright (already a dependency; needs `bunx playwright install chromium` locally and a browser-install step in CI, on a chore branch), and the multi-tab suite at step ⑫.
 - **Entries.** `entries/worker.ts` gains the dedicated-worker path: when the module runs inside a dedicated worker (a worker global without `onconnect`), it attaches the worker global as a port at load; messages the worker posts before the page listens are buffered by the browser. SharedWorker `onconnect` arrives at step ⑩. The entry imports `Engine` and `RpcServer` only, and is the package's one side-effecting module (`sideEffects` in `package.json`).
@@ -843,7 +953,7 @@ Rules:
 - **Chain (§3.4, locked).** From the pin (`mode`, default `'shared'`): shared → dedicated → in-process. A hosting **fails** (N25) when its constructor throws (no `SharedWorker` on Chrome Android), the worker fires `error` before the handshake completed (script failed to load or threw at top level), or no `hello` arrives within `handshakeTimeoutMs` (default 5000). Each failure emits `modeFallback { from, to, reason }` (§2.7) and the next hosting is tried; when the last one fails, `createClient` rejects with that error. A `ProtocolMismatchError` is **not** a failure to step down from: it is a real incompatibility and rejects `createClient` at once (stale cached script, package skew — §3.1).
 - **`workerUrl`** is required for `'shared'` and `'dedicated'`; omitting it with the default pin throws `ConfigError` before anything is created (the doc says: omit only when pinning `'in-process'`). Workers are created as module workers (`{ type: 'module' }`).
 - **In-process (N27).** Every `createClient` with the in-process hosting builds its own `Engine` behind a `MessageChannel` pair in the page (no module-level singleton); two in-process clients in one page do not share data — sharing in a page is what the workers are for. The server side is the same `RpcServer`, so the RPC layer is exercised (§3.2).
-- **Handles.** `client.cache(config)` sends `cache` and returns a `CacheHandle` whose methods map one-to-one onto the ops with `cacheId` filled in. `put` transfers the batch's typed-array buffers (§3.3); the TSDoc says the arrays are consumed. `cache.on(event, fn)` filters `client.on` by `cacheId` for cache- and request-scoped events.
+- **Handles.** `client.cache(config)` sends `cache` and returns a `CacheHandle` whose methods map one-to-one onto the ops with `cacheId` filled in. `put` transfers the batch's typed-array buffers (§3.3); the TSDoc says the arrays are consumed. `hydrate(snapshot)` sends `hydrate` with the snapshot cloned, so it stays usable (§2.8). `cache.on(event, fn)` filters `client.on` by `cacheId` for cache- and request-scoped events.
 - **Events.** `evt` messages re-emit as `ClientEvents`: `cacheCleared` (cache scope), `mergeWarning` (request scope, with `requestId`), `authInvalid` (client scope, step ⑪), and the client-made `modeFallback` and `workerLost`. Listeners run on the page; a throwing listener does not break the port (the emitter's rule).
 - **Dispose.** `client.dispose()` sends `dispose`, releases the port, terminates an owned dedicated worker, and rejects later calls with `TscacheError`; idempotent. A SharedWorker is never terminated by a client (other tabs may use it). The client also disposes itself on the page's `pagehide` event when the page is not being persisted (best effort), because browsers fire no port-close event a SharedWorker could use to notice a closed tab; a page entering the back/forward cache (`persisted: true`) keeps its client, since it may be restored with its objects intact. A tab whose renderer dies abruptly fires no `pagehide` either; its connection then stays registered in the worker until the worker is torn down with the last tab — a bounded leak accepted by N28. A handshake that times out or sees a worker `error` is aborted: its listeners go and this side's port closes, so a late `hello` completes nothing. A dedicated worker's `error` after the handshake aborts the client's pending requests (a `Worker` has no port closure to observe).
 - **Worker loss (N32).** A client is lost when its transport fails underneath it after the handshake: its SharedWorker's lifetime lock is granted to it (below), a dedicated worker fires `error` (which already aborts pending requests), or the port closes or the server sends `bye`. On loss, pending and later calls reject with `TscacheError(reason)`. The client releases what it owns, as `dispose()` would: an owned dedicated worker is terminated and the `pagehide` listener removed, but no `dispose` message is sent. Then it emits `workerLost { reason }` once. `dispose()` withdraws the queued lock request and never emits it. Chromium runs a SharedWorker in the renderer of the tab that created it. A crash of that renderer kills the worker, and the other tabs get no `error` and no port `close`. In a SharedWorker scope with Web Locks, the worker entry requests an exclusive lock `tscache-worker:<random UUID>` at startup and holds it for its lifetime. Ports that connect before the grant wait, then get `hello` with `lock`. After the handshake, a shared-mode client requests that lock in `'shared'` mode with an `AbortSignal`. The browser grants it only once the worker is gone, so a grant means worker loss. Without Web Locks (a non-secure context) or without `hello.lock` (an older worker script), nothing is watched and a host crash hangs as before. Dedicated and in-process hostings hold no lock: a dedicated worker shares its page's renderer and dies with it. Both protocol changes of N32 and N33 are additive and optional (an old client ignores `lock` and `context`; a new client facing an old worker sees no `lock` and skips the watch, and gets `authInvalid` without `context`, which the refresh snippet treats as a refusal of the stored token), so `PROTOCOL_VERSION` stays 1.
@@ -870,7 +980,7 @@ class Orchestrator {
 Rules:
 
 - **Loading (N30).** `init.fetcher` makes the server call `load()` before answering: `import(module)` once per worker (the first connection loads it; later connections reuse it; a different module on a later connection is a `ConfigError` in `init-err`). An import failure, or a module whose default export has no `fetch` function, answers `init-err` with a `TscacheError` naming the module, so `createClient` rejects at startup. `context` is stored and sent with every request; `updateAuth` replaces it. A tab that joins with a context that is not the identical value takes the `updateAuth` path once the module is loaded (structured-cloneable values have no cheap, cycle-safe equality, so anything else is treated as new material).
-- **Orchestrated get (N2).** `get` reads the engine; with `cacheOnly` or no fetcher it returns that. Otherwise the `'uncached'` misses are **coalesced**: adjacent misses merge, and a miss abutting existing coverage is extended by one interval into it (locked: the one-point overlap aids range merge). Each coalesced range becomes one `FetchRequest`; the response is applied with `engine.put(cacheId, response, { range })`, so the fetched range is authoritative (N3, clipped by the response's own watermark, N19). The engine is read again and the result returned. A range whose fetch threw comes back as a miss with `reason: 'fetch-failed'` and `error: { name, message }`; a range not fetched because auth is invalid comes back `'auth-pending'`; `'uncached'` is reserved for slots nobody asked to fetch (only after the fence, below).
+- **Orchestrated get (N2).** `get` reads the engine; with `cacheOnly` or no fetcher it returns that. Otherwise the `'uncached'` misses are **coalesced**: adjacent misses merge, and a miss abutting existing coverage is extended by one interval into it (locked: the one-point overlap aids range merge). Each coalesced range becomes one `FetchRequest`; the response is applied with `engine.put(cacheId, response, { range })`, so the fetched range is authoritative (N3, clipped by the response's own watermark, N19). The engine is read again and the result returned; `options.snapshot` is applied to that final read (or to the only read under `cacheOnly` or without a fetcher), so the result's columns and its `snapshot` come from one state (N36). A range whose fetch threw comes back as a miss with `reason: 'fetch-failed'` and `error: { name, message }`; a range not fetched because auth is invalid comes back `'auth-pending'`; `'uncached'` is reserved for slots nobody asked to fetch (only after the fence, below).
 - **Dedup (N31, locked).** In-flight fetches are keyed by `(cacheId, range.start, range.end)` of the coalesced range; a second `get` from any tab that produces the same key awaits the same promise and applies nothing itself. Overlapping but different ranges fetch separately.
 - **Version fence (N29; companion to N19).** The orchestrator counts `cacheCleared` events per cache. A response whose fetch started before the latest clear is **not applied**; the waiting `get` re-issues the fetch for what is still missing **once**, and if that one is dropped too the range is returned as `'uncached'`. A fetch's `put` may itself trigger a version-mismatch clear (its `meta.version` is newer): that clear happens inside the put and does not fence the response that caused it.
 - **Auth (design b/y, locked).** `AuthInvalidError` (detected by `code === 'tscache:auth-invalid'`, never `instanceof`) from a fetch flips the state to `'invalid'` and broadcasts `authInvalid { error, context }` to every port once per flip, where `context` is the context the refused fetch was issued with (N33). Only a failure under the current auth generation flips the state, so this is the context in place when the event is sent. Every tab of the origin receives it; those tabs supplied it. The failed range comes back `'auth-pending'`, and while invalid no fetch is issued (every miss resolves `'auth-pending'` at once). `updateAuth(context)` from any tab is applied in call order, one at a time: the fetcher's `updateAuth` hook runs, then the context and the auth generation switch together and the state flips to `'valid'`; the next `get` fetches again. While the fetcher's hook is running (a credential transition, machine-speed), no fetch starts: the module's own state and the orchestrator's stamp could disagree, so uncached ranges come back `'auth-pending'` at once and the consumer re-gets after the switch. A fetch that was already out carries the generation it started under, and an auth failure from a superseded generation is ignored. A `get` waiting on several fetches is released the moment one of them invalidates auth: the ranges still out come back `'auth-pending'` while their fetches finish in the background. The fetcher receives a copy of the range; the orchestrator's own range object decides the authoritative write. Likewise the fetcher and its `updateAuth` hook receive copies of the context, so what later fetches carry and what `authInvalid` names cannot be changed by fetcher code. Nothing is retried on behalf of a `get` that already returned: a `get` never waits for a human.

@@ -8,11 +8,13 @@ import { ConfigError, UnknownCacheError } from "../errors";
 import type {
   CacheConfig,
   GetResult,
+  HydrateResult,
   PutBatch,
   PutOptions,
   PutResult,
   Range,
   ResolvedCacheConfig,
+  Snapshot,
 } from "../types";
 import { CacheState } from "./cache";
 import { Emitter } from "./emitter";
@@ -100,10 +102,29 @@ export class Engine {
   /**
    * Every present point in the range, with the authoritative sub-ranges and
    * the uncovered ones as 'uncached' misses (§2.3, N16). Current state only:
-   * orchestration arrives at step ⑪.
+   * orchestration arrives at step ⑪. `snapshot: true` adds a Snapshot of
+   * the same state (§2.8).
    */
-  get(cacheId: string, range: Range): GetResult {
-    return this.#state(cacheId).get(range);
+  get(
+    cacheId: string,
+    range: Range,
+    options?: { snapshot?: boolean },
+  ): GetResult {
+    return this.#state(cacheId).get(range, options);
+  }
+
+  /** What the cache knows about the range (§2.8, N34); no read, no orchestration. */
+  snapshot(cacheId: string, range: Range): Snapshot {
+    return this.#state(cacheId).snapshot(range);
+  }
+
+  /**
+   * Applies a snapshot where the cache knows nothing (§2.8, N35). One
+   * synchronous call, so no other write interleaves; emits no event, since
+   * it never clears.
+   */
+  hydrate(cacheId: string, snapshot: Snapshot): HydrateResult {
+    return this.#state(cacheId).hydrate(snapshot);
   }
 
   /**

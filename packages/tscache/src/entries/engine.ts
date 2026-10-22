@@ -11,11 +11,16 @@ export {
   TscacheError,
   UnknownCacheError,
 } from "../errors";
+export { decodeSnapshot, encodeSnapshot } from "../snapshot";
 export type {
   CacheConfig,
+  DenseSegmentPayload,
   Dtype,
+  EncodedSegmentPayload,
+  EncodedSnapshot,
   FieldArray,
   GetResult,
+  HydrateResult,
   MergeWarning,
   Miss,
   MissReason,
@@ -24,5 +29,6 @@ export type {
   PutResult,
   Range,
   ResolvedCacheConfig,
+  Snapshot,
 } from "../types";
 export { DTYPES } from "../types";

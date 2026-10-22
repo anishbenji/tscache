@@ -36,8 +36,8 @@ export const CONNECTION: InjectionKey<Connection> = Symbol("tscache");
 /**
  * A plugin that connects once for the app and disposes the connection when
  * the app unmounts. `open` runs once per client, so it can read the
- * fetcher's current credentials; `seeds`, the server's reads, go to the
- * first client only. Install it in the browser only; a server render reads
+ * fetcher's current credentials; `seeds`, the server's reads, go to every
+ * client. Install it in the browser only; a server render reads
  * with its own client (ssr-server.ts).
  */
 export function createTscache(

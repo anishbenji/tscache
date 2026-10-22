@@ -15,6 +15,7 @@ import type {
   PutOptions,
   PutResult,
   Range,
+  Snapshot,
 } from "../types";
 import {
   type Bye,
@@ -51,6 +52,7 @@ interface Params {
   options?: PutOptions & GetOptions;
   t?: number;
   context?: unknown;
+  snapshot?: Snapshot;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -276,6 +278,8 @@ export class RpcServer {
     clearAll: () => this.#engine.clearAll(),
     setFinalizedUntil: (_c, _r, p) =>
       this.#engine.setFinalizedUntil(p.cacheId as string, p.t as number),
+    hydrate: (_c, _r, p) =>
+      this.#engine.hydrate(p.cacheId as string, p.snapshot as Snapshot),
     updateAuth: (_c, _r, p) => this.#orchestrator.updateAuth(p.context),
     // Acknowledged first; #request detaches the port afterwards.
     dispose: () => undefined,

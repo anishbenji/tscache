@@ -16,6 +16,7 @@ import {
   TscacheError,
   UnknownCacheError,
 } from "../errors";
+import type { Snapshot } from "../types";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -28,7 +29,9 @@ export type Op =
   | "clearAll"
   | "setFinalizedUntil"
   | "updateAuth"
-  | "dispose";
+  | "dispose"
+  /** §2.8 (N36); additive, so the protocol stays 1 (N37). */
+  | "hydrate";
 
 export interface WireError {
   name: string;
@@ -247,10 +250,14 @@ export function fromWireError(input: WireError): TscacheError {
   return rebuild(wire);
 }
 
-/** The distinct buffers behind a message's typed arrays, for the transfer list. */
+/**
+ * The distinct buffers behind a message's typed arrays, for the transfer
+ * list, including a get result's snapshot payloads (§3.3, §2.8).
+ */
 export function transferablesOf(value: {
   timestamps?: ArrayBufferView | number[];
   fields?: Record<string, ArrayBufferView | number[]>;
+  snapshot?: Snapshot;
 }): ArrayBuffer[] {
   const buffers = new Set<ArrayBuffer>();
   const add = (view: ArrayBufferView | number[] | undefined) => {
@@ -261,6 +268,10 @@ export function transferablesOf(value: {
   add(value.timestamps);
   if (value.fields !== undefined) {
     for (const view of Object.values(value.fields)) add(view);
+  }
+  for (const payload of value.snapshot?.segments ?? []) {
+    add(payload.mask);
+    for (const { data } of payload.fields) buffers.add(data);
   }
   return [...buffers];
 }

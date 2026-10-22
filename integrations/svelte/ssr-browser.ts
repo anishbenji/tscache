@@ -1,6 +1,6 @@
 // A server-rendered Svelte 5 page, the browser's half. It hydrates the app
 // with the props the server rendered it from, so the hydration render
-// writes what the server wrote, and seeds the first client's cache with the
+// writes what the server wrote, and seeds each client's cache with the
 // server's read, so the live answer that follows fetches only what the read
 // did not cover (the provisional last day, say).
 

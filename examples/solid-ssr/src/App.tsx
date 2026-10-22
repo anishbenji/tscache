@@ -69,7 +69,7 @@ function Live(props: ServerRead) {
   };
 
   // In time for the first fetch: the first get waits for the worker's
-  // handshake and the seeds.
+  // handshake and the snapshot.
   onSettled(() =>
     onFetchNotice((notice) => {
       setFetches((n) => n + 1);

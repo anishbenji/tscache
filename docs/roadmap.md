@@ -108,7 +108,8 @@ are rows N34–N44 in `docs/architecture.md` §8.
 - A snapshot API over the segment payload (§3.4) that carries the dataset version and watermark, so SSR
   hydration is exact and a seed can no longer outlive a restatement (`docs/reviews/step-13.md`, ⑬b),
   applied in one engine step only where the browser's cache covers nothing, so another tab's fetch
-  cannot land between the check and the put (`docs/reviews/step-14.md`, R2-2). N34–N39; step ⑮.
+  cannot land between the check and the put (`docs/reviews/step-14.md`, R2-2). N34–N39; built in
+  step ⑮ (`get(range, { snapshot: true })`, `CacheHandle.hydrate`, `encodeSnapshot`/`decodeSnapshot`).
 - A `tscache/vite` entry exporting the fetcher-URL plugin, with file URLs for server builds. The SSR page
   plugin stays in the examples. N40–N41; step ⑯.
 - DC-1 and DC-2 from step ⑫ (`docs/reviews/step-12.md`): the refresh snippet's assumption that a refresh

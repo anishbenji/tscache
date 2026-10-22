@@ -42,7 +42,7 @@ server alone.
   for the read. The reader writes the read into `TransferState` under
   `makeStateKey<Dehydrated>`, and Angular escapes it into the page.
 - In the browser, `hydrate: [candles]` makes the service rehydrate that
-  read, seed the first client with it, and hand it to the first
+  read, seed every client with it, and hand it to the first
   `cacheResource` as its first value. The hydration render then matches
   the server's markup, and the live read fetches only what the read did
   not cover.

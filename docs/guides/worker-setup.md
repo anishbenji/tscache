@@ -142,10 +142,36 @@ Two things differ from the browser:
   needs the backend's origin from its context. The examples' fetcher reads
   `context.origin`; the browser's client omits it.
 
-The SSR examples (`examples/react-ssr`, `examples/solid-ssr`) show the rest:
-the server writes the covered parts of its answer into the page, and the
-browser puts them back with their ranges, so it fetches only what they do not
-cover.
+The server hands its answer to the browser as a snapshot (`docs/architecture.md`
+§2.8). Read with `snapshot: true`, and the result carries a `Snapshot` taken
+from the same state as its columns. The page carries both: the columns for the
+render, and the snapshot for the cache, encoded for JSON:
+
+```ts
+// Server: one read gives the page's data and the cache's snapshot.
+const { snapshot, ...result } = await cache.get(range, { snapshot: true });
+const html = render(result); // your framework's renderer
+const json = JSON.stringify(encodeSnapshot(snapshot!)).replaceAll("<", "\\u003c");
+page.head += `<script id="tscache-snapshot" type="application/json">${json}</script>`;
+
+// Browser: before the first live read.
+const text = document.getElementById("tscache-snapshot")!.textContent!;
+const { applied, skipped } = await cache.hydrate(decodeSnapshot(JSON.parse(text)));
+```
+
+`hydrate` writes only where the browser's cache neither covers anything nor
+holds a provisional point, in one call inside the worker, so another tab's
+newer fetch is never replaced. A snapshot of another dataset version is
+refused (`skipped: 'version-mismatch'`), and the snapshot's own provisional
+tail is left for the browser to fetch. The snapshot stays usable after
+`hydrate`, so the client that replaces a lost one can be seeded from it too.
+A worker from before `hydrate` (a stale cached script) rejects the call with
+"unknown op"; treat that as nothing applied, and the cache fetches instead.
+Escape every `<` in the JSON, as above, so no string in it can close the
+script element.
+
+The SSR examples (`examples/react-ssr`, `examples/solid-ssr`) and the
+integration snippets (`integrations/`) show the whole flow.
 
 ## Notes
 

@@ -3,13 +3,20 @@ import type { Hydration } from "../../examples/mock-backend/src/hydration";
 import type { FetchNotice } from "../../examples/mock-backend/src/notices";
 import type { ServerRead } from "../../examples/solid-ssr/src/sensor";
 import { appUrl } from "./apps";
-import { notices, recordNotices, waitNotices } from "./support";
+import {
+  coveredPoints,
+  coveredSpan,
+  logCount,
+  logSince,
+  notices,
+  recordNotices,
+  waitNotices,
+} from "./support";
 
 // examples/solid-ssr: the server reads the last 24 hours of a sensor with an
-// in-process client shared by every render, and writes the covered ranges
-// with their readings into the page. The browser puts them into its cache
-// and fetches only what they do not cover; the dropouts inside them are
-// known without a fetch.
+// in-process client shared by every render, and writes the read's snapshot
+// into the page. The browser hydrates its cache from it and fetches only
+// what it does not cover; the dropouts inside it are known without a fetch.
 
 test.use({ baseURL: appUrl("solid-ssr") });
 test.describe.configure({ mode: "serial" });
@@ -31,11 +38,9 @@ async function script<T>(page: Page, id: string): Promise<T> {
 const read = (page: Page) => script<ServerRead>(page, "app-props");
 const hydration = (page: Page) => script<Hydration>(page, "tscache-hydration");
 
-/** Where the seeds' coverage ends, which the browser need not fetch. */
+/** Where the snapshot's coverage ends, which the browser need not fetch. */
 async function seedsEnd(page: Page): Promise<number> {
-  const end = (await hydration(page)).seeds.at(-1)?.range.end;
-  if (end === undefined) throw new Error("the page carries no seeds");
-  return end;
+  return coveredSpan((await hydration(page)).snapshot).until;
 }
 
 async function open(page: Page): Promise<void> {
@@ -63,14 +68,17 @@ test.describe("without JavaScript", () => {
 
     const { window, figures } = await read(page);
     expect(figures.readings).toBe(readings);
-    const { range, seeds } = await hydration(page);
+    const { range, snapshot } = await hydration(page);
     expect(range).toEqual(window);
     // The read snaps outward to the minute grid, so it ends at the minute
     // after now, which is still provisional: coverage ends a minute earlier,
     // at the minute the render began in, or at the next one when a minute
     // began before the backend answered.
-    expect(seeds).toHaveLength(1);
-    const covered = seeds[0]?.range ?? { start: Number.NaN, end: Number.NaN };
+    expect(snapshot.coverage).toHaveLength(1);
+    const covered = snapshot.coverage[0] ?? {
+      start: Number.NaN,
+      end: Number.NaN,
+    };
     expect(covered.start).toBe(minuteOf(window.start));
     expect([minuteOf(window.end), minuteOf(window.end) + MINUTE]).toContain(
       covered.end,
@@ -79,8 +87,8 @@ test.describe("without JavaScript", () => {
     expect(readings + knownEmpty).toBe(
       (covered.end - covered.start) / MINUTE + 1,
     );
-    // Every reading travels with the seed: 8 bytes per timestamp.
-    expect(atob(seeds[0]?.timestamps ?? "").length / 8).toBe(readings);
+    // Every reading travels with the snapshot.
+    expect(coveredPoints(snapshot)).toHaveLength(readings);
     await expect(
       page.getByRole("button", { name: "Load the previous day" }),
     ).toBeDisabled();
@@ -150,8 +158,7 @@ test("the server's cache serves later renders", async ({ page }) => {
 
 test("loading the previous day fetches only that day", async ({ page }) => {
   await open(page);
-  const { seeds } = await hydration(page);
-  const coverageStart = seeds[0]?.range.start ?? Number.NaN;
+  const coverageStart = coveredSpan((await hydration(page)).snapshot).from;
   const [tail] = await waitNotices(page, 1);
   if (tail === undefined) throw new Error("no fetch after hydration");
   const readings = await count(page, "readings");
@@ -208,17 +215,20 @@ test("when the worker's host tab crashes, another tab connects a new client and 
   await dead;
 
   await expect(survivor.locator(".log")).toContainText("worker lost");
-  // The new worker starts empty and is not seeded again: the seeds are as
-  // old as the page, which may have seen a newer dataset version since. So
-  // the new client fetches the whole window, in one fetch.
+  // The new worker starts empty and the page's snapshot seeds it (N39,
+  // every client): something is applied, and the day is not fetched again.
   await expect
-    .poll(async () =>
-      (await notices(survivor))
-        .slice(since)
-        .filter((notice) => notice.range.end - notice.range.start >= DAY),
-    )
-    .toHaveLength(1);
+    .poll(() => logCount(survivor, "snapshot from the server"))
+    .toBe(2);
   await expect(survivor.getByTestId("status")).toHaveText("ready");
+  const replaced = await logSince(survivor, "worker lost");
+  expect(replaced).toContain("snapshot from the server");
+  expect(replaced).not.toContain("snapshot from the server: 0 range");
+  expect(
+    (await notices(survivor))
+      .slice(since)
+      .filter((notice) => notice.range.end - notice.range.start >= DAY),
+  ).toEqual([]);
   await expect(survivor.getByTestId("mode")).toHaveText("shared");
 
   const readings = await count(survivor, "readings");

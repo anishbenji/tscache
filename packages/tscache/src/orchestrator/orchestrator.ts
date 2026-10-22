@@ -234,7 +234,9 @@ export class Orchestrator {
     options?: GetOptions,
     requestId?: string,
   ): Promise<GetResult> {
-    let result = this.#engine.get(cacheId, range);
+    // Every read whose result may be returned takes `options.snapshot`, so
+    // a snapshot comes from the same state as the columns (§2.8, N36).
+    let result = this.#engine.get(cacheId, range, options);
     if (this.#fetcher === undefined || options?.cacheOnly === true) {
       return result;
     }
@@ -251,7 +253,7 @@ export class Orchestrator {
       for (const [i, r] of wanted.entries()) {
         settled.push({ range: r, outcome: outcomes[i] as Outcome });
       }
-      result = this.#engine.get(cacheId, range);
+      result = this.#engine.get(cacheId, range, options);
       if (attempt === 1 || !outcomes.some((o) => o.kind === "dropped")) break;
       const blocked = settled
         .filter((s) => s.outcome.kind === "failed" || s.outcome.kind === "auth")

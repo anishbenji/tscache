@@ -5,7 +5,7 @@
 // is turning the read's promise into that reactivity too.
 
 import type { CacheConfig, CacheHandle, TscacheClient } from "tscache";
-import { putCovered, type ServerRead } from "./hydration";
+import { hydrateRead, type ServerRead } from "./hydration";
 
 /**
  * Where the connection stands. Every change is a new object, so a snapshot
@@ -34,9 +34,9 @@ export interface Connection {
    * `client`'s handle for `config`. Every call goes to `client.cache()`,
    * which opens the same cache for an equal config and rejects a
    * conflicting one with ConfigError (N4, N20): whether two configs name
-   * one cache is the library's call, never this code's. On the first
-   * client, a cache's seed goes in before its first handle is given out,
-   * so no read runs ahead of it.
+   * one cache is the library's call, never this code's. On every client, a
+   * cache's seed goes in before its first handle is given out, so no read
+   * runs ahead of it.
    */
   cache(client: TscacheClient, config: CacheConfig): Promise<CacheHandle>;
   /** Disposes the client and stops replacing it. Idempotent. */
@@ -52,13 +52,13 @@ const CONNECTING: ConnectionState = { status: "connecting" };
  * `open` runs once per client, so it can read the fetcher's current
  * credentials.
  *
- * Only the first client gets the seeds. A replacement starts empty and
- * fetches what it is asked for: the seeds are as old as the page, which
- * may have seen a newer dataset version since, and a seed carries no
- * version to tell. Each seed is put once, when its cache is first asked
- * for, into the cache opened with the seed's own config: a reader asking
- * for a conflicting config is refused by the client's check, rather than
- * handed coverage read on another grid.
+ * Every client gets the seeds, a replacement's empty worker included:
+ * `hydrate` refuses a snapshot of another dataset version and never
+ * touches what a cache covers, so a page-old seed cannot replace newer
+ * data (N39). Each seed is applied once per client, when its cache is
+ * first asked for, into the cache opened with the seed's own config: a
+ * reader asking for a conflicting config is refused by the client's check,
+ * rather than handed coverage read on another grid.
  */
 export function connect(
   open: () => Promise<TscacheClient>,
@@ -66,9 +66,9 @@ export function connect(
 ): Connection {
   let state = CONNECTING;
   let disposed = false;
-  const unseeded = new Map(seeds.map((seed) => [seed.config.id, seed]));
-  const seedings = new Map<string, Promise<void>>();
-  let first: TscacheClient | undefined;
+  const byId = new Map(seeds.map((seed) => [seed.config.id, seed]));
+  /** Per client, the applying of each cache's seed, started on the first ask. */
+  const seedings = new WeakMap<TscacheClient, Map<string, Promise<void>>>();
   const listeners = new Set<() => void>();
 
   function set(next: ConnectionState): void {
@@ -80,7 +80,6 @@ export function connect(
     open().then(
       (client) => {
         if (disposed) return void client.dispose();
-        first ??= client;
         client.on("workerLost", () => {
           if (disposed) return;
           set(CONNECTING);
@@ -94,22 +93,27 @@ export function connect(
     );
   }
 
-  /** The putting of the seed for cache `id`, started on the first ask. */
+  /** The applying of cache `id`'s seed to `client`, started on the first ask. */
   function seeding(
     client: TscacheClient,
     id: string,
   ): Promise<void> | undefined {
-    if (client !== first) return undefined;
-    let putting = seedings.get(id);
-    const seed = unseeded.get(id);
-    if (putting === undefined && seed !== undefined) {
-      unseeded.delete(id);
-      putting = client
-        .cache(seed.config)
-        .then((cache) => putCovered(cache, seed.config, seed.read));
-      seedings.set(id, putting);
+    const seed = byId.get(id);
+    if (seed === undefined) return undefined;
+    let ofClient = seedings.get(client);
+    if (ofClient === undefined) {
+      ofClient = new Map();
+      seedings.set(client, ofClient);
     }
-    return putting;
+    let applying = ofClient.get(id);
+    if (applying === undefined) {
+      applying = client
+        .cache(seed.config)
+        .then((cache) => hydrateRead(cache, seed.read))
+        .then(() => {});
+      ofClient.set(id, applying);
+    }
+    return applying;
   }
 
   start();

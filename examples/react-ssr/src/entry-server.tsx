@@ -10,6 +10,7 @@ import {
   dehydrate,
   hydrationScript,
   jsonScript,
+  snapshotOf,
 } from "@examples/mock-backend/hydration";
 import type { RenderedPage, RenderRequest } from "@examples/mock-backend/vite";
 import { renderToString } from "react-dom/server";
@@ -55,7 +56,8 @@ export async function render({ origin }: RenderRequest): Promise<RenderedPage> {
   const range = { start: now - HALF_YEAR, end: now };
   // What the cache held before this render, for the page to tell.
   const known = await cache.get(range, { cacheOnly: true });
-  const result = await cache.get(range);
+  // The page's summary and its snapshot come from one read (N36).
+  const result = await cache.get(range, { snapshot: true });
   // The page shows what the cache has; the browser fetches the rest itself.
   // The provisional day is always an 'uncached' miss; any other is news.
   for (const { reason, range: missed } of result.misses) {
@@ -68,7 +70,7 @@ export async function render({ origin }: RenderRequest): Promise<RenderedPage> {
     summary: summarize(result),
     serverCached: coveredBars(known),
   };
-  const hydration = dehydrate(range, result);
+  const hydration = dehydrate(range, snapshotOf(result));
   return {
     head: hydrationScript(hydration) + jsonScript(APP_PROPS, props),
     html: renderToString(<App {...props} hydration={hydration} />),
