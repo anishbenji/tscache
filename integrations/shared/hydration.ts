@@ -1,24 +1,34 @@
-// Server rendering through tscache's public API, the same in every
-// framework. The server reads a range with its own client and writes the
-// answer into the page. The browser renders that answer first, so its
-// hydration render matches the server's, and puts the answer's covered
-// ranges into its own cache with those ranges, so it fetches only the rest
+// Server rendering through tscache's snapshot API (docs/architecture.md
+// §2.8), the same in every framework. The server reads a range with its own
+// client and `get(range, { snapshot: true })`, and writes both forms of the
+// answer into the page: the columns, which the browser renders first so its
+// hydration render matches the server's, and the snapshot, which the
+// browser applies to its cache with `hydrate`, so it fetches only the rest
 // (a provisional tail, say).
 
-import type {
-  CacheConfig,
-  CacheHandle,
-  Dtype,
-  FieldArray,
-  GetResult,
-  Miss,
-  Range,
+import {
+  type CacheConfig,
+  type CacheHandle,
+  type Dtype,
+  decodeSnapshot,
+  type EncodedSnapshot,
+  encodeSnapshot,
+  type FieldArray,
+  type GetResult,
+  type HydrateResult,
+  type Miss,
+  type Range,
+  type Snapshot,
 } from "tscache";
 
-/** What a server read: the range it asked for and the cache's answer. */
+/**
+ * What a server read: the range it asked for, the cache's answer and the
+ * snapshot taken from the same state (N36).
+ */
 export interface ServerRead {
   range: Range;
   result: GetResult;
+  snapshot: Snapshot;
 }
 
 /**
@@ -35,6 +45,8 @@ export interface Dehydrated {
   fields: Record<string, string>;
   coverage: Range[];
   misses: Miss[];
+  /** The snapshot as JSON (`encodeSnapshot`). */
+  snapshot: EncodedSnapshot;
 }
 
 const ARRAYS: Readonly<Record<Dtype, new (buffer: ArrayBuffer) => FieldArray>> =
@@ -82,13 +94,14 @@ function mapFields<A, B>(
   );
 }
 
-export function dehydrate({ range, result }: ServerRead): Dehydrated {
+export function dehydrate({ range, result, snapshot }: ServerRead): Dehydrated {
   return {
     range,
     timestamps: toBase64(result.timestamps),
     fields: mapFields(result.fields, toBase64),
     coverage: result.coverage,
     misses: result.misses,
+    snapshot: encodeSnapshot(snapshot),
   };
 }
 
@@ -113,77 +126,31 @@ export function rehydrate(config: CacheConfig, value: Dehydrated): ServerRead {
       coverage: value.coverage,
       misses: value.misses,
     },
+    snapshot: decodeSnapshot(value.snapshot),
   };
 }
 
-/** The first index of sorted `timestamps` past `t` (or at it, if `at`). */
-function bound(timestamps: Float64Array, t: number, at: boolean): number {
-  let lo = 0;
-  let hi = timestamps.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1;
-    const value = timestamps[mid] as number;
-    if (value < t || (!at && value === t)) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
-}
-
-/** The parts of `range` that no range of sorted `coverage` holds. */
-function uncovered(range: Range, coverage: Range[], interval: number): Range[] {
-  const parts: Range[] = [];
-  let start = range.start;
-  for (const covered of coverage) {
-    if (covered.end < start) continue;
-    if (covered.start > range.end) break;
-    if (covered.start > start) {
-      parts.push({ start, end: covered.start - interval });
-    }
-    start = covered.end + interval;
-  }
-  if (start <= range.end) parts.push({ start, end: range.end });
-  return parts;
-}
-
 /**
- * Puts the covered ranges of a server's read into `cache`, each with its
- * range, so an empty slot inside one is a confirmed gap the browser never
- * fetches. Only where the cache does not cover them yet: with a
- * SharedWorker, another tab may hold a range from a later fetch than the
- * server's, and a seed must not replace it. Points outside the coverage,
- * such as a provisional tail, stay out; the browser fetches them itself.
- *
- * The check and the puts are separate requests, and tscache's public API
- * has no put that applies only where nothing is covered. Another tab's
- * fetch that lands between them is replaced by the seed. That changes
- * values only if the backend changed covered history since the server's
- * read, the limit a seed has anyway, since it carries no dataset version.
+ * Applies a server's snapshot to `cache` (§2.8, N35): only where the cache
+ * neither covers nor holds a provisional point, in one call inside the
+ * worker, so another tab's newer fetch is never replaced; a snapshot of
+ * another dataset version is refused. The snapshot is cloned, so one read
+ * can seed every client. A worker from before `hydrate` answers "unknown
+ * op": that counts as nothing applied, and the cache fetches instead (N37).
+ * Any other failure is a bug and propagates.
  */
-export async function putCovered(
+export async function hydrateRead(
   cache: CacheHandle,
-  config: CacheConfig,
-  { range, result }: ServerRead,
-): Promise<void> {
-  const known = await cache.get(range, { cacheOnly: true });
-  const parts = result.coverage.flatMap((covered) =>
-    uncovered(covered, known.coverage, config.interval),
-  );
-  const { timestamps } = result;
-  await Promise.all(
-    parts.map((part) => {
-      const from = bound(timestamps, part.start, true);
-      const to = bound(timestamps, part.end, false);
-      // put() transfers its arrays to the worker, and the page still
-      // renders these: each part gets copies.
-      return cache.put(
-        {
-          timestamps: timestamps.slice(from, to),
-          fields: mapFields(result.fields, (values) => values.slice(from, to)),
-        },
-        { range: part },
-      );
-    }),
-  );
+  { snapshot }: ServerRead,
+): Promise<HydrateResult> {
+  try {
+    return await cache.hydrate(snapshot);
+  } catch (error) {
+    if (error instanceof Error && /unknown op/.test(error.message)) {
+      return { applied: [] };
+    }
+    throw error;
+  }
 }
 
 /** The id of the script element that carries the server's read. */

@@ -1,5 +1,10 @@
-import { ConfigError, type TscacheClient } from "tscache";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  ConfigError,
+  createClient,
+  type GetResult,
+  type TscacheClient,
+} from "tscache";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type Connection, connect } from "../shared/connection";
 import type { ServerRead } from "../shared/hydration";
 import { config, type Lossy, lossy, until } from "./helpers";
@@ -26,15 +31,24 @@ function lossyConnection(seeds: ServerRead[] = []) {
   return { connection, clients, connected };
 }
 
-const seed: ServerRead = {
-  range: { start: 0, end: 20 },
-  result: {
-    timestamps: new Float64Array([0, 20]),
-    fields: { v: new Float64Array([1, 2]), n: new Int16Array([1, 2]) },
-    coverage: [{ start: 0, end: 20 }],
-    misses: [],
-  },
-};
+/** A server's read of [0, 20]: points at 0 and 20, a confirmed gap at 10. */
+let seed: ServerRead;
+beforeAll(async () => {
+  const server = await createClient({ mode: "in-process" });
+  const cache = await server.cache(config);
+  const range = { start: 0, end: 20 };
+  await cache.put(
+    { timestamps: [0, 20], fields: { v: [1, 2], n: [1, 2] } },
+    { range },
+  );
+  const { snapshot, ...result } = await cache.get(range, {
+    cacheOnly: true,
+    snapshot: true,
+  });
+  await server.dispose();
+  if (snapshot === undefined) throw new Error("no snapshot");
+  seed = { range, result: result as GetResult, snapshot };
+});
 
 describe("connect", () => {
   it("connects, and tells subscribers", async () => {
@@ -60,7 +74,7 @@ describe("connect", () => {
     expect(seen).toEqual(["connecting", "connected"]);
   });
 
-  it("seeds the first client's cache and never a replacement's", async () => {
+  it("seeds the first client's cache and a replacement's (N39)", async () => {
     const { clients, connection, connected } = lossyConnection([seed]);
     await until(() => connected() !== null);
     const first = await connection.cache(connected() as TscacheClient, config);
@@ -70,18 +84,18 @@ describe("connect", () => {
     clients[0]?.lose();
     await until(() => connected() !== null);
     const next = await connection.cache(connected() as TscacheClient, config);
-    const fresh = await next.get(seed.range, { cacheOnly: true });
-    expect(fresh.coverage).toEqual([]);
+    const reseeded = await next.get(seed.range, { cacheOnly: true });
+    expect(reseeded.coverage).toEqual([{ start: 0, end: 20 }]);
   });
 
-  it("drops the seeds when the first client is lost before opening the cache", async () => {
+  it("seeds a replacement when the first client is lost before opening the cache", async () => {
     const { clients, connection, connected } = lossyConnection([seed]);
     await until(() => connected() !== null);
     clients[0]?.lose();
     await until(() => connected() !== null);
     const next = await connection.cache(connected() as TscacheClient, config);
-    const fresh = await next.get(seed.range, { cacheOnly: true });
-    expect(fresh.coverage).toEqual([]);
+    const seeded = await next.get(seed.range, { cacheOnly: true });
+    expect(seeded.coverage).toEqual([{ start: 0, end: 20 }]);
   });
 
   it("seeds a cache once per client under concurrent calls", async () => {

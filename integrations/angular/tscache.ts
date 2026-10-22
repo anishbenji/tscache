@@ -5,7 +5,7 @@
 // Angular's `resource()`, which drops an answer a newer range has overtaken;
 // putting the connection's state in its params makes a client that replaces
 // a lost one read again, with nothing reported. Server-rendered, the server's
-// read travels in TransferState: it seeds the browser's first client and is
+// read travels in TransferState: it seeds every browser client and is
 // the first value shown, so the hydration render matches the server's.
 
 import { isPlatformBrowser, isPlatformServer } from "@angular/common";
@@ -51,7 +51,7 @@ import {
 export interface TscacheOptions {
   /**
    * The caches the server read for this page (ssr-server.ts). Each one's
-   * read seeds the first client and is the first value of the first
+   * read seeds every client and is the first value of the first
    * `cacheResource()` for it.
    */
   hydrate?: readonly CacheConfig[];
@@ -129,8 +129,8 @@ export class Tscache {
   }
 
   /**
-   * `client`'s handle for `config`, opened once per client; the first
-   * client's is seeded with the server's read before it is handed out.
+   * `client`'s handle for `config`, opened once per client; every client's
+   * is seeded with the server's read before it is handed out.
    */
   cache(client: TscacheClient, config: CacheConfig): Promise<CacheHandle> {
     if (this.#connection === undefined) {

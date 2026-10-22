@@ -1,6 +1,6 @@
 // A server-rendered page in Solid, the browser's half. It hydrates the
 // server's markup from the server's read, then mounts the live chart, which
-// connects with that read as the first client's seed and shows it until its
+// connects with that read as every client's seed and shows it until its
 // own answer lands, so the page never shows a fallback. The browser fetches
 // only what the read did not cover (the provisional last day, say).
 

@@ -12,12 +12,15 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
 ## The shared core (`shared/`)
 
 - `connection.ts`: `connect(open, seeds?)` connects once, replaces the client when the worker behind it
-  is lost (a crashed tab hosting the SharedWorker), and disposes it on teardown. Only the first client
-  gets the server's seeds: they are as old as the page, and a seed carries no dataset version.
+  is lost (a crashed tab hosting the SharedWorker), and disposes it on teardown. Every client, a
+  replacement included, gets the server's seeds: `hydrate` refuses a snapshot of another dataset
+  version and never touches what a cache covers (architecture §2.8, N39).
   `open` runs once per client, so it can read the fetcher's current credentials.
-- `hydration.ts`: `dehydrate` and `rehydrate` carry a server's read through JSON (typed arrays as
-  base64, so NaN survives); `connection.ts` puts the read's covered ranges into the browser's cache
-  where it does not cover them yet, so the browser fetches only the rest, such as a provisional tail.
+- `hydration.ts`: `dehydrate` and `rehydrate` carry a server's read through JSON: its columns (typed
+  arrays as base64, so NaN survives), which the hydration render shows, and its snapshot
+  (`encodeSnapshot`); `hydrateRead`, which `connection.ts` calls, applies the snapshot with
+  `cache.hydrate`, which fills only what the browser's cache does not cover yet, so the browser
+  fetches only the rest, such as a provisional tail.
 - `server.ts`: `serverReader(options)` reads through one in-process client per server process, shared
   by every render. Every visitor reads the same cache: public data only.
 - `candles.ts`: the dataset every snippet shows, and the one line of text that stands in for a chart.

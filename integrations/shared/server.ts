@@ -53,6 +53,9 @@ export function serverReader({
   });
   return async (config, range) => {
     const cache = await (await client()).cache(config);
-    return { range, result: await cache.get(range) };
+    // The columns and the snapshot come from one read (N36).
+    const { snapshot, ...result } = await cache.get(range, { snapshot: true });
+    if (snapshot === undefined) throw new Error("the read carries no snapshot");
+    return { range, result, snapshot };
   };
 }

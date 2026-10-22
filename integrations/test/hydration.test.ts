@@ -1,14 +1,18 @@
 import {
   type CacheConfig,
+  type CacheHandle,
   createClient,
   type Dtype,
   type FieldArray,
+  type GetResult,
+  type Range,
   type TscacheClient,
+  TscacheError,
 } from "tscache";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   dehydrate,
-  putCovered,
+  hydrateRead,
   rehydrate,
   type ServerRead,
 } from "../shared/hydration";
@@ -18,6 +22,16 @@ const open: TscacheClient[] = [];
 afterEach(async () => {
   for (const client of open.splice(0)) await client.dispose();
 });
+
+/** A read of `range` with its snapshot, as the server reader takes one. */
+async function readOf(cache: CacheHandle, range: Range): Promise<ServerRead> {
+  const { snapshot, ...result } = await cache.get(range, {
+    cacheOnly: true,
+    snapshot: true,
+  });
+  if (snapshot === undefined) throw new Error("no snapshot");
+  return { range, result: result as GetResult, snapshot };
+}
 
 async function cache() {
   const client = await createClient({ mode: "in-process" });
@@ -39,8 +53,7 @@ async function serverRead(): Promise<ServerRead> {
     },
     { range: { start: 0, end: 50 } },
   );
-  const range = { start: 0, end: 50 };
-  return { range, result: await server.get(range, { cacheOnly: true }) };
+  return readOf(server, { start: 0, end: 50 });
 }
 
 describe("dehydrate / rehydrate", () => {
@@ -63,6 +76,7 @@ describe("dehydrate / rehydrate", () => {
     expect(Array.from(back.result.fields.n ?? [])).toEqual([-1, 2, 3, 4, 5]);
     expect(back.result.coverage).toEqual(read.result.coverage);
     expect(back.result.misses).toEqual(read.result.misses);
+    expect(back.snapshot).toEqual(read.snapshot);
   });
 
   it("keeps fields named like Object.prototype members as fields", async () => {
@@ -87,7 +101,7 @@ describe("dehydrate / rehydrate", () => {
       },
       { range },
     );
-    const read = { range, result: await server.get(range) };
+    const read = await readOf(server, range);
     const back = rehydrate(odd, JSON.parse(JSON.stringify(dehydrate(read))));
     expect(own(back.result.fields, "__proto__")).toEqual([1.5, 2.5]);
     expect(own(back.result.fields, "constructor")).toEqual([3, 4]);
@@ -95,7 +109,7 @@ describe("dehydrate / rehydrate", () => {
     const other = await createClient({ mode: "in-process" });
     open.push(other);
     const browser = await other.cache(odd);
-    await putCovered(browser, odd, back);
+    await hydrateRead(browser, back);
     const known = await browser.get(range, { cacheOnly: true });
     expect(known.coverage).toEqual([range]);
     expect(own(known.fields, "constructor")).toEqual([3, 4]);
@@ -109,22 +123,27 @@ describe("dehydrate / rehydrate", () => {
   });
 });
 
-describe("putCovered", () => {
-  it("puts the covered ranges with their gaps, and leaves the provisional tail out", async () => {
+describe("hydrateRead", () => {
+  it("applies the covered ranges with their gaps, and leaves the provisional tail out", async () => {
     const read = rehydrate(config, dehydrate(await serverRead()));
     const browser = await cache();
-    await putCovered(browser, config, read);
+    expect(await hydrateRead(browser, read)).toEqual({
+      applied: [{ start: 0, end: 30 }],
+    });
     const known = await browser.get(read.range, { cacheOnly: true });
     expect(known.coverage).toEqual([{ start: 0, end: 30 }]);
     expect(Array.from(known.timestamps)).toEqual([0, 10, 30]);
     expect(Array.from(known.fields.v ?? [])).toEqual([1, Number.NaN, 3]);
   });
 
-  it("keeps the read's arrays usable: it puts copies", async () => {
+  it("leaves the read usable: its arrays stay and its snapshot seeds another cache", async () => {
     const read = await serverRead();
-    await putCovered(await cache(), config, read);
+    await hydrateRead(await cache(), read);
     expect(read.result.timestamps.length).toBe(5);
     expect(read.result.fields.v?.length).toBe(5);
+    expect(await hydrateRead(await cache(), read)).toEqual({
+      applied: [{ start: 0, end: 30 }],
+    });
   });
 
   it("never replaces what the cache already covers", async () => {
@@ -134,22 +153,38 @@ describe("putCovered", () => {
       { timestamps: [0, 10], fields: { v: [100, 101], n: [0, 0] } },
       { range: { start: 0, end: 10 } },
     );
-    await putCovered(browser, config, read);
+    expect(await hydrateRead(browser, read)).toEqual({
+      applied: [{ start: 20, end: 30 }],
+    });
     const known = await browser.get(read.range, { cacheOnly: true });
     expect(known.coverage).toEqual([{ start: 0, end: 30 }]);
     expect(Array.from(known.timestamps)).toEqual([0, 10, 30]);
     expect(Array.from(known.fields.v ?? [])).toEqual([100, 101, 3]);
   });
 
-  it("puts nothing when the cache covers the whole read", async () => {
+  it("applies nothing when the cache covers the whole read", async () => {
     const read = await serverRead();
     const browser = await cache();
     await browser.put(
       { timestamps: [0, 10, 30], fields: { v: [7, 7, 7], n: [7, 7, 7] } },
       { range: { start: 0, end: 30 } },
     );
-    await putCovered(browser, config, read);
+    expect(await hydrateRead(browser, read)).toEqual({ applied: [] });
     const known = await browser.get(read.range, { cacheOnly: true });
     expect(Array.from(known.fields.v ?? [])).toEqual([7, 7, 7]);
+  });
+
+  it("counts an older worker's unknown op as nothing applied, and lets other failures through", async () => {
+    const read = await serverRead();
+    const refusing = (message: string) =>
+      ({
+        hydrate: () => Promise.reject(new TscacheError(message)),
+      }) as unknown as CacheHandle;
+    await expect(
+      hydrateRead(refusing('unknown op "hydrate"'), read),
+    ).resolves.toEqual({ applied: [] });
+    await expect(
+      hydrateRead(refusing("invalid snapshot: interval differs"), read),
+    ).rejects.toThrow(/invalid snapshot/);
   });
 });
