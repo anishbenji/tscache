@@ -87,24 +87,36 @@ export function useSeries(config: CacheConfig, range: Range): GetResult {
   const end = useDeferredValue(range.end);
 
   const read =
-    connection !== null && snapshot.status === "connected"
-      ? readOf(connection, snapshot.client, cache, start, end)
-      : undefined;
-  useEffect(() => {
-    if (read === undefined) return;
-    read.shown++;
-    return () => {
-      read.shown--;
-    };
-  }, [read]);
+    connection === null
+      ? undefined
+      : readFor(connection, snapshot, cache, start, end);
+  useEffect(() => read?.show(), [read]);
 
   if (read !== undefined) return use(read.answer);
-  if (connection === null || snapshot.status === "server") {
-    return serverAnswer(seeds, cache, start, end);
-  }
   if (snapshot.status === "failed") throw snapshot.error;
-  const client = use(clientOf(connection));
-  return use(readOf(connection, client, cache, start, end).answer);
+  return serverAnswer(seeds, cache, start, end);
+}
+
+/**
+ * The read a render suspends on: from the snapshot's client, or from the
+ * next client while the connection connects. A render that suspended while
+ * connecting finds the same read once connected (see clientOf), since
+ * React replays a suspended render expecting the same promise.
+ */
+function readFor(
+  connection: Connection,
+  snapshot: Snapshot,
+  config: CacheConfig,
+  start: number,
+  end: number,
+): Read | undefined {
+  if (snapshot.status === "connected") {
+    return readOf(connection, promiseOf(snapshot.client), config, start, end);
+  }
+  if (snapshot.status === "connecting") {
+    return readOf(connection, clientOf(connection), config, start, end);
+  }
+  return undefined;
 }
 
 function serverAnswer(
@@ -122,26 +134,68 @@ function serverAnswer(
   return read.result;
 }
 
-/** How many answers that no mounted component shows a client keeps. */
-const SPARE = 8;
-
-interface Read {
-  readonly answer: Promise<GetResult>;
-  /** Mounted components showing the answer; while any does, it stays. */
-  shown: number;
-}
-
-/** Each client's reads by cache and range, least recently used first. */
-const readsOf = new WeakMap<TscacheClient, Map<string, Read>>();
+/**
+ * How long a settled read that no mounted component shows stays cached.
+ * A suspended render commits only once every read it waits on has settled,
+ * and React reports no render it abandons; this outlasts that wait, so
+ * each retry finds the promise it suspended on.
+ */
+const KEEP_MS = 30_000;
 
 /**
- * `client`'s read of a range: the same object on every render that asks
- * for it, so `use` sees one promise. Answers no mounted component shows
- * are dropped beyond the SPARE used last; a new client starts with none.
+ * One client's read of one range. A pending read, and a read a mounted
+ * component shows, stay cached; any other is dropped KEEP_MS after it
+ * settled or was last shown. Nothing is dropped during a render.
+ */
+class Read {
+  readonly answer: Promise<GetResult>;
+  readonly #reads: Map<string, Read>;
+  readonly #key: string;
+  #shown = 0;
+  #expiry: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(
+    answer: Promise<GetResult>,
+    reads: Map<string, Read>,
+    key: string,
+  ) {
+    this.answer = answer;
+    this.#reads = reads;
+    this.#key = key;
+    const settled = () => this.#expire();
+    answer.then(settled, settled);
+  }
+
+  /** Keeps the read while a mounted component shows it; returns the release. */
+  show(): () => void {
+    this.#shown++;
+    clearTimeout(this.#expiry);
+    return () => {
+      this.#shown--;
+      this.#expire();
+    };
+  }
+
+  #expire(): void {
+    if (this.#shown > 0) return;
+    clearTimeout(this.#expiry);
+    this.#expiry = setTimeout(() => {
+      if (this.#reads.get(this.#key) === this) this.#reads.delete(this.#key);
+    }, KEEP_MS);
+  }
+}
+
+/** The reads made through each client's promise, by cache and range. */
+const readsOf = new WeakMap<Promise<TscacheClient>, Map<string, Read>>();
+
+/**
+ * The read of a range through `client`: the same object on every render
+ * that asks for it, so `use` sees one promise. A new client starts with no
+ * reads.
  */
 function readOf(
   connection: Connection,
-  client: TscacheClient,
+  client: Promise<TscacheClient>,
   config: CacheConfig,
   start: number,
   end: number,
@@ -152,31 +206,22 @@ function readOf(
     readsOf.set(client, reads);
   }
   const key = `${config.id} ${start} ${end}`;
-  const read = reads.get(key) ?? {
-    answer: answer(connection, client, config, start, end),
-    shown: 0,
-  };
-  reads.delete(key);
-  reads.set(key, read);
-  let spare = 0;
-  for (const other of reads.values()) if (other.shown === 0) spare++;
-  for (const [key, other] of reads) {
-    if (spare <= SPARE) break;
-    if (other.shown === 0) {
-      reads.delete(key);
-      spare--;
-    }
+  let read = reads.get(key);
+  if (read === undefined) {
+    read = new Read(answer(connection, client, config, start, end), reads, key);
+    reads.set(key, read);
   }
   return read;
 }
 
 async function answer(
   connection: Connection,
-  client: TscacheClient,
+  awaited: Promise<TscacheClient>,
   config: CacheConfig,
   start: number,
   end: number,
 ): Promise<GetResult> {
+  const client = await awaited;
   try {
     const cache = await connection.cache(client, config);
     return await cache.get({ start, end });
@@ -185,32 +230,47 @@ async function answer(
     if (state.status === "connected" && state.client === client) throw error;
     // The worker was lost: the client rejected what was pending, and the
     // connection is replacing it. The next client answers instead.
-    const next = await clientOf(connection);
-    return readOf(connection, next, config, start, end).answer;
+    return readOf(connection, clientOf(connection), config, start, end).answer;
   }
 }
 
-/** One promise per connecting connection, for every render while it connects. */
+/** The promise each client is known by. */
+const promised = new WeakMap<TscacheClient, Promise<TscacheClient>>();
+/** Each connecting connection's promise of its next client. */
 const nextClients = new WeakMap<Connection, Promise<TscacheClient>>();
 
-/** The connection's client, now or once it connects; rejects if it fails to. */
+function promiseOf(client: TscacheClient): Promise<TscacheClient> {
+  let promise = promised.get(client);
+  if (promise === undefined) {
+    promise = Promise.resolve(client);
+    promised.set(client, promise);
+  }
+  return promise;
+}
+
+/**
+ * The promise of the connection's client, or of its next one while it
+ * connects, which rejects if the connection fails. The next client is
+ * known by the promise that awaited it, so the reads made while
+ * connecting are its reads.
+ */
 function clientOf(connection: Connection): Promise<TscacheClient> {
   const { state } = connection;
-  if (state.status === "connected") return Promise.resolve(state.client);
+  if (state.status === "connected") return promiseOf(state.client);
   if (state.status === "failed") return Promise.reject(state.error);
-  let next = nextClients.get(connection);
-  if (next === undefined) {
-    next = new Promise((resolve, reject) => {
-      const unsubscribe = connection.subscribe(() => {
-        const now = connection.state;
-        if (now.status === "connecting") return;
-        unsubscribe();
-        nextClients.delete(connection);
-        if (now.status === "connected") resolve(now.client);
-        else reject(now.error);
-      });
+  const waiting = nextClients.get(connection);
+  if (waiting !== undefined) return waiting;
+  const next = new Promise<TscacheClient>((resolve, reject) => {
+    const unsubscribe = connection.subscribe(() => {
+      const now = connection.state;
+      if (now.status === "connecting") return;
+      unsubscribe();
+      nextClients.delete(connection);
+      if (now.status === "failed") return reject(now.error);
+      promised.set(now.client, next);
+      resolve(now.client);
     });
-    nextClients.set(connection, next);
-  }
+  });
+  nextClients.set(connection, next);
   return next;
 }

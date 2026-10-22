@@ -35,18 +35,19 @@ only.
   loads in a background render while the previous answer stays on screen.
   React drops a background render that a newer range overtook, so an
   overtaken answer never shows. Only a first answer shows the fallback.
-- `use()` needs the same promise on every render of a read. Reads are
-  cached per client, cache id and range. An answer a mounted component shows
-  stays; of the rest, each client keeps the 8 used last. A new client starts
-  with an empty cache.
+- `use()` needs the same promise on every render of a read, a suspended
+  render's retry included. Reads are cached per client, cache id and
+  range, and none is dropped during a render: a pending or shown read
+  stays, any other goes 30 s after it settled or was last shown (like
+  TanStack Query's `gcTime`). A read made while connecting belongs to the
+  client it awaited. A new client starts with no reads.
 - A read rejected because the worker was lost is asked again of the client
   replacing it, so it never reaches an error boundary. A failed connection,
   or a read that failed on a live client, throws to the nearest one.
 - The server must not suspend on tscache. Its read reaches `useSeries`
-  through the provider, and `useSyncExternalStore`'s server snapshot makes
-  the server's render and the browser's hydration render both show it, so
-  the markup matches. The browser then switches to its own answer in a
-  background render, with no fallback in between.
+  through the provider; with `useSyncExternalStore`'s server snapshot, the
+  server's render and the browser's hydration render both show it, so the
+  markup matches. Then the browser's answer replaces it in the background.
 - `renderToString`: the server reads before it renders, so nothing suspends
   and a stream would have nothing to stream.
 
@@ -57,9 +58,9 @@ only.
   stay as they were until the range or the client changes. After
   `updateAuth`, change the range to read again. For `authInvalid` and Web
   Locks, see `examples/react-lwcharts/src/auth-refresh.ts`.
-- A read that failed on a live client stays failed for that range and
-  client; tscache rejects only programmer errors (§2.3), which a retry
-  would repeat.
+- Memory holds every range read in the last 30 s; a boundary waiting over
+  30 s on one read may read its other ranges again. A failed read is kept
+  as long, so an error boundary's retry within that time repeats it.
 - The hook has no pending flag. To show one, set the range in
   `startTransition` from `useTransition` and read `isPending`.
 - The server reads one range per cache id. A `useSeries` with no matching
