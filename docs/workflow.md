@@ -15,6 +15,7 @@ The primary driver is **T3 Code**: one Claude thread per step, plus a Codex thre
 | `.codex/config.toml` | Codex, once the project is trusted | Pins `gpt-6.1-sol` at high effort |
 | `docs/review-checklist.md` | Reviewer | Invariants every review checks, and the findings format |
 | `scripts/codex-review.sh` | Claude | Runs `bun run ci`, then a headless read-only Codex review (prompts C and D live here) |
+| `scripts/review-watch.sh` | Claude | Runs `codex-review.sh` under a silence watchdog; Codex sessions can stall without output |
 | `.reviews/step-NN/` | Claude | Raw review output per round (gitignored) |
 | `docs/reviews/step-NN.md` | Everyone | Findings and triage for each step |
 
@@ -56,7 +57,7 @@ Actions in the workflow are pinned to commit SHAs. The GitHub CLI (`gh`, `brew i
 
 The reviewer reads only committed history (`git diff main...feat/NN-slug`), so commit before each round.
 
-1. **Review.** `scripts/codex-review.sh NN`. The script runs `bun run ci` on the host (Codex's read-only sandbox cannot install or build), then runs `codex exec` read-only in a fresh session with prompt C and the CI result. The model comes from `.codex/config.toml`; the script sets effort high. Output: `.reviews/step-NN/round-K.md`.
+1. **Review.** `scripts/review-watch.sh NN` (in the background), which runs `scripts/codex-review.sh NN` with stdin closed under a silence watchdog: no output for ten minutes (`REVIEW_SILENCE_SECONDS`) kills the session and exits 124, and the round is retried. The script runs `bun run ci` on the host (Codex's read-only sandbox cannot install or build), then runs `codex exec` read-only in a fresh session with prompt C and the CI result. The model comes from `.codex/config.toml`; the script sets effort high. Output: `.reviews/step-NN/round-K.md`.
 2. **Adversarial review**, for steps in the schedule below: `scripts/codex-review.sh NN --adversarial "<focus>"` (effort xhigh). Output: `.reviews/step-NN/adversarial-K.md`.
 3. **Validate every finding** before acting on it: reproduce it with a failing test, or confirm it by reading the code and the cited doc section. A finding that does not survive validation is rejected with the evidence.
 4. **Triage.** Accepted findings are fixed in small commits, test first where behaviour changes. Rejections take one sentence citing the doc section. "Decision concerns" are never acted on — they go to the user. Record the round in `docs/reviews/step-NN.md` and commit it as `docs(review): step NN round K triage`.

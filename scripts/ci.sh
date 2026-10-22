@@ -7,6 +7,9 @@ set -euo pipefail
 # The commit the branch is compared against. Actions sets CI_BASE, because a
 # pull request checkout has no local `main`.
 base="${CI_BASE:-main}"
+# Fallow's audit compares against the same base. Left unset, it compares a
+# pushed branch against its upstream and audits only unpushed commits.
+export FALLOW_AUDIT_BASE="${FALLOW_AUDIT_BASE:-$base}"
 
 bun install --frozen-lockfile
 bash .claude/hooks/guard-bash.test.sh
