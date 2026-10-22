@@ -1,6 +1,6 @@
 # Step 15 — Snapshot API (hydrate, encode/decode) and the migration of server-rendering hydration
 
-Branch: `feat/15-snapshot` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: implemented; review loop in progress · Verdict after triage: —
+Branch: `feat/15-snapshot` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: settled · Verdict after triage: merge
 
 Step ⑮ is the first item of the post-build architecture review (`docs/architecture-review.md`, item 1; decisions N34–N39 in `docs/architecture.md` §8). An engine step: the architecture text comes first, then Codex writes the contract tests from it (prompt A, `docs/workflow.md`), then the implementation, the migration of the ⑬b and ⑭ helpers and the guide's server-rendering section, then the review loop.
 
@@ -45,6 +45,10 @@ Only an older worker's `unknown op` rejection counts as "not seeded" in the two 
 | R1-1 | P1 | Both hydration helpers swallow any error whose message contains "unknown op", including a validation error for a payload whose dtype is that text | accepted | Validated with a failing test in each helper's suite (a rejection whose message embeds the phrase must propagate). The helpers now match the RPC server's exact answer, `unknown op hydrate`, on a `TscacheError`; a wiring test pins that message format. The earlier tests had used a quoted message the server never sends (1df6e43, e8a7186) |
 | R1-2 | P1 | `decodeSnapshot` accepts sparse arrays: `map()` skips holes in `segments`, `coverage` and payload `fields` | accepted | Validated with failing tests for each array. `Array.from` visits every position, so a hole reaches the shape check as `undefined` and is rejected (e8a7186). `hydrate`'s own validation already iterated with `entries()`, which visits holes |
 
+## Round 2 — reviewer verdict: merge
+
+No findings. The reviewer confirmed both round 1 fixes and their regression tests. **Settled.**
+
 ## Contract-test changes
 
 None. The six Codex files pass unchanged.
@@ -52,3 +56,21 @@ None. The six Codex files pass unchanged.
 ## Decision concerns
 
 None yet.
+
+## Merge request: `feat/15-snapshot` → `main`
+
+**Scope.** Step ⑮, the first item of the post-build architecture review: a snapshot API over the segment payload (N34–N39), and the migration of every server-rendering helper to it.
+
+- **Library.** `get(range, { snapshot: true })` returns a `Snapshot` taken from the same state as the result: the §3.4 payloads of the present points clipped to the request, with the grid, schema, version, watermark and coverage. `CacheHandle.hydrate(snapshot)` (one new op, `hydrate`) validates it in full, refuses a differing dataset version, advances the watermark forwards only, and replaces only the parts the cache neither covers nor holds as provisional, in one engine call, which closes the seed race of step ⑭ (R2-2). `encodeSnapshot`/`decodeSnapshot` carry a snapshot through JSON with `NaN` intact. `DenseSegmentPayload` and the snapshot types are public from `.` and `./engine`. `PROTOCOL_VERSION` stays 1 (N37).
+- **Migration.** The mock backend's hydration helper and `integrations/shared/hydration.ts` carry the encoded snapshot and apply it with `hydrate`; `putSeeds`, `putCovered` and their uncovered-range arithmetic are gone. Both SSR examples and the integrations seed every client, a replacement after `workerLost` included (D6-B). Only an older worker's exact `unknown op hydrate` answer counts as "not seeded"; every other failure propagates.
+- **Docs.** Architecture §2.3, §2.8, §3.2–§3.4, §4.5–§4.9 (approved before the tests); the server-rendering section of `docs/guides/worker-setup.md`; the example and integration READMEs; the roadmap.
+
+**Process.** Strict test-first: Codex wrote 279 contract tests from the approved text (six files, unchanged since); two ambiguities they surfaced were settled in the text before implementation. Review: two rounds. Round 1 found two P1s (the helpers' too-broad "unknown op" match; holes in arrays accepted by `decodeSnapshot`), both reproduced with failing tests and fixed; round 2 was clean.
+
+**Confidence: high** for the engine (contract tests cover every documented rejection in order, the fill-only rule, the volatile region, round trip, idempotence and never-overwrite as generated properties over 32 states). **Medium-high** for the migration: the SSR specs now assert that a replacement worker is seeded and that the window is not refetched, but they run in Chromium only.
+
+**Blast radius.** One new op and an optional `get` field: additive, protocol unchanged, so an old worker keeps working and a new page treats its refusal as not seeded. The examples' and integrations' hydration payload format changed (unpublished source). `bun run ci` passed on the branch: 1429 Node tests and 48 browser specs.
+
+**Known limits.** The failure-part-way rule of `hydrate` (an allocation failure mid-write withdraws that part's coverage) is implemented as `put`'s is but not tested, since it needs allocation-failure injection. No adversarial pass was run: the workflow schedule does not list step ⑮; one focused on `hydrate`'s atomicity and version rules is available on request.
+
+**For the user.** Review and merge. Next: `feat/16-vite-entry` (N40–N41); adding `vite` as an optional peer dependency is a decision you approved with D7-A, and its supported range is proposed in that step.
