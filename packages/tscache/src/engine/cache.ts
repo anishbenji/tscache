@@ -13,16 +13,19 @@ import type { Columns } from "../segment/types";
 import type {
   FieldArray,
   GetResult,
+  HydrateResult,
   MergeWarning,
   PutBatch,
   PutOptions,
   Range,
   ResolvedCacheConfig,
+  Snapshot,
 } from "../types";
 import { validateBatch } from "./batch";
 import { SegmentStore } from "./merge";
 import type { SlotWarning } from "./overlap";
-import { read } from "./read";
+import { collect, read } from "./read";
+import { takeSnapshot, validateSnapshot } from "./snapshot";
 
 export interface CachePutResult {
   /** In ms, outside the volatile region only. */
@@ -178,16 +181,88 @@ export class CacheState {
     }
   }
 
-  /** Every present point in the range, with coverage and 'uncached' misses. */
-  get(range: Range): GetResult {
+  /**
+   * Every present point in the range, with coverage and 'uncached' misses.
+   * With `snapshot: true` the result also carries a Snapshot of the same
+   * request, taken from the same state (§2.8, N36).
+   */
+  get(range: Range, options?: { snapshot?: boolean }): GetResult {
     const request = snapOut(range, this.config);
-    return read(
+    const result = read(
       request,
       this.#store.segments,
       this.#coverage,
       this.config,
       this.config.fields,
     );
+    if (options?.snapshot === true) result.snapshot = this.#snapshot(request);
+    return result;
+  }
+
+  /** What this cache knows about the range, snapped outward (§2.8, N34). */
+  snapshot(range: Range): Snapshot {
+    return this.#snapshot(snapOut(range, this.config));
+  }
+
+  /**
+   * Applies a snapshot where nothing is known (§2.8, §4.5, N35): validates
+   * it in full first; refuses a differing version; advances the watermark
+   * forwards only; then replaces each part of the snapshot's coverage that
+   * this cache neither covers nor holds as provisional, and covers it.
+   */
+  hydrate(snapshot: Snapshot): HydrateResult {
+    const valid = validateSnapshot(snapshot, this.config);
+    if (
+      valid.version !== undefined &&
+      this.#version !== undefined &&
+      valid.version !== this.#version
+    ) {
+      return { applied: [], skipped: "version-mismatch" };
+    }
+    if (valid.version !== undefined) this.#version = valid.version;
+    if (valid.watermark !== undefined) {
+      this.#advance(valid.watermark.t, valid.watermark.slot);
+    }
+    const parts = this.#unknownParts(valid.coverage);
+    for (const part of parts) {
+      const points = collect(valid.segments, part, this.config.fields);
+      try {
+        this.#store.put(points, part);
+      } catch (error) {
+        this.#coverage.subtract(part);
+        throw error;
+      }
+      this.#coverage.add(part);
+    }
+    return { applied: parts.map((part) => toMs(part, this.config)) };
+  }
+
+  #snapshot(request: SlotRange): Snapshot {
+    return takeSnapshot(
+      {
+        config: this.config,
+        segments: this.#store.segments,
+        coverage: this.#coverage,
+        version: this.#version,
+        finalizedUntil: this.#finalizedUntil,
+      },
+      request,
+    );
+  }
+
+  /** The parts of `ranges` this cache neither covers nor holds as provisional. */
+  #unknownParts(ranges: SlotRange[]): SlotRange[] {
+    const parts: SlotRange[] = [];
+    for (const range of ranges) {
+      for (const gap of this.#coverage.gaps(range)) {
+        const part =
+          this.#volatileFrom === undefined
+            ? gap
+            : below(gap, this.#volatileFrom);
+        if (part !== undefined) parts.push(part);
+      }
+    }
+    return parts;
   }
 
   /** The authoritative sub-ranges of `range` in ms, without reading points. */

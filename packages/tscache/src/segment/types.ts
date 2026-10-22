@@ -5,7 +5,7 @@
  */
 
 import type { Grid, SlotRange } from "../grid";
-import type { Dtype, FieldArray } from "../types";
+import type { DenseSegmentPayload, Dtype, FieldArray } from "../types";
 
 /**
  * Present points only, in slot terms: every field array has `slots.length`
@@ -16,26 +16,7 @@ export interface Columns {
   fields: Record<string, FieldArray>;
 }
 
-/**
- * Self-describing segment transfer payload (architecture §3.4). One format,
- * three uses: RPC message, IndexedDB value and SSR hydration payload, so it
- * must stay a plain structured-cloneable object.
- */
-export interface DenseSegmentPayload {
-  /** Payload schema version. */
-  format: 1;
-  layout: "dense";
-  /** Timestamp of the first slot. */
-  start: number;
-  /** Slot count; slot i is at start + i * interval. */
-  count: number;
-  interval: number;
-  alignmentOffset: number;
-  /** ceil(count / 8) bytes; slot i is bit (i & 7) of byte (i >> 3). */
-  mask: Uint8Array;
-  /** Schema declaration order; little-endian; absent slots hold zero. */
-  fields: { name: string; dtype: Dtype; data: ArrayBuffer }[];
-}
+export type { DenseSegmentPayload } from "../types";
 
 /**
  * Largest supported slot cap (N12). Mask indices use 32-bit integer
