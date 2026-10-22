@@ -20,6 +20,12 @@ Commit `docs(architecture): snapshot api text for step 15` adds §2.8 Snapshots,
 
 Not in the text, deliberately: a reader that derives `GetResult` columns from a snapshot (N38 defers it); seeds applied at `cache()` (N36 rejected it); a protocol bump (N37).
 
+## Contract tests (Codex, 2026-10-23)
+
+Prompt A, headless (`codex exec -s workspace-write`, GPT-6.1 Sol high, one session under the silence watchdog). Six files in `packages/tscache/test/`: `cache-snapshot.test.ts` (S01–S10), `cache-hydrate-rejections.test.ts` (V01–V12), `cache-hydrate.test.ts` (H01–H11, P01 with 32 generated states), `engine-snapshot.test.ts` (E01–E05), `snapshot-codec.test.ts` (C01–C06) and `snapshot-test-helpers.ts`. Codex reported 234 failing and 1 passing before implementation, the existing 1137 passing with the new files excluded, Biome clean, and the failure-part-way rule skipped (needs allocation-failure injection). Nothing under `src/` was touched; nothing was committed, since contract tests land with the code that makes them pass.
+
+Two ambiguities Codex left unpinned, settled in the text before implementation (commit below): an unaligned `range` inside a snapshot is rejected, since §2.8 says a snapshot is never snapped, where §4.5 had said "a range `snapOut` accepts"; and `decodeSnapshot` checks the shape and the base64 only, with every semantic check (lengths, ordering, alignment, schema) left to `hydrate`.
+
 ## Contract-test changes
 
 None yet.
