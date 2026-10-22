@@ -100,16 +100,17 @@ evicted page stays on disk and is loaded again on demand, which needs the lazy l
   shows the bounded leak matters.
 - **N31.** Subtracting in-flight ranges from new fetch requests, instead of sharing only identical ranges.
 
-## For the post-build architecture review
+## Decided at the post-build architecture review
 
-The agenda for the review, with the context, options and a recommendation for each item below, is
-`docs/architecture-review.md`.
+The review held on 2026-10-23 (agenda: `docs/architecture-review.md`) decided these items; the decisions
+are rows N34–N44 in `docs/architecture.md` §8.
 
 - A snapshot API over the segment payload (§3.4) that carries the dataset version and watermark, so SSR
   hydration is exact and a seed can no longer outlive a restatement (`docs/reviews/step-13.md`, ⑬b),
   applied in one engine step only where the browser's cache covers nothing, so another tab's fetch
-  cannot land between the check and the put (`docs/reviews/step-14.md`, R2-2).
-- A `tscache/vite` entry for the two Vite plugins the examples needed: the fetcher URL, with file URLs for
-  server builds, and the SSR page plugin.
+  cannot land between the check and the put (`docs/reviews/step-14.md`, R2-2). N34–N39; step ⑮.
+- A `tscache/vite` entry exporting the fetcher-URL plugin, with file URLs for server builds. The SSR page
+  plugin stays in the examples. N40–N41; step ⑯.
 - DC-1 and DC-2 from step ⑫ (`docs/reviews/step-12.md`): the refresh snippet's assumption that a refresh
-  issues a new access token, and the two ways a client can stop being served that N32 does not detect.
+  issues a new access token, and the two ways a client can stop being served that N32 does not detect,
+  are documented as assumptions (N42–N44), not changed.
