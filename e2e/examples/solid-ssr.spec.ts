@@ -208,12 +208,16 @@ test("when the worker's host tab crashes, another tab connects a new client and 
   await dead;
 
   await expect(survivor.locator(".log")).toContainText("worker lost");
-  // The new worker's empty cache gets the page's seeds again, so the new
-  // client fetches only what they do not cover.
-  const refetched = (await waitNotices(survivor, since + 1)).slice(since);
-  for (const notice of refetched) {
-    expect(notice.range.start).toBeGreaterThanOrEqual(covered);
-  }
+  // The new worker starts empty and is not seeded again: the seeds are as
+  // old as the page, which may have seen a newer dataset version since. So
+  // the new client fetches the whole window, in one fetch.
+  await expect
+    .poll(async () =>
+      (await notices(survivor))
+        .slice(since)
+        .filter((notice) => notice.range.end - notice.range.start >= DAY),
+    )
+    .toHaveLength(1);
   await expect(survivor.getByTestId("status")).toHaveText("ready");
   await expect(survivor.getByTestId("mode")).toHaveText("shared");
 

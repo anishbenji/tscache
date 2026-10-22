@@ -48,9 +48,10 @@ then confirmed gaps in the browser too: the "slots known to be empty" figure
 keeps every one the server reported, and none of those minutes is fetched. The
 browser's first `get` asks for the same window ending a moment later and
 fetches only the minutes since the server's read; the log shows one fetch
-of a minute or two. Seeding the points alone, without their range, would
-claim only the span from the first reading to the last (the default put
-range), and each dropout would look like time never fetched.
+of a minute or two. The range matters at the edges: a put without one
+claims only the span from its first reading to its last (the default put
+range, N3), so an offline block at either end of the window, or a seed with
+no reading at all, would look like time never fetched.
 
 **Decision shown: one server client for every render.** The server creates
 its client once, on the first render, and every later render reads from the
@@ -140,9 +141,10 @@ mechanism this page demonstrates, and they are plain tscache put payloads.
   cache memo puts the seeds before it hands the cache out, so no `get` can
   run ahead of them. When the worker is lost, as when the tab hosting the
   SharedWorker crashes, the `workerLost` handler refreshes the client memo:
-  the new client starts a new worker with an empty cache, the cache memo
-  seeds it again from the page, and the new worker fetches only what the
-  seeds do not cover.
+  the new client starts a new worker with an empty cache, which fetches the
+  window. Only the first client gets the seeds: they are as old as the page,
+  which may have seen a newer dataset version since, and a seed carries no
+  version, so in an empty cache it would pass for the newer one.
 - `src/App.tsx` derives the browser's answer as one async memo over the
   cache and the window's start, so loading the previous day is a write to
   the `start` signal, and a newer answer always supersedes an older one
