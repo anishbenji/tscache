@@ -47,7 +47,11 @@ export interface CacheConfig {
   interval: number;
   /** Timestamps satisfy (t - alignmentOffset) % interval === 0. Default 0. */
   alignmentOffset?: number;
-  /** Field name → dtype. At least one field. */
+  /**
+   * Field name → dtype. At least one field. Presence is per point, not per
+   * field: a float field can hold NaN for a missing value, while an integer
+   * field cannot mark one (docs/guides/patterns.md).
+   */
   fields: Record<string, Dtype>;
   /** Dense segment splits where more than K consecutive slots hold no point. Default 4. */
   gapSplitK?: number;
