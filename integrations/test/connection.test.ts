@@ -84,23 +84,21 @@ describe("connect", () => {
     expect(fresh.coverage).toEqual([]);
   });
 
-  it("opens a cache once per client, seeding it once under concurrent calls", async () => {
+  it("seeds a cache once per client under concurrent calls", async () => {
     const { connection, connected } = lossyConnection([seed]);
     await until(() => connected() !== null);
     const client = connected() as TscacheClient;
-    const [a, b] = [
+    const [a, b] = await Promise.all([
       connection.cache(client, config),
       connection.cache(client, config),
-    ];
-    expect(a).toBe(b);
-    const handle = await a;
-    await handle.put(
+    ]);
+    await a.put(
       { timestamps: [0], fields: { v: [9], n: [9] } },
       { range: { start: 0, end: 0 } },
     );
     // A second seeding would have put 1 at 0 again over this 9.
     await connection.cache(client, config);
-    const known = await handle.get(seed.range, { cacheOnly: true });
+    const known = await b.get(seed.range, { cacheOnly: true });
     expect(Array.from(known.fields.v ?? [])).toEqual([9, 2]);
   });
 
@@ -135,15 +133,37 @@ describe("connect", () => {
     await first;
   });
 
-  it("forgets a failed open, so the next call tries again", async () => {
+  it("lets the client judge a config changed in place after its open", async () => {
+    const { connection, connected } = lossyConnection();
+    await until(() => connected() !== null);
+    const client = connected() as TscacheClient;
+    const changing = { ...config };
+    await connection.cache(client, changing);
+    changing.interval = 5;
+    await expect(connection.cache(client, changing)).rejects.toThrow(
+      ConfigError,
+    );
+  });
+
+  it("puts a seed with the config it was read with, never another", async () => {
+    const { connection, connected } = lossyConnection([seed]);
+    await until(() => connected() !== null);
+    const client = connected() as TscacheClient;
+    await expect(
+      connection.cache(client, { ...config, interval: 5 }),
+    ).rejects.toThrow(ConfigError);
+    const seeded = await connection.cache(client, config);
+    const known = await seeded.get(seed.range, { cacheOnly: true });
+    expect(known.coverage).toEqual([{ start: 0, end: 20 }]);
+  });
+
+  it("a failed open does not stick to the cache id", async () => {
     const { connection, connected } = lossyConnection();
     await until(() => connected() !== null);
     const client = connected() as TscacheClient;
     const bad = { ...config, interval: -1 };
-    const first = connection.cache(client, bad);
-    await expect(first).rejects.toThrow();
-    expect(connection.cache(client, bad)).not.toBe(first);
-    await expect(connection.cache(client, bad)).rejects.toThrow();
+    await expect(connection.cache(client, bad)).rejects.toThrow(ConfigError);
+    await expect(connection.cache(client, config)).resolves.toBeDefined();
   });
 
   it("reports a client that cannot connect", async () => {

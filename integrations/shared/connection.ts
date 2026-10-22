@@ -31,11 +31,12 @@ export interface Connection {
   /** Calls `listener` after each change of `state`; returns the unsubscribe. */
   subscribe(listener: () => void): () => void;
   /**
-   * `client`'s handle for `config`, opened once per client and config. The
-   * first client puts a cache's seed in before handing the cache out, so no
-   * read runs ahead of it. Another config with the same id goes to the
-   * client, which returns the same cache for an equal config and rejects a
-   * conflicting one with ConfigError (N4, N20).
+   * `client`'s handle for `config`. Every call goes to `client.cache()`,
+   * which opens the same cache for an equal config and rejects a
+   * conflicting one with ConfigError (N4, N20): whether two configs name
+   * one cache is the library's call, never this code's. On the first
+   * client, a cache's seed goes in before its first handle is given out,
+   * so no read runs ahead of it.
    */
   cache(client: TscacheClient, config: CacheConfig): Promise<CacheHandle>;
   /** Disposes the client and stops replacing it. Idempotent. */
@@ -43,12 +44,6 @@ export interface Connection {
 }
 
 const CONNECTING: ConnectionState = { status: "connecting" };
-
-/** A cache a client opened, with the config it was opened with. */
-interface Opened {
-  config: CacheConfig;
-  handle: Promise<CacheHandle>;
-}
 
 /**
  * Connects with `open`, and again each time the worker behind the client
@@ -60,7 +55,10 @@ interface Opened {
  * Only the first client gets the seeds. A replacement starts empty and
  * fetches what it is asked for: the seeds are as old as the page, which
  * may have seen a newer dataset version since, and a seed carries no
- * version to tell.
+ * version to tell. Each seed is put once, when its cache is first asked
+ * for, into the cache opened with the seed's own config: a reader asking
+ * for a conflicting config is refused by the client's check, rather than
+ * handed coverage read on another grid.
  */
 export function connect(
   open: () => Promise<TscacheClient>,
@@ -68,11 +66,9 @@ export function connect(
 ): Connection {
   let state = CONNECTING;
   let disposed = false;
-  let firstSeeds: Map<string, ServerRead> | undefined = new Map(
-    seeds.map(({ config, read }) => [config.id, read]),
-  );
-  const seedsOf = new WeakMap<TscacheClient, Map<string, ServerRead>>();
-  const handles = new WeakMap<TscacheClient, Map<string, Opened>>();
+  const unseeded = new Map(seeds.map((seed) => [seed.config.id, seed]));
+  const seedings = new Map<string, Promise<void>>();
+  let first: TscacheClient | undefined;
   const listeners = new Set<() => void>();
 
   function set(next: ConnectionState): void {
@@ -84,10 +80,7 @@ export function connect(
     open().then(
       (client) => {
         if (disposed) return void client.dispose();
-        if (firstSeeds !== undefined) {
-          seedsOf.set(client, firstSeeds);
-          firstSeeds = undefined;
-        }
+        first ??= client;
         client.on("workerLost", () => {
           if (disposed) return;
           set(CONNECTING);
@@ -101,27 +94,22 @@ export function connect(
     );
   }
 
-  function handlesOf(client: TscacheClient): Map<string, Opened> {
-    let opened = handles.get(client);
-    if (opened === undefined) {
-      opened = new Map();
-      handles.set(client, opened);
-    }
-    return opened;
-  }
-
-  async function openCache(
+  /** The putting of the seed for cache `id`, started on the first ask. */
+  function seeding(
     client: TscacheClient,
-    config: CacheConfig,
-  ): Promise<CacheHandle> {
-    const handle = await client.cache(config);
-    const seeds = seedsOf.get(client);
-    const read = seeds?.get(config.id);
-    if (read !== undefined) {
-      seeds?.delete(config.id);
-      await putCovered(handle, config, read);
+    id: string,
+  ): Promise<void> | undefined {
+    if (client !== first) return undefined;
+    let putting = seedings.get(id);
+    const seed = unseeded.get(id);
+    if (putting === undefined && seed !== undefined) {
+      unseeded.delete(id);
+      putting = client
+        .cache(seed.config)
+        .then((cache) => putCovered(cache, seed.config, seed.read));
+      seedings.set(id, putting);
     }
-    return handle;
+    return putting;
   }
 
   start();
@@ -133,24 +121,9 @@ export function connect(
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    cache(client, config) {
-      const opened = handlesOf(client);
-      const first = opened.get(config.id);
-      if (first?.config === config) return first.handle;
-      if (first !== undefined) {
-        // After the first open, so its seed is in before this handle reads.
-        return first.handle.then(
-          () => client.cache(config),
-          () => client.cache(config),
-        );
-      }
-      const handle = openCache(client, config);
-      opened.set(config.id, { config, handle });
-      // A failed open is not kept: the next call tries again.
-      handle.catch(() => {
-        if (opened.get(config.id)?.handle === handle) opened.delete(config.id);
-      });
-      return handle;
+    async cache(client, config) {
+      await seeding(client, config.id);
+      return client.cache(config);
     },
     async dispose() {
       if (disposed) return;
