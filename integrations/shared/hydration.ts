@@ -68,13 +68,18 @@ function fromBase64(text: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+/**
+ * `fields` with `fn` applied to each value. Object.fromEntries defines own
+ * properties, so a field named like an Object.prototype member (`__proto__`
+ * is a legal name) stays a field.
+ */
 function mapFields<A, B>(
   fields: Record<string, A>,
   fn: (value: A, name: string) => B,
 ): Record<string, B> {
-  const out: Record<string, B> = {};
-  for (const name in fields) out[name] = fn(fields[name] as A, name);
-  return out;
+  return Object.fromEntries(
+    Object.entries(fields).map(([name, value]) => [name, fn(value, name)]),
+  );
 }
 
 export function dehydrate({ range, result }: ServerRead): Dehydrated {
@@ -90,7 +95,9 @@ export function dehydrate({ range, result }: ServerRead): Dehydrated {
 /** The server's read as it was, typed arrays and all. */
 export function rehydrate(config: CacheConfig, value: Dehydrated): ServerRead {
   const fields = mapFields(value.fields, (text, name) => {
-    const dtype = config.fields[name];
+    const dtype = Object.hasOwn(config.fields, name)
+      ? config.fields[name]
+      : undefined;
     if (dtype === undefined) {
       throw new Error(
         `the server read a field ${name} that ${config.id} lacks`,

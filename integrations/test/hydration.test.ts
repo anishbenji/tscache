@@ -59,6 +59,47 @@ describe("dehydrate / rehydrate", () => {
     expect(back.result.misses).toEqual(read.result.misses);
   });
 
+  it("keeps fields named like Object.prototype members as fields", async () => {
+    const odd = {
+      id: "odd",
+      interval: 10,
+      fields: Object.fromEntries([
+        ["__proto__", "f64"],
+        ["constructor", "i16"],
+      ]),
+    };
+    const client = await createClient({ mode: "in-process" });
+    open.push(client);
+    const server = await client.cache(odd);
+    const range = { start: 0, end: 10 };
+    await server.put(
+      {
+        timestamps: [0, 10],
+        fields: Object.fromEntries([
+          ["__proto__", [1.5, 2.5]],
+          ["constructor", [3, 4]],
+        ]),
+      },
+      { range },
+    );
+    const read = { range, result: await server.get(range) };
+    const back = rehydrate(odd, JSON.parse(JSON.stringify(dehydrate(read))));
+    const proto = Object.getOwnPropertyDescriptor(
+      back.result.fields,
+      "__proto__",
+    );
+    expect(Array.from(proto?.value ?? [])).toEqual([1.5, 2.5]);
+    expect(Array.from(back.result.fields.constructor ?? [])).toEqual([3, 4]);
+
+    const other = await createClient({ mode: "in-process" });
+    open.push(other);
+    const browser = await other.cache(odd);
+    await putCovered(browser, odd, back);
+    const known = await browser.get(range, { cacheOnly: true });
+    expect(known.coverage).toEqual([range]);
+    expect(Array.from(known.fields.constructor ?? [])).toEqual([3, 4]);
+  });
+
   it("refuses a field the cache config lacks", async () => {
     const value = dehydrate(await serverRead());
     expect(() => rehydrate({ ...config, fields: { v: "f64" } }, value)).toThrow(
