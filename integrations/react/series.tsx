@@ -121,13 +121,20 @@ function readFor(
   return undefined;
 }
 
+/**
+ * The server's read of the cache `config` names, for the server's render
+ * and the browser's hydration render. Matched by cache id, judging
+ * nothing: whether `config` fits the cache is the client's call, and the
+ * browser's client makes it against the cache opened with the seed's
+ * config, so a conflicting config fails there with ConfigError.
+ */
 function serverAnswer(
   seeds: readonly Seed[],
   config: CacheConfig,
   start: number,
   end: number,
 ): GetResult {
-  const read = seeds.find((seed) => keyOf(seed.config) === keyOf(config))?.read;
+  const read = seeds.find((seed) => seed.config.id === config.id)?.read;
   if (read?.range.start !== start || read.range.end !== end) {
     throw new Error(
       `useSeries has no connection and no server read of ${config.id} from ${start} to ${end}; check the TscacheProvider above it`,

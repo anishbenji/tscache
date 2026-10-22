@@ -63,8 +63,8 @@ only.
   as long, so an error boundary's retry within that time repeats it.
 - The hook has no pending flag. To show one, set the range in
   `startTransition` from `useTransition` and read `isPending`.
-- The server reads one range per cache id. A `useSeries` with no matching
-  server read does not fail the server render: React renders that
-  boundary's fallback, and the browser renders the boundary itself and
-  logs a recoverable error.
+- The server reads one range per cache id and matches it by id alone, so
+  a config conflicting with the seed's shows the seed, then `ConfigError`.
+  With no server read, React renders that boundary's fallback on the
+  server; the browser renders it, logging a recoverable error.
 - The provider keeps the seeds for the life of the page.
