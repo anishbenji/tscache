@@ -172,3 +172,13 @@ cover.
   };
   client.on("workerLost", recover);
   ```
+
+  Detection assumes two things (architecture §4.8, N43, N44). First, no
+  script of your origin takes the worker's lock. Its name is readable with
+  `navigator.locks.query()`; a script that requests it with `steal: true`
+  and later releases it makes every client report `workerLost` while the
+  worker runs on. The worker never requests its lock again, so every client
+  that connects to it afterwards reports loss at once, and the loop above
+  reconnects until the last tab closes. Second, the fetcher module never
+  closes its worker: a dedicated worker that calls `self.close()` fires no
+  `error`, so the calls of its tab hang.
