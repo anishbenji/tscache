@@ -104,6 +104,10 @@ None. Step ⑭ is not an engine step; its tests were written with the code.
 
 None raised by the reviewer. R2-2 is escalated as a finding (above), and R4-1 was decided by the user.
 
+## Follow-up: the post-build architecture review's agenda (`docs/14-architecture-review-agenda`)
+
+Documentation only, no change under `packages/tscache/src/`. Steps ①–⑭ are merged; the user holds an architecture review next, and `docs/architecture-review.md` prepares it: for the snapshot API (with the seed race R2-2), a `tscache/vite` entry, DC-1 and DC-2 (`docs/reviews/step-12.md`), the context with its sources, the decision points, the options with pros and cons, and a recommendation. `docs/roadmap.md` and the README point at it. What a review of this branch checks is the agenda's claims about the code and the documents it cites (one engine call per op and which calls are synchronous, what `put` with `meta.version` does, what `segmentFromPayload` validates, what the lifetime lock does after a steal, how the snippets render a seed), not the recommendations, which are the user's to decide. Rounds continue from round 6 in `.reviews/step-14/`.
+
 ## Merge request: `feat/14-integrations` → `main`
 
 **Scope.** Step ⑭ of the commit plan (starter §7, §8, §10, §11), the last step. No change under `packages/tscache/src/` except one TSDoc paragraph.

@@ -7,7 +7,9 @@ orchestration, and coverage tracking that distinguishes "not fetched yet" from
 **Status: pre-release.** The design is settled; see
 [`docs/architecture.md`](docs/architecture.md) for the API surface, RPC
 protocol and decision register, and [`docs/roadmap.md`](docs/roadmap.md) for
-what v1 leaves out.
+what v1 leaves out. The questions deferred to the review after the build, with
+options and recommendations, are in
+[`docs/architecture-review.md`](docs/architecture-review.md).
 
 ## Guides
 
