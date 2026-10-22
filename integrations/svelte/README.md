@@ -47,8 +47,9 @@ that scrolls would set `chart.range` to its visible range.
   through the `context` option of `mount()` and `hydrate()`; `createContext`
   can only be set inside a component. The server render passes no context.
 - Each series has one effect, which reads for the current range and client.
-  An answer lands only if its range is still `range`, so a slow answer never
-  replaces a newer one, and the previous answer stays until the next lands.
+  An answer lands only from the latest read, and only while its range is
+  still `range`, so a slow answer never replaces a newer one, even for the
+  same range object; the previous answer stays until the next lands.
 - A read rejected because the worker was lost is dropped, and the new client
   reads again. A failed read on a live client, or a failed connection, is
   thrown from `current`, so a `<svelte:boundary>` shows it.
@@ -61,8 +62,7 @@ that scrolls would set `chart.range` to its visible range.
 
 - tsc checks the `.ts` files; nothing here runs `svelte-check` on this one.
 - A failure is final for its series. For a retry, create the series in a
-  child component inside the boundary; the `failed` snippet's `reset` then
-  creates it again.
+  child component inside the boundary, whose `reset` then creates it again.
 - `loading` stays false while a new client reads the same range again, since
   the answer shown is for that range.
 - A seed carries no dataset version (see `examples/solid-ssr`).

@@ -63,6 +63,7 @@ export class Series {
   range: Range;
   #answer: Answer | undefined;
   #failure = $state.raw<{ error: unknown }>();
+  #reads = 0;
 
   /**
    * `shown` is the answer to show until the first read lands, such as the
@@ -85,9 +86,12 @@ export class Series {
         return;
       }
       if (state.status !== "connected") return;
-      // Checked when the read settles. Svelte re-runs this effect a
-      // microtask after `range` changes, and an answer can land in between.
-      const latest = () => this.range === range;
+      // Checked when the read settles. The count tells this read from a
+      // later one for the same range object (A, B, A). The range covers the
+      // microtask between a change of `range` and Svelte re-running this
+      // effect, when this read is still the last one started.
+      const read = ++this.#reads;
+      const latest = () => read === this.#reads && this.range === range;
       connection
         .cache(state.client, config)
         .then((cache) => cache.get(range))
