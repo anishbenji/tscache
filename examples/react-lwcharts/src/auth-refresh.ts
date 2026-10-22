@@ -1,0 +1,91 @@
+// Refresh-token rotation across tabs, driven by tscache's authInvalid event.
+//
+// tscache tells every open tab when the fetcher reports an expired token,
+// and names the fetcher context that was refused. With refresh-token
+// rotation each refresh token works once: if every tab refreshed, all but
+// the first would present a spent token, and many servers answer that by
+// revoking the whole session. Here one tab refreshes while the others wait
+// on a Web Lock; a tab that gets the lock afterwards finds the refused token
+// already replaced and uses the new tokens instead of refreshing again.
+//
+// A refresh token is never presented twice: it is cleared from storage
+// before it is spent, so if the refresh or the save of the new tokens fails,
+// every tab ends the session through onSessionLost instead of retrying with
+// it.
+//
+// A SharedWorker from a tscache version that did not name the refused
+// context yet (kept alive by a tab opened before an upgrade) sends the event
+// without one. The refused token is then unknown, so the tab refreshes: tabs
+// may rotate once each, always with the current refresh token.
+
+import type { TscacheClient } from "tscache";
+
+export interface StoredTokens {
+  access: string;
+  refresh: string | null;
+}
+
+export interface RefreshOptions {
+  load: () => StoredTokens | Promise<StoredTokens>;
+  save: (tokens: StoredTokens) => void | Promise<void>;
+  refresh: (
+    refreshToken: string,
+  ) => Promise<{ access: string; refresh: string }>;
+  toContext: (access: string) => unknown;
+  accessOf: (context: unknown) => string | undefined;
+  onSessionLost: (error: unknown) => void;
+  lockName?: string;
+}
+
+/**
+ * @param client the tscache client of this tab
+ * @param options.load returns the tokens all tabs share, `{ access, refresh }`
+ *   (from localStorage, say); may return a promise
+ * @param options.save stores tokens where `load` finds them; may return a
+ *   promise, which must reject if they were not stored
+ * @param options.refresh exchanges a refresh token for new tokens
+ * @param options.toContext builds the fetcher context for an access token
+ * @param options.accessOf returns the access token in a fetcher context
+ *   (the inverse of `toContext`)
+ * @param options.onSessionLost called with the error when the session cannot
+ *   be recovered (send the user to sign in)
+ * @returns the unsubscribe function
+ */
+export function refreshOnAuthInvalid(
+  client: TscacheClient,
+  {
+    load,
+    save,
+    refresh,
+    toContext,
+    accessOf,
+    onSessionLost,
+    lockName = "tscache-auth-refresh",
+  }: RefreshOptions,
+): () => void {
+  return client.on("authInvalid", ({ context }) => {
+    void navigator.locks
+      .request(lockName, async () => {
+        let tokens: StoredTokens;
+        try {
+          tokens = await load();
+          if (tokens.refresh === null) {
+            throw new Error("the session ended in another tab");
+          }
+          // Otherwise another tab already replaced the refused token.
+          if (context === undefined || tokens.access === accessOf(context)) {
+            await save({ access: tokens.access, refresh: null });
+            tokens = await refresh(tokens.refresh);
+            await save(tokens);
+          }
+        } catch (error) {
+          onSessionLost(error);
+          return;
+        }
+        // Tabs sharing a SharedWorker would recover from one tab's update,
+        // but tabs on their own workers (after a fallback) each need theirs.
+        await client.updateAuth(toContext(tokens.access));
+      })
+      .catch(reportError);
+  });
+}

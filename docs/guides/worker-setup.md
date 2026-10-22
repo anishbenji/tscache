@@ -54,6 +54,66 @@ your origin, or copy `dist/` into your static assets, and pass that path:
 const client = await createClient({ workerUrl: "/vendor/tscache/worker.js" });
 ```
 
+## The fetcher module
+
+`fetcher.module` is a URL too: the worker loads it with `import()` and uses
+its default export (`docs/architecture.md` §2.5). Serve it as an ES module
+from your origin, with that export intact.
+
+With Vite, `?worker&url` does not fit the fetcher: Vite bundles a worker
+entry without its exports, so the module loads but has no default export.
+A small plugin emits the fetcher as a chunk of its own instead; the examples
+ship it as `fetcherUrl()` in `examples/mock-backend/src/vite.ts`:
+
+```ts
+// vite.config.ts
+import { defineConfig, type Plugin } from "vite";
+
+const PREFIX = "\0fetcher-url:";
+
+/** `import url from "./fetcher.ts?fetcher"`: the module's URL, exports kept. */
+function fetcherUrl(): Plugin {
+  let serve = false;
+  return {
+    name: "fetcher-url",
+    enforce: "pre",
+    configResolved(config) {
+      serve = config.command === "serve";
+    },
+    async resolveId(source, importer) {
+      if (!source.endsWith("?fetcher")) return undefined;
+      const target = source.slice(0, -"?fetcher".length);
+      const resolved = await this.resolve(target, importer, { skipSelf: true });
+      return resolved ? PREFIX + resolved.id : undefined;
+    },
+    load(id) {
+      if (!id.startsWith(PREFIX)) return undefined;
+      const file = id.slice(PREFIX.length);
+      if (serve) return `export default ${JSON.stringify(`/@fs${file}`)};`;
+      const ref = this.emitFile({ type: "chunk", id: file, preserveSignature: "strict" });
+      return `export default import.meta.ROLLUP_FILE_URL_${ref};`;
+    },
+  };
+}
+
+export default defineConfig({ plugins: [fetcherUrl()] });
+```
+
+```ts
+import { createClient } from "tscache";
+import workerUrl from "tscache/worker?worker&url";
+import fetcherUrl from "./fetcher.ts?fetcher";
+
+const client = await createClient({ workerUrl, fetcher: { module: fetcherUrl } });
+```
+
+For TypeScript, declare the import once:
+`declare module "*?fetcher" { const url: string; export default url; }`.
+
+Without a bundler, write the fetcher as a plain ES module and import
+`AuthInvalidError` from your served copy of `dist/fetcher.js`
+(`import { AuthInvalidError } from "/vendor/tscache/fetcher.js"`).
+
 ## Notes
 
 - Same origin only: a worker script on another origin is refused by the
