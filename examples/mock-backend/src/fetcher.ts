@@ -16,6 +16,12 @@ import { type FetchNotice, postFetchNotice } from "./notices";
 export interface ExampleContext {
   /** Access token; omit when the backend runs without auth. */
   token?: string;
+  /**
+   * The backend's origin. Omit in the browser, where the worker's own
+   * origin serves the backend. A server has no such origin, so the SSR
+   * examples pass the address they listen on.
+   */
+  origin?: string;
 }
 
 interface Page {
@@ -25,13 +31,10 @@ interface Page {
   next?: number;
 }
 
-function tokenOf(context: unknown): string | undefined {
-  return typeof context === "object" &&
-    context !== null &&
-    "token" in context &&
-    typeof context.token === "string"
-    ? context.token
-    : undefined;
+function stringIn(context: unknown, key: keyof ExampleContext) {
+  if (typeof context !== "object" || context === null) return undefined;
+  const value: unknown = (context as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
 }
 
 function seriesPath(cacheId: string): string {
@@ -53,10 +56,15 @@ async function fetchPage(
     interval: String(request.interval),
     offset: String(request.alignmentOffset),
   });
-  const token = tokenOf(request.context);
-  const response = await fetch(`${path}?${query}`, {
-    headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
-  });
+  const url = `${path}?${query}`;
+  const origin = stringIn(request.context, "origin");
+  const token = stringIn(request.context, "token");
+  const response = await fetch(
+    origin === undefined ? url : new URL(url, origin),
+    {
+      headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
+    },
+  );
   if (response.status === 401) {
     throw new AuthInvalidError("the backend refused the access token");
   }

@@ -6,6 +6,7 @@
   "exports": {
     "./datasets": "./src/datasets.ts",
     "./fetcher": "./src/fetcher.ts",
+    "./hydration": "./src/hydration.ts",
     "./notices": "./src/notices.ts",
     "./vite": "./src/vite.ts"
   },

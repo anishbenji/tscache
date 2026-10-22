@@ -101,6 +101,24 @@ describe("fetcher", () => {
     expect(await noticed).toMatchObject({ outcome: "auth-invalid" });
   });
 
+  it("asks the backend at the context's origin when it has one", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
+      asked.push(String(input));
+      return (await backend(new Request(input, init))) as Response;
+    });
+    await fetcher.fetch(
+      request({ context: { origin: "http://127.0.0.1:5105/" } }),
+    );
+    expect(asked).toHaveLength(3);
+    for (const url of asked) {
+      expect(url).toMatch(
+        /^http:\/\/127\.0\.0\.1:5105\/api\/series\/metrics\/web\?/,
+      );
+    }
+  });
+
   it("rejects a cache id that names no series", async () => {
     serve(createBackend({ latencyMs: 0, now: () => NOW }));
     await expect(

@@ -7,6 +7,8 @@ export const apps = {
   "solid-uplot": 5102,
   "solid-lwcharts": 5103,
   "react-lwcharts": 5104,
+  "react-ssr": 5105,
+  "solid-ssr": 5106,
 } as const;
 
 export type App = keyof typeof apps;
