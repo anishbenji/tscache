@@ -13,6 +13,13 @@
 // every tab ends the session through onSessionLost instead of retrying with
 // it.
 //
+// It assumes a refresh issues a new access token. A backend that renews an
+// access token in place (an opaque token whose expiry the refresh extends)
+// returns the refused string again, so every tab that heard the refusal
+// finds it still stored and refreshes once in turn. Each refresh presents the
+// current refresh token, never a spent one, so the session survives; the
+// cost is one redundant refresh per extra tab.
+//
 // A SharedWorker from a tscache version that did not name the refused
 // context yet (kept alive by a tab opened before an upgrade) sends the event
 // without one. The refused token is then unknown, so the tab refreshes: tabs

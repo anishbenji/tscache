@@ -6,6 +6,10 @@ context with its sources, the decision points, the options with their pros and c
 recommendation. The user decides; nothing here is settled. Decisions land as rows N34 onward in
 `docs/architecture.md` §8, each with the alternatives it rejected, and as the steps listed at the end.
 
+**Decided 2026-10-23:** the user took the recommended option at every decision point. The decisions are
+rows N34–N44 in `docs/architecture.md` §8; the one point this agenda left open (D6, whether
+`connection.ts` keeps seeding only the first client) is proposed in the step ⑮ architecture text.
+
 The items, heaviest first:
 
 1. A snapshot API over the segment payload, which also closes the seed race (R2-2).

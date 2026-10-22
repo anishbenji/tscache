@@ -70,9 +70,13 @@ With tokens, the fetcher receives them in its `context`, throws `AuthInvalidErro
 context (design (b), architecture §6.2, N33). Any tab may refresh and call `updateAuth`, after which the
 paused fetches run again. Refreshing with a rotating refresh token needs one tab at a time; the Web Locks
 snippet in [`examples/react-lwcharts/src/auth-refresh.ts`](../../examples/react-lwcharts/src/auth-refresh.ts)
-does it, and its header lists what it assumes. While credentials are invalid, `get` does not wait: the
-affected ranges come back as misses with reason `'auth-pending'`, and a `get` after `updateAuth` fills
-them.
+does it, and its header lists what it assumes. The main assumption is that a refresh issues a new access
+token: a tab that takes the lock after another tab's refresh compares the stored access token with the
+refused one. A backend that renews an access token in place returns the same string, so each tab that
+heard the refusal refreshes once in turn, always with the current refresh token (architecture N42). The
+session survives; the cost is one redundant refresh per extra tab. While credentials are invalid, `get`
+does not wait: the affected ranges come back as misses with reason `'auth-pending'`, and a `get` after
+`updateAuth` fills them.
 
 ## A lost worker
 
