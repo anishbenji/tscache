@@ -1,7 +1,7 @@
 // Vite plugins for the examples: one mounts the mock backend on the dev and
-// preview servers, so each example runs from a single command; one gives the
-// URL of a fetcher module, which tscache's worker import()s; and one renders
-// the SSR examples' page on the server.
+// preview servers, so each example runs from a single command, and one
+// renders the SSR examples' page on the server. The fetcher's URL comes from
+// tscache's own plugin, `fetcherUrl()` in `tscache/vite`.
 
 /// <reference path="./node.d.ts" />
 
@@ -72,60 +72,6 @@ export function mockBackend(options?: BackendOptions): Plugin {
     name: "tscache-examples:mock-backend",
     configureServer: (server) => void server.middlewares.use(middleware),
     configurePreviewServer: (server) => void server.middlewares.use(middleware),
-  };
-}
-
-const FETCHER_QUERY = "?fetcher";
-const PREFIX = "\0fetcher-url:";
-
-/**
- * `import url from "./fetcher.ts?fetcher"` gives the URL of that module
- * with its exports intact. Vite's `?worker&url` does not fit: it bundles a
- * worker entry without exports, and tscache needs the fetcher's default
- * export. In a build the module becomes its own chunk; in dev it is served
- * from source.
- *
- * Server code (the SSR examples' in-process client) gets a URL it can
- * import() too: in a server build, a file URL of the chunk; in dev, the
- * same path as the browser, which Vite's module runner resolves.
- */
-export function fetcherUrl(): Plugin {
-  let serve = false;
-  const chunks = new Set<string>();
-  return {
-    name: "tscache-examples:fetcher-url",
-    enforce: "pre",
-    configResolved(config) {
-      serve = config.command === "serve";
-    },
-    async resolveId(source, importer) {
-      if (!source.endsWith(FETCHER_QUERY)) return undefined;
-      const target = source.slice(0, -FETCHER_QUERY.length);
-      const resolved = await this.resolve(target, importer, { skipSelf: true });
-      return resolved ? PREFIX + resolved.id : undefined;
-    },
-    load(id) {
-      if (!id.startsWith(PREFIX)) return undefined;
-      const file = id.slice(PREFIX.length);
-      if (serve) return `export default ${JSON.stringify(`/@fs${file}`)};`;
-      const ref = this.emitFile({
-        type: "chunk",
-        id: file,
-        preserveSignature: "strict",
-      });
-      chunks.add(ref);
-      return `export default import.meta.ROLLUP_FILE_URL_${ref};`;
-    },
-    // Vite renders a file URL as a path under the base, which only a
-    // browser can load.
-    resolveFileUrl({ referenceId, relativePath }) {
-      if (this.environment.config.consumer !== "server") return null;
-      if (!chunks.has(referenceId)) return null;
-      const path = relativePath.startsWith(".")
-        ? relativePath
-        : `./${relativePath}`;
-      return `new URL(${JSON.stringify(path)}, import.meta.url).href`;
-    },
   };
 }
 
