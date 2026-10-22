@@ -61,7 +61,7 @@ what R2-2 needs and what the engine already provides; only the public surface is
 
 | Option | What it is | Pros | Cons |
 |---|---|---|---|
-| **A. Segment payloads, clipped to the range** (recommended) | `{ format, version?, finalizedUntil?, coverage: Range[], segments: DenseSegmentPayload[] }` for the request range: the payloads of the present points inside it, the covered sub-ranges, the dataset version and the watermark in force | Honours §3.4 as written; persistence stores the same `segments` by page and the same cache record; `segmentFromPayload` already validates grid, schema, mask and sizes, so a snapshot from a cache with another config is refused with `TscacheError`; equal data gives equal payloads (N15) | Needs a range-clipped payload (today `transferPayload()` is whole-segment): build a temporary segment from `slice(range)` or add a clipped payload method; a dense payload carries absent slots as zeros, bounded by the K-gap split |
+| **A. Segment payloads, clipped to the range** (recommended) | `{ format, interval, alignmentOffset, fields, version?, finalizedUntil?, coverage: Range[], segments: DenseSegmentPayload[] }` for the request range: the grid and schema of the cache, the covered sub-ranges, the dataset version and the watermark in force, and the payloads of the present points inside the range | Honours §3.4 as written; the envelope is the persistence sketch's cache record and `segments` its page content; the grid and schema are checked against the receiving cache before anything is applied, so a snapshot that holds no segment (a confirmed gap) is checked too, and `segmentFromPayload` checks each payload again (mask, sizes, alignment); a snapshot from a cache with another config is refused with `TscacheError`; equal data gives equal payloads (N15) | Needs a range-clipped payload (today `transferPayload()` is whole-segment): build a temporary segment from `slice(range)` or add a clipped payload method; a dense payload carries absent slots as zeros, bounded by the K-gap split |
 | B. The read result plus metadata | `GetResult` columns, coverage, version, watermark: today's seed with the two missing fields | Smallest change to the helpers that exist; compact for sparse data | A second serialised format next to the payload, which starter §3.7 locks against: the user would have to unlock it; persistence would still need the payload path, so two decoders |
 | C. Whole segments that intersect the range | `transferPayload()` of each segment the range touches | No clipping code | A daily series keeps decades in one segment (cap 32 768 slots), so a 200-candle page would serialise everything the server ever fetched |
 
@@ -88,16 +88,17 @@ the architecture text:
 | iii. Plain upsert | `put` without a range | Simplest | Can replace a newer provisional point with an older one until the next `get` refetches it |
 
 - *Result.* `{ applied: Range[]; skipped?: 'version-mismatch' }`: what was written, for tests and logs.
-- *Errors.* A snapshot whose grid or schema differs from the cache, or whose `format` is unknown, throws
-  `TscacheError` before anything changes (the `segmentFromPayload` rules, §4.2); an unknown cache
-  throws `UnknownCacheError` as every op does.
+- *Errors.* A snapshot whose `format` is unknown, or whose grid or schema differs from the cache, throws
+  `TscacheError` before anything changes: the envelope is checked first, so a snapshot with no segment
+  cannot mark a range covered on another grid, then each payload by the `segmentFromPayload` rules
+  (§4.2); an unknown cache throws `UnknownCacheError` as every op does.
 
 **D3. Where it lives.**
 
 | Option | Shape | Pros | Cons |
 |---|---|---|---|
-| **A. Two handle methods** (recommended) | `CacheHandle.snapshot(range)` and `CacheHandle.hydrate(snapshot)`; `Engine.snapshot`/`Engine.hydrate`; ops `snapshot` and `hydrate` | Symmetric; the server calls `get` then `snapshot` (two calls on an in-process client, no race: the snapshot reads the state after the fetch); the engine method is the one persistence will call | Two more ops and two more public types |
-| B. A `get` option | `get(range, { snapshot: true })` returns the snapshot alongside the result | One call on the server | Widens `GetResult` and `GetOptions` for one caller; the `get` transfer path would carry payload buffers |
+| **A. A `get` option** (recommended) | `get(range, { snapshot: true })` resolves with the result and its `snapshot`, both taken from the one engine read that follows the fetches the read awaited (§4.9); `CacheHandle.hydrate(snapshot)`; `Engine.snapshot(cacheId, range)` and `Engine.hydrate` for persistence and tests; one new op, `hydrate` | The page needs both forms (below) and gets them from one call and one state, so the columns and the snapshot cannot disagree; the smaller surface: one option, one method, one op | `GetResult` gains an optional field, and the `get` transfer path carries payload buffers when asked |
+| B. Two handle methods | `CacheHandle.snapshot(range)` next to `get`; ops `snapshot` and `hydrate` | Symmetric; `get` unchanged | The server shares one client across renders (`serverClient`), so another render's fetch, and with it a version change, can land between a render's `get` and its `snapshot`: the page then carries columns of one version and a snapshot of the next. The cache stays right, since the snapshot's own version applies, and the display catches up at the first live read, but the window has to be documented |
 | C. Seeds at open | `cache(config, { seed })` or a `seeds` client option applies at open | Removes the ordering code in `connection.ts` (seed before the first handle) | Couples opening with data; hides the result; A can grow this later |
 
 **D4. Protocol version.** New ops are additive. A worker from before them (a stale cached script, N25)
@@ -182,10 +183,10 @@ adopts the stored tokens otherwise. The adversarial reviewer of ⑫b noted (`doc
 DC-1): if a refresh returned the **same** access token with a new refresh token, every tab hearing one
 refusal would refresh in turn, since each finds the refused token still stored. The rotations are
 safe: each presents the current refresh token, never a spent one, so no session is revoked. The cost is
-one redundant refresh per extra tab. The scenario needs a backend that refuses a token and then
-reissues it, which the mock backend never does (`examples/mock-backend/src/backend.ts` rotates both
-tokens); a backend that did so would also loop a single tab, since the reissued token is refused
-again.
+one redundant refresh per extra tab. The realistic case is an opaque access token whose server-side
+expiry a refresh renews in place: the string stays the same, the retry succeeds, and only the
+redundant refreshes remain. The mock backend rotates both tokens
+(`examples/mock-backend/src/backend.ts`), so no spec exercises this case.
 
 ### Decision point
 
