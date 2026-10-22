@@ -22,6 +22,10 @@ export interface Seed {
   read: ServerRead;
 }
 
+/**
+ * Its members need no `this`: pass `subscribe`, or a getter of `state`,
+ * as they are (React's useSyncExternalStore takes them so).
+ */
 export interface Connection {
   readonly state: ConnectionState;
   /** Calls `listener` after each change of `state`; returns the unsubscribe. */
