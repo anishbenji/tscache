@@ -21,8 +21,18 @@
   "health": {
     // Test tables run long by design; size thresholds gate src only. The
     // example apps are demo code covered by their Playwright specs, which
-    // the coverage-based CRAP estimate cannot see.
-    "ignore": ["packages/*/test/**", "examples/**"]
+    // the coverage-based CRAP estimate cannot see. The framework snippets
+    // are type-checked, not run in CI (step ⑭), so the estimate takes them
+    // as untested; their shared core and the vanilla snippet stay gated.
+    "ignore": [
+      "packages/*/test/**",
+      "examples/**",
+      "integrations/react/**",
+      "integrations/solid/**",
+      "integrations/vue/**",
+      "integrations/svelte/**",
+      "integrations/angular/**"
+    ]
   },
   "duplicates": {
     // Hide pair-only clones; focus on widespread copy-paste

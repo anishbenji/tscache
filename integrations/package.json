@@ -4,9 +4,15 @@
   "type": "module",
   "description": "Type-checked integration snippets for tscache, one per framework (never published)",
   "scripts": {
-    "check": "tsc -p shared && tsc -p vanilla && tsc -p test"
+    "check": "tsc -p shared && tsc -p test && tsc -p vanilla && tsc -p react"
   },
   "dependencies": {
     "tscache": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   }
 }
