@@ -114,6 +114,39 @@ Without a bundler, write the fetcher as a plain ES module and import
 `AuthInvalidError` from your served copy of `dist/fetcher.js`
 (`import { AuthInvalidError } from "/vendor/tscache/fetcher.js"`).
 
+## Server rendering
+
+A server reads with an in-process client (`mode: 'in-process'`, no
+`workerUrl`), which imports the fetcher module in the server's own process.
+Two things differ from the browser:
+
+- The module URL must be one the server can `import()`. Vite's dev server
+  runs server code through its module runner, which resolves the same
+  `/@fs/` path the plugin gives the browser. A server build, however, renders
+  an emitted chunk's URL as a path under `base`, which only a browser can
+  load. Add a `resolveFileUrl` hook that gives server code a file URL
+  instead (the examples' `fetcherUrl()` does):
+
+  ```ts
+  // In the plugin above: remember each emitted chunk's reference id in
+  // `chunks` (a Set), then:
+  resolveFileUrl({ referenceId, relativePath }) {
+    if (this.environment.config.consumer !== "server") return null;
+    if (!chunks.has(referenceId)) return null;
+    const path = relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
+    return `new URL(${JSON.stringify(path)}, import.meta.url).href`;
+  },
+  ```
+
+- A server has no page origin, so a fetcher that requests relative paths
+  needs the backend's origin from its context. The examples' fetcher reads
+  `context.origin`; the browser's client omits it.
+
+The SSR examples (`examples/react-ssr`, `examples/solid-ssr`) show the rest:
+the server writes the covered parts of its answer into the page, and the
+browser puts them back with their ranges, so it fetches only what they do not
+cover.
+
 ## Notes
 
 - Same origin only: a worker script on another origin is refused by the

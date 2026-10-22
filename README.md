@@ -7,7 +7,8 @@ orchestration, and coverage tracking that distinguishes "not fetched yet" from
 **Status: pre-release, under active development.** The design is settled — see
 [`docs/architecture.md`](docs/architecture.md) for the API surface, RPC
 protocol, and decision register. Implementation is proceeding through the
-commit plan described there.
+commit plan described there; deferred work is listed in
+[`docs/roadmap.md`](docs/roadmap.md).
 
 ## Examples
 
@@ -22,6 +23,8 @@ server mounts under `/api/`.
 | [`solid-uplot`](examples/solid-uplot) | IoT sensor with dropout gaps and an integer field |
 | [`solid-lwcharts`](examples/solid-lwcharts) | OHLCV scroll-back over nights and weekends |
 | [`react-lwcharts`](examples/react-lwcharts) | Two tabs, one SharedWorker; token refresh across tabs |
+| [`react-ssr`](examples/react-ssr) | Server-rendered candles; the browser's cache hydrated from the server's read |
+| [`solid-ssr`](examples/solid-ssr) | Server-rendered sensor; confirmed gaps travel with the coverage |
 
 ```sh
 bun install && bun run build
