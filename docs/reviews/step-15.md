@@ -1,6 +1,6 @@
 # Step 15 — Snapshot API (hydrate, encode/decode) and the migration of server-rendering hydration
 
-Branch: `feat/15-snapshot` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: architecture text approved; contract tests in progress · Verdict after triage: —
+Branch: `feat/15-snapshot` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: implemented; review loop in progress · Verdict after triage: —
 
 Step ⑮ is the first item of the post-build architecture review (`docs/architecture-review.md`, item 1; decisions N34–N39 in `docs/architecture.md` §8). An engine step: the architecture text comes first, then Codex writes the contract tests from it (prompt A, `docs/workflow.md`), then the implementation, the migration of the ⑬b and ⑭ helpers and the guide's server-rendering section, then the review loop.
 
@@ -26,9 +26,21 @@ Prompt A, headless (`codex exec -s workspace-write`, GPT-6.1 Sol high, one sessi
 
 Two ambiguities Codex left unpinned, settled in the text before implementation (commit below): an unaligned `range` inside a snapshot is rejected, since §2.8 says a snapshot is never snapped, where §4.5 had said "a range `snapOut` accepts"; and `decodeSnapshot` checks the shape and the base64 only, with every semantic check (lengths, ordering, alignment, schema) left to `hydrate`.
 
+## Implementation (2026-10-23)
+
+| Commit | What |
+|---|---|
+| 80c2f13 | `feat(engine)`: `CacheState`/`Engine` `snapshot`, `hydrate`, the `snapshot` option on `get`; `engine/snapshot.ts` (take, validate); `src/snapshot.ts` (`encodeSnapshot`/`decodeSnapshot`); `DenseSegmentPayload` moved to `types.ts` and public; exports from `.` and `./engine`. Codex's contract tests land here unchanged |
+| fe48a01 | `feat(rpc)`: the `hydrate` op, a `get` result's snapshot buffers in its transfer list, the orchestrator's snapshot from the read it returns, `CacheHandle.hydrate`; wiring tests in `snapshot-wiring.test.ts` |
+| 4d18782 | `feat(examples)`: the mock backend's hydration helper carries the encoded snapshot and applies it with `hydrate` (`seed`); both SSR examples read with `snapshot: true` and seed every client (D6-B); specs, READMEs, helper tests |
+| 7cc7f1b | `feat(integrations)`: a server read carries its snapshot beside its columns; `hydrateRead` replaces `putCovered`; `connection.ts` seeds every client (D6-B); tests, comments, READMEs |
+| f539868 | `docs(guides)`: the server-rendering section of `docs/guides/worker-setup.md` shows the snapshot flow; roadmap pointer |
+
+Only an older worker's `unknown op` rejection counts as "not seeded" in the two helpers (N37); every other failure propagates. `main` (PR #26) was merged into the branch before the implementation commits.
+
 ## Contract-test changes
 
-None yet.
+None. The six Codex files pass unchanged.
 
 ## Decision concerns
 
