@@ -1,4 +1,10 @@
-import { createClient, type TscacheClient } from "tscache";
+import {
+  type CacheConfig,
+  createClient,
+  type Dtype,
+  type FieldArray,
+  type TscacheClient,
+} from "tscache";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   dehydrate,
@@ -60,14 +66,13 @@ describe("dehydrate / rehydrate", () => {
   });
 
   it("keeps fields named like Object.prototype members as fields", async () => {
-    const odd = {
-      id: "odd",
-      interval: 10,
-      fields: Object.fromEntries([
-        ["__proto__", "f64"],
-        ["constructor", "i16"],
-      ]),
-    };
+    const fields: Record<string, Dtype> = Object.fromEntries([
+      ["__proto__", "f64"],
+      ["constructor", "i16"],
+    ]);
+    const odd: CacheConfig = { id: "odd", interval: 10, fields };
+    const own = (of: Record<string, FieldArray>, name: string) =>
+      Array.from(Object.getOwnPropertyDescriptor(of, name)?.value ?? []);
     const client = await createClient({ mode: "in-process" });
     open.push(client);
     const server = await client.cache(odd);
@@ -84,12 +89,8 @@ describe("dehydrate / rehydrate", () => {
     );
     const read = { range, result: await server.get(range) };
     const back = rehydrate(odd, JSON.parse(JSON.stringify(dehydrate(read))));
-    const proto = Object.getOwnPropertyDescriptor(
-      back.result.fields,
-      "__proto__",
-    );
-    expect(Array.from(proto?.value ?? [])).toEqual([1.5, 2.5]);
-    expect(Array.from(back.result.fields.constructor ?? [])).toEqual([3, 4]);
+    expect(own(back.result.fields, "__proto__")).toEqual([1.5, 2.5]);
+    expect(own(back.result.fields, "constructor")).toEqual([3, 4]);
 
     const other = await createClient({ mode: "in-process" });
     open.push(other);
@@ -97,7 +98,7 @@ describe("dehydrate / rehydrate", () => {
     await putCovered(browser, odd, back);
     const known = await browser.get(range, { cacheOnly: true });
     expect(known.coverage).toEqual([range]);
-    expect(Array.from(known.fields.constructor ?? [])).toEqual([3, 4]);
+    expect(own(known.fields, "constructor")).toEqual([3, 4]);
   });
 
   it("refuses a field the cache config lacks", async () => {
