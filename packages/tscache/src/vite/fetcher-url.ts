@@ -28,7 +28,8 @@ interface Context {
 export interface FetcherUrlPlugin {
   name: string;
   enforce: "pre";
-  configResolved(config: { command: "build" | "serve" }): void;
+  config(): { ssr: { noExternal: string[] } };
+  configResolved(config: { command: "build" | "serve"; base: string }): void;
   resolveId(
     this: Context,
     source: string,
@@ -59,12 +60,19 @@ const PREFIX = "\0tscache-fetcher-url:";
  */
 export function fetcherUrl(): FetcherUrlPlugin {
   let serve = false;
+  let base = "/";
   const chunks = new Set<string>();
   return {
     name: "tscache:fetcher-url",
     enforce: "pre",
+    // In dev, server code import()s the fetcher through Vite's module
+    // runner, which resolves /@fs/ paths. An installed tscache would be
+    // externalized and its import() run in plain Node, where they mean
+    // nothing; bundling it routes the import() through the runner.
+    config: () => ({ ssr: { noExternal: ["tscache"] } }),
     configResolved(config) {
       serve = config.command === "serve";
+      base = config.base;
     },
     async resolveId(source, importer) {
       if (!source.endsWith(QUERY)) return undefined;
@@ -75,7 +83,11 @@ export function fetcherUrl(): FetcherUrlPlugin {
     load(id) {
       if (!id.startsWith(PREFIX)) return undefined;
       const file = id.slice(PREFIX.length);
-      if (serve) return `export default ${JSON.stringify(`/@fs${file}`)};`;
+      if (serve) {
+        // The browser requests under the base; the runner resolves /@fs/.
+        const server = this.environment.config.consumer === "server";
+        return `export default ${JSON.stringify(devUrl(server ? "/" : base, file))};`;
+      }
       const ref = this.emitFile({
         type: "chunk",
         id: file,
@@ -95,4 +107,14 @@ export function fetcherUrl(): FetcherUrlPlugin {
       return `new URL(${JSON.stringify(path)}, import.meta.url).href`;
     },
   };
+}
+
+/**
+ * The dev server's URL of an absolute file under `base`: Vite serves files
+ * outside the root at `<base>@fs/<path>`, and a Windows path (`C:/…`) has
+ * no leading slash of its own.
+ */
+export function devUrl(base: string, file: string): string {
+  const root = base.endsWith("/") ? base : `${base}/`;
+  return `${root}@fs/${file.replace(/^\/+/, "")}`;
 }

@@ -1,7 +1,7 @@
 // The package has no Node type definitions (batch-realms.test.ts); Vitest
 // runs under Node.
 // @ts-expect-error -- no Node types
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 // @ts-expect-error -- no Node types
 import { tmpdir } from "node:os";
 // @ts-expect-error -- no Node types
@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fetcherUrl } from "../src/entries/vite";
+import { devUrl } from "../src/vite/fetcher-url";
 
 /**
  * Vite, loaded through a specifier TypeScript does not resolve: Vite's
@@ -20,6 +21,8 @@ interface Vite {
   build(config: object): Promise<unknown>;
   createServer(config: object): Promise<{
     ssrLoadModule(url: string): Promise<Record<string, unknown>>;
+    listen(): Promise<unknown>;
+    resolvedUrls: { local: string[] } | null;
     close(): Promise<void>;
   }>;
 }
@@ -123,5 +126,84 @@ describe("fetcherUrl (tscache/vite)", () => {
     expect(
       await plugin.resolveId.call(context, "./fetcher.js", undefined),
     ).toBeUndefined();
+  });
+
+  it("a dev server under a base serves the fetcher at a URL inside that base (R1-2)", async () => {
+    const server = await createServer({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      base: "/app/",
+      plugins: [fetcherUrl()],
+      server: { port: 0, hmr: false, ws: false },
+    });
+    try {
+      await server.listen();
+      const origin = new URL(server.resolvedUrls?.local[0] ?? "").origin;
+      const get = async (path: string) => {
+        const response = await fetch(new URL(path, origin));
+        expect(response.status).toBe(200);
+        return response.text();
+      };
+      // main.js imports the virtual module; it exports the fetcher's URL.
+      const main = await get("/app/main.js");
+      const virtual = /from\s+"([^"]*tscache-fetcher-url[^"]*)"/.exec(
+        main,
+      )?.[1];
+      expect(virtual).toBeDefined();
+      const url = /export default "([^"]+)"/.exec(
+        await get(virtual ?? ""),
+      )?.[1];
+      expect(url).toMatch(/^\/app\/@fs\/.*\/fetcher\.js$/);
+      expect(await get(url ?? "")).toContain("fetched");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("an installed tscache is bundled in dev SSR, so its import() of the fetcher URL resolves (R1-4)", async () => {
+    // A stand-in for an installed tscache, which Vite would externalize: its
+    // import() would then run in plain Node, where /@fs/ paths mean nothing.
+    await mkdir(join(root, "node_modules", "tscache"), { recursive: true });
+    await writeFile(
+      join(root, "node_modules", "tscache", "package.json"),
+      '{ "name": "tscache", "type": "module", "exports": "./index.js" }\n',
+    );
+    await writeFile(
+      join(root, "node_modules", "tscache", "index.js"),
+      "export const load = (url) => import(/* @vite-ignore */ url);\n",
+    );
+    await writeFile(
+      join(root, "ssr.js"),
+      'import { load } from "tscache";\nimport url from "./fetcher.js?fetcher";\nexport const fetcher = () => load(url);\n',
+    );
+    const server = await createServer({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      plugins: [fetcherUrl()],
+      server: { middlewareMode: true, hmr: false, ws: false },
+      appType: "custom",
+    });
+    try {
+      const ssr = (await server.ssrLoadModule("/ssr.js")) as unknown as {
+        fetcher(): Promise<FetcherModule>;
+      };
+      expect((await ssr.fetcher()).default.fetch()).toBe("fetched");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("devUrl (R1-2, R1-3)", () => {
+  it.each([
+    ["/", "/repo/fetcher.ts", "/@fs/repo/fetcher.ts"],
+    ["/app/", "/repo/fetcher.ts", "/app/@fs/repo/fetcher.ts"],
+    ["/app", "/repo/fetcher.ts", "/app/@fs/repo/fetcher.ts"],
+    ["/", "C:/repo/fetcher.ts", "/@fs/C:/repo/fetcher.ts"],
+    ["/app/", "C:/repo/fetcher.ts", "/app/@fs/C:/repo/fetcher.ts"],
+  ])("base %s, file %s → %s", (base, file, url) => {
+    expect(devUrl(base, file)).toBe(url);
   });
 });
