@@ -126,6 +126,10 @@ describe("hydrate over the wire (§3.2, §4.7)", () => {
     await expect(
       client.request("not-an-op" as Op, { cacheId: "wiring" }),
     ).rejects.toThrow(/unknown op/);
+    // The helpers recognise an older worker by this exact text (R1-1).
+    await expect(
+      client.request("hydrate-v2" as Op, { cacheId: "wiring" }),
+    ).rejects.toThrow(/^unknown op hydrate-v2$/);
   });
 });
 
@@ -188,4 +192,28 @@ describe("CacheHandle.hydrate in process (§4.8)", () => {
       expect(read.coverage).toEqual([{ start: 3, end: 33 }]);
     }
   });
+});
+
+describe("decodeSnapshot rejects sparse arrays (step 15 R1-2)", () => {
+  function encoded() {
+    const engine = new Engine();
+    engine.cache(config);
+    engine.put("wiring", batch([3, 13]));
+    return encodeSnapshot(engine.snapshot("wiring", { start: 3, end: 13 }));
+  }
+
+  it.each(["segments", "coverage", "fields"] as const)(
+    "a hole in %s is a TscacheError",
+    (where) => {
+      const e = encoded();
+      if (where === "segments") e.segments = new Array(1);
+      else if (where === "coverage") e.coverage = new Array(1);
+      else {
+        const p = e.segments[0];
+        if (p === undefined) throw new Error("no payload");
+        p.fields = new Array(2);
+      }
+      expect(() => decodeSnapshot(e)).toThrow(TscacheError);
+    },
+  );
 });

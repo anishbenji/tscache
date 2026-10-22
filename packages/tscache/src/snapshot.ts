@@ -104,7 +104,7 @@ function decodePayload(value: unknown, i: number): DenseSegmentPayload {
   if (value.format !== 1) fail(`${what}.format must be 1`);
   if (value.layout !== "dense") fail(`${what}.layout must be "dense"`);
   if (!Array.isArray(value.fields)) fail(`${what}.fields must be an array`);
-  const fields = value.fields.map((entry: unknown, k: number) => {
+  const fields = Array.from(value.fields, (entry: unknown, k: number) => {
     const at = `${what}.fields[${k}]`;
     if (
       !isObject(entry) ||
@@ -135,8 +135,8 @@ function decodePayload(value: unknown, i: number): DenseSegmentPayload {
 }
 
 /**
- * The snapshot an {@link encodeSnapshot} value carries. Checks the shape and
- * the base64 only, and leaves its input unchanged; whether the snapshot
+ * The snapshot an {@link encodeSnapshot} value carries. Checks the shape
+ * (every array position, holes included) and the base64 only, and leaves its input unchanged; whether the snapshot
  * fits a cache (lengths, ordering, alignment, schema) is `hydrate`'s check.
  * Throws TscacheError for anything else.
  */
@@ -162,10 +162,10 @@ export function decodeSnapshot(encoded: EncodedSnapshot): Snapshot {
     alignmentOffset: checkNumber(e.alignmentOffset, "alignmentOffset"),
     fields: { ...(fields as Snapshot["fields"]) },
     range: checkRange(e.range, "range"),
-    coverage: e.coverage.map((r: unknown, i: number) =>
+    coverage: Array.from(e.coverage, (r: unknown, i: number) =>
       checkRange(r, `coverage[${i}]`),
     ),
-    segments: e.segments.map(decodePayload),
+    segments: Array.from(e.segments, decodePayload),
   };
   if (e.version !== undefined) snapshot.version = e.version as string;
   if (e.finalizedUntil !== undefined) {
