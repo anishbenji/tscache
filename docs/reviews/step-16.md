@@ -1,6 +1,6 @@
 # Step 16 — `tscache/vite` entry
 
-Branch: `feat/16-vite-entry` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: review loop in progress · Verdict after triage: —
+Branch: `feat/16-vite-entry` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: settled except R3-1, escalated to the user · Verdict after triage: merge after the user decides R3-1
 
 Item 2 of the post-build architecture review (`docs/architecture-review.md`; decisions N40–N41). Not an engine step: tests are written with the code.
 
@@ -54,6 +54,12 @@ Observed while verifying: one CI run timed out an unrelated heavy test (`merge-f
 | B. Empty the preload list for chunks the worker runs (recommended) | The plugin wraps `build.modulePreload.resolveDependencies` (and any the app set) to return `[]` for imports hosted in the fetcher chunk and the chunks it reaches | Exact, automatic, the app keeps preloading elsewhere | Relies on a Vite hook's call order in the bundle step; a chunk shared by page and worker loses preloading for its own dynamic imports |
 | C. Build the fetcher separately, as Vite builds workers | A second bundle for the fetcher graph, exports kept | Worker code fully isolated from page helpers | Duplicates shared code; much more plugin machinery |
 
+## Round 4 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P1 | R3-1 is still open: documenting the workaround does not fix it | escalated (re-raises R3-1) | Correct: it stays open until the user picks an option in the table above. No other finding; the reviewer confirmed every other accepted fix. The loop stops here as step ⑭ did with R2-2: the remaining finding needs a decision, not another patch |
+
 ## Contract-test changes
 
 None: not an engine step.
@@ -61,3 +67,15 @@ None: not an engine step.
 ## Decision concerns
 
 None yet.
+
+## Merge request: `feat/16-vite-entry` → `main`
+
+**Scope.** Item 2 of the post-build architecture review (N40–N41): `tscache/vite` exports `fetcherUrl()`, so an app writes `import url from "./fetcher.ts?fetcher"` and gets the fetcher's URL with its default export intact; `vite ^8.0.0` is an optional peer dependency. The examples import it and drop their copy; the guide replaces its forty-five-line copy with the import.
+
+**Open: R3-1, escalated.** A fetcher whose `import()` loads code the app also uses gets Vite's preload helper, which reads `document` in the worker. The limit and a workaround are documented; the fix is the user's decision (options in the round 3 section, B recommended). Merging now ships the documented limit; option B would follow as a small change with a worker-execution test.
+
+**Design, after four rounds.** The plugin declares the Vite shapes it uses instead of importing Vite's types, which would bring Node's into the browser library's type check (V2). The entry has its own `platform: "node"` build, as N40 states (R1-1). Every URL it builds lives in `src/vite/urls.ts`, each encoded as the inverse of what decodes it (redesigned at the convergence check after rounds 1–3): the browser's dev URL under the base with `encodeURI`, server code's dev path as an absolute path, the server build's file URL encoded per segment with Rolldown's hash placeholders kept. Virtual ids carry a number, not a path. The plugin adds `tscache` to `ssr.noExternal`, so an installed package's `import()` of the fetcher goes through Vite's module runner in dev.
+
+**Tests.** Real Vite builds and servers: a client build under a base, a server build with an assets directory holding `%`, a space and `#` imported by plain Node, a dev server under a base fetching the URL over HTTP with the fetcher outside the root in a directory named `lib %41`, the module runner's load, and a stand-in installed `tscache`. Unit cases for both URL encoders. `bun run ci` passed: 1444 Node tests and 48 browser specs, every example built with the new import.
+
+**For the user.** V1: the peer range `^8.0.0` (only the tested major). V2: structural typing instead of Vite's types. R3-1: pick A, B or C. Known limits: a path holding `#` or `?` cannot be served by Vite's dev middleware at all; one CI run timed out an unrelated heavy test while Vite builds shared the Vitest pool (rerun passed). Commit note: the Node build config landed in a triage commit (99a6f21) after a commitlint refusal.
