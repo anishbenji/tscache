@@ -5,9 +5,11 @@
 #
 # Headless Codex sessions sometimes stall without output. When nothing
 # under .reviews/step-NN/ grows for REVIEW_SILENCE_SECONDS (default 600),
-# the review's process group and its `codex exec` are killed and this
-# script exits 124, so the caller can retry. stdin is closed: `codex exec`
-# otherwise waits on it for the whole timeout.
+# the review's process group (the review script and its `codex exec`, and
+# nothing else) is killed and this script exits 124, so the caller can
+# retry. Otherwise it exits with the review's own status. stdin is closed:
+# `codex exec` otherwise waits on it for the whole timeout.
+# REVIEW_POLL_SECONDS (default 30) sets how often output is checked.
 set -u
 
 [[ $# -ge 1 && $1 =~ ^[0-9]{2}$ ]] || {
@@ -21,6 +23,7 @@ cd "$root" || exit 2
 dir=".reviews/step-$step"
 mkdir -p "$dir"
 limit=${REVIEW_SILENCE_SECONDS:-600}
+poll=${REVIEW_POLL_SECONDS:-30}
 
 # Total bytes under the review directory (portable: no stat flags).
 size() {
@@ -28,24 +31,27 @@ size() {
     awk '$2 != "total" { s += $1 } END { print s + 0 }'
 }
 
+# Job control gives the review its own process group, so a timeout kills
+# exactly that group: never another checkout's review.
 set -m
 scripts/codex-review.sh "$step" "$@" </dev/null &
 pid=$!
 last=$(size)
 quiet=0
-while kill -0 "$pid" 2>/dev/null; do
-  sleep 30
+while :; do
+  sleep "$poll"
+  # Finished during the sleep: report its status, never a timeout.
+  kill -0 "$pid" 2>/dev/null || break
   now=$(size)
   if [[ $now != "$last" ]]; then
     last=$now
     quiet=0
   else
-    quiet=$((quiet + 30))
+    quiet=$((quiet + poll))
   fi
   if ((quiet >= limit)); then
     echo "review-watch: no output for ${quiet}s; killing the review" >&2
     kill -TERM -- -"$pid" 2>/dev/null
-    pkill -f 'codex exec -s read-only' 2>/dev/null
     sleep 5
     kill -KILL -- -"$pid" 2>/dev/null
     exit 124

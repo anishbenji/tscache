@@ -13,6 +13,7 @@ export FALLOW_AUDIT_BASE="${FALLOW_AUDIT_BASE:-$base}"
 
 bun install --frozen-lockfile
 bash .claude/hooks/guard-bash.test.sh
+bash scripts/review-watch.test.sh
 # Backstop for skipped git hooks: re-run the commit-time checks over every
 # commit on the branch, however a hook was bypassed. `-m` includes merge
 # diffs, so a secret added while resolving a merge is scanned too. Skipped

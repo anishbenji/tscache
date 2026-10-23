@@ -130,6 +130,15 @@ No findings. The reviewer checked that N34–N44 match the options the agenda re
 
 Tooling only, no change under `packages/tscache/src/`; backlog items the user parked for after the build (2026-10-11). `scripts/review-watch.sh` commits the silence watchdog every review since step ⑫ ran from a copy in `/tmp`: it runs `scripts/codex-review.sh` with stdin closed and kills the session after `REVIEW_SILENCE_SECONDS` (default 600) without output, exiting 124. Tested against stand-in review scripts: a silent one is killed after 35 s with no process left behind, a busy one exits 0. `scripts/ci.sh` now sets `FALLOW_AUDIT_BASE` to its own base when unset, so a pushed branch is audited against `main` rather than its upstream. `docs/workflow.md` points the review step at the watchdog. Not done, since each needs a decision: type-checking `e2e/` and `scripts/` needs Node or Bun type definitions, a new dependency; running `check:integrations` in pre-push needs a build first. Rounds continue from round 8 in `.reviews/step-14/`.
 
+### Round 8 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R8-1 | P1 | The timeout's global `pkill -f 'codex exec -s read-only'` also kills another checkout's healthy review | accepted | Validated with a regression case: a process named like a codex session outside the review was killed by the old script. The watchdog now kills only the review's own process group, which job control gives it |
+| R8-2 | P1 | A review that finishes during the sleep without new output is reported as a timeout (124) | accepted | Validated with a regression case that failed on the old script (124 instead of 0). The loop now rechecks the child after each sleep and returns its own status |
+
+`scripts/review-watch.test.sh` holds four cases (silent review times out; busy review keeps its status; quick silent review exits 0; other sessions survive) with `REVIEW_POLL_SECONDS` and `REVIEW_SILENCE_SECONDS` set to seconds, and `scripts/ci.sh` runs it next to the guard's tests.
+
 ## Merge request: `docs/14b-assumptions` → `main`
 
 **Scope.** Documentation only; nothing under `packages/tscache/src/` changes. The post-build architecture review's decisions, recorded, and the two outcomes that need only documentation.
