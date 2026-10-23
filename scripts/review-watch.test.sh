@@ -8,10 +8,15 @@ check() { # name expected actual
   if [[ $2 == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: expected $2, got $3"; fail=1; fi
 }
 
-scratch=$(mktemp -d)
+# Every case writes scripts/codex-review.sh, so it must never run outside
+# a fresh scratch repository: any setup failure stops here.
+scratch=$(mktemp -d) || { echo "cannot create a scratch directory" >&2; exit 1; }
+[[ -n $scratch && -d $scratch ]] || { echo "no scratch directory" >&2; exit 1; }
 trap 'rm -rf "$scratch"' EXIT
-cd "$scratch" && git init -q && mkdir scripts
-cp "$here/review-watch.sh" scripts/
+cd "$scratch" || exit 1
+git init -q || exit 1
+mkdir scripts || exit 1
+cp "$here/review-watch.sh" scripts/ || exit 1
 stand_in() { printf '#!/usr/bin/env bash\n%s\n' "$1" > scripts/codex-review.sh; chmod +x scripts/codex-review.sh; }
 export REVIEW_POLL_SECONDS=1 REVIEW_SILENCE_SECONDS=3
 

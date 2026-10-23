@@ -139,6 +139,12 @@ Tooling only, no change under `packages/tscache/src/`; backlog items the user pa
 
 `scripts/review-watch.test.sh` holds four cases (silent review times out; busy review keeps its status; quick silent review exits 0; other sessions survive) with `REVIEW_POLL_SECONDS` and `REVIEW_SILENCE_SECONDS` set to seconds, and `scripts/ci.sh` runs it next to the guard's tests.
 
+### Round 9 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R9-1 | P1 | If `mktemp -d` fails, the test goes on in the real checkout and overwrites `scripts/codex-review.sh` | accepted | Reproduced: with a `mktemp` that always fails first in `PATH`, the old test overwrote the real script (`cd ""` succeeds in bash and stays put). Every setup step now exits on failure, and the scratch path must be a directory. `scripts/ci.sh` runs the test with that failing `mktemp` and checks that it exits non-zero and leaves the real script's hash unchanged. An unwritable `TMPDIR` does not simulate it on macOS, whose `mktemp` falls back to `/tmp` |
+
 ## Merge request: `docs/14b-assumptions` → `main`
 
 **Scope.** Documentation only; nothing under `packages/tscache/src/` changes. The post-build architecture review's decisions, recorded, and the two outcomes that need only documentation.

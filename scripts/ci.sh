@@ -14,6 +14,21 @@ export FALLOW_AUDIT_BASE="${FALLOW_AUDIT_BASE:-$base}"
 bun install --frozen-lockfile
 bash .claude/hooks/guard-bash.test.sh
 bash scripts/review-watch.test.sh
+# With no usable scratch directory the test must stop, never touch the
+# real review script (step 14 R9-1).
+before=$(git hash-object scripts/codex-review.sh)
+nomktemp=$(mktemp -d)
+printf '#!/bin/sh\nexit 1\n' >"$nomktemp/mktemp"
+chmod +x "$nomktemp/mktemp"
+if PATH="$nomktemp:$PATH" bash scripts/review-watch.test.sh >/dev/null 2>&1; then
+  echo "review-watch.test.sh ran without a scratch directory" >&2
+  exit 1
+fi
+[ "$(git hash-object scripts/codex-review.sh)" = "$before" ] || {
+  echo "review-watch.test.sh changed scripts/codex-review.sh" >&2
+  exit 1
+}
+rm -rf "$nomktemp"
 # Backstop for skipped git hooks: re-run the commit-time checks over every
 # commit on the branch, however a hook was bypassed. `-m` includes merge
 # diffs, so a secret added while resolving a merge is scanned too. Skipped
