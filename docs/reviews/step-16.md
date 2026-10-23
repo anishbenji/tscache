@@ -68,6 +68,10 @@ None: not an engine step.
 
 None yet.
 
+## After the review: GitHub CI on a fresh checkout
+
+The first GitHub run failed at Knip: it loads each example's `vite.config.ts`, which now imports `tscache/vite` from `dist/`, and a fresh checkout has no `dist/` before the build (local runs always had one). Reproduced locally by deleting `dist/`. `scripts/ci.sh` now builds the package before Knip; the full gate passes from a deleted `dist/`. Not Codex-reviewed: a reordering of existing steps.
+
 ## Merge request: `feat/16-vite-entry` → `main`
 
 **Scope.** Item 2 of the post-build architecture review (N40–N41): `tscache/vite` exports `fetcherUrl()`, so an app writes `import url from "./fetcher.ts?fetcher"` and gets the fetcher's URL with its default export intact; `vite ^8.0.0` is an optional peer dependency. The examples import it and drop their copy; the guide replaces its forty-five-line copy with the import.
