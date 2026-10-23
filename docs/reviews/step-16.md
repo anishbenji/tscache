@@ -68,6 +68,10 @@ None: not an engine step.
 
 None yet.
 
+## The user's decision on R3-1 (2026-10-23): option B with a self-check, after #28
+
+The user chose the compromise: #28 merges with the documented limit (option A's text); option B lands as a follow-up (`feat/16b-worker-preload`, PR #30) with a build-time self-check. The plugin empties the preload lists of imports hosted in the chunks the worker runs, and after the bundle is written it fails the build, naming the chunk, if one of them still carries a list (a Vite change in hook order, or another plugin replacing `resolveDependencies`), so a regression is a build error rather than a fetcher throwing in a worker. The guide keeps `build.modulePreload: false` as the escape hatch the error points to. Option C (a separate fetcher build) stays the fallback if the self-check ever fires in practice.
+
 ## After the review: GitHub CI on a fresh checkout
 
 The first GitHub run failed at Knip: it loads each example's `vite.config.ts`, which now imports `tscache/vite` from `dist/`, and a fresh checkout has no `dist/` before the build (local runs always had one). Reproduced locally by deleting `dist/`. `scripts/ci.sh` now builds the package before Knip; the full gate passes from a deleted `dist/`. Not Codex-reviewed: a reordering of existing steps.

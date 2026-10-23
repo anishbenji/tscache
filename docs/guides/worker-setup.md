@@ -78,7 +78,9 @@ A fetcher may `import()` code lazily, even code the page shares: the
 plugin turns off Vite's module preloading for imports inside the chunks the
 worker runs, since Vite's preload helper reads `document`, which a worker
 lacks. Preloading for the page's own imports is unchanged, including a
-`build.modulePreload.resolveDependencies` of your own.
+`build.modulePreload.resolveDependencies` of your own. Should a chunk the
+worker runs still carry a preload list (after a Vite change, say), the
+build fails and names it; `build: { modulePreload: false }` is the way out.
 
 ```ts
 import { createClient } from "tscache";

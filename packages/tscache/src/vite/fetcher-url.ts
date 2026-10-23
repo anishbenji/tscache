@@ -45,6 +45,7 @@ interface UserConfig {
 /** The parts of an output chunk the bundle walk reads. */
 interface OutputChunkLike {
   type: string;
+  code?: string;
   facadeModuleId?: string | null;
   imports?: string[];
   dynamicImports?: string[];
@@ -73,6 +74,11 @@ export interface FetcherUrlPlugin {
     options: unknown,
     bundle: Record<string, OutputChunkLike>,
   ): void;
+  writeBundle(
+    this: { error(message: string): never },
+    options: unknown,
+    bundle: Record<string, OutputChunkLike>,
+  ): void;
 }
 
 const QUERY = "?fetcher";
@@ -95,7 +101,11 @@ const PREFIX = "\0tscache-fetcher-url:";
  * fetcher's chunk and every chunk it reaches), wrapping any
  * `build.modulePreload.resolveDependencies` the app set, which still runs
  * for every other chunk. A chunk the page shares with the worker therefore
- * loses preloading for its own dynamic imports.
+ * loses preloading for its own dynamic imports. If a chunk the worker runs
+ * still carries a preload list after the build (a Vite change, or another
+ * plugin replacing `resolveDependencies`), the build fails and names the
+ * chunk, rather than ship a fetcher that throws in the worker; setting
+ * `build.modulePreload: false` is the way out.
  *
  * TypeScript needs the import's type once per project:
  * `declare module "*?fetcher" { const url: string; export default url; }`.
@@ -189,6 +199,17 @@ export function fetcherUrl(): FetcherUrlPlugin {
       });
       chunks.add(ref);
       return `export default import.meta.ROLLUP_FILE_URL_${ref};`;
+    },
+    // The self-check: Vite writes the preload lists after generateBundle's
+    // "pre" phase, so a list left in a worker chunk shows up only here.
+    writeBundle(_options, bundle) {
+      for (const name of workerChunks) {
+        if (bundle[name]?.code?.includes("__vite__mapDeps([")) {
+          this.error(
+            `${name} runs in tscache's worker but still carries a module preload list, whose helper reads document and throws there. Set build.modulePreload: false, or report this against tscache/vite.`,
+          );
+        }
+      }
     },
     // Vite renders a file URL as a path under the base, which only a
     // browser can load; server code needs a file URL.

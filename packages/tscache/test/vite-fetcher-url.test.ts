@@ -89,6 +89,26 @@ function runInNode(script: string): Promise<string> {
   );
 }
 
+/**
+ * An app whose fetcher lazily imports a decoder sharing a chunk with the
+ * page (step 16 R3-1).
+ */
+// shared.js is used by the fetcher's decoder and by the page's lazy
+// module, so it becomes a chunk of its own and both imports carry a
+// preload list (two entries: the module and shared.js).
+const PRELOAD_APP: Record<string, string> = {
+  "shared.js": "export const unit = (s) => s + 'fetched';\n",
+  "decoder.js":
+    "import { unit } from './shared.js';\nexport const decode = () => unit('');\n",
+  "fetcher.js":
+    "export default { async fetch() { const { decode } = await import('./decoder.js'); return decode(); } };\n",
+  "lazy.js":
+    "import { unit } from './shared.js';\nexport const lazy = () => unit('page ');\n",
+  "main.js":
+    "import url from './fetcher.js?fetcher';\nimport('./lazy.js').then((m) => console.log(m.lazy(), url));\n",
+  "index.html": '<script type="module" src="/main.js"></script>\n',
+};
+
 interface Main {
   url: string;
 }
@@ -267,21 +287,7 @@ describe("fetcherUrl (tscache/vite)", () => {
   it("a fetcher's import() of code the page shares runs without document, as in a worker (R3-1)", async () => {
     const app = join(base, "preload");
     await mkdir(app, { recursive: true });
-    // shared.js is used by the fetcher's decoder and by the page's lazy
-    // module, so it becomes a chunk of its own and both imports carry a
-    // preload list (two entries: the module and shared.js).
-    const files: Record<string, string> = {
-      "shared.js": "export const unit = (s) => s + 'fetched';\n",
-      "decoder.js":
-        "import { unit } from './shared.js';\nexport const decode = () => unit('');\n",
-      "fetcher.js":
-        "export default { async fetch() { const { decode } = await import('./decoder.js'); return decode(); } };\n",
-      "lazy.js":
-        "import { unit } from './shared.js';\nexport const lazy = () => unit('page ');\n",
-      "main.js":
-        "import url from './fetcher.js?fetcher';\nimport('./lazy.js').then((m) => console.log(m.lazy(), url));\n",
-      "index.html": '<script type="module" src="/main.js"></script>\n',
-    };
+    const files = PRELOAD_APP;
     for (const [name, code] of Object.entries(files)) {
       await writeFile(join(app, name), code);
     }
@@ -329,6 +335,34 @@ describe("fetcherUrl (tscache/vite)", () => {
         .map((f) => readFile(join(outDir, "assets", f), "utf8")),
     );
     expect(page.join("")).toContain("__vite__mapDeps");
+  });
+  it("fails the build when a chunk the worker runs still carries a preload list (R3-1 self-check)", async () => {
+    const app = join(base, "preload-override");
+    await mkdir(app, { recursive: true });
+    for (const [name, code] of Object.entries(PRELOAD_APP)) {
+      await writeFile(join(app, name), code);
+    }
+    // Stands in for a Vite change that bypasses the plugin's preload hook: a
+    // later plugin's config replaces resolveDependencies.
+    const override = {
+      name: "override-preload",
+      config: () => ({
+        build: {
+          modulePreload: {
+            resolveDependencies: (_file: string, deps: string[]) => deps,
+          },
+        },
+      }),
+    };
+    await expect(
+      build({
+        root: app,
+        configFile: false,
+        logLevel: "silent",
+        plugins: [fetcherUrl(), override],
+        build: { outDir: join(app, "dist") },
+      }),
+    ).rejects.toThrow(/preload list.*modulePreload: false/s);
   });
 });
 
