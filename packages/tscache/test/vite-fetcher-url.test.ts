@@ -75,6 +75,37 @@ afterAll(async () => {
   await rm(base, { recursive: true, force: true });
 });
 
+/** Writes an app into `dir`, one file per entry. */
+async function writeApp(dir: string, files: Record<string, string>) {
+  await mkdir(dir, { recursive: true });
+  for (const [name, code] of Object.entries(files)) {
+    await writeFile(join(dir, name), code);
+  }
+}
+
+/**
+ * An app whose fetcher lazily imports a decoder (step 16 R3-1, R6-1). With
+ * `shared`, the decoder shares a module with the page's own lazy module,
+ * so Vite emits its preload helper as a chunk of its own; without, Vite
+ * inlines the helper into the fetcher's chunk.
+ */
+function lazyFetcherApp(shared: boolean): Record<string, string> {
+  return {
+    "shared.js": "export const unit = (s) => s + 'fetched';\n",
+    "decoder.js": shared
+      ? "import { unit } from './shared.js';\nexport const decode = () => unit('');\n"
+      : "export const decode = () => 'fetched';\n",
+    "fetcher.js":
+      "export default { async fetch() { const { decode } = await import('./decoder.js'); return decode(); } };\n",
+    "lazy.js":
+      "import { unit } from './shared.js';\nexport const lazy = () => unit('page ');\n",
+    "main.js": shared
+      ? "import url from './fetcher.js?fetcher';\nimport('./lazy.js').then((m) => console.log(m.lazy(), url));\n"
+      : "import url from './fetcher.js?fetcher';\nconsole.log(url);\n",
+    "index.html": '<script type="module" src="/main.js"></script>\n',
+  };
+}
+
 interface Main {
   url: string;
 }
@@ -250,6 +281,24 @@ describe("fetcherUrl (tscache/vite)", () => {
       await plugin.resolveId.call(context, "./fetcher.js", undefined),
     ).toBeUndefined();
   });
+  it.each([true, false])(
+    "fails the build when the fetcher's code uses import() (shared with the page: %s) (R3-1, R6-1)",
+    async (shared) => {
+      const app = join(base, `lazy-${shared}`);
+      await writeApp(app, lazyFetcherApp(shared));
+      // Vite wraps every bundled import() in a helper that reads document
+      // and calls window.dispatchEvent, neither of which a worker has.
+      await expect(
+        build({
+          root: app,
+          configFile: false,
+          logLevel: "silent",
+          plugins: [fetcherUrl()],
+          build: { outDir: join(app, "dist") },
+        }),
+      ).rejects.toThrow(/fetcher .*uses import\(\).*statically/s);
+    },
+  );
 });
 
 describe("devUrl (R1-3, R2-1)", () => {
