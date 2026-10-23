@@ -26,6 +26,15 @@ interface Context {
   environment: { config: { consumer: "client" | "server" } };
 }
 
+/** The parts of an output chunk the bundle check reads. */
+interface OutputChunkLike {
+  type: string;
+  code?: string;
+  facadeModuleId?: string | null;
+  imports?: string[];
+  dynamicImports?: string[];
+}
+
 /** A Vite plugin (Vite 8's `Plugin`, structurally). */
 export interface FetcherUrlPlugin {
   name: string;
@@ -42,6 +51,11 @@ export interface FetcherUrlPlugin {
     this: Context,
     options: { referenceId: string; relativePath: string },
   ): string | null;
+  generateBundle(
+    this: { error(message: string): never },
+    options: unknown,
+    bundle: Record<string, OutputChunkLike>,
+  ): void;
 }
 
 const QUERY = "?fetcher";
@@ -57,13 +71,13 @@ const PREFIX = "\0tscache-fetcher-url:";
  * server build, a file URL of the chunk; in dev, the file's absolute path,
  * which Vite's module runner resolves.
  *
- * One limit in a build (step 16 R3-1, R6-1): Vite wraps every bundled
- * `import()` in its module-preload helper, which reads `document` when it
- * has something to preload and calls `window.dispatchEvent` when the import
- * fails; a worker has neither, so the fetch throws a ReferenceError instead
- * of its own error. Keep the fetcher's module graph free of `import()`:
- * import its dependencies statically. `build.modulePreload: false` does not
- * remove the wrapper.
+ * The fetcher's code must import statically (step 16 R3-1, R6-1): Vite
+ * wraps every bundled `import()` in its module-preload helper, which reads
+ * `document` and, when the import fails, calls `window.dispatchEvent`; a
+ * worker has neither, so the fetch would throw a ReferenceError instead of
+ * its own error (an expired-token error included). A build whose fetcher
+ * graph contains that helper therefore fails, naming the chunk.
+ * `build.modulePreload: false` does not remove the helper.
  *
  * TypeScript needs the import's type once per project:
  * `declare module "*?fetcher" { const url: string; export default url; }`.
@@ -115,6 +129,40 @@ export function fetcherUrl(): FetcherUrlPlugin {
       });
       chunks.add(ref);
       return `export default import.meta.ROLLUP_FILE_URL_${ref};`;
+    },
+    // No chunk the worker runs (the fetcher's and every chunk it reaches)
+    // may carry Vite's preload helper; its event name marks it in any form.
+    generateBundle(_options, bundle) {
+      const fetchers = Object.entries(bundle)
+        .filter(
+          ([, chunk]) =>
+            chunk.type === "chunk" &&
+            typeof chunk.facadeModuleId === "string" &&
+            files.includes(chunk.facadeModuleId),
+        )
+        .map(([name]) => name);
+      for (const fetcher of fetchers) {
+        const pending = [fetcher];
+        const seen = new Set<string>();
+        for (
+          let name = pending.pop();
+          name !== undefined;
+          name = pending.pop()
+        ) {
+          if (seen.has(name)) continue;
+          seen.add(name);
+          const chunk = bundle[name];
+          if (chunk?.code?.includes("vite:preloadError")) {
+            this.error(
+              `The fetcher ${fetcher} uses import(): Vite wraps it in a helper (in ${name}) that needs document and window, which tscache's worker lacks. Import the fetcher's dependencies statically.`,
+            );
+          }
+          pending.push(
+            ...(chunk?.imports ?? []),
+            ...(chunk?.dynamicImports ?? []),
+          );
+        }
+      }
     },
     // Vite renders a file URL as a path under the base, which only a
     // browser can load; server code needs a file URL.
