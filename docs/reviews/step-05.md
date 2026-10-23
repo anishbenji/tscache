@@ -113,3 +113,19 @@ No findings; the reviewer checked the usage against the migration guide.
 ## Merge request: `chore/06-vitest` → `main`
 
 One dependency, `vitest` 4.1.8 → 5.0.3. `bun run ci` passes (658 tests). Confidence high; blast radius is the test runner only. Vitest still runs under Node, per the toolchain rule in `AGENTS.md`.
+
+## Follow-up: TypeScript 7 and Dependabot's commit subjects (`chore/18-typescript-7`)
+
+**Decisions (user, 2026-10-23).** Adopt TypeScript 7.0.2 as the authoritative type check, replacing TypeScript 6 and the optional tsgo check; starter §4 (row and hook staging) and the `AGENTS.md` toolchain line say so. Make commitlint skip Dependabot's capitalised bump commits instead of redoing each bump by hand. This branch replaces Dependabot's #7, whose CI never got past commitlint: its subject is `chore: Bump typescript …`, and Dependabot capitalises "Bump" only sometimes (#3, #6 and #8 were lowercase).
+
+**TypeScript 7, checked against the repo.** No tsconfig uses an option 7.0 removed or changed (all use `moduleResolution: "bundler"`, `module: "ESNext"`, `target: "ES2022"`, `strict`). No code here imports the TypeScript API, which the 7.0 package does not ship (nor `tsserver`): attw bundles its own TypeScript 5.6, tsdown emits declarations through Oxc (`isolatedDeclarations`), the commitlint config is plain `.mjs`, and Fallow already ran on 7.0.2. Evidence: the full `bun run ci` passes (1444 Node tests, 48 browser specs, build with declarations, publint and attw, Knip, Fallow, `check:integrations`); a planted type error is reported in the package and in all eight integration projects; the examples, which CI does not type-check, report no errors under either version. The checks take about a third of the time (package 0.95 s → 0.35 s, integrations 3.1 s → 1.0 s). A future tool that needs the API, such as TypeDoc, gets TypeScript 6 under an npm alias.
+
+**Commitlint.** `commitlint.config.mjs` ignores a commit only when its subject starts with `chore: Bump ` or `ci: Bump ` and it carries Dependabot's sign-off trailer. `scripts/commitlint-config.test.sh` (run by `scripts/ci.sh`) checks #7's real message and an actions-group bump pass, and that a capitalised bump without the trailer, a capitalised non-bump subject with the trailer, and a lowercase bump are linted as before. It failed before the rule, and each broadening mutant (subject only, trailer only) fails it.
+
+### Round 8 — reviewer verdict: merge
+
+No findings. The reviewer ran the type check and the commitlint cases itself; `bun run ci` passed (1444 Node tests, 48 browser specs).
+
+## Merge request: `chore/18-typescript-7` → `main`
+
+Two changes, each its own commit. `typescript` 6.0.3 → 7.0.2, with starter §4 and `AGENTS.md` updated to make TypeScript 7 the authoritative type check; blast radius is the type check and nothing that imports the compiler, since nothing here does. Commitlint skips Dependabot's capitalised bump commits only, with a shell test in `scripts/ci.sh`. Replaces #7, which can be closed. Not verified locally: this branch was cut before #31 merged, so the GitHub run on the merge ref is the first type check of #31's code under TypeScript 7.
