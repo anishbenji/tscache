@@ -72,6 +72,12 @@ None yet.
 
 The user chose the compromise: #28 merges with the documented limit (option A's text); option B lands as a follow-up (`feat/16b-worker-preload`, PR #30) with a build-time self-check. The plugin empties the preload lists of imports hosted in the chunks the worker runs, and after the bundle is written it fails the build, naming the chunk, if one of them still carries a list (a Vite change in hook order, or another plugin replacing `resolveDependencies`), so a regression is a build error rather than a fetcher throwing in a worker. The guide keeps `build.modulePreload: false` as the escape hatch the error points to. Option C (a separate fetcher build) stays the fallback if the self-check ever fires in practice.
 
+### Round 5 (on `feat/16b-worker-preload`) — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R5-1 | P1 | On a fresh checkout the pre-push hook's Knip fails: it loads the examples' Vite configs, which import `tscache/vite` from a `dist/` that does not exist yet | accepted | Validated by reading `lefthook.yml` against the CI fix (fc31807), which built first only in `scripts/ci.sh`. The hook's Knip job now builds first too (6d48e93 on #28's branch, merged here); the hook was run from a deleted `dist/` and passed. The reviewer confirmed R3-1/R4-1 are addressed by option B and the self-check |
+
 ## After the review: GitHub CI on a fresh checkout
 
 The first GitHub run failed at Knip: it loads each example's `vite.config.ts`, which now imports `tscache/vite` from `dist/`, and a fresh checkout has no `dist/` before the build (local runs always had one). Reproduced locally by deleting `dist/`. `scripts/ci.sh` now builds the package before Knip; the full gate passes from a deleted `dist/`. Not Codex-reviewed: a reordering of existing steps.
