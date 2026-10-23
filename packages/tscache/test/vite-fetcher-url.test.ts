@@ -75,6 +75,20 @@ afterAll(async () => {
   await rm(base, { recursive: true, force: true });
 });
 
+/** Runs an ES module script in plain Node and returns its stdout. */
+function runInNode(script: string): Promise<string> {
+  const node = (globalThis as { process?: { execPath?: string } }).process
+    ?.execPath as string;
+  return new Promise<string>((resolve, reject) =>
+    execFile(
+      node,
+      ["--input-type=module", "-e", script],
+      (error: unknown, stdout: string) =>
+        error ? reject(error) : resolve(stdout),
+    ),
+  );
+}
+
 interface Main {
   url: string;
 }
@@ -249,6 +263,72 @@ describe("fetcherUrl (tscache/vite)", () => {
     expect(
       await plugin.resolveId.call(context, "./fetcher.js", undefined),
     ).toBeUndefined();
+  });
+  it("a fetcher's import() of code the page shares runs without document, as in a worker (R3-1)", async () => {
+    const app = join(base, "preload");
+    await mkdir(app, { recursive: true });
+    // shared.js is used by the fetcher's decoder and by the page's lazy
+    // module, so it becomes a chunk of its own and both imports carry a
+    // preload list (two entries: the module and shared.js).
+    const files: Record<string, string> = {
+      "shared.js": "export const unit = (s) => s + 'fetched';\n",
+      "decoder.js":
+        "import { unit } from './shared.js';\nexport const decode = () => unit('');\n",
+      "fetcher.js":
+        "export default { async fetch() { const { decode } = await import('./decoder.js'); return decode(); } };\n",
+      "lazy.js":
+        "import { unit } from './shared.js';\nexport const lazy = () => unit('page ');\n",
+      "main.js":
+        "import url from './fetcher.js?fetcher';\nimport('./lazy.js').then((m) => console.log(m.lazy(), url));\n",
+      "index.html": '<script type="module" src="/main.js"></script>\n',
+    };
+    for (const [name, code] of Object.entries(files)) {
+      await writeFile(join(app, name), code);
+    }
+    const outDir = join(app, "dist");
+    // The app's own resolveDependencies still runs, for the page's imports.
+    const hosts: string[] = [];
+    await build({
+      root: app,
+      configFile: false,
+      logLevel: "silent",
+      plugins: [fetcherUrl()],
+      build: {
+        outDir,
+        modulePreload: {
+          resolveDependencies: (
+            _file: string,
+            deps: string[],
+            context: { hostId: string },
+          ) => {
+            hosts.push(context.hostId);
+            return deps;
+          },
+        },
+      },
+    });
+    expect(hosts.length).toBeGreaterThan(0);
+    expect(hosts.every((host) => !host.includes("fetcher-"))).toBe(true);
+    const { readdir, readFile } = await load<{
+      readdir(path: string): Promise<string[]>;
+      readFile(path: string, encoding: "utf8"): Promise<string>;
+    }>("node:fs/promises");
+    const assets = await readdir(join(outDir, "assets"));
+    const fetcherFile = assets.find((f) => f.startsWith("fetcher-"));
+    expect(fetcherFile).toBeDefined();
+    const href = pathToFileURL(join(outDir, "assets", fetcherFile ?? "")).href;
+    // Plain Node has no document, as a worker has none.
+    const output = await runInNode(
+      `const m = await import(${JSON.stringify(href)});\nprocess.stdout.write(await m.default.fetch());`,
+    );
+    expect(output).toBe("fetched");
+    // The page's own lazy import keeps its preload list.
+    const page = await Promise.all(
+      assets
+        .filter((f) => f.startsWith("index-") && f.endsWith(".js"))
+        .map((f) => readFile(join(outDir, "assets", f), "utf8")),
+    );
+    expect(page.join("")).toContain("__vite__mapDeps");
   });
 });
 
