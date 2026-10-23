@@ -78,6 +78,20 @@ The user chose the compromise: #28 merges with the documented limit (option A's 
 |---|---|---|---|---|
 | R5-1 | P1 | On a fresh checkout the pre-push hook's Knip fails: it loads the examples' Vite configs, which import `tscache/vite` from a `dist/` that does not exist yet | accepted | Validated by reading `lefthook.yml` against the CI fix (fc31807), which built first only in `scripts/ci.sh`. The hook's Knip job now builds first too (6d48e93 on #28's branch, merged here); the hook was run from a deleted `dist/` and passed. The reviewer confirmed R3-1/R4-1 are addressed by option B and the self-check |
 
+### Round 6 (on `feat/16b-worker-preload`) — reviewer verdict: merge after fixes; **escalated**
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R6-1 | P1 | Empty preload lists still leave Vite's wrapper around the fetcher's `import()`; its failure path calls `window.dispatchEvent`, so in a worker a failing lazy import (an auth error included) throws a `ReferenceError` instead of its own error, and `authInvalid` is never broadcast | accepted; **escalated** | Confirmed in built output: the wrapper and its `window.dispatchEvent` are present with option B and with `build.modulePreload: false` alike, so the self-check (which looks for preload lists) passes. **Convergence check:** the preload area drew findings in rounds 3, 4 (re-raise) and 6, so it is escalated rather than patched again. #28's documented workaround was wrong for the same reason and is corrected there (e38f647); this branch is not merged with it until the user picks an option |
+
+**Options for the user (option B as built does not fix R6-1):**
+
+| Option | What | Pros | Cons |
+|---|---|---|---|
+| **1. Enforce static imports** (recommended now) | Drop the preload-list emptying. The plugin fails the build when any chunk the worker runs contains Vite's preload wrapper (its `vite:preloadError` marker), naming the chunk and saying to import the fetcher's dependencies statically | Small and certain: no worker ever gets the wrapper, whatever Vite changes; the error appears at build time with the fix in it | A fetcher cannot lazily load code at all in a Vite build |
+| 2. Swap the helper in worker chunks | Re-point worker chunks' import of Vite's helper chunk at a worker-safe one (`(fn) => fn()`), using Rollup's `importedBindings` | Lazy imports keep working | Fragile: depends on how Vite emits and names the helper, and fails when Vite inlines the helper into the fetcher chunk (observed when nothing is shared) |
+| 3. Build the fetcher separately (option C) | A second bundle for the fetcher graph, the way Vite builds worker entries, exports kept | Robust; lazy imports work | Duplicates shared code; much more plugin machinery |
+
 ## After the review: GitHub CI on a fresh checkout
 
 The first GitHub run failed at Knip: it loads each example's `vite.config.ts`, which now imports `tscache/vite` from `dist/`, and a fresh checkout has no `dist/` before the build (local runs always had one). Reproduced locally by deleting `dist/`. `scripts/ci.sh` now builds the package before Knip; the full gate passes from a deleted `dist/`. Not Codex-reviewed: a reordering of existing steps.
