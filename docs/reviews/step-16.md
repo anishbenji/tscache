@@ -68,6 +68,10 @@ None: not an engine step.
 
 None yet.
 
+## Correction after round 6 on #30 (2026-10-23)
+
+Round 6 on the option B branch showed that the workaround this PR documented, `build.modulePreload: false`, is wrong: Vite still wraps every bundled `import()` in its preload helper, whose failure path calls `window.dispatchEvent`, so in a worker a failing lazy import throws a `ReferenceError` instead of its own error. Checked in built output with and without the setting. The plugin's TSDoc and the guide now say to import the fetcher's dependencies statically, and no longer offer the setting as a fix.
+
 ## After the review: GitHub CI on a fresh checkout
 
 The first GitHub run failed at Knip: it loads each example's `vite.config.ts`, which now imports `tscache/vite` from `dist/`, and a fresh checkout has no `dist/` before the build (local runs always had one). Reproduced locally by deleting `dist/`. `scripts/ci.sh` now builds the package before Knip; the full gate passes from a deleted `dist/`. Not Codex-reviewed: a reordering of existing steps.

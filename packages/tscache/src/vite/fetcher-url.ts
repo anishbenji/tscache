@@ -57,10 +57,13 @@ const PREFIX = "\0tscache-fetcher-url:";
  * server build, a file URL of the chunk; in dev, the file's absolute path,
  * which Vite's module runner resolves.
  *
- * One limit in a build (step 16 R3-1): an `import()` inside the fetcher's
- * module graph of code the app shares gets Vite's module-preload helper,
- * which reads `document` and so throws in the worker. Keep the fetcher's
- * dynamic imports to code of its own, or set `build.modulePreload: false`.
+ * One limit in a build (step 16 R3-1, R6-1): Vite wraps every bundled
+ * `import()` in its module-preload helper, which reads `document` when it
+ * has something to preload and calls `window.dispatchEvent` when the import
+ * fails; a worker has neither, so the fetch throws a ReferenceError instead
+ * of its own error. Keep the fetcher's module graph free of `import()`:
+ * import its dependencies statically. `build.modulePreload: false` does not
+ * remove the wrapper.
  *
  * TypeScript needs the import's type once per project:
  * `declare module "*?fetcher" { const url: string; export default url; }`.

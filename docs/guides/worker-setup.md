@@ -74,10 +74,13 @@ import { defineConfig } from "vite";
 export default defineConfig({ plugins: [fetcherUrl()] });
 ```
 
-One limit in a build: an `import()` inside the fetcher's module graph of a
-module the app also uses gets Vite's module-preload helper, which reads
-`document` and so throws inside the worker. Keep the fetcher's dynamic
-imports to modules of its own, or set `build: { modulePreload: false }`.
+One limit in a build: Vite wraps every bundled `import()` in its
+module-preload helper, which reads `document` and, when the import fails,
+calls `window.dispatchEvent`; a worker has neither, so the fetch throws a
+`ReferenceError` instead of its own error (an expired-token error included,
+which then never reaches the other tabs). Import the fetcher's
+dependencies statically. `build.modulePreload: false` does not remove the
+wrapper.
 
 ```ts
 import { createClient } from "tscache";
