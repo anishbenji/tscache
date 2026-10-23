@@ -7,7 +7,10 @@
     },
     "packages/tscache": {
       "entry": ["src/entries/*.ts", "test/**/*.test.ts"],
-      "project": ["src/**/*.ts", "test/**/*.ts"]
+      "project": ["src/**/*.ts", "test/**/*.ts"],
+      // The tscache/vite test loads Vite through a computed specifier, so
+      // its types (which bring Node's) stay out of the package's type check.
+      "ignoreDependencies": ["vite"]
     },
     // The SSR examples' server entries are named only by their Vite config.
     "examples/react-ssr": { "entry": ["src/entry-server.tsx"] },

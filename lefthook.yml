@@ -22,7 +22,9 @@ pre-push:
     - name: biome-full
       run: bunx biome check .
     - name: knip
-      run: bunx knip
+      # Built first, as in scripts/ci.sh: Knip loads the examples' Vite
+      # configs, which import tscache/vite from dist/.
+      run: bun run build >/dev/null && bunx knip
     - name: fallow
       run: bun run fallow
     - name: tests

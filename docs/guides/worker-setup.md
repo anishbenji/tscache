@@ -62,42 +62,25 @@ from your origin, with that export intact.
 
 With Vite, `?worker&url` does not fit the fetcher: Vite bundles a worker
 entry without its exports, so the module loads but has no default export.
-A small plugin emits the fetcher as a chunk of its own instead; the examples
-ship it as `fetcherUrl()` in `examples/mock-backend/src/vite.ts`:
+`fetcherUrl()` from `tscache/vite` emits the fetcher as a chunk of its own
+instead, with its exports intact, and serves it from source in dev. It needs
+Vite 8 (`vite` is an optional peer dependency of tscache):
 
 ```ts
 // vite.config.ts
-import { defineConfig, type Plugin } from "vite";
-
-const PREFIX = "\0fetcher-url:";
-
-/** `import url from "./fetcher.ts?fetcher"`: the module's URL, exports kept. */
-function fetcherUrl(): Plugin {
-  let serve = false;
-  return {
-    name: "fetcher-url",
-    enforce: "pre",
-    configResolved(config) {
-      serve = config.command === "serve";
-    },
-    async resolveId(source, importer) {
-      if (!source.endsWith("?fetcher")) return undefined;
-      const target = source.slice(0, -"?fetcher".length);
-      const resolved = await this.resolve(target, importer, { skipSelf: true });
-      return resolved ? PREFIX + resolved.id : undefined;
-    },
-    load(id) {
-      if (!id.startsWith(PREFIX)) return undefined;
-      const file = id.slice(PREFIX.length);
-      if (serve) return `export default ${JSON.stringify(`/@fs${file}`)};`;
-      const ref = this.emitFile({ type: "chunk", id: file, preserveSignature: "strict" });
-      return `export default import.meta.ROLLUP_FILE_URL_${ref};`;
-    },
-  };
-}
+import { fetcherUrl } from "tscache/vite";
+import { defineConfig } from "vite";
 
 export default defineConfig({ plugins: [fetcherUrl()] });
 ```
+
+One limit in a build: Vite wraps every bundled `import()` in its
+module-preload helper, which reads `document` and, when the import fails,
+calls `window.dispatchEvent`; a worker has neither, so the fetch throws a
+`ReferenceError` instead of its own error (an expired-token error included,
+which then never reaches the other tabs). Import the fetcher's
+dependencies statically. `build.modulePreload: false` does not remove the
+wrapper.
 
 ```ts
 import { createClient } from "tscache";
@@ -120,24 +103,13 @@ A server reads with an in-process client (`mode: 'in-process'`, no
 `workerUrl`), which imports the fetcher module in the server's own process.
 Two things differ from the browser:
 
-- The module URL must be one the server can `import()`. Vite's dev server
-  runs server code through its module runner, which resolves the same
-  `/@fs/` path the plugin gives the browser. A server build, however, renders
-  an emitted chunk's URL as a path under `base`, which only a browser can
-  load. Add a `resolveFileUrl` hook that gives server code a file URL
-  instead (the examples' `fetcherUrl()` does):
-
-  ```ts
-  // In the plugin above: remember each emitted chunk's reference id in
-  // `chunks` (a Set), then:
-  resolveFileUrl({ referenceId, relativePath }) {
-    if (this.environment.config.consumer !== "server") return null;
-    if (!chunks.has(referenceId)) return null;
-    const path = relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
-    return `new URL(${JSON.stringify(path)}, import.meta.url).href`;
-  },
-  ```
-
+- The module URL must be one the server can `import()`. Vite renders an
+  emitted chunk's URL as a path under `base`, which only a browser can load,
+  so `fetcherUrl()` gives server code a file URL in a server build instead.
+  In dev, server code gets an `/@fs/` path, which Vite's module runner
+  resolves; the plugin adds `tscache` to `ssr.noExternal`, so the library's
+  `import()` of the fetcher goes through that runner rather than plain Node.
+  Nothing to configure.
 - A server has no page origin, so a fetcher that requests relative paths
   needs the backend's origin from its context. The examples' fetcher reads
   `context.origin`; the browser's client omits it.

@@ -40,10 +40,12 @@ if [ "$(git rev-parse "$base")" != "$(git rev-parse HEAD)" ]; then
 fi
 bunx biome ci .
 bunx tsc -p packages/tscache
+# Built before Knip: the examples' Vite configs import tscache/vite from
+# dist/, and Knip loads them; a fresh checkout has no dist/ yet.
+bun run --filter tscache build   # includes publint + attw (esm-only profile)
 bunx knip
 bun run fallow
 bunx vitest run --passWithNoTests
-bun run --filter tscache build   # includes publint + attw (esm-only profile)
 (cd packages/tscache && npm pack --dry-run)
 # The integration snippets type-check against the built package, as an
 # app would see it (starter §5, §7).

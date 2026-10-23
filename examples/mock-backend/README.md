@@ -55,6 +55,7 @@ pages, and throws `AuthInvalidError` on a 401. It announces each fetch on a
 `BroadcastChannel` (`src/notices.ts`), which the examples use for their
 fetch counters.
 
-`fetcherUrl()` (in `src/vite.ts`) makes `import url from "…?fetcher"` give
-the fetcher's URL with its default export intact; Vite's `?worker&url` drops
-it. `docs/guides/worker-setup.md` explains why.
+Each example loads the fetcher with `fetcherUrl()` from `tscache/vite`,
+which makes `import url from "…?fetcher"` give the fetcher's URL with its
+default export intact; Vite's `?worker&url` drops it.
+`docs/guides/worker-setup.md` explains why.

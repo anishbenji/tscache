@@ -23,6 +23,10 @@
     "./fetcher": {
       "types": "./dist/fetcher.d.ts",
       "default": "./dist/fetcher.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
     }
   },
   "files": [
@@ -37,5 +41,16 @@
     "sharedworker",
     "ohlcv",
     "charts"
-  ]
+  ],
+  "peerDependencies": {
+    "vite": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  }
 }
