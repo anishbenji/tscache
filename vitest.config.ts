@@ -27,5 +27,8 @@ export default defineConfig({
       "integrations/test/**/*.test.ts",
     ],
     passWithNoTests: true,
+    // On a loaded machine the heavy property tests ran 20-40x slower than
+    // idle (7.8 s against 373 ms) and crossed the 5 s default (chore/19).
+    testTimeout: 20_000,
   },
 });
