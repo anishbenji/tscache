@@ -28,7 +28,7 @@ The per-step pipeline, the review loop, copy-paste prompts and the adversarial-r
 ## Toolchain hard rules
 
 - **Never `bun test`** — Vitest runs under Node (≥22.12). Use `bun run test` or `bunx vitest run`. Bun for everything else (workspaces, scripts).
-- Build: tsdown (ESM-only, `isolatedDeclarations: true`). **tsup is EOL — do not use.** `tsc --noEmit` is the authoritative type check; tsgo optional pre-push only.
+- Build: tsdown (ESM-only, `isolatedDeclarations: true`). **tsup is EOL — do not use.** `tsc --noEmit` is the authoritative type check, on TypeScript 7 (the native compiler; user-confirmed 2026-10-23). TypeScript 7 ships no JS API: a tool that needs one gets TS 6 under an npm alias.
 - Hook staging: pre-commit = Biome (staged) + gitleaks + commitlint (sub-second); pre-push = tsc + full Biome + Knip + Fallow (`bun run fallow`) + Vitest; `bun run ci` = superset incl. build + publint/attw + Playwright + bench smoke, plus gitleaks and commitlint over `main..HEAD` as the backstop for any skipped hook.
 - Multi-tab tests: standalone Playwright, one `BrowserContext` + multiple pages (Vitest browser mode cannot share a SharedWorker across tabs).
 

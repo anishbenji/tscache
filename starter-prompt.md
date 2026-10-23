@@ -80,7 +80,7 @@ The segment transfer payload (`{layout, start, count, mask?, fields, ...}`) is s
 |---|---|---|
 | Package manager / scripts | **Bun** (workspaces) | Bun everywhere except where Node required |
 | Lint + format | **Biome** | replaces ESLint+Prettier; pair with tsc for types |
-| Type-check | **`tsc --noEmit`** authoritative | **`tsgo --noEmit`** optional fast pre-push check (TS 7 is Beta — don't make it the source of truth) |
+| Type-check | **`tsc --noEmit`** (TypeScript 7) authoritative | TypeScript 7 is the native compiler; adopted 2026-10-23 (user) once stable, replacing TS 6 with an optional tsgo check. It ships no JS API: a tool that needs one (TypeDoc, for example) gets TS 6 under an npm alias |
 | Build | **tsdown** | Rolldown/Oxc; ESM-only output; subpath + worker entries; `.d.ts` via oxc with **`isolatedDeclarations: true`** in tsconfig; tsup is EOL — do not use |
 | Publish hygiene | **publint + `attw --pack`** + `npm pack` dry-run | wired into `bun run ci` (tsdown can integrate both) |
 | Dead code / unused deps | **Knip** + **`fallow audit`** | Fallow (fallow-rs/fallow): Rust codebase-intelligence — dead code, duplication, complexity, boundaries; syntactic-only (no type info), so use `@public`/`@internal` TSDoc tags and config `entry` patterns for worker entries to avoid false positives. Both run pre-push, not pre-commit |
@@ -94,7 +94,7 @@ The segment transfer payload (`{layout, start, count, mask?, fields, ...}`) is s
 | API docs | **TypeDoc** + TSDoc | |
 | Optional | **sherif** (workspace dep consistency), **taze** (dep updates) | cheap insurance |
 
-**Hook staging:** pre-commit = Biome (staged) + gitleaks + commitlint (sub-second budget). Pre-push = `tsc --noEmit` (+ optional tsgo) + full Biome + Knip + `fallow audit` + Vitest suite. `bun run ci` = full superset incl. build + publint/attw + Playwright + bench smoke.
+**Hook staging:** pre-commit = Biome (staged) + gitleaks + commitlint (sub-second budget). Pre-push = `tsc --noEmit` + full Biome + Knip + `fallow audit` + Vitest suite. `bun run ci` = full superset incl. build + publint/attw + Playwright + bench smoke.
 
 ## 5. Repo Structure & Packaging
 
