@@ -1,6 +1,6 @@
 # Step 16 — `tscache/vite` entry
 
-Branch: `feat/16-vite-entry` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: review loop in progress · Verdict after triage: —
+Branch: `feat/16-vite-entry` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: review loop in progress · Verdict after triage: —
 
 Item 2 of the post-build architecture review (`docs/architecture-review.md`; decisions N40–N41). Not an engine step: tests are written with the code.
 
@@ -38,6 +38,21 @@ Commit note: the Node-platform tsdown config of R1-1 landed in the round 1 triag
 | R2-1 | P1 | A literal `%` in the checkout path breaks the dev URL: `/repo/a%20b` is requested as `/repo/a b` | accepted; area redesigned | Reproduced with the fetcher in a directory named `lib %41`. **Convergence check:** dev-URL construction drew findings in rounds 1 and 2, so the area was redesigned rather than patched. Delegating to Vite's own `?url` import was tried first and failed: Vite turns `lib %41` into `lib%20A`. Probes then fixed the design on evidence: Vite's module middleware decodes with `decodeURI`, so the browser gets `<base>@fs/` + `encodeURI(path)`, its exact inverse; Vite's module runner does not decode at all, so server code gets the plain absolute path (also free of the Windows `/@fs` slash). The virtual module's id no longer embeds the path either: Vite puts ids into URLs unencoded and decodes the request, which failed with a 500 for the same directory. The test now keeps the fetcher outside the app's root in that directory and checks the URL and its fetch over a real dev server under a base, the runner's load, and the installed-package case. A path holding `#` or `?` cannot be served by Vite's middleware at all; the code says so |
 
 Observed while verifying: one CI run timed out an unrelated heavy test (`merge-failures.test.ts`, 5 s) while the new Vite builds ran in the same Vitest pool; the rerun passed. Recorded as a load risk, not changed.
+
+## Round 3 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | An `import()` inside the fetcher's graph of code the app shares gets Vite's module-preload helper, which reads `document` and throws in the worker | accepted in part; **escalated** | Reproduced with a build whose fetcher dynamically imports a module sharing a dependency with the app: the fetcher chunk carries the helper, which queries `document` whenever the import's dependency list is non-empty. A full fix changes how Vite preloads, so it is a decision for the user (below). Meanwhile the limit and its workaround (`build.modulePreload: false`, which Vite's source shows empties the non-CSS dependencies) are stated in the plugin's TSDoc and the guide |
+| R3-2 | P1 | A server build's file URL is not encoded: an assets directory `assets %41` or one holding `#` breaks the import | accepted; area redesigned | Reproduced with `assetsDir: "assets %41 #1"`. **Convergence check:** URL encoding drew findings in rounds 1, 2 and 3, so every URL the plugin builds now lives in one module, `src/vite/urls.ts`, each encoded as the exact inverse of what decodes it: the dev URL with `encodeURI` (Vite's middleware applies `decodeURI`), the server file URL with `encodeURIComponent` per segment (the URL parser and Node decode every escape), keeping Rolldown's hash placeholders, which the first attempt encoded and broke. The server-build test now imports through a `node` child process, since Vitest's own `import()` does not decode file URLs as Node does |
+
+### Escalated: R3-1, the fetcher's dynamic imports in a worker
+
+| Option | What | Pros | Cons |
+|---|---|---|---|
+| A. Document the limit (done) | TSDoc and guide: keep the fetcher's dynamic imports to its own code, or set `build.modulePreload: false` | Nothing more to build; the common fetcher has no dynamic import | A trap for a fetcher that lazily loads a shared decoder; the workaround turns preloading off for the whole app |
+| B. Empty the preload list for chunks the worker runs (recommended) | The plugin wraps `build.modulePreload.resolveDependencies` (and any the app set) to return `[]` for imports hosted in the fetcher chunk and the chunks it reaches | Exact, automatic, the app keeps preloading elsewhere | Relies on a Vite hook's call order in the bundle step; a chunk shared by page and worker loses preloading for its own dynamic imports |
+| C. Build the fetcher separately, as Vite builds workers | A second bundle for the fetcher graph, exports kept | Worker code fully isolated from page helpers | Duplicates shared code; much more plugin machinery |
 
 ## Contract-test changes
 

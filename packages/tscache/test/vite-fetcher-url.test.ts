@@ -1,22 +1,40 @@
-// The package has no Node type definitions (batch-realms.test.ts); Vitest
-// runs under Node.
-// @ts-expect-error -- no Node types
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
-// @ts-expect-error -- no Node types
-import { tmpdir } from "node:os";
-// @ts-expect-error -- no Node types
-import { join } from "node:path";
-// @ts-expect-error -- no Node types
-import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fetcherUrl } from "../src/entries/vite";
-import { devUrl } from "../src/vite/fetcher-url";
+import { devUrl, serverFileUrl } from "../src/vite/urls";
 
 /**
- * Vite, loaded through a specifier TypeScript does not resolve: Vite's
- * types reference Node's, which this package's type check keeps out so
- * Node APIs cannot slip into the library. These are the calls used here.
+ * Node's modules and Vite, loaded through specifiers TypeScript does not
+ * resolve: the package has no Node type definitions, and Vite's types
+ * reference Node's, which this package's type check keeps out so Node APIs
+ * cannot slip into the library (batch-realms.test.ts). These are the calls
+ * used here; Vitest runs under Node.
  */
+const load = <T>(specifier: string): Promise<T> =>
+  import(/* @vite-ignore */ specifier) as Promise<T>;
+const { mkdir, mkdtemp, realpath, rm, writeFile } = await load<{
+  mkdir(path: string, options: { recursive: boolean }): Promise<unknown>;
+  mkdtemp(prefix: string): Promise<string>;
+  realpath(path: string): Promise<string>;
+  rm(
+    path: string,
+    options: { recursive: boolean; force: boolean },
+  ): Promise<void>;
+  writeFile(path: string, data: string): Promise<void>;
+}>("node:fs/promises");
+const { tmpdir } = await load<{ tmpdir(): string }>("node:os");
+const { join } = await load<{ join(...parts: string[]): string }>("node:path");
+const { pathToFileURL } = await load<{ pathToFileURL(path: string): URL }>(
+  "node:url",
+);
+const { execFile } = await load<{
+  execFile(
+    file: string,
+    args: string[],
+    done: (error: unknown, stdout: string) => void,
+  ): void;
+}>("node:child_process");
+
+/** The Vite calls used here. */
 interface Vite {
   build(config: object): Promise<unknown>;
   createServer(config: object): Promise<{
@@ -26,8 +44,7 @@ interface Vite {
     close(): Promise<void>;
   }>;
 }
-const VITE = "vite";
-const { build, createServer } = (await import(VITE)) as Vite;
+const { build, createServer } = await load<Vite>("vite");
 
 // Implementer tests (N40): real Vite builds and dev servers of a tiny app
 // that imports a fetcher with `?fetcher`, checking what tscache's worker
@@ -97,17 +114,36 @@ describe("fetcherUrl (tscache/vite)", () => {
     expect(fetcher.default.fetch()).toBe("fetched");
   });
 
-  it("a server build gives a file URL that server code can import()", async () => {
+  it("a server build gives a file URL that server code can import(), whatever the assets directory is called (R3-2)", async () => {
     await build({
       ...devOptions(),
-      build: { ssr: "main.js", outDir: join(root, "server") },
+      build: {
+        ssr: "main.js",
+        outDir: join(root, "server"),
+        assetsDir: "assets %41 #1",
+      },
     });
-    const main = (await import(
-      pathToFileURL(join(root, "server", "main.mjs")).href
-    )) as Main;
-    expect(main.url).toMatch(/^file:\/\/.*\/fetcher-[\w-]+\.mjs$/);
-    const fetcher = (await import(main.url)) as FetcherModule;
-    expect(fetcher.default.fetch()).toBe("fetched");
+    // Plain Node, as server code runs: Vitest's own import() resolver does
+    // not decode file URLs as Node does.
+    const node = (globalThis as { process?: { execPath?: string } }).process
+      ?.execPath as string;
+    const main = pathToFileURL(join(root, "server", "main.mjs")).href;
+    const script = `const { url } = await import(${JSON.stringify(main)});
+      const fetcher = await import(url);
+      process.stdout.write(JSON.stringify([url, fetcher.default.fetch()]));`;
+    const output = await new Promise<string>((resolve, reject) =>
+      execFile(
+        node,
+        ["--input-type=module", "-e", script],
+        (error: unknown, stdout: string) =>
+          error ? reject(error) : resolve(stdout),
+      ),
+    );
+    const [url, fetched] = JSON.parse(output) as [string, string];
+    expect(url).toMatch(
+      /^file:\/\/.*\/assets%20%2541%20%231\/fetcher-[\w-]+\.mjs$/,
+    );
+    expect(fetched).toBe("fetched");
   });
 
   it("a dev server under a base gives the browser an encoded /@fs/ URL inside that base (R1-2, R2-1)", async () => {
@@ -224,5 +260,19 @@ describe("devUrl (R1-3, R2-1)", () => {
     ["/app/", "C:/a b/%41/f.ts", "/app/@fs/C:/a%20b/%2541/f.ts"],
   ])("base %s, file %s → %s", (prefix, file, url) => {
     expect(devUrl(prefix, file)).toBe(url);
+  });
+});
+
+describe("serverFileUrl (R3-2)", () => {
+  it.each([
+    ["assets/f.mjs", "./assets/f.mjs"],
+    ["./assets/f.mjs", "./assets/f.mjs"],
+    ["../x/f.mjs", "../x/f.mjs"],
+    ["assets %41 #?/f.mjs", "./assets%20%2541%20%23%3F/f.mjs"],
+    ["a b/f-!~{001}~.mjs", "./a%20b/f-!~{001}~.mjs"],
+  ])("%s → %s", (relativePath, encoded) => {
+    expect(serverFileUrl(relativePath)).toBe(
+      `new URL(${JSON.stringify(encoded)}, import.meta.url).href`,
+    );
   });
 });

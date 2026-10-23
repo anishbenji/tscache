@@ -74,6 +74,11 @@ import { defineConfig } from "vite";
 export default defineConfig({ plugins: [fetcherUrl()] });
 ```
 
+One limit in a build: an `import()` inside the fetcher's module graph of a
+module the app also uses gets Vite's module-preload helper, which reads
+`document` and so throws inside the worker. Keep the fetcher's dynamic
+imports to modules of its own, or set `build: { modulePreload: false }`.
+
 ```ts
 import { createClient } from "tscache";
 import workerUrl from "tscache/worker?worker&url";

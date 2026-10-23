@@ -9,6 +9,8 @@
  * Plugin type.
  */
 
+import { devUrl, serverFileUrl } from "./urls";
+
 /** The parts of Vite's plugin context the hooks use. */
 interface Context {
   resolve(
@@ -54,6 +56,11 @@ const PREFIX = "\0tscache-fetcher-url:";
  * client during server rendering) gets a URL it can `import()` too: in a
  * server build, a file URL of the chunk; in dev, the file's absolute path,
  * which Vite's module runner resolves.
+ *
+ * One limit in a build (step 16 R3-1): an `import()` inside the fetcher's
+ * module graph of code the app shares gets Vite's module-preload helper,
+ * which reads `document` and so throws in the worker. Keep the fetcher's
+ * dynamic imports to code of its own, or set `build.modulePreload: false`.
  *
  * TypeScript needs the import's type once per project:
  * `declare module "*?fetcher" { const url: string; export default url; }`.
@@ -111,24 +118,7 @@ export function fetcherUrl(): FetcherUrlPlugin {
     resolveFileUrl({ referenceId, relativePath }) {
       if (this.environment.config.consumer !== "server") return null;
       if (!chunks.has(referenceId)) return null;
-      const path = relativePath.startsWith(".")
-        ? relativePath
-        : `./${relativePath}`;
-      return `new URL(${JSON.stringify(path)}, import.meta.url).href`;
+      return serverFileUrl(relativePath);
     },
   };
-}
-
-/**
- * The dev server's URL of a file: Vite serves any allowed file at
- * `<base>@fs/<path>`, and its module middleware decodes the request with
- * `decodeURI`, whose inverse is `encodeURI`: a space or a literal `%` is
- * encoded, a Windows drive's `:` is not. A path holding `#` or `?` cannot
- * be served that way at all. A Windows path (`C:/…`) has no leading slash
- * of its own. Vite's own `?url` import is not used: it decodes a literal
- * `%41` in a path to `A`.
- */
-export function devUrl(base: string, file: string): string {
-  const prefix = base.endsWith("/") ? base : `${base}/`;
-  return `${prefix}@fs/${encodeURI(file.replace(/^\/+/, ""))}`;
 }
