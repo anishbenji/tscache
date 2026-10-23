@@ -145,6 +145,20 @@ Tooling only, no change under `packages/tscache/src/`; backlog items the user pa
 |---|---|---|---|---|
 | R9-1 | P1 | If `mktemp -d` fails, the test goes on in the real checkout and overwrites `scripts/codex-review.sh` | accepted | Reproduced: with a `mktemp` that always fails first in `PATH`, the old test overwrote the real script (`cd ""` succeeds in bash and stays put). Every setup step now exits on failure, and the scratch path must be a directory. `scripts/ci.sh` runs the test with that failing `mktemp` and checks that it exits non-zero and leaves the real script's hash unchanged. An unwritable `TMPDIR` does not simulate it on macOS, whose `mktemp` falls back to `/tmp` |
 
+### Round 10 — reviewer verdict: merge
+
+No findings. **Settled** after three rounds (8–10).
+
+## Merge request: `chore/17-review-tooling` → `main`
+
+**Scope.** Tooling only, from the backlog the user parked after the build. `scripts/review-watch.sh` runs `scripts/codex-review.sh` with stdin closed under a silence watchdog (`REVIEW_SILENCE_SECONDS`, default 600; `REVIEW_POLL_SECONDS`, default 30): after the limit without output it kills the review's own process group and exits 124; otherwise it exits with the review's status. `scripts/review-watch.test.sh` pins four cases against stand-in reviews in a scratch repository, and `scripts/ci.sh` runs it plus a check that it stops, leaving the real review script unchanged, when no scratch directory can be made. `scripts/ci.sh` sets `FALLOW_AUDIT_BASE` to its base when unset. `docs/workflow.md` points the review step at the watchdog.
+
+**Review outcome.** Three rounds: R8-1 (a timeout's global `pkill` could kill another checkout's review), R8-2 (a review finishing silently during a poll was reported as a timeout), R9-1 (a failed `mktemp` let the test overwrite the real review script); each reproduced against the old code and fixed with a regression; round 10 clean.
+
+**Blast radius.** Scripts and docs; no package code. `bun run ci` passed: 1429 Node tests and 48 browser specs, plus the watchdog cases.
+
+**Not done, needs the user.** Type-checking `e2e/` and `scripts/` needs Node or Bun type definitions (a new dependency); running `check:integrations` in pre-push needs a build first. The watchdog was exercised by every round of this chore (rounds 8–10 ran through it).
+
 ## Merge request: `docs/14b-assumptions` → `main`
 
 **Scope.** Documentation only; nothing under `packages/tscache/src/` changes. The post-build architecture review's decisions, recorded, and the two outcomes that need only documentation.
