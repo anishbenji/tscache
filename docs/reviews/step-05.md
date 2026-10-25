@@ -129,3 +129,17 @@ No findings. The reviewer ran the type check and the commitlint cases itself; `b
 ## Merge request: `chore/18-typescript-7` → `main`
 
 Two changes, each its own commit. `typescript` 6.0.3 → 7.0.2, with starter §4 and `AGENTS.md` updated to make TypeScript 7 the authoritative type check; blast radius is the type check and nothing that imports the compiler, since nothing here does. Commitlint skips Dependabot's capitalised bump commits only, with a shell test in `scripts/ci.sh`. Replaces #7, which can be closed. Not verified locally: this branch was cut before #31 merged, so the GitHub run on the merge ref is the first type check of #31's code under TypeScript 7.
+
+## Follow-up: Vitest's test timeout (`chore/19-test-timeout`)
+
+**Problem.** Pre-push failed twice while `chore/18` was pushed: Vitest's 5 s default timed out `keeps the points outside the authority` (merge-failures, 7.8 s and 6.8 s) and a seeded upsert/replace property (merge-property, 6.0 s). At idle they take 373 ms and 146 ms, and the whole suite 2.2 s; the machine was at load 20–28 from other processes. The same flake was seen once at step ⑯.
+
+**What was ruled out.** Building the package before the parallel pre-push checks (the `knip` job builds since #28) made no measurable difference: the build takes 0.4 s, and with ten CPU burners (load up to 90) both hook configurations passed three times out of three, Vitest taking about 4.5 s either way. Plain CPU contention therefore slows the suite about twofold, not the twenty- to fortyfold seen; the real cause is outside the repository and was not identified.
+
+**Decision (user, 2026-10-23).** Raise the global `testTimeout` to 20 s in `vitest.config.ts`, a 2.5× margin over the worst run seen, rather than per-test timeouts on the contract tests or the lefthook change. Assertions and contract tests are unchanged; the cost is that a hung test fails after 20 s instead of 5 s. A temporary test that busy-waits 6 s failed under the old configuration and passed under the new one, then was deleted.
+
+**Not Codex-reviewed.** Codex was at 89 % of its five-hour window, over the 85 % pause line; the user chose to open the pull request without a round (2026-10-23). `bun run ci` passed: 1446 Node tests, 48 browser specs.
+
+## Merge request: `chore/19-test-timeout` → `main`
+
+One line in `vitest.config.ts`, `testTimeout: 20_000`, with its reason. Blast radius: how long Vitest waits before failing a slow or hung test; no assertion changes. The cause of the 20–40× slowdowns stays unknown; if a heavy test crosses 20 s, that is a signal worth investigating rather than another raise.
