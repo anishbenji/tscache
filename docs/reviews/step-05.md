@@ -173,3 +173,11 @@ A root `tsconfig.json` and `e2e/tsconfig.json`, and `bun run typecheck` running 
 **Decision (user, 2026-10-26).** `scripts/ci.sh` deletes `packages/tscache/dist` before anything else. A local run now always rebuilds the package; the build takes about 0.4 s. The examples' `dist/` directories are left alone, because nothing reads them before Playwright rebuilds each app.
 
 **Evidence.** Replayed on #34's commit before its fix (7b9933a), in a scratch worktree with a fresh build in `dist/`: the old script passed there (round 9's CI log, same tsconfigs), and the new one fails at the type check with `TS2307: Cannot find module 'tscache'`, as GitHub did. The worktree was removed afterwards.
+
+### Round 10 — reviewer verdict: merge
+
+No findings. The reviewer checked the script's syntax and the library's type check itself. `bun run ci` passed with the new first step: 1446 Node tests, 48 browser specs, and `dist/` rebuilt from nothing.
+
+## Merge request: `chore/21-ci-clean-dist` → `main`
+
+One line in `scripts/ci.sh`, with its reason: delete `packages/tscache/dist` before anything else, so a local run starts where GitHub's checkout does. Blast radius: local CI runs, which always rebuild the package (about 0.4 s); on GitHub the directory does not exist and the line does nothing. No check, test or assertion changes.
