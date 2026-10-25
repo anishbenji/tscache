@@ -97,3 +97,19 @@ The first GitHub run failed at Knip: it loads each example's `vite.config.ts`, w
 **Round 7 — reviewer verdict: merge.** No findings; the reviewer confirmed the earlier accepted findings stay fixed under the recorded decision. `bun run ci` passed: 1446 Node tests and 48 browser specs. (Rounds 5 and 6 ran on the closed option B branch, #30.)
 
 **Merge request: `feat/16c-static-fetcher-imports` → `main`.** One commit, the change above, settled in one clean round. Known limit, not verified: the check is conservative. It refuses any build in which a chunk the fetcher reaches carries the helper, so if Rolldown ever merged the helper into a shared chunk that the fetcher loads but never calls, a working build would be refused. No such build was seen. The open follow-up is the backlog item to look for a better option than relying on Vite for the fetcher.
+
+## Follow-up: fetchers that need `import()` (`docs/23-fetcher-prebuild`)
+
+**Question (backlog, user 2026-10-23).** Is there a better option for fetcher authors than the static-import rule `fetcherUrl()` enforces?
+
+**Findings.** Vite 8.3.4 adds its preload helper only to an app's client build: `getInsertPreload` is `consumer === "client" && !config.isWorker && !config.build.lib` (`dist/node/chunks/node.js`). Worker bundles drop the entry's exports (`preserveEntrySignatures: false`), which is why `?worker&url` cannot serve a fetcher. Probes, each with a fetcher that lazily imports a decoder and throws `AuthInvalidError`:
+- A Vite library-mode build keeps the default export, splits the decoder into its own chunk, and contains no helper.
+- `bun build --splitting` keeps the export too. Its own preload code touches `document` only when it exists, so it is worker-safe.
+- Both outputs run in Node, with no `document`: the lazy chunk loads, and the auth error keeps its `code`.
+- A worker entry owned by the app, which imports the fetcher statically and is built through `?worker&url`, also carries no helper.
+
+**Options put to the user.** A, keep the rule. B, a nested library-mode build inside `fetcherUrl()`. C, document building the fetcher on its own. D, a worker entry owned by the app: this would also remove webpack's copy step, but it changes the locked §2.5 contract, so it belongs on the architecture review.
+
+**Decision (user, 2026-10-26).** Keep the rule and document C. The rule's cost is small: a decoder imported statically grows only the worker's fetcher, not the page.
+
+**Change.** `docs/guides/worker-setup.md` gains "Building the fetcher on its own", with the Bun and Vite library-mode commands and the trade-offs: a separate rebuild step with no HMR, the app's aliases and defines not applied, and no content hash in the file name. The build error and the plugin's TSDoc now point to that section. The R3-1 test's pattern also requires the pointer: it fails against the old message and passes against the new one.
