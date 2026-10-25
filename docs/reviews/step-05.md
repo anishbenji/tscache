@@ -143,3 +143,13 @@ Two changes, each its own commit. `typescript` 6.0.3 → 7.0.2, with starter §4
 ## Merge request: `chore/19-test-timeout` → `main`
 
 One line in `vitest.config.ts`, `testTimeout: 20_000`, with its reason. Blast radius: how long Vitest waits before failing a slow or hung test; no assertion changes. The cause of the 20–40× slowdowns stays unknown; if a heavy test crosses 20 s, that is a signal worth investigating rather than another raise.
+
+## Follow-up: type-checking e2e, scripts and tool configs (`chore/20-typecheck-e2e-scripts`)
+
+**Problem.** `bun run typecheck` (pre-push) and `scripts/ci.sh` checked only `packages/tscache`. Twenty-four tracked TypeScript files belonged to no checked project: the Playwright specs and helpers under `e2e/`, the Bun-run e2e server and backend in `scripts/`, `playwright.config.ts`, `vitest.config.ts`, `packages/tscache/tsdown.config.ts` and the mock backend's tests. The e2e helpers import library types, so a change to those types could break them unnoticed (found at step ⑫).
+
+**Decision (user, 2026-10-26).** Add `@types/bun` 1.4.4 as a devDependency, so the e2e server's use of `Bun.serve`, `Bun.file` and `process.env` is checked against Bun's real types rather than skipped or declared by hand.
+
+**Change.** A root `tsconfig.json` covers `scripts/` and the tool configs with `types: ["bun"]`; `e2e/tsconfig.json` covers the specs with DOM types, since their `page.evaluate` callbacks run in the browser. `bun run typecheck` runs these two and the mock backend's existing project after the library's, and `scripts/ci.sh` now calls `bun run typecheck`, so pre-push and CI check the same files. TypeScript 7 loads only the types a project names, so Bun's and Node's globals stay out of the library: a planted `Bun.version` and `process.env` in `packages/tscache/src` are still errors, and no other project's file list includes Bun's types. Knip reads the root `tsconfig.json`, so it counts `@types/bun` as used.
+
+**Evidence.** The new projects pass with no code changes. A planted type error in each of `scripts/e2e-server.ts`, `scripts/e2e-backend.ts`, `playwright.config.ts`, `vitest.config.ts`, `packages/tscache/tsdown.config.ts`, `e2e/support.ts`, `e2e/examples/support.ts` and `examples/mock-backend/test/backend.test.ts` fails `bun run typecheck` naming that file, as does a call to a nonexistent `Bun` member. Comparing every project's file list with `git ls-files '*.ts' '*.tsx'` now leaves one file unchecked: `.claude/hooks/guard-bash.ts`, the frozen Bash guard, which stays out of scope.
