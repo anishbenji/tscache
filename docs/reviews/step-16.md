@@ -131,3 +131,13 @@ Not taken: the suggested regression tests. The recipe exercises Vite's library b
 | R9-1 | P1 | With a relative Vite `base` (`"./"` or `""`), `BASE_URL` is relative, and the worker resolves it against its own script (`/app/assets/`), not the page | accepted | Confirmed in the source: the client sends `fetcher.module` as an unresolved string (`client/client.ts`), and the worker `import()`s it (`orchestrator/orchestrator.ts`). For a page at `/app/index.html` and a worker at `/app/assets/worker-1.js`, `"./fetcher/fetcher.js"` resolves to `/app/assets/fetcher/fetcher.js` in the worker and to `/app/fetcher/fetcher.js` against the page. With `"/app/"` both give `/app/fetcher/fetcher.js`. The recipe now resolves the URL against `document.baseURI`, and the guide's fetcher section says to pass an absolute URL or path. |
 
 **Convergence check.** R8-2 and R9-1 hit the same area, the recipe's URL, in consecutive rounds. Redesigned in the docs: the URL is resolved against the page, which is correct for every base form (absolute, relative, empty), so no form is left to patch. The root cause sits in the library: a relative `fetcher.module` resolves against the worker, which nobody expects. Making the client resolve it against the page before sending changes behaviour §2.1 documents ("the worker will dynamic-import()"), so it is **escalated to the user** rather than done here.
+
+### Round 10 — reviewer verdict: merge after fixes
+
+| ID | Sev | Finding | Triage | Evidence |
+|---|---|---|---|---|
+| R10-1 | P1 | Re-raises R9-1: with a relative `base`, resolving against the page breaks for a page in a subfolder (`/app/nested/index.html` gives `/app/nested/fetcher/fetcher.js`) | accepted; recipe narrowed | Correct: a relative `base` does not say where the app's root is, so no URL built from `BASE_URL` at runtime finds `public/` from every page. |
+
+**Convergence check, third round in this area (R8-2, R9-1, R10-1).** I stopped patching the URL. The recipe now claims only what holds: with an absolute `base`, the path is `${BASE_URL}fetcher/fetcher.js`. With a relative `base`, the guide says why no derived URL works and has the app give the deployed path itself, for example from an environment variable. The `document.baseURI` resolution from round 9 is gone.
+
+This also weakens the case for the library change the user approved after round 9. Resolving a relative `fetcher.module` against the page would make it behave like other web APIs, but it would not fix the relative-`base` case either. Raised with the user again.
