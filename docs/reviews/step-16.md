@@ -113,3 +113,13 @@ The first GitHub run failed at Knip: it loads each example's `vite.config.ts`, w
 **Decision (user, 2026-10-26).** Keep the rule and document C. The rule's cost is small: a decoder imported statically grows only the worker's fetcher, not the page.
 
 **Change.** `docs/guides/worker-setup.md` gains "Building the fetcher on its own", with the Bun and Vite library-mode commands and the trade-offs: a separate rebuild step with no HMR, the app's aliases and defines not applied, and no content hash in the file name. The build error and the plugin's TSDoc now point to that section. The R3-1 test's pattern also requires the pointer: it fails against the old message and passes against the new one.
+
+### Round 8 — reviewer verdict: merge after fixes
+
+| ID | Sev | Finding | Triage | Evidence |
+|---|---|---|---|---|
+| R8-1 | P1 | The Vite recipe's `fileName: "fetcher"` emits `fetcher.mjs` outside a `"type": "module"` package, so the URL shown 404s | accepted | Reproduced: a library build in a package without `"type": "module"` emits `fetcher.mjs`, and with `fileName: () => "fetcher.js"` it emits `fetcher.js`. My earlier probe ran inside a module package. The recipe now uses the function. Lazy chunks stay `.mjs`, which the entry imports by relative path. |
+| R8-2 | P1 | The URL `/fetcher/fetcher.js` ignores Vite's `base`, so an app under `/app/` gets a 404 | accepted | Vite serves `public/` under `base`. The example now builds the URL from `import.meta.env.BASE_URL`. |
+| — | — | (found while fixing R8-1) The recipe's `outDir` lies inside `public/`, which Vite copies into `outDir` | fixed | Reproduced: without `publicDir: false`, `public/favicon.txt` lands in `public/fetcher/`, and Vite warns that the folders overlap. The recipe sets `publicDir: false`. |
+
+Not taken: the suggested regression tests. The recipe exercises Vite's library build, not tscache code. Each point was checked by building it with Vite 8.3.4, as above.
