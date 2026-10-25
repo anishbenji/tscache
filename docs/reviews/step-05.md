@@ -158,6 +158,10 @@ One line in `vitest.config.ts`, `testTimeout: 20_000`, with its reason. Blast ra
 
 No findings. The reviewer ran `bun run typecheck` itself and read the compiler's file lists, which confirm the added coverage and that the library project loads no Bun types. `bun run ci` passed: 1446 Node tests, 48 browser specs.
 
+### GitHub CI, first run — failed, fixed
+
+The `e2e` and mock backend projects import `tscache`, whose exports point into `dist/`. `scripts/ci.sh` type-checks before it builds, so on GitHub's fresh checkout the import did not resolve (`TS2307: Cannot find module 'tscache'`). Local runs passed only because an earlier build had left `dist/` in place. Pre-push had a related race: it type-checks in parallel with the `knip` job, which rebuilds `dist/`. Both tsconfigs now map `tscache` and `tscache/*` to `packages/tscache/src/entries/`, as Vitest's alias does. Moving `dist/` aside reproduced the failure before the fix; after it, `bun run typecheck` passes without `dist/`, planted errors in `e2e/support.ts` and the mock backend's tests are still reported, and Knip does not flag the backend's `tscache` dependency. Not re-reviewed by Codex: the fix is the two `paths` entries, checked as above.
+
 ## Merge request: `chore/20-typecheck-e2e-scripts` → `main`
 
 A root `tsconfig.json` and `e2e/tsconfig.json`, and `bun run typecheck` running them with the mock backend's project; `scripts/ci.sh` calls the same script. One new devDependency, `@types/bun` 1.4.4 (user-approved). Blast radius: the type check only. No source, test or assertion changes, and the library's own check is unchanged. Not checked: `.claude/hooks/guard-bash.ts`, which stays frozen.
