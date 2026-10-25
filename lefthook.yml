@@ -21,10 +21,20 @@ pre-push:
       run: bun run typecheck
     - name: biome-full
       run: bunx biome check .
-    - name: knip
-      # Built first, as in scripts/ci.sh: Knip loads the examples' Vite
-      # configs, which import tscache/vite from dist/.
-      run: bun run build >/dev/null && bunx knip
+    # The checks that read the built package, in order after one build, as
+    # in scripts/ci.sh: Knip loads the examples' Vite configs, which import
+    # tscache/vite from dist/, and the integration snippets type-check
+    # against it, as an app would.
+    - name: built
+      group:
+        piped: true
+        jobs:
+          - name: build
+            run: bun run build >/dev/null
+          - name: knip
+            run: bunx knip
+          - name: integrations
+            run: bun run check:integrations
     - name: fallow
       run: bun run fallow
     - name: tests
