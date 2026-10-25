@@ -1,0 +1,11 @@
+{
+  // The Playwright specs: Node-side test code whose page.evaluate()
+  // callbacks run in the browser, hence the DOM types.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "isolatedDeclarations": false,
+    "declaration": false
+  },
+  "include": ["."]
+}
