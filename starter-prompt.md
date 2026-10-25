@@ -94,7 +94,7 @@ The segment transfer payload (`{layout, start, count, mask?, fields, ...}`) is s
 | API docs | **TypeDoc** + TSDoc | |
 | Optional | **sherif** (workspace dep consistency), **taze** (dep updates) | cheap insurance |
 
-**Hook staging:** pre-commit = Biome (staged) + gitleaks + commitlint (sub-second budget). Pre-push = `tsc --noEmit` + full Biome + Knip + `fallow audit` + Vitest suite. `bun run ci` = full superset incl. build + publint/attw + Playwright + bench smoke.
+**Hook staging:** pre-commit = Biome (staged) + gitleaks + commitlint (sub-second budget). Pre-push = `tsc --noEmit` + full Biome + build, then Knip and the integration snippets' type check + `fallow audit` + Vitest suite. `bun run ci` = full superset incl. build + publint/attw + Playwright + bench smoke.
 
 ## 5. Repo Structure & Packaging
 
