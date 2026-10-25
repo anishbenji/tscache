@@ -141,3 +141,13 @@ Not taken: the suggested regression tests. The recipe exercises Vite's library b
 **Convergence check, third round in this area (R8-2, R9-1, R10-1).** I stopped patching the URL. The recipe now claims only what holds: with an absolute `base`, the path is `${BASE_URL}fetcher/fetcher.js`. With a relative `base`, the guide says why no derived URL works and has the app give the deployed path itself, for example from an environment variable. The `document.baseURI` resolution from round 9 is gone.
 
 This also weakens the case for the library change the user approved after round 9. Resolving a relative `fetcher.module` against the page would make it behave like other web APIs, but it would not fix the relative-`base` case either. Raised with the user again.
+
+**Decision (user, 2026-10-26).** The library change is dropped. A relative `fetcher.module` keeps resolving against the worker's script, and the guide's rule stands: pass an absolute URL or path.
+
+### Round 11 — reviewer verdict: merge
+
+No findings. Every accepted finding stays fixed. `bun run ci` passed: 1446 Node tests, 48 browser specs.
+
+## Merge request: `docs/23-fetcher-prebuild` → `main`
+
+The worker setup guide gains "Building the fetcher on its own": Bun and Vite library-mode recipes for a fetcher that needs `import()`, with their trade-offs and the rule that the fetcher's URL must be absolute. `fetcherUrl()`'s build error and TSDoc point to that section, and the R3-1 test requires the pointer. Blast radius: documentation and one error message. No behaviour changes. Settled after four rounds: R8-1, R8-2, R9-1 and R10-1 were all recipe defects, each reproduced and fixed. The convergence check narrowed the recipe to absolute paths. Not verified: a prebuilt fetcher running in a real browser worker. The probes ran in Node, which has no `document`.
