@@ -108,7 +108,7 @@ a static file. Use a bundler that keeps the entry's exports and adds no
 DOM code to the output. Bun and Vite's library mode both qualify; Vite
 adds its preload helper only to an app's own client build. Put the output
 where your app serves files as they are, such as Vite's `public/`, and
-pass its URL under your app's base:
+pass the absolute path it is served at:
 
 ```sh
 bun build src/fetcher.ts --splitting --format esm --outdir public/fetcher
@@ -132,13 +132,18 @@ export default defineConfig({
 ```ts
 const client = await createClient({
   workerUrl,
-  // Vite serves public/ under `base`. Resolved against the page, because
-  // a relative base ("./") would otherwise resolve against the worker.
-  fetcher: {
-    module: new URL(`${import.meta.env.BASE_URL}fetcher/fetcher.js`, document.baseURI).href,
-  },
+  // Vite serves public/ under `base`; here `base` is "/" or "/app/".
+  fetcher: { module: `${import.meta.env.BASE_URL}fetcher/fetcher.js` },
 });
 ```
+
+This works when `base` is an absolute path. With a relative `base`
+(`"./"` or `""`), `BASE_URL` is relative, and no URL built from it at
+runtime finds `public/` from every page: the worker resolves it against
+its own script, and the page resolves it against its own folder, which
+differs for a page in a subfolder. Give the deployed path yourself
+instead, for example from an environment variable
+(`import.meta.env.VITE_FETCHER_URL`).
 
 Bun's output carries its own preload code, but that code touches
 `document` only when it exists, so it runs in a worker. The lazily
