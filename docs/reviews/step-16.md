@@ -123,3 +123,11 @@ The first GitHub run failed at Knip: it loads each example's `vite.config.ts`, w
 | — | — | (found while fixing R8-1) The recipe's `outDir` lies inside `public/`, which Vite copies into `outDir` | fixed | Reproduced: without `publicDir: false`, `public/favicon.txt` lands in `public/fetcher/`, and Vite warns that the folders overlap. The recipe sets `publicDir: false`. |
 
 Not taken: the suggested regression tests. The recipe exercises Vite's library build, not tscache code. Each point was checked by building it with Vite 8.3.4, as above.
+
+### Round 9 — reviewer verdict: merge after fixes
+
+| ID | Sev | Finding | Triage | Evidence |
+|---|---|---|---|---|
+| R9-1 | P1 | With a relative Vite `base` (`"./"` or `""`), `BASE_URL` is relative, and the worker resolves it against its own script (`/app/assets/`), not the page | accepted | Confirmed in the source: the client sends `fetcher.module` as an unresolved string (`client/client.ts`), and the worker `import()`s it (`orchestrator/orchestrator.ts`). For a page at `/app/index.html` and a worker at `/app/assets/worker-1.js`, `"./fetcher/fetcher.js"` resolves to `/app/assets/fetcher/fetcher.js` in the worker and to `/app/fetcher/fetcher.js` against the page. With `"/app/"` both give `/app/fetcher/fetcher.js`. The recipe now resolves the URL against `document.baseURI`, and the guide's fetcher section says to pass an absolute URL or path. |
+
+**Convergence check.** R8-2 and R9-1 hit the same area, the recipe's URL, in consecutive rounds. Redesigned in the docs: the URL is resolved against the page, which is correct for every base form (absolute, relative, empty), so no form is left to patch. The root cause sits in the library: a relative `fetcher.module` resolves against the worker, which nobody expects. Making the client resolve it against the page before sending changes behaviour §2.1 documents ("the worker will dynamic-import()"), so it is **escalated to the user** rather than done here.
