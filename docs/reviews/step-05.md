@@ -143,3 +143,25 @@ Two changes, each its own commit. `typescript` 6.0.3 → 7.0.2, with starter §4
 ## Merge request: `chore/19-test-timeout` → `main`
 
 One line in `vitest.config.ts`, `testTimeout: 20_000`, with its reason. Blast radius: how long Vitest waits before failing a slow or hung test; no assertion changes. The cause of the 20–40× slowdowns stays unknown; if a heavy test crosses 20 s, that is a signal worth investigating rather than another raise.
+
+## Follow-up: type-checking e2e, scripts and tool configs (`chore/20-typecheck-e2e-scripts`)
+
+**Problem.** `bun run typecheck` (pre-push) and `scripts/ci.sh` checked only `packages/tscache`. Twenty-four tracked TypeScript files belonged to no checked project: the Playwright specs and helpers under `e2e/`, the Bun-run e2e server and backend in `scripts/`, `playwright.config.ts`, `vitest.config.ts`, `packages/tscache/tsdown.config.ts` and the mock backend's tests. The e2e helpers import library types, so a change to those types could break them unnoticed (found at step ⑫).
+
+**Decision (user, 2026-10-26).** Add `@types/bun` 1.4.4 as a devDependency, so the e2e server's use of `Bun.serve`, `Bun.file` and `process.env` is checked against Bun's real types rather than skipped or declared by hand.
+
+**Change.** A root `tsconfig.json` covers `scripts/` and the tool configs with `types: ["bun"]`; `e2e/tsconfig.json` covers the specs with DOM types, since their `page.evaluate` callbacks run in the browser. `bun run typecheck` runs these two and the mock backend's existing project after the library's, and `scripts/ci.sh` now calls `bun run typecheck`, so pre-push and CI check the same files. TypeScript 7 loads only the types a project names, so Bun's and Node's globals stay out of the library: a planted `Bun.version` and `process.env` in `packages/tscache/src` are still errors, and no other project's file list includes Bun's types. Knip reads the root `tsconfig.json`, so it counts `@types/bun` as used.
+
+**Evidence.** The new projects pass with no code changes. A planted type error in each of `scripts/e2e-server.ts`, `scripts/e2e-backend.ts`, `playwright.config.ts`, `vitest.config.ts`, `packages/tscache/tsdown.config.ts`, `e2e/support.ts`, `e2e/examples/support.ts` and `examples/mock-backend/test/backend.test.ts` fails `bun run typecheck` naming that file, as does a call to a nonexistent `Bun` member. Comparing every project's file list with `git ls-files '*.ts' '*.tsx'` now leaves one file unchecked: `.claude/hooks/guard-bash.ts`, the frozen Bash guard, which stays out of scope.
+
+### Round 9 — reviewer verdict: merge
+
+No findings. The reviewer ran `bun run typecheck` itself and read the compiler's file lists, which confirm the added coverage and that the library project loads no Bun types. `bun run ci` passed: 1446 Node tests, 48 browser specs.
+
+### GitHub CI, first run — failed, fixed
+
+The `e2e` and mock backend projects import `tscache`, whose exports point into `dist/`. `scripts/ci.sh` type-checks before it builds, so on GitHub's fresh checkout the import did not resolve (`TS2307: Cannot find module 'tscache'`). Local runs passed only because an earlier build had left `dist/` in place. Pre-push had a related race: it type-checks in parallel with the `knip` job, which rebuilds `dist/`. Both tsconfigs now map `tscache` and `tscache/*` to `packages/tscache/src/entries/`, as Vitest's alias does. Moving `dist/` aside reproduced the failure before the fix; after it, `bun run typecheck` passes without `dist/`, planted errors in `e2e/support.ts` and the mock backend's tests are still reported, and Knip does not flag the backend's `tscache` dependency. Not re-reviewed by Codex: the fix is the two `paths` entries, checked as above.
+
+## Merge request: `chore/20-typecheck-e2e-scripts` → `main`
+
+A root `tsconfig.json` and `e2e/tsconfig.json`, and `bun run typecheck` running them with the mock backend's project; `scripts/ci.sh` calls the same script. One new devDependency, `@types/bun` 1.4.4 (user-approved). Blast radius: the type check only. No source, test or assertion changes, and the library's own check is unchanged. Not checked: `.claude/hooks/guard-bash.ts`, which stays frozen.

@@ -1,0 +1,18 @@
+{
+  // The Playwright specs: Node-side test code whose page.evaluate()
+  // callbacks run in the browser, hence the DOM types.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "isolatedDeclarations": false,
+    "declaration": false,
+    // The package's exports point into dist/, which `bun run ci` builds
+    // after the type check and pre-push rebuilds alongside it; the specs
+    // check against the source instead, as Vitest's alias does.
+    "paths": {
+      "tscache": ["../packages/tscache/src/entries/index.ts"],
+      "tscache/*": ["../packages/tscache/src/entries/*.ts"]
+    }
+  },
+  "include": ["."]
+}

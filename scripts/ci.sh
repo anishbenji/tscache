@@ -40,7 +40,7 @@ if [ "$(git rev-parse "$base")" != "$(git rev-parse HEAD)" ]; then
   bunx commitlint --from "$base" --to HEAD
 fi
 bunx biome ci .
-bunx tsc -p packages/tscache
+bun run typecheck
 # Built before Knip: the examples' Vite configs import tscache/vite from
 # dist/, and Knip loads them; a fresh checkout has no dist/ yet.
 bun run --filter tscache build   # includes publint + attw (esm-only profile)

@@ -1,0 +1,12 @@
+{
+  // The scripts Bun runs and the tool configs outside every other project.
+  // The library, the examples, the integration snippets and e2e/ have
+  // projects of their own; the frozen Bash guard stays unchecked.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "isolatedDeclarations": false,
+    "declaration": false
+  },
+  "include": ["scripts", "*.config.ts", "packages/*/tsdown.config.ts"]
+}
