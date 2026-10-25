@@ -10,6 +10,10 @@ base="${CI_BASE:-main}"
 # Fallow's audit compares against the same base. Left unset, it compares a
 # pushed branch against its upstream and audits only unpushed commits.
 export FALLOW_AUDIT_BASE="${FALLOW_AUDIT_BASE:-$base}"
+# Start without the built package, as a fresh checkout does: a dist/ left
+# by an earlier build let a check that ran before the build pass locally
+# and fail on GitHub (#34).
+rm -rf packages/tscache/dist
 
 bun install --frozen-lockfile
 bash .claude/hooks/guard-bash.test.sh
