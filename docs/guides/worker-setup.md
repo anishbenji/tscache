@@ -58,7 +58,8 @@ const client = await createClient({ workerUrl: "/vendor/tscache/worker.js" });
 
 `fetcher.module` is a URL too: the worker loads it with `import()` and uses
 its default export (`docs/architecture.md` §2.5). Serve it as an ES module
-from your origin, with that export intact.
+from your origin, with that export intact. The worker resolves a relative
+URL against its own script, not the page, so pass an absolute URL or path.
 
 With Vite, `?worker&url` does not fit the fetcher: Vite bundles a worker
 entry without its exports, so the module loads but has no default export.
@@ -131,8 +132,11 @@ export default defineConfig({
 ```ts
 const client = await createClient({
   workerUrl,
-  // Vite serves public/ under `base`; BASE_URL ends with a slash.
-  fetcher: { module: `${import.meta.env.BASE_URL}fetcher/fetcher.js` },
+  // Vite serves public/ under `base`. Resolved against the page, because
+  // a relative base ("./") would otherwise resolve against the worker.
+  fetcher: {
+    module: new URL(`${import.meta.env.BASE_URL}fetcher/fetcher.js`, document.baseURI).href,
+  },
 });
 ```
 
