@@ -165,3 +165,19 @@ The `e2e` and mock backend projects import `tscache`, whose exports point into `
 ## Merge request: `chore/20-typecheck-e2e-scripts` → `main`
 
 A root `tsconfig.json` and `e2e/tsconfig.json`, and `bun run typecheck` running them with the mock backend's project; `scripts/ci.sh` calls the same script. One new devDependency, `@types/bun` 1.4.4 (user-approved). Blast radius: the type check only. No source, test or assertion changes, and the library's own check is unchanged. Not checked: `.claude/hooks/guard-bash.ts`, which stays frozen.
+
+## Follow-up: local CI starts without the built package (`chore/21-ci-clean-dist`)
+
+**Problem.** A local `bun run ci`, including the one `scripts/codex-review.sh` runs before every review round, started with whatever `packages/tscache/dist/` an earlier build had left. GitHub's checkout has none. A check that runs before the build and needs the package therefore passed locally and failed on GitHub: #34's first run (`TS2307`), after the same kind of miss at #22 and #28.
+
+**Decision (user, 2026-10-26).** `scripts/ci.sh` deletes `packages/tscache/dist` before anything else. A local run now always rebuilds the package; the build takes about 0.4 s. The examples' `dist/` directories are left alone, because nothing reads them before Playwright rebuilds each app.
+
+**Evidence.** Replayed on #34's commit before its fix (7b9933a), in a scratch worktree with a fresh build in `dist/`: the old script passed there (round 9's CI log, same tsconfigs), and the new one fails at the type check with `TS2307: Cannot find module 'tscache'`, as GitHub did. The worktree was removed afterwards.
+
+### Round 10 — reviewer verdict: merge
+
+No findings. The reviewer checked the script's syntax and the library's type check itself. `bun run ci` passed with the new first step: 1446 Node tests, 48 browser specs, and `dist/` rebuilt from nothing.
+
+## Merge request: `chore/21-ci-clean-dist` → `main`
+
+One line in `scripts/ci.sh`, with its reason: delete `packages/tscache/dist` before anything else, so a local run starts where GitHub's checkout does. Blast radius: local CI runs, which always rebuild the package (about 0.4 s); on GitHub the directory does not exist and the line does nothing. No check, test or assertion changes.
