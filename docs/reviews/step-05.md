@@ -189,3 +189,11 @@ One line in `scripts/ci.sh`, with its reason: delete `packages/tscache/dist` bef
 **Change.** Pre-push's `knip` job becomes a piped group, `built`: one build, then Knip, then `check:integrations`. These are the two checks that read `dist/`, and they run in the same order as in `scripts/ci.sh`. Since #34 the type check no longer reads `dist/`, so it still runs in parallel. Starter §4 and `AGENTS.md` list the new pre-push contents. `docs/workflow.md` now says to run the hook by hand with `--force`, because without it lefthook skips every job when there is nothing to push.
 
 **Evidence.** `lefthook validate` passes. A clean `lefthook run pre-push --force` passes in about 3.5 s: build 1.8 s, Knip 1.2 s, snippets 0.5 s, with the rest in parallel. A type error planted in `integrations/vanilla/series.ts` passed the old configuration and fails the new one, which names the file. A syntax error planted in the library stops the group at the build, and Knip and the snippet check do not run.
+
+### Round 11 — reviewer verdict: merge
+
+No findings. The reviewer ran `lefthook validate` and the library's type check itself. `bun run ci` passed: 1446 Node tests, 48 browser specs.
+
+## Merge request: `chore/22-integrations-pre-push` → `main`
+
+Pre-push builds once, then runs Knip and the integration snippets' type check in order; the other jobs still run in parallel. Starter §4, `AGENTS.md` and `docs/workflow.md` are updated to match. Blast radius: the pre-push hook only, which gains about half a second. `bun run ci` is unchanged.
