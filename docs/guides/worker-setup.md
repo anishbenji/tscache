@@ -81,7 +81,8 @@ fetch would throw a `ReferenceError` instead of its own error (an
 expired-token error included, which would then never reach the other
 tabs). `fetcherUrl()` fails the build when the fetcher, or any code it
 reaches, uses `import()`, naming the chunk. `build.modulePreload: false`
-does not remove the helper.
+does not remove the helper. To keep a lazy import, build the fetcher on
+its own (below).
 
 ```ts
 import { createClient } from "tscache";
@@ -97,6 +98,57 @@ For TypeScript, declare the import once:
 Without a bundler, write the fetcher as a plain ES module and import
 `AuthInvalidError` from your served copy of `dist/fetcher.js`
 (`import { AuthInvalidError } from "/vendor/tscache/fetcher.js"`).
+
+### Building the fetcher on its own
+
+A fetcher that needs `import()`, for example to load a large decoder
+only when a fetch needs it, can be built as a separate step and served as
+a static file. Use a bundler that keeps the entry's exports and adds no
+DOM code to the output. Bun and Vite's library mode both qualify; Vite
+adds its preload helper only to an app's own client build. Put the output
+where your app serves files as they are, such as Vite's `public/`, and
+pass its URL:
+
+```sh
+bun build src/fetcher.ts --splitting --format esm --outdir public/fetcher
+```
+
+```ts
+// vite.fetcher.config.ts, run with `vite build --config vite.fetcher.config.ts`
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  build: {
+    outDir: "public/fetcher",
+    lib: { entry: "src/fetcher.ts", formats: ["es"], fileName: "fetcher" },
+  },
+});
+```
+
+```ts
+const client = await createClient({
+  workerUrl,
+  fetcher: { module: "/fetcher/fetcher.js" },
+});
+```
+
+Bun's output carries its own preload code, but that code touches
+`document` only when it exists, so it runs in a worker. The lazily
+imported chunks load relative to the fetcher's URL. The build bundles its
+own copy of `AuthInvalidError`, which is fine: the worker recognises the
+error by its `code`, not by its class (`docs/architecture.md` §2.5).
+
+The trade-offs:
+
+- The step runs outside your app's build. Rebuild the fetcher when it
+  changes (`bun build --watch`, `vite build --watch`); there is no HMR for
+  it in dev.
+- Your app's aliases, `define` values and plugins do not apply unless you
+  repeat them in that build.
+- The file name carries no content hash, so serve it with revalidation
+  or put a version in its path.
+- This path works with any bundler, or none, since the output is a plain
+  ES module.
 
 ## Server rendering
 
