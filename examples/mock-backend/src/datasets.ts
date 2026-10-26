@@ -53,31 +53,56 @@ function price(seed: number, t: number): number {
   return 100 * Math.exp(drift);
 }
 
+/**
+ * One OHLCV bar starting at `t`, formed up to `now`, for a market open
+ * `tradedHours` of the bar's span.
+ */
+function ohlcv(
+  seed: number,
+  t: number,
+  interval: number,
+  now: number,
+  tradedHours: number,
+): readonly number[] {
+  const end = Math.min(t + interval, now);
+  const open = price(seed, t);
+  const close = price(seed, end);
+  let high = Math.max(open, close);
+  let low = Math.min(open, close);
+  for (let i = 1; i < 4; i++) {
+    const inside = price(seed, t + ((end - t) * i) / 4);
+    high = Math.max(high, inside);
+    low = Math.min(low, inside);
+  }
+  high *= 1 + 0.002 * unit(seed + 1, t);
+  low *= 1 - 0.002 * unit(seed + 2, t);
+  const formed = (end - t) / interval;
+  const volume = Math.round(
+    1e6 * tradedHours * (0.5 + unit(seed + 3, t)) * formed,
+  );
+  return [open, high, low, close, volume];
+}
+
 /** OHLCV bars in weekday sessions; the bar forming now is provisional. */
 const candles: Dataset = {
   fields: { open: "f64", high: "f64", low: "f64", close: "f64", volume: "u32" },
   provisionalMs: (interval) => interval,
   point(seed, t, interval, now) {
     if (!isTradingBar(t, interval)) return undefined;
-    const end = Math.min(t + interval, now);
-    const open = price(seed, t);
-    const close = price(seed, end);
-    let high = Math.max(open, close);
-    let low = Math.min(open, close);
-    for (let i = 1; i < 4; i++) {
-      const inside = price(seed, t + ((end - t) * i) / 4);
-      high = Math.max(high, inside);
-      low = Math.min(low, inside);
-    }
-    high *= 1 + 0.002 * unit(seed + 1, t);
-    low *= 1 - 0.002 * unit(seed + 2, t);
     const tradedHours = Math.min(interval, SESSION_CLOSE - SESSION_OPEN) / HOUR;
-    const formed = (end - t) / interval;
-    const volume = Math.round(
-      1e6 * tradedHours * (0.5 + unit(seed + 3, t)) * formed,
-    );
-    return [open, high, low, close, volume];
+    return ohlcv(seed, t, interval, now, tradedHours);
   },
+};
+
+/**
+ * OHLCV bars of a market that never closes, as crypto trades: a bar in
+ * every slot, so a live chart moves at any hour.
+ */
+const allDay: Dataset = {
+  fields: candles.fields,
+  provisionalMs: (interval) => interval,
+  point: (seed, t, interval, now) =>
+    ohlcv(seed, t, interval, now, interval / HOUR),
 };
 
 /** Server metrics, always present; request counts arrive late. */
@@ -156,6 +181,7 @@ const events: Dataset = {
 
 export const datasets = {
   candles,
+  crypto: allDay,
   metrics,
   sensor,
   events,
