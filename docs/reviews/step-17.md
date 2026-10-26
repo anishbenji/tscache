@@ -1,6 +1,6 @@
 # Step 17 — Reference clients: vanilla
 
-Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: in review · Verdict after triage: —
+Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: —
 
 The first of the three reference clients (`docs/roadmap.md`, "Reference clients"; track (c) after the post-build architecture review). Not an engine step: tests are written with the code. The decisions below were the user's (2026-10-26); the roadmap records them.
 
@@ -26,9 +26,17 @@ Each is reversible and inside the user's decisions; listed so the review can con
 | D6 | A chart reports a scroll only around user input (Lightweight Charts) or from its own handlers (uPlot) | Lightweight Charts changes its range by itself after a draw or a resize and reports it the same way; taken for a scroll, each one cost a read. Found while running the page | Compare against the last range set; failed, since the chart adjusts the range a frame later |
 | D7 | `@tscache/integrations` gains `exports`, and the reference imports its shared core | One copy of the lifecycle and the hydration; a reader copies the files the README lists | Copy the files into `reference/shared` |
 
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | A pushed batch of a new dataset version clears the cache, and the cache-only redraws never fetch the history back | accepted | Validated by reading: the put with a new `meta.version` auto-clears (§2.4) and `refresh` reads with `cacheOnly`. The page now reads its range again on `cacheCleared` for the market's cache, on every tab (the event reaches all of them). E2E test bumps the version while streaming and waits for a history fetch and the full bar count; it fails with the listener removed. 198c849 |
+| R1-2 | P1 | Switching chart libraries opens the new chart at the opening range, away from the history on screen | accepted | Reproduced. `ChartView` gains `visible()`, and a new chart opens at the old one's range. The page shows the range on screen (`showing`), which the E2E test compares across a switch after scrolling back; it fails with the old opening restored. 198c849 |
+| R1-3 | P1 | The page never shows coverage or misses other than auth-pending, so a failed history fetch looks like a confirmed gap | accepted | Validated against the roadmap's scope ("render coverage and misses"). The page shows what an answer lacks by reason, leaving out the provisional forming bar, and offers Retry after a failed fetch. Found while testing: the next push's cache-only redraw reports the failed range as uncached, so the page keeps naming the failure until nothing is missing. The mock backend gains `failNext`; the E2E test fails a history fetch, sees "fetch failed", and retries. 198c849 |
+
 ## Verification
 
 - `bunx vitest run examples/mock-backend integrations reference`: the new stream, dataset, service-token, series and range tests pass.
-- `E2E_EXAMPLES=reference-vanilla bunx playwright test --project=examples reference/`: 6 passed — one stream for two tabs and a hand-over when the holder closes, pushed bars drawn without a fetch, history fetched once on scrolling back with each chart library and not again on scrolling forward, one token refresh across two tabs, the server-rendered page fetching only the forming bar, and switching the library without a fetch.
+- `E2E_EXAMPLES=reference-vanilla bunx playwright test --project=examples reference/`: 9 passed after round 1 (6 before it) — one stream for two tabs and a hand-over when the holder closes, pushed bars drawn without a fetch, history fetched once on scrolling back with each chart library and not again on scrolling forward, one token refresh across two tabs, the server-rendered page fetching only the forming bar, and switching the library without a fetch.
 - Run by hand in Chromium against the dev server: both libraries draw, follow the live bar and scroll back through history; the server-rendered page draws the server's read before the client connects.
 - Not verified: Firefox and Safari; the dedicated-worker and in-process paths of the feed (D2) in a real browser.
