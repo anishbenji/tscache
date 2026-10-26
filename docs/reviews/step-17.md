@@ -1,6 +1,6 @@
 # Step 17 — Reference clients: vanilla
 
-Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in review · Verdict after triage: —
+Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: in review · Verdict after triage: —
 
 The first of the three reference clients (`docs/roadmap.md`, "Reference clients"; track (c) after the post-build architecture review). Not an engine step: tests are written with the code. The decisions below were the user's (2026-10-26); the roadmap records them.
 
@@ -48,9 +48,15 @@ Each is reversible and inside the user's decisions; listed so the review can con
 | R3-1 | P1 | After a stream outage of several minutes, every batch lies more than a bar past the read range and is dropped, so the chart freezes | accepted | Validated by reading `onBatch`. While the chart follows the market (what is on screen reaches the end of the read range), a batch after a gap now widens the range and reads it normally, which fetches the missed bars; in history the page waits as before. The E2E test starts the page with its clock three minutes behind the backend's, so the first pushed bar comes after a gap, and waits for the missed bars; it fails with the read disabled. Found while testing: following measured against the newest bar broke when the fetch reached past the view, so it is measured against the read range. 401e88c |
 | R3-2 | P1 | Fallow fails on the branch: the specs' pixel helper exceeds the complexity threshold, and the chart setup is a clone | accepted in part | The complexity finding was real and is fixed: the helper compares packed pixels against a set. The clone group (Lightweight Charts setup shared with two examples) is reported as a warning under `.fallowrc.json` (`minOccurrences: 3`, duplication not gating) and did not fail the run; the reference is the copy readers take, so it stays. `bun run ci` passes on the fix commit. 401e88c |
 
+## Round 4 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P1 | A stream that reconnects inside the next bar sends only that bar, so the bar it broke in keeps its provisional values | accepted; area redesigned | Validated by reading: the gap branch of R3-1 starts only past one bar, and a new stream sends no closed bar. **Convergence check:** the stream's recovery drew findings in rounds 3 and 4, so it was redesigned rather than patched. Every break of the stream ends in an opening (an `EventSource` reconnect, or another tab taking the lock), so the feed now reports each opening to every tab (`onOpened`), ahead of the stream's first batch, and a tab that follows the market reads its newest bars with a fetch. That fetch covers the provisional end, so it mends missed bars and stale provisional ones alike; a batch after a gap takes the same path (`catchUp`). The mock backend gains `dropStreams` and `advanceMs`, and sends an SSE `retry` of 500 ms. The E2E test drops the stream and moves the backend a minute on in one request, then waits for a fetch over the bar the stream broke in; it fails without the catch-up on opening. 2b5a5b4 |
+
 ## Verification
 
 - `bunx vitest run examples/mock-backend integrations reference`: the new stream, dataset, service-token, series and range tests pass.
-- `E2E_EXAMPLES=reference-vanilla bunx playwright test --project=examples reference/`: 12 passed after round 3 (6 before round 1); `bun run ci` green after round 3 (1465 Vitest, 60 Playwright) — one stream for two tabs and a hand-over when the holder closes, pushed bars drawn without a fetch, history fetched once on scrolling back with each chart library and not again on scrolling forward, one token refresh across two tabs, the server-rendered page fetching only the forming bar, and switching the library without a fetch.
+- `E2E_EXAMPLES=reference-vanilla bunx playwright test --project=examples reference/`: 13 passed after round 4 (6 before round 1); `bun run ci` green after round 4 (1466 Vitest, 61 Playwright) — one stream for two tabs and a hand-over when the holder closes, pushed bars drawn without a fetch, history fetched once on scrolling back with each chart library and not again on scrolling forward, one token refresh across two tabs, the server-rendered page fetching only the forming bar, and switching the library without a fetch.
 - Run by hand in Chromium against the dev server: both libraries draw, follow the live bar and scroll back through history; the server-rendered page draws the server's read before the client connects.
 - Not verified: Firefox and Safari; the dedicated-worker and in-process paths of the feed (D2) in a real browser.
