@@ -1,0 +1,12 @@
+{
+  // Shared by the reference clients: application code a reader copies,
+  // bundled by Vite, so the library-only isolatedDeclarations rule does not
+  // apply. They type-check against the built package, as an app would.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "isolatedDeclarations": false,
+    "declaration": false
+  }
+}

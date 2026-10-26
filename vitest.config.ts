@@ -25,6 +25,7 @@ export default defineConfig({
       "packages/*/test/**/*.test.ts",
       "examples/*/test/**/*.test.ts",
       "integrations/test/**/*.test.ts",
+      "reference/*/test/**/*.test.ts",
     ],
     passWithNoTests: true,
     // On a loaded machine the heavy property tests ran 20-40x slower than

@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { type App, apps, appUrl } from "./e2e/examples/apps";
+import { type App, appDir, apps, appUrl } from "./e2e/examples/apps";
 
 // Multi-tab SharedWorker suites (step ⑫): one BrowserContext, multiple
 // context.newPage() calls — pages share the SharedWorker; separate contexts
@@ -9,8 +9,9 @@ import { type App, apps, appUrl } from "./e2e/examples/apps";
 // served by scripts/e2e-server.ts, because workers need a same-origin URL.
 //
 // The examples project (step ⑬) builds each example app and serves it with
-// `vite preview`. E2E_EXAMPLES=a,b limits which apps are started (empty: none),
-// for running one app's spec while the others are being worked on.
+// `vite preview`, and so does the reference clients' spec (e2e/reference/).
+// E2E_EXAMPLES=a,b limits which apps are started (empty: none), for running
+// one app's spec while the others are being worked on.
 const selected = (
   process.env.E2E_EXAMPLES?.split(",") ?? Object.keys(apps)
 ).filter((name): name is App => Object.hasOwn(apps, name));
@@ -23,12 +24,12 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: "examples/**",
+      testIgnore: ["examples/**", "reference/**"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "examples",
-      testMatch: "examples/**/*.spec.ts",
+      testMatch: ["examples/**/*.spec.ts", "reference/**/*.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
     },
   ],
@@ -40,7 +41,7 @@ export default defineConfig({
       timeout: 30_000,
     },
     ...selected.map((app) => ({
-      command: `bun run --cwd examples/${app} build && bun run --cwd examples/${app} preview --host 127.0.0.1 --port ${apps[app]} --strictPort`,
+      command: `bun run --cwd ${appDir(app)} build && bun run --cwd ${appDir(app)} preview --host 127.0.0.1 --port ${apps[app]} --strictPort`,
       url: appUrl(app),
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

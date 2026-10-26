@@ -21,6 +21,14 @@ untouched and no adapter API needs versioning; the library's framework surface (
 promise to reactivity) is small enough for an application to own. Subpath adapters with optional peers
 (`tscache/react`, `tscache/solid`) stay possible later if copying proves a burden.
 
+**Decisions (user, 2026-10-26).** They live in a `reference/` workspace of their own, next to the
+examples rather than in place of them. Each draws with both Lightweight Charts and uPlot behind one
+small chart interface, switched on the page. Each has a client-only page and a server-rendered one,
+vanilla included. Pushed bars come over Server-Sent Events, held by one tab per browser elected with a
+Web Lock; WebSocket and polling variants of the feed follow the three clients. They land one pull
+request each: vanilla first, carrying the shared pieces, then React, then Solid. The vanilla client
+landed in step 17 (`reference/README.md`).
+
 ## Design sketch: IndexedDB persistence
 
 **Goal.** A reload or a new tab starts from what an earlier session fetched. Immutable history, the
