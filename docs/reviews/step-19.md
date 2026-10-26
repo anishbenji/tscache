@@ -26,7 +26,7 @@ No findings.
 
 ## Verification
 
-- `bun run ci` green: 93 Playwright, including all 15 reference tests against each of the three clients.
+- `bun run ci` green: 1467 Vitest, 93 Playwright, including all 15 reference tests against each of the three clients.
 - `E2E_EXAMPLES=reference-solid bunx playwright test --project=examples reference/ -g reference-solid`: 15 passed.
 - Run by hand in Chromium against the dev server: `/ssr?chart=uplot` hydrates with no warning (dev mode reports hydration key misses; the preview build used by the tests does not) and draws the server's read.
 - Not verified: Firefox and Safari; the feed on dedicated-worker or in-process tabs; a page remount (no spec remounts a page).
