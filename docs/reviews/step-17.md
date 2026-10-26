@@ -1,6 +1,6 @@
 # Step 17 — Reference clients: vanilla
 
-Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 6 · Status: in review · Verdict after triage: —
+Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 7 · Status: settled · Verdict after triage: merge
 
 The first of the three reference clients (`docs/roadmap.md`, "Reference clients"; track (c) after the post-build architecture review). Not an engine step: tests are written with the code. The decisions below were the user's (2026-10-26); the roadmap records them.
 
@@ -66,6 +66,10 @@ Each is reversible and inside the user's decisions; listed so the review can con
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R6-1 | P1 | A refresh pending at teardown fails later and marks the page started again in the same markup as signed out | accepted; area redesigned | Validated by reading: `refreshOnAuthInvalid`'s unsubscribe stops new events, not a lock callback already queued. **Convergence check:** teardown drew findings in rounds 5 and 6, so instead of guarding this callback the page has one rule: every write to its markup goes through `show` and `reveal`, which do nothing once the page is torn down. The vanilla series, which the pending callbacks reach through `show(asked)`, now ignores `show` and `refresh` after `dispose` (its unit test fails without that). The page-level guard holds by construction; no browser test, for the reason in R5-1. a4f11ef |
+
+## Round 7 — reviewer verdict: merge
+
+No findings. The reviewer confirmed every accepted finding of rounds 1–6 fixed and the R3-2 duplication rejection justified.
 
 ## Verification
 
