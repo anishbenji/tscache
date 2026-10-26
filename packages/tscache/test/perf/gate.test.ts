@@ -5,6 +5,7 @@ import {
   GATE,
   type Git,
   noisy,
+  tallyCalibration,
   trailers,
   verdictOf,
 } from "../../bench/gate";
@@ -82,6 +83,10 @@ describe("the sampler", () => {
   it("bounds the median with the binomial order statistics", () => {
     expect(medianRanks(20)).toEqual([6, 15]);
     expect(medianRanks(30)).toEqual([10, 21]);
+    expect(medianRanks(1000)).toEqual([469, 532]);
+    // Fewer rounds give no interval; more underflow 0.5 ** n.
+    expect(() => medianRanks(9)).toThrow(RangeError);
+    expect(() => medianRanks(1001)).toThrow(RangeError);
   });
 
   it("finds no difference between the same operation and itself, and a large one", () => {
@@ -130,7 +135,9 @@ describe("Perf-Accepted trailers in a pull request", () => {
       git("commit", "-q", "-m", message);
       return git("rev-parse", "HEAD");
     };
-    return { git, commit };
+    const write = (file: string, text: string) =>
+      writeFileSync(`${dir}/${file}`, text);
+    return { git, commit, write };
   }
 
   it("accepts the code it was written for, also on a merge ref, and not a later change", async () => {
@@ -158,6 +165,47 @@ describe("Perf-Accepted trailers in a pull request", () => {
     expect(voided).toHaveLength(1);
   });
 
+  it("is voided when merging the base resolves a source conflict by hand, not by a clean merge", async () => {
+    const { git, write } = await scratch();
+    write("packages/tscache/src/engine.ts", "one\ntwo\nthree\nfour\nfive\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "pr");
+    write("packages/tscache/src/engine.ts", "ONE\ntwo\nthree\nfour\nfive\n");
+    git(
+      "commit",
+      "-q",
+      "-am",
+      "perf: slower read\n\nPerf-Accepted: read-viewport 1.2 a reason",
+    );
+    // Main changes the same file elsewhere; merged in, git merges it alone.
+    git("checkout", "-q", "main");
+    write("packages/tscache/src/engine.ts", "one\ntwo\nthree\nfour\nFIVE\n");
+    git("commit", "-q", "-am", "main: five");
+    const clean = git("rev-parse", "HEAD");
+    git("checkout", "-q", "pr");
+    git("merge", "-q", "--no-edit", "main");
+    expect(acceptances(clean, git)).toEqual(new Map([["read-viewport", 1.2]]));
+    // Main changes the line the pull request changed: a conflict, which
+    // the merge resolves with code neither side had.
+    git("checkout", "-q", "main");
+    write("packages/tscache/src/engine.ts", "uno\ntwo\nthree\nfour\nFIVE\n");
+    git("commit", "-q", "-am", "main: uno");
+    const conflicting = git("rev-parse", "HEAD");
+    git("checkout", "-q", "pr");
+    try {
+      git("merge", "-q", "--no-edit", "main");
+    } catch {
+      // Conflict, as intended.
+    }
+    write(
+      "packages/tscache/src/engine.ts",
+      "resolved\ntwo\nthree\nfour\nFIVE\n",
+    );
+    git("commit", "-q", "-am", "merge main");
+    expect(acceptances(conflicting, git)).toEqual(new Map());
+  });
+
   it("is not voided by a later change outside the source", async () => {
     const { git, commit } = await scratch();
     const base = commit("packages/tscache/src/engine.ts", "base");
@@ -167,5 +215,28 @@ describe("Perf-Accepted trailers in a pull request", () => {
     );
     commit("README.md", "docs: say so");
     expect(acceptances(base, git)).toEqual(new Map([["put-page@bun", 1.15]]));
+  });
+});
+
+describe("a calibration's tally", () => {
+  it("counts quiet runs only, and lists noisy ones apart", () => {
+    const quiet = (verdict: string) => ({
+      runtime: "bun",
+      noisy: false,
+      verdicts: { "read-viewport": verdict },
+    });
+    const reports = [
+      ...Array.from({ length: 17 }, () => quiet("regression")),
+      ...Array.from({ length: 3 }, () => ({
+        runtime: "bun",
+        noisy: true,
+        verdicts: { "read-viewport": "regression" },
+      })),
+      quiet("ok"),
+    ];
+    const { cases, noisy } = tallyCalibration(reports);
+    // 17 of 18 quiet runs: the 3 noisy ones count in neither column.
+    expect(cases.get("bun")?.get("read-viewport")).toEqual([17, 18]);
+    expect(noisy.get("bun")).toBe(3);
   });
 });

@@ -12,10 +12,11 @@
 // needs it (docs/benchmarking.md).
 
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 
 const ROOT = new URL("../packages/tscache/", import.meta.url);
-const BUDGETS = new URL("bench/budgets.json", ROOT);
+const BUDGETS = fileURLToPath(new URL("bench/budgets.json", ROOT));
 
 /** The package's entries, and whether each runs in a browser. */
 const ENTRIES = {
@@ -41,7 +42,7 @@ interface Budgets {
 
 async function measure(entry: Entry): Promise<Size> {
   const result = await Bun.build({
-    entrypoints: [new URL(`dist/${entry}.js`, ROOT).pathname],
+    entrypoints: [fileURLToPath(new URL(`dist/${entry}.js`, ROOT))],
     target: ENTRIES[entry],
     format: "esm",
     minify: true,
@@ -112,7 +113,7 @@ if (update) {
     ) as Record<Entry, number>,
   };
   writeFileSync(BUDGETS, `${JSON.stringify(next, null, 2)}\n`);
-  console.log(`\nbudgets written to ${BUDGETS.pathname}`);
+  console.log(`\nbudgets written to ${BUDGETS}`);
 } else if (over > 0) {
   console.error(
     `\n${over} entr${over === 1 ? "y is" : "ies are"} over budget: shrink it, or raise the budget in packages/tscache/bench/budgets.json with the reason in the commit (docs/benchmarking.md).`,

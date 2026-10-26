@@ -101,7 +101,7 @@ Perf-Accepted: read-viewport 1.25 reads assemble rows for the new snapshot forma
 Perf-Accepted: put-page@bun 1.15 JSC only; V8 is unchanged
 ```
 
-The case may then be up to that ratio slower; beyond it, it fails again. The trailer counts only while no later commit in the pull request changes `packages/tscache/src`, so it accepts the code it was written for, not a later change. It retires with the merge, since the next pull request's base already contains that code.
+The case may then be up to that ratio slower; beyond it, it fails again. The trailer counts only while no later commit in the pull request changes `packages/tscache/src`, so it accepts the code it was written for, not a later change. A later merge counts as a change when its source differs from what git's own merge of its parents gives (a conflict resolved by hand). What the base brings in does not count, so GitHub's merge ref, which merges in what landed on `main` since, leaves the trailer standing. It retires with the merge, since the next pull request's base already contains that code.
 
 **Calibration before the timing gate blocks.** Dispatch `bench-calibrate.yml` three times, with slowdown `0`, `0.15` and `0.25`. Each dispatch runs the head against itself in 20 parallel jobs, with the head made that much slower: an operation of 2 ms or more (judged from warm calls) spins for that fraction of its own time, and a shorter one runs again that often, with no clock read that would slow it on its own. The summary job tallies how often the gate fired per runtime and case, leaving out noisy runs. The gate may block when:
 - it fired in none of the 20 same-revision runs;

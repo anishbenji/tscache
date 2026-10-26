@@ -83,6 +83,11 @@ function median(sorted: readonly number[]): number {
  * n = 20, ranks 6 and 15; for n = 30, 10 and 21).
  */
 export function medianRanks(n: number): [number, number] {
+  // 0.5 ** n underflows past about a thousand rounds, and below ten
+  // there is no 95 % interval to speak of.
+  if (!Number.isInteger(n) || n < 10 || n > 1000) {
+    throw new RangeError(`rounds must be an integer from 10 to 1000, not ${n}`);
+  }
   let below = 0;
   let term = 0.5 ** n;
   let r = 0;

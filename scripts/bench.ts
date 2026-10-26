@@ -29,6 +29,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { BunPlugin } from "bun";
 import {
   acceptances,
@@ -41,7 +42,7 @@ import {
 import type { CaseResult, RunOptions } from "../packages/tscache/bench/run";
 import type { Sample } from "../packages/tscache/bench/sample";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PACKAGE = join(ROOT, "packages/tscache");
 const RESULTS = join(ROOT, ".bench-results");
 
@@ -64,11 +65,11 @@ interface Args {
   slowdown: number | undefined;
 }
 
-/** At least 10 rounds: fewer give no 95 % interval of the median. */
+/** 10 to 1000 rounds (medianRanks): fewer give no 95 % interval. */
 function roundsOf(text: string | undefined): number {
   const rounds = Number(text ?? 20);
-  if (!Number.isInteger(rounds) || rounds < 10) {
-    throw new Error(`--rounds must be an integer of at least 10, not ${text}`);
+  if (!Number.isInteger(rounds) || rounds < 10 || rounds > 1000) {
+    throw new Error(`--rounds must be an integer from 10 to 1000, not ${text}`);
   }
   return rounds;
 }

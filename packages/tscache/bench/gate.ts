@@ -83,13 +83,35 @@ export type Git = (...args: string[]) => string;
 const SOURCE = "packages/tscache/src";
 
 /**
+ * Whether merge `merge` changes the source beyond merging its parents:
+ * a conflict resolved by hand, or an edit made in the merge. Its source
+ * is compared with what git's own merge of the parents gives.
+ */
+function resolvedBy(merge: string, git: Git): boolean {
+  const [, ...parents] = git("rev-list", "--parents", "-n", "1", merge).split(
+    " ",
+  );
+  if (parents.length !== 2) return true;
+  let merged: string;
+  try {
+    merged = git("merge-tree", "--write-tree", "--no-messages", ...parents);
+  } catch {
+    // Conflicts: whatever the merge holds, someone wrote it.
+    return true;
+  }
+  const tree = merged.split("\n")[0] as string;
+  return git("diff", "--name-only", tree, merge, "--", SOURCE) !== "";
+}
+
+/**
  * What `Perf-Accepted` trailers in base..HEAD allow: per case (optionally
  * `case@runtime`), the highest head/base ratio accepted. A trailer counts
  * only while no later commit of the pull request changes the package's
  * source, so it accepts the code it was written for and not a later
- * change; commits the base brings in (a pull request's merge ref merges
- * in what landed since) do not void it. `ignored` hears of each trailer
- * voided so.
+ * change: no later commit that edits it, and no later merge that changes
+ * it beyond merging (a resolved conflict). Commits the base brings in (a
+ * pull request's merge ref merges in what landed since) do not void it.
+ * `ignored` hears of each trailer voided so.
  */
 export function acceptances(
   baseSha: string,
@@ -110,7 +132,17 @@ export function acceptances(
       "--",
       SOURCE,
     );
-    if (later !== "") {
+    const merges = git(
+      "rev-list",
+      "--merges",
+      `${commit}..HEAD`,
+      "--not",
+      baseSha,
+    );
+    const resolved = merges
+      .split("\n")
+      .some((merge) => merge !== "" && resolvedBy(merge, git));
+    if (later !== "" || resolved) {
       ignored(commit);
       continue;
     }
@@ -119,4 +151,39 @@ export function acceptances(
     }
   }
   return accepted;
+}
+
+/** What a calibration run reports per runtime (.bench-results/*.json). */
+export interface CalibrationReport {
+  runtime: string;
+  noisy: boolean;
+  verdicts: Record<string, string>;
+}
+
+export interface CalibrationTally {
+  /** runtime → case → [runs the gate fired in, quiet runs]. */
+  cases: Map<string, Map<string, [number, number]>>;
+  /** runtime → noisy runs, left out of the counts: nothing fails in them. */
+  noisy: Map<string, number>;
+}
+
+/** Counts, per runtime and case, the quiet runs the gate fired in. */
+export function tallyCalibration(
+  reports: readonly CalibrationReport[],
+): CalibrationTally {
+  const cases = new Map<string, Map<string, [number, number]>>();
+  const noisy = new Map<string, number>();
+  for (const report of reports) {
+    if (report.noisy) {
+      noisy.set(report.runtime, (noisy.get(report.runtime) ?? 0) + 1);
+      continue;
+    }
+    const counts = cases.get(report.runtime) ?? new Map();
+    cases.set(report.runtime, counts);
+    for (const [name, verdict] of Object.entries(report.verdicts)) {
+      const [fired, runs] = counts.get(name) ?? [0, 0];
+      counts.set(name, [fired + (verdict === "regression" ? 1 : 0), runs + 1]);
+    }
+  }
+  return { cases, noisy };
 }

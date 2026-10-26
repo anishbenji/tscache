@@ -6,63 +6,50 @@
 //
 // With no slowdown, every confirmed regression is a false alarm; with one,
 // every case that is not one is a miss. Prints a Markdown table: per
-// runtime and case, in how many runs the gate fired.
+// runtime and case, in how many quiet runs the gate fired. Noisy runs
+// (the A/A control out of bounds) fail nothing, so they count in neither
+// column and are listed apart.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-
-interface Report {
-  runtime: string;
-  noisy: boolean;
-  verdicts: Record<string, string>;
-}
+import {
+  type CalibrationReport,
+  tallyCalibration,
+} from "../packages/tscache/bench/gate";
 
 const [directory = "calibration", slowdownArg = "0"] = process.argv.slice(2);
 const slowdown = Number(slowdownArg);
 
-/** runtime → case → [fired, runs]; and noisy runs per runtime. */
-const tally = new Map<string, Map<string, [number, number]>>();
-const noisyRuns = new Map<string, number>();
-let runs = 0;
-
-for (const run of readdirSync(directory)) {
-  runs++;
-  for (const file of readdirSync(join(directory, run))) {
-    if (!file.endsWith(".json")) continue;
-    const report = JSON.parse(
-      readFileSync(join(directory, run, file), "utf8"),
-    ) as Report;
-    if (report.noisy) {
-      noisyRuns.set(report.runtime, (noisyRuns.get(report.runtime) ?? 0) + 1);
-    }
-    const cases = tally.get(report.runtime) ?? new Map();
-    tally.set(report.runtime, cases);
-    for (const [name, verdict] of Object.entries(report.verdicts)) {
-      const [fired, seen] = cases.get(name) ?? [0, 0];
-      // A noisy run fails nothing, so it fires nothing either.
-      const fires = verdict === "regression" && !report.noisy;
-      cases.set(name, [fired + (fires ? 1 : 0), seen + 1]);
-    }
-  }
-}
+const runs = readdirSync(directory);
+const reports: CalibrationReport[] = runs.flatMap((run) =>
+  readdirSync(join(directory, run))
+    .filter((file) => file.endsWith(".json"))
+    .map(
+      (file) =>
+        JSON.parse(
+          readFileSync(join(directory, run, file), "utf8"),
+        ) as CalibrationReport,
+    ),
+);
+const { cases, noisy } = tallyCalibration(reports);
 
 const what =
   slowdown === 0
     ? "false alarms (should be none)"
     : `detections of a ${Math.round(slowdown * 100)} % slowdown`;
 const lines = [
-  `### Bench calibration: ${runs} runs, ${what}`,
+  `### Bench calibration: ${runs.length} runs, ${what}`,
   "",
-  "| Runtime | Case | Fired | Runs |",
+  "| Runtime | Case | Fired | Quiet runs |",
   "|---|---|---:|---:|",
 ];
-for (const [runtime, cases] of tally) {
-  for (const [name, [fired, seen]] of cases) {
-    lines.push(`| ${runtime} | \`${name}\` | ${fired} | ${seen} |`);
+for (const [runtime, counts] of cases) {
+  for (const [name, [fired, quiet]] of counts) {
+    lines.push(`| ${runtime} | \`${name}\` | ${fired} | ${quiet} |`);
   }
 }
 lines.push("");
-for (const [runtime, count] of noisyRuns) {
-  lines.push(`- ${runtime}: ${count} run(s) noisy (A/A control out of bounds)`);
+for (const [runtime, count] of noisy) {
+  lines.push(`- ${runtime}: ${count} noisy run(s), left out of the counts`);
 }
 console.log(lines.join("\n"));
