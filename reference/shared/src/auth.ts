@@ -130,6 +130,24 @@ export function refreshOnAuthInvalid(
   });
 }
 
+/**
+ * Calls `listener` with the new fetcher context when another tab stores
+ * tokens that can be refreshed: a sign-in, or a rotation. A tab whose
+ * session was lost recovers so without signing in itself. Returns the
+ * unsubscribe.
+ */
+export function onTokensStored(
+  listener: (context: ExampleContext) => void,
+): () => void {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== KEY) return;
+    const tokens = parse(event.newValue);
+    if (tokens?.refresh != null) listener(contextOf(tokens.access));
+  };
+  addEventListener("storage", onStorage);
+  return () => removeEventListener("storage", onStorage);
+}
+
 /** Signs in again after a lost session and gives `client` the new token. */
 export async function signInAgain(client: TscacheClient): Promise<void> {
   const { access } = await signIn();

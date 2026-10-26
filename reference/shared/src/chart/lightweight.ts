@@ -153,24 +153,38 @@ export function createLightweightChart(
   }
   scale.subscribeVisibleLogicalRangeChange(onRangeChange);
 
+  /** Shows `range` on the bars drawn. */
+  function showRange(range: Range): void {
+    shown = range;
+    scale.setVisibleLogicalRange({
+      from: logicalAt(range.start),
+      to: logicalAt(range.end),
+    });
+  }
+
+  // A resize keeps the bar spacing, and so would narrow the time on
+  // screen (the first layout does it too); keep the time instead.
+  const onResize = () => {
+    if (shown !== undefined && times.length > 0) showRange(shown);
+  };
+  scale.subscribeSizeChange(onResize);
+
   return {
     draw(result) {
       const data = toBars(result);
       if (data === undefined) return;
-      const before = times.at(-1);
+      // Decided before setData, which reports the chart's own range.
+      const target =
+        shown === undefined
+          ? opening
+          : keptRange(shown, times.at(-1), result.timestamps.at(-1));
       times = result.timestamps;
       candles.setData(data.bars);
       volume.setData(data.volumes);
+      // An answer without bars clears the chart and keeps the time on
+      // screen, so the bars of a later answer appear where the user was.
       if (times.length === 0) return;
-      const target =
-        before === undefined || shown === undefined
-          ? opening
-          : keptRange(shown, before, times.at(-1));
-      shown = target;
-      scale.setVisibleLogicalRange({
-        from: logicalAt(target.start),
-        to: logicalAt(target.end),
-      });
+      showRange(target);
     },
     visible: () => shown,
     onScroll(listener) {
@@ -183,6 +197,7 @@ export function createLightweightChart(
         element.removeEventListener(type, interacting);
       }
       scale.unsubscribeVisibleLogicalRangeChange(onRangeChange);
+      scale.unsubscribeSizeChange(onResize);
       chart.remove();
     },
   };

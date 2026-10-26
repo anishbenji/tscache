@@ -168,9 +168,10 @@ export function createUplotChart(
       if (columns.some((column) => column === undefined)) return;
       const before = times.length > 0 ? times[times.length - 1] : undefined;
       times = timestamps;
-      if (timestamps.length === 0) return;
+      // An answer without bars clears the chart and keeps the time on
+      // screen, so the bars of a later answer appear where the user was.
       const target =
-        before === undefined || shown === undefined
+        shown === undefined
           ? opening
           : keptRange(shown, before, timestamps.at(-1));
       shown = target;

@@ -13,6 +13,7 @@
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import {
   fetcherContext,
+  onTokensStored,
   refreshOnAuthInvalid,
   signInAgain,
 } from "@reference/shared/auth";
@@ -282,14 +283,25 @@ export function startPage(
 
   retry.addEventListener("click", () => bars.show(asked));
 
+  function sessionRestored(): void {
+    sessionLost = false;
+    signIn.hidden = true;
+    output("auth").value = "signed in";
+    bars.show(asked);
+  }
+
   signIn.addEventListener("click", () => {
     const state = connection.state;
     if (state.status !== "connected") return;
-    void signInAgain(state.client).then(() => {
-      sessionLost = false;
-      signIn.hidden = true;
-      bars.show(asked);
-    }, reportError);
+    void signInAgain(state.client).then(sessionRestored, reportError);
+  });
+
+  // Another tab signed in: adopt its token, as a tab on a worker of its
+  // own must, and read again.
+  const stopWatchingTokens = onTokensStored((context) => {
+    const state = connection.state;
+    if (!sessionLost || state.status !== "connected") return;
+    void state.client.updateAuth(context).then(sessionRestored, reportError);
   });
 
   const stopFeed = liveFeed({
@@ -324,6 +336,7 @@ export function startPage(
     stopFeed();
     unsubscribe();
     uninstall?.();
+    stopWatchingTokens();
     bars.dispose();
     view?.dispose();
     await connection.dispose();

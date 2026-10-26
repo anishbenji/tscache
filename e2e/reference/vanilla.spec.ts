@@ -57,6 +57,19 @@ function isHistory(notice: FetchNotice): boolean {
   return span(notice) > HOUR;
 }
 
+/**
+ * The page's fetches since the first `since`, once one of them is a
+ * history read; a fetch of the forming bar may come first.
+ */
+async function waitHistory(page: Page, since: number): Promise<FetchNotice[]> {
+  await expect
+    .poll(
+      async () => (await notices(page)).slice(since).filter(isHistory).length,
+    )
+    .toBeGreaterThan(0);
+  return (await notices(page)).slice(since);
+}
+
 test("one tab holds the live feed, and every tab draws its bars without a fetch", async ({
   context,
 }) => {
@@ -86,9 +99,7 @@ for (const chart of ["lightweight", "uplot"] as const) {
     await waitNotices(page, 1);
     const before = (await notices(page)).length;
     await drag(page, "back");
-    const after = await waitNotices(page, before + 1);
-    const loaded = after.slice(before);
-    expect(loaded.filter(isHistory).length).toBeGreaterThanOrEqual(1);
+    const loaded = await waitHistory(page, before);
     const opening = (await notices(page))[0];
     if (opening === undefined) throw new Error("no opening fetch");
     // The history read lies before what the opening fetched.
@@ -186,8 +197,7 @@ test("a dataset version pushed with a bar refills the history it cleared (R1-1)"
   await control(page, { bumpVersion: true });
   // The next pushed batch carries the new version and clears the cache;
   // the page reads its range again rather than from the cache alone.
-  const after = await waitNotices(page, fetched + 1);
-  expect(after.slice(fetched).filter(isHistory).length).toBeGreaterThan(0);
+  await waitHistory(page, fetched);
   await expect.poll(() => barCount(page)).toBeGreaterThan(600);
 });
 
@@ -199,7 +209,7 @@ test("switching the chart library after scrolling keeps the time on screen (R1-2
   const opening = await showingStart(page);
   const before = (await notices(page)).length;
   await drag(page, "back");
-  await waitNotices(page, before + 1);
+  await waitHistory(page, before);
   await expect.poll(() => showingStart(page)).toBeLessThan(opening - HOUR);
   const scrolled = await showingStart(page);
   await page.selectOption("#chart-kind", "uplot");
@@ -224,4 +234,67 @@ test("a failed history fetch shows as missing, and Retry fetches it (R1-3)", asy
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByTestId("missing")).toHaveText("nothing missing");
   await expect(page.getByRole("button", { name: "Retry" })).toBeHidden();
+});
+
+/** How many pixels of the chart's canvases have a candle's colour. */
+function candlePixels(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    let count = 0;
+    for (const canvas of document.querySelectorAll<HTMLCanvasElement>(
+      "#chart canvas",
+    )) {
+      const context = canvas.getContext("2d");
+      if (context === null) continue;
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < data.length; i += 4) {
+        const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
+        const up = r === 0x2a && g === 0x78 && b === 0xd6;
+        const down = r === 0xeb && g === 0x68 && b === 0x34;
+        if (up || down) count++;
+      }
+    }
+    return count;
+  });
+}
+
+test("an answer without bars clears the uPlot chart (R2-1)", async ({
+  context,
+}) => {
+  const page = await openTab(context, "/?chart=uplot");
+  await waitNotices(page, 1);
+  // Two screens back, so the range read holds no bar the feed pushes.
+  for (let i = 0; i < 2; i++) {
+    const before = (await notices(page)).length;
+    await drag(page, "back");
+    await waitHistory(page, before);
+    await page.waitForTimeout(500);
+  }
+  await expect.poll(() => candlePixels(page)).toBeGreaterThan(0);
+  await control(page, { failNext: 1000 });
+  // The next pushed batch clears the cache, and the refill fails.
+  await control(page, { bumpVersion: true });
+  await expect(page.getByTestId("summary")).toContainText("0 bars");
+  await expect.poll(() => candlePixels(page)).toBe(0);
+  await control(page, { failNext: 0 });
+});
+
+test("a tab signed out with the others recovers when one signs in (R2-2)", async ({
+  context,
+}) => {
+  const a = await openTab(context);
+  const b = await openTab(context);
+  // A refresh token the backend refuses: the next refresh ends the session.
+  await a.evaluate(() => {
+    const key = "tscache-reference:tokens";
+    const tokens = JSON.parse(localStorage.getItem(key) ?? "{}");
+    localStorage.setItem(key, JSON.stringify({ ...tokens, refresh: "rt-x" }));
+  });
+  await control(a, { expireAccess: true });
+  await drag(a, "back");
+  await expect(a.getByTestId("auth")).toHaveText("signed out");
+  await expect(b.getByTestId("auth")).toHaveText("signed out");
+  await a.getByRole("button", { name: "Sign in again" }).click();
+  await expect(a.getByTestId("auth")).toHaveText("signed in");
+  await expect(b.getByTestId("auth")).toHaveText("signed in");
+  await expect(b.getByRole("button", { name: "Sign in again" })).toBeHidden();
 });
