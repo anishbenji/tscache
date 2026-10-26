@@ -137,7 +137,12 @@ export interface SessionOptions {
 }
 
 export interface Session {
-  /** The time range a page's first chart opens on. */
+  /**
+   * The time range a chart attached now opens on: the page's opening range
+   * at first; after a chart was detached (another library replacing it),
+   * where that chart was, moved on to the newest bars if it followed the
+   * market.
+   */
   readonly opening: Range;
   readonly state: SessionState;
   /**
@@ -174,10 +179,11 @@ export function startSession({ open, served }: SessionOptions): Session {
   let state = initialState(served);
   let chart: ChartView | undefined;
   /**
-   * What the last chart showed when it was detached: a chart being
-   * replaced (another library loading) still counts as following.
+   * The last chart, when it was detached and no chart has been attached
+   * since (another library loading): what it showed, and whether it
+   * followed the market, which the page then still does.
    */
-  let lastVisible: Range | undefined;
+  let detached: { visible: Range; following: boolean } | undefined;
   let disposed = false;
   const listeners = new Set<() => void>();
 
@@ -223,7 +229,8 @@ export function startSession({ open, served }: SessionOptions): Session {
    * while the user reads history).
    */
   function following(): boolean {
-    const visible = chart?.visible() ?? lastVisible;
+    if (chart === undefined) return detached?.following ?? false;
+    const visible = chart.visible();
     return visible !== undefined && visible.end + market.interval >= asked.end;
   }
 
@@ -308,7 +315,13 @@ export function startSession({ open, served }: SessionOptions): Session {
   bars.show(asked);
 
   return {
-    opening,
+    get opening() {
+      if (detached === undefined) return opening;
+      const { visible, following } = detached;
+      if (!following) return visible;
+      const shift = Math.max(0, asked.end - visible.end);
+      return { start: visible.start + shift, end: visible.end + shift };
+    },
     get state() {
       return state;
     },
@@ -318,9 +331,12 @@ export function startSession({ open, served }: SessionOptions): Session {
     },
     attachChart(next) {
       chart = next;
+      detached = undefined;
       return () => {
         if (chart !== next) return;
-        lastVisible = next.visible() ?? lastVisible;
+        const visible = next.visible();
+        if (visible !== undefined)
+          detached = { visible, following: following() };
         chart = undefined;
       };
     },

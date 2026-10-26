@@ -106,6 +106,10 @@ for (const app of ["reference-vanilla", "reference-react"] as const) {
   test.describe(app, () => {
     test.use({ baseURL: appUrl(app) });
     test.describe.configure({ mode: "serial" });
+    // Some tests move the backend's clock on; every test starts on the real one.
+    test.afterEach(async ({ request }) => {
+      await request.post("/api/control", { data: { resetClock: true } });
+    });
 
     test("one tab holds the live feed, and every tab draws its bars without a fetch", async ({
       context,
@@ -328,7 +332,6 @@ for (const app of ["reference-vanilla", "reference-react"] as const) {
       await nextDraw(page);
     });
 
-    // Last of the app's tests: it moves its backend's clock on for any after it.
     test("a stream that reopens a bar later mends the bar it broke in (R4-1)", async ({
       context,
     }) => {
@@ -338,7 +341,7 @@ for (const app of ["reference-vanilla", "reference-react"] as const) {
       const fetched = (await notices(page)).length;
       // The bar forming now, as the backend sees it, stays provisional in the
       // cache when the stream breaks.
-      const forming = Math.floor(Date.now() / MINUTE) * MINUTE;
+      const forming = Math.floor((await stats(page)).now / MINUTE) * MINUTE;
       // One request, so no batch comes between: the stream breaks, a minute
       // passes, and the new stream sends only the next bar.
       await control(page, { dropStreams: true, advanceMs: MINUTE });
@@ -353,7 +356,6 @@ for (const app of ["reference-vanilla", "reference-react"] as const) {
       await nextDraw(page);
     });
 
-    // Moves the backend's clock on too, like the test before it.
     test("a stream that reopens while another chart library loads still mends the broken bar (step 18 R1-1)", async ({
       context,
     }) => {
@@ -370,8 +372,42 @@ for (const app of ["reference-vanilla", "reference-react"] as const) {
         await route.continue();
       });
       const fetched = (await notices(page)).length;
-      const forming = Math.floor(Date.now() / MINUTE) * MINUTE;
+      const forming = Math.floor((await stats(page)).now / MINUTE) * MINUTE;
       await page.selectOption("#chart-kind", "uplot");
+      await control(page, { dropStreams: true, advanceMs: MINUTE });
+      await expect
+        .poll(async () =>
+          (await notices(page))
+            .slice(fetched)
+            .some((notice) => notice.range.end >= forming),
+        )
+        .toBe(true);
+      release();
+      await expect(page.locator("#chart .u-over")).toBeVisible();
+    });
+
+    test("bars that arrive while another chart library loads keep the page following (step 18 R2-1)", async ({
+      context,
+    }) => {
+      const page = await openTab(context);
+      await waitNotices(page, 1);
+      await nextDraw(page);
+      let release = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route("**/assets/uplot-*.js", async (route) => {
+        await held;
+        await route.continue();
+      });
+      await page.selectOption("#chart-kind", "uplot");
+      // Two bars on while the chunk is held: the pushes, read from the
+      // cache alone, move the read range past where the old chart was.
+      await control(page, { advanceMs: 2 * MINUTE });
+      await nextDraw(page);
+      await nextDraw(page);
+      const fetched = (await notices(page)).length;
+      const forming = Math.floor((await stats(page)).now / MINUTE) * MINUTE;
       await control(page, { dropStreams: true, advanceMs: MINUTE });
       await expect
         .poll(async () =>

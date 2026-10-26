@@ -22,8 +22,6 @@ export interface ChartProps {
 export function Chart({ session, kind, answer, onShowing }: ChartProps) {
   const element = useRef<HTMLDivElement>(null);
   const view = useRef<ChartView | null>(null);
-  /** Where the last chart was, so a chart of another kind opens there. */
-  const last = useRef<Range | undefined>(undefined);
   const showing = useEffectEvent(() => {
     const visible = view.current?.visible();
     if (visible !== undefined) onShowing(visible);
@@ -38,8 +36,11 @@ export function Chart({ session, kind, answer, onShowing }: ChartProps) {
     // Only the library shown is loaded.
     void loadChart(kind).then((create) => {
       if (cancelled) return;
-      const opening = last.current ?? session.opening;
-      mounted = create(target, { interval: market.interval, opening });
+      // Where the last chart was, or the page's opening range at first.
+      mounted = create(target, {
+        interval: market.interval,
+        opening: session.opening,
+      });
       view.current = mounted;
       detach = session.attachChart(mounted);
       mounted.onScroll((visible) => {
@@ -53,7 +54,6 @@ export function Chart({ session, kind, answer, onShowing }: ChartProps) {
     return () => {
       cancelled = true;
       if (mounted === undefined) return;
-      last.current = mounted.visible() ?? last.current;
       detach?.();
       mounted.dispose();
       view.current = null;
