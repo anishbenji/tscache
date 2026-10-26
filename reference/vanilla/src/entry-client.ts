@@ -10,7 +10,7 @@ import {
   SERVER_READ,
 } from "@tscache/integrations/shared/hydration";
 import { startPage } from "./page";
-import "./style.css";
+import "@reference/shared/style.css";
 
 const root = document.getElementById("app");
 if (root === null) throw new Error("ssr.html has no #app");

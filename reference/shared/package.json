@@ -4,6 +4,7 @@
   "type": "module",
   "description": "What every tscache reference client shares: the market, the two chart views, auth refresh and the live feed (never published)",
   "exports": {
+    "./style.css": "./src/style.css",
     "./*": "./src/*.ts"
   },
   "scripts": {

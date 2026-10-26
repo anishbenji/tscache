@@ -147,6 +147,23 @@
         "vite",
       ],
     },
+    "reference/react": {
+      "name": "@reference/react",
+      "dependencies": {
+        "@examples/mock-backend": "workspace:*",
+        "@reference/shared": "workspace:*",
+        "@tscache/integrations": "workspace:*",
+        "react": "^19.3.0",
+        "react-dom": "^19.3.0",
+        "tscache": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
+        "@vitejs/plugin-react": "^6.1.2",
+        "vite": "^8.3.4",
+      },
+    },
     "reference/shared": {
       "name": "@reference/shared",
       "dependencies": {
@@ -415,6 +432,8 @@
     "@publint/pack": ["@publint/pack@0.1.7", "", { "dependencies": { "tinyexec": "^1.3.0" } }, "sha512-4EDEmvxWtgsCnnVeBvtFIFZtUhPPt1+bA9JrSwU4Sa//6oKtzCSlGGXYJr44OD9aGISymbieJ4mCKHUygUDU+g=="],
 
     "@quansync/fs": ["@quansync/fs@1.0.0", "", { "dependencies": { "quansync": "^1.0.0" } }, "sha512-4TJ3DFtlf1L5LDMaM6CanJ/0lckGNtJcMjQ1NAV6zDmA0tEHKZtxNKin8EgPaVX1YzljbxckyT2tJrpQKAtngQ=="],
+
+    "@reference/react": ["@reference/react@workspace:reference/react"],
 
     "@reference/shared": ["@reference/shared@workspace:reference/shared"],
 

@@ -27,7 +27,7 @@ small chart interface, switched on the page. Each has a client-only page and a s
 vanilla included. Pushed bars come over Server-Sent Events, held by one tab per browser elected with a
 Web Lock; WebSocket and polling variants of the feed follow the three clients. They land one pull
 request each: vanilla first, carrying the shared pieces, then React, then Solid. The vanilla client
-landed in step 17 (`reference/README.md`).
+landed in step 17 and the React client in step 18 (`reference/README.md`).
 
 ## Design sketch: IndexedDB persistence
 
