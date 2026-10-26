@@ -1,6 +1,6 @@
 # Step 20 — Reference clients: WebSocket and polling feeds
 
-Branch: `feat/20-feed-transports` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: in review · Verdict after triage: —
+Branch: `feat/20-feed-transports` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: —
 
 The feed variants the user asked to follow the three reference clients (`docs/roadmap.md`, "Reference clients"; decisions of 2026-10-26). Not an engine step: tests are written with the code.
 
@@ -27,6 +27,14 @@ The first four are the user's (2026-10-26); the rest are mine.
 | D8 | The socket reports its opening on the subscription's first batch, not on the `open` event | The backend checks the token after `open`; counting `open` would make every tab catch up with a fetch for a socket the backend then refuses | An acknowledgement message from the backend |
 | D9 | A poll moves on only when it is complete (no failed or auth-pending fetch) | Otherwise a failed poll's span would never be read again by the feed | Always move on, and leave the gap to the next scroll or opening |
 | D10 | The WebSocket and polling tests run against the vanilla client; the feed switch runs against all three | What the page does with new bars is in `reference/shared`; a client only adds the menu | Every feed test against every client (three times the run) |
+
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | A tab on a cache of its own that fails its read of a poll never reads that span again | accepted | Validated by reading `apply`: the follower read the holder's span only, and the holder had moved on. Each tab now keeps where its own reads stopped being complete and reads the next poll from there (D9's rule, applied to every tab). Unit test (`reference/shared/test/live.test.ts`, under Node, which has Web Locks and BroadcastChannel): a dedicated-worker tab fails one poll and reads it again with the next; fails with the fix removed. b4ca6a4 |
+| R1-2 | P1 | A socket waiting after a lost session never restarts when the user signs in in the same tab | accepted | Validated by reading: the wait listened for the storage event only, which a tab does not receive for its own writes. The session now also resumes waiting sockets when its own sign-in succeeds, and the socket's retry runs once however it hears of the sign-in. E2E test: spoil the refresh token, refuse the socket's token, see "signed out" and no socket, sign in, and see the socket back and drawing; fails with the resume removed. b4ca6a4 |
+| R1-3 | P1 | An absolute `wss:` socket URL is rewritten to `ws:` | accepted | Validated by reading. `socketAddress` converts only `http:` and `https:`; unit test with relative, `ws:` and `wss:` URLs; fails with the old conversion. b4ca6a4 |
 
 ## Verification
 
