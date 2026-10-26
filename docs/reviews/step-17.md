@@ -1,6 +1,6 @@
 # Step 17 — Reference clients: vanilla
 
-Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: —
+Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in review · Verdict after triage: —
 
 The first of the three reference clients (`docs/roadmap.md`, "Reference clients"; track (c) after the post-build architecture review). Not an engine step: tests are written with the code. The decisions below were the user's (2026-10-26); the roadmap records them.
 
@@ -41,9 +41,16 @@ Each is reversible and inside the user's decisions; listed so the review can con
 | R2-1 | P1 | uPlot keeps the previous bars for an answer without any (a version clear whose refill fails, in history) | accepted | Validated by reading: `draw` returned before `setData` for no bars. uPlot now sets the empty columns and keeps the time on screen; both views keep it, so later bars appear where the user was. The E2E test scrolls two screens back with uPlot, fails every fetch, bumps the version, and counts candle-coloured pixels down to zero; it fails with the early return restored. Found while fixing: Lightweight Charts' `setData` reports the chart's default range at once, and the view took it for the range on screen, so the opening range was applied only through the old "no bars before" branch. The view now decides the range before `setData`, and keeps the time on screen across a resize. fd19e87 |
 | R2-2 | P1 | A tab whose session was lost stays "signed out" after another tab signs in | accepted | Validated by reading: only the tab's own sign-in cleared the state. `onTokensStored` (auth.ts) hears another tab store refreshable tokens through the `storage` event; a signed-out tab gives its client the token and reads again. The E2E test spoils the refresh token, signs both tabs out with an expired access token, signs in from one and waits for the other; it fails without the recovery. fd19e87 |
 
+## Round 3 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | After a stream outage of several minutes, every batch lies more than a bar past the read range and is dropped, so the chart freezes | accepted | Validated by reading `onBatch`. While the chart follows the market (what is on screen reaches the end of the read range), a batch after a gap now widens the range and reads it normally, which fetches the missed bars; in history the page waits as before. The E2E test starts the page with its clock three minutes behind the backend's, so the first pushed bar comes after a gap, and waits for the missed bars; it fails with the read disabled. Found while testing: following measured against the newest bar broke when the fetch reached past the view, so it is measured against the read range. 401e88c |
+| R3-2 | P1 | Fallow fails on the branch: the specs' pixel helper exceeds the complexity threshold, and the chart setup is a clone | accepted in part | The complexity finding was real and is fixed: the helper compares packed pixels against a set. The clone group (Lightweight Charts setup shared with two examples) is reported as a warning under `.fallowrc.json` (`minOccurrences: 3`, duplication not gating) and did not fail the run; the reference is the copy readers take, so it stays. `bun run ci` passes on the fix commit. 401e88c |
+
 ## Verification
 
 - `bunx vitest run examples/mock-backend integrations reference`: the new stream, dataset, service-token, series and range tests pass.
-- `E2E_EXAMPLES=reference-vanilla bunx playwright test --project=examples reference/`: 11 passed after round 2 (6 before round 1) — one stream for two tabs and a hand-over when the holder closes, pushed bars drawn without a fetch, history fetched once on scrolling back with each chart library and not again on scrolling forward, one token refresh across two tabs, the server-rendered page fetching only the forming bar, and switching the library without a fetch.
+- `E2E_EXAMPLES=reference-vanilla bunx playwright test --project=examples reference/`: 12 passed after round 3 (6 before round 1); `bun run ci` green after round 3 (1465 Vitest, 60 Playwright) — one stream for two tabs and a hand-over when the holder closes, pushed bars drawn without a fetch, history fetched once on scrolling back with each chart library and not again on scrolling forward, one token refresh across two tabs, the server-rendered page fetching only the forming bar, and switching the library without a fetch.
 - Run by hand in Chromium against the dev server: both libraries draw, follow the live bar and scroll back through history; the server-rendered page draws the server's read before the client connects.
 - Not verified: Firefox and Safari; the dedicated-worker and in-process paths of the feed (D2) in a real browser.
