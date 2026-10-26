@@ -18,6 +18,15 @@ export const market: CacheConfig = {
 /** The live feed's URL for the market (the mock backend's SSE route). */
 export const feedUrl = `/api/stream/crypto/BTC?interval=${MINUTE}`;
 
+/** The live socket's URL, and the market's subscription on it. */
+export const socketUrl = "/api/live";
+export const socketSubscription = {
+  type: "subscribe",
+  dataset: "crypto",
+  symbol: "BTC",
+  interval: MINUTE,
+} as const;
+
 /** The range a page opens on: the last six hours up to `now`. */
 export function openingRange(now: number): Range {
   return { start: now - 6 * HOUR, end: now };

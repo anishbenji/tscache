@@ -3,6 +3,7 @@
 // long as the page.
 
 import { chartKindOf } from "@reference/shared/chart/load";
+import { feedKindOf } from "@reference/shared/feed";
 import { startSession } from "@reference/shared/session";
 import { hydrate, render } from "@solidjs/web";
 import type { ServerRead } from "@tscache/integrations/shared/hydration";
@@ -20,12 +21,14 @@ export function startPage(
   element: HTMLElement,
   served?: ServerRead,
 ): () => Promise<void> {
-  const session = startSession({ open: openClient, served });
+  const feed = feedKindOf(location.search);
+  const session = startSession({ open: openClient, served, feed });
   const app = () => (
     <App
       session={session}
       served={served}
       initialKind={chartKindOf(location.search)}
+      initialFeed={feed}
     />
   );
   const dispose =

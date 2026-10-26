@@ -19,6 +19,8 @@ import {
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+/** How often the polling feed polls (reference/shared/src/session.ts). */
+const POLL_MS = 2000;
 
 async function openTab(context: BrowserContext, path = "/"): Promise<Page> {
   const page = await context.newPage();
@@ -133,6 +135,25 @@ for (const app of [
       await a.close();
       await expect.poll(async () => (await stats(b)).streams).toBe(1);
       await nextDraw(b);
+      await nextDraw(b);
+    });
+
+    test("choosing a feed in one tab switches every tab", async ({
+      context,
+    }) => {
+      const a = await openTab(context);
+      const b = await openTab(context);
+      await a.selectOption("#feed-kind", "ws");
+      await expect(b.locator("#feed-kind")).toHaveValue("ws");
+      // The socket replaces the event stream, and its bars reach both tabs
+      // (that they cost no fetch, the feeds' own tests show).
+      await expect.poll(async () => (await stats(a)).streams).toBe(1);
+      await nextDraw(a);
+      await nextDraw(b);
+      await b.selectOption("#feed-kind", "poll");
+      await expect(a.locator("#feed-kind")).toHaveValue("poll");
+      await expect.poll(async () => (await stats(a)).streams).toBe(0);
+      await nextDraw(a);
       await nextDraw(b);
     });
 
@@ -423,5 +444,95 @@ for (const app of [
       release();
       await expect(page.locator("#chart .u-over")).toBeVisible();
     });
+
+    // The other feeds. What the page does with new bars is the same in
+    // every client (reference/shared), so they run against one.
+    if (app === "reference-vanilla") {
+      test("one tab holds the WebSocket, and every tab draws its bars without a fetch", async ({
+        context,
+      }) => {
+        const a = await openTab(context, "/?feed=ws");
+        const b = await openTab(context, "/?feed=ws");
+        await expect(b.locator("#feed-kind")).toHaveValue("ws");
+        await expect.poll(async () => (await stats(a)).streams).toBe(1);
+        const fetched = (await notices(b)).length;
+        await nextDraw(a);
+        await nextDraw(b);
+        await nextDraw(b);
+        expect((await notices(b)).length).toBe(fetched);
+        // The holder leaves; the other tab opens the socket again.
+        await a.close();
+        await expect.poll(async () => (await stats(b)).streams).toBe(1);
+        await nextDraw(b);
+      });
+
+      test("a socket that reopens a bar later mends the bar it broke in", async ({
+        context,
+      }) => {
+        const page = await openTab(context, "/?feed=ws");
+        await waitNotices(page, 1);
+        await nextDraw(page);
+        const fetched = (await notices(page)).length;
+        const forming = Math.floor((await stats(page)).now / MINUTE) * MINUTE;
+        await control(page, { dropStreams: true, advanceMs: MINUTE });
+        await expect
+          .poll(async () =>
+            (await notices(page))
+              .slice(fetched)
+              .some((notice) => notice.range.end >= forming),
+          )
+          .toBe(true);
+        await nextDraw(page);
+      });
+
+      test("a socket refused for a stale token refreshes it once and reconnects", async ({
+        context,
+      }) => {
+        const a = await openTab(context, "/?feed=ws");
+        const b = await openTab(context, "/?feed=ws");
+        await expect.poll(async () => (await stats(a)).streams).toBe(1);
+        const before = await stats(a);
+        // The socket reconnects with the token the backend no longer accepts.
+        await control(a, { expireAccess: true, dropStreams: true });
+        await expect
+          .poll(async () => (await stats(a)).refreshes)
+          .toBe(before.refreshes + 1);
+        await expect.poll(async () => (await stats(a)).streams).toBe(1);
+        const after = await stats(a);
+        expect(after.refused).toBeGreaterThan(before.refused);
+        expect(after.reused).toBe(before.reused);
+        await nextDraw(a);
+        await nextDraw(b);
+        await expect(a.getByTestId("auth")).toHaveText("signed in");
+        await expect(b.getByTestId("auth")).toHaveText("signed in");
+      });
+
+      test("one tab polls, fetching only the newest bars, and the others draw without a fetch", async ({
+        context,
+      }) => {
+        const a = await openTab(context, "/?feed=poll");
+        const b = await openTab(context, "/?feed=poll");
+        await expect(b.getByTestId("mode")).toHaveText("shared");
+        expect((await stats(a)).streams).toBe(0);
+        await nextDraw(b);
+        // Notices are the origin's: every tab hears every tab's fetches.
+        const before = (await notices(b)).length;
+        const started = Date.now();
+        await nextDraw(a);
+        await nextDraw(b);
+        await nextDraw(b);
+        const elapsed = Date.now() - started;
+        const polls = (await notices(b)).slice(before);
+        expect(polls.length).toBeGreaterThan(0);
+        // One fetch per poll: the other tab draws from the cache the poll
+        // filled, which a second fetch per poll would double.
+        expect(polls.length).toBeLessThanOrEqual(
+          Math.floor(elapsed / POLL_MS) + 1,
+        );
+        for (const notice of polls) {
+          expect(span(notice)).toBeLessThanOrEqual(2 * MINUTE);
+        }
+      });
+    }
   });
 }

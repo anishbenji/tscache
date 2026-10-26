@@ -8,6 +8,7 @@
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import type { RenderedPage, RenderRequest } from "@examples/mock-backend/vite";
 import { chartKindOf } from "@reference/shared/chart/load";
+import { feedKindOf } from "@reference/shared/feed";
 import { market, openingRange, readRange } from "@reference/shared/market";
 import { SERVICE_TOKEN } from "@reference/shared/server";
 import { generateHydrationScript, renderToString } from "@solidjs/web";
@@ -37,13 +38,18 @@ export async function render({
   });
   const now = Date.now();
   const served = await reader(market, readRange(openingRange(now), now));
-  const kind = chartKindOf(new URL(url, origin).search);
+  const { search } = new URL(url, origin);
   return {
     // Solid's hydration script first: the browser's hydrate needs it.
     head:
       generateHydrationScript() + jsonScript(SERVER_READ, dehydrate(served)),
     html: renderToString(() => (
-      <App session={null} served={served} initialKind={kind} />
+      <App
+        session={null}
+        served={served}
+        initialKind={chartKindOf(search)}
+        initialFeed={feedKindOf(search)}
+      />
     )),
   };
 }

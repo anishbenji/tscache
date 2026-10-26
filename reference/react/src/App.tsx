@@ -5,6 +5,12 @@
 // matches, and then the session's state takes over.
 
 import { type ChartKind, chartKindOf } from "@reference/shared/chart/load";
+import {
+  FEED_OPTIONS,
+  type FeedKind,
+  feedKindOf,
+  showFeedInUrl,
+} from "@reference/shared/feed";
 import { summarize } from "@reference/shared/market";
 import {
   describeConnection,
@@ -14,7 +20,7 @@ import {
   utc,
 } from "@reference/shared/session";
 import type { ServerRead } from "@tscache/integrations/shared/hydration";
-import { type ChangeEvent, useState } from "react";
+import { type ChangeEvent, useEffect, useState } from "react";
 import type { Range } from "tscache";
 import { Chart } from "./Chart";
 import { useSessionState } from "./session";
@@ -26,17 +32,26 @@ export interface AppProps {
   served?: ServerRead | undefined;
   /** The chart library the URL asked for (`?chart=`). */
   initialKind: ChartKind;
+  /** The feed the URL asked for (`?feed=`), if any. */
+  initialFeed?: FeedKind | undefined;
 }
 
 function time(t: number | undefined): string {
   return t === undefined ? "–" : new Date(t).toISOString().slice(11, 19);
 }
 
-export function App({ session, served, initialKind }: AppProps) {
-  const [initial] = useState(() => initialState(served));
+export function App({ session, served, initialKind, initialFeed }: AppProps) {
+  const [initial] = useState(() => initialState(served, initialFeed));
   const state = useSessionState(session, initial);
   const [kind, setKind] = useState(initialKind);
   const [showing, setShowing] = useState<Range>();
+
+  useEffect(() => showFeedInUrl(state.feed), [state.feed]);
+
+  function chooseFeed(event: ChangeEvent<HTMLSelectElement>): void {
+    const chosen = feedKindOf(`?feed=${event.target.value}`);
+    if (chosen !== undefined) session?.chooseFeed(chosen);
+  }
 
   function chooseKind(event: ChangeEvent<HTMLSelectElement>): void {
     const next = chartKindOf(`?chart=${event.target.value}`);
@@ -55,6 +70,16 @@ export function App({ session, served, initialKind }: AppProps) {
           <select id="chart-kind" value={kind} onChange={chooseKind}>
             <option value="lightweight">Lightweight Charts</option>
             <option value="uplot">uPlot</option>
+          </select>
+        </label>
+        <label>
+          Feed{" "}
+          <select id="feed-kind" value={state.feed} onChange={chooseFeed}>
+            {FEED_OPTIONS.map(([feed, name]) => (
+              <option key={feed} value={feed}>
+                {name}
+              </option>
+            ))}
           </select>
         </label>
       </header>
