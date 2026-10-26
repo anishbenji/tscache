@@ -43,7 +43,9 @@ export function storeFeed(kind: FeedKind): void {
 export function onFeedStored(listener: (kind: FeedKind) => void): () => void {
   const onStorage = (event: StorageEvent) => {
     if (event.key !== KEY) return;
-    const kind = kindOf(event.newValue);
+    // What is stored now, not the event's value: an event can arrive after
+    // a later choice, and adopting its value would undo that choice here.
+    const kind = storedFeed();
     if (kind !== undefined) listener(kind);
   };
   addEventListener("storage", onStorage);
