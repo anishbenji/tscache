@@ -1,6 +1,6 @@
 # Step 19 — Reference clients: Solid
 
-Branch: `feat/19-reference-solid` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: in review · Verdict after triage: —
+Branch: `feat/19-reference-solid` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 The third of the three reference clients (`docs/roadmap.md`, "Reference clients"; decisions of 2026-10-26). Not an engine step: tests are written with the code. The session (`reference/shared/src/session.ts`, step 18 D1) is unchanged; this step binds it to Solid 2.0 (`solid-js` and `@solidjs/web` 2.0.0-rc.14, `vite-plugin-solid` 3.0.0-next.27, the versions the Solid examples already use).
 
@@ -20,8 +20,13 @@ The third of the three reference clients (`docs/roadmap.md`, "Reference clients"
 | D4 | The chart menu marks its option `selected`, not the select's `value` | `selected` is an attribute the server writes too, so the server-rendered page shows the library `?chart=` asked for before it hydrates | A `value` on the select, which is a property only |
 | D5 | No `Loading` or `Errored` boundary | Nothing the page renders reads an async value: the state always has something to show (the server's read, or "loading…"), and only the chart's effects read the library. A library that fails to load is logged by the effect, as the vanilla page's unhandled import is | A `Loading` boundary over the chart, which would replace the chart on screen with a fallback while the next library loads |
 
+## Round 1 — reviewer verdict: merge
+
+No findings.
+
 ## Verification
 
+- `bun run ci` green: 93 Playwright, including all 15 reference tests against each of the three clients.
 - `E2E_EXAMPLES=reference-solid bunx playwright test --project=examples reference/ -g reference-solid`: 15 passed.
 - Run by hand in Chromium against the dev server: `/ssr?chart=uplot` hydrates with no warning (dev mode reports hydration key misses; the preview build used by the tests does not) and draws the server's read.
 - Not verified: Firefox and Safari; the feed on dedicated-worker or in-process tabs; a page remount (no spec remounts a page).
