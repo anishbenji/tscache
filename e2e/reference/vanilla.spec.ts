@@ -317,3 +317,28 @@ test("bars after a gap in the stream are read through it while the chart follows
   // Then the chart follows the stream again.
   await nextDraw(page);
 });
+
+// Last in the file: it moves the backend's clock on for the tests after it.
+test("a stream that reopens a bar later mends the bar it broke in (R4-1)", async ({
+  context,
+}) => {
+  const page = await openTab(context);
+  await waitNotices(page, 1);
+  await nextDraw(page);
+  const fetched = (await notices(page)).length;
+  // The bar forming now, as the backend sees it, stays provisional in the
+  // cache when the stream breaks.
+  const forming = Math.floor(Date.now() / MINUTE) * MINUTE;
+  // One request, so no batch comes between: the stream breaks, a minute
+  // passes, and the new stream sends only the next bar.
+  await control(page, { dropStreams: true, advanceMs: MINUTE });
+  // The new stream's opening reads over the bar the old one broke in.
+  await expect
+    .poll(async () =>
+      (await notices(page))
+        .slice(fetched)
+        .some((notice) => notice.range.end >= forming),
+    )
+    .toBe(true);
+  await nextDraw(page);
+});

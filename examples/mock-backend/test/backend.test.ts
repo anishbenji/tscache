@@ -170,15 +170,19 @@ describe("live stream", () => {
     vi.useRealTimers();
   });
 
-  /** The next message of an event stream, parsed. */
+  /** The next bar event of an event stream, parsed. */
   async function nextBatch(
     reader: ReadableStreamDefaultReader<Uint8Array>,
   ): Promise<StreamBatch> {
-    const { value } = await reader.read();
-    const text = new TextDecoder().decode(value);
-    const data = /^event: bar\ndata: (.*)\n\n$/.exec(text)?.[1];
-    if (data === undefined) throw new Error(`not a bar event: ${text}`);
-    return JSON.parse(data) as StreamBatch;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("the stream ended");
+      const text = new TextDecoder().decode(value);
+      if (text.startsWith("retry: ")) continue;
+      const data = /^event: bar\ndata: (.*)\n\n$/.exec(text)?.[1];
+      if (data === undefined) throw new Error(`not a bar event: ${text}`);
+      return JSON.parse(data) as StreamBatch;
+    }
   }
 
   it("pushes the forming bar, then the closed bar with its final values", async () => {
@@ -227,6 +231,30 @@ describe("live stream", () => {
 
     gone.abort();
     expect((await stats(backend)).streams).toBe(0);
+  });
+
+  it("ends every stream on dropStreams, and moves the clock on advanceMs", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW + 30_000 });
+    const response = await call(
+      backend,
+      `/api/stream/crypto/BTC?interval=${MINUTE}`,
+    );
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    const { value } = await reader.read();
+    expect(new TextDecoder().decode(value)).toBe("retry: 500\n\n");
+    expect((await nextBatch(reader)).timestamps).toEqual([NOW]);
+    await call(backend, "/api/control", post({ dropStreams: true }));
+    expect((await reader.read()).done).toBe(true);
+    expect((await stats(backend)).streams).toBe(0);
+
+    await call(backend, "/api/control", post({ advanceMs: MINUTE }));
+    const later = await call(
+      backend,
+      `/api/stream/crypto/BTC?interval=${MINUTE}`,
+    );
+    const next = (later.body as ReadableStream<Uint8Array>).getReader();
+    expect((await nextBatch(next)).timestamps).toEqual([NOW + MINUTE]);
+    await call(backend, "/api/control", post({ dropStreams: true }));
   });
 
   it("rejects unknown datasets and bad intervals", async () => {

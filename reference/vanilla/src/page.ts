@@ -205,6 +205,18 @@ export function startPage(
   }
 
   /**
+   * Reads up to `end` with a fetch, which mends what the stream missed:
+   * bars, or the final values of the bar forming when it broke. Only while
+   * the chart follows the market; history is final, so a user reading it
+   * misses nothing.
+   */
+  function catchUp(end: number): void {
+    if (!following()) return;
+    asked = { start: asked.start, end: Math.max(asked.end, end) };
+    bars.show(asked);
+  }
+
+  /**
    * Whether the chart follows the market: what is on screen reaches the end
    * of what is read, which is now (a screen of history lies past its end
    * while the user reads history).
@@ -327,14 +339,10 @@ export function startPage(
         bars.refresh(asked);
         return;
       }
-      // Bars after a gap, as when the stream was down for minutes. While
-      // the chart follows the market, read through the gap, which fetches
-      // the bars the stream missed; while the user reads history, wait.
-      if (following()) {
-        asked = { start: asked.start, end: span.end };
-        bars.show(asked);
-      }
+      // Bars after a gap the stream did not fill.
+      catchUp(span.end);
     },
+    onOpened: () => catchUp(Date.now()),
   });
 
   const kind = chartKindOf(location.search);

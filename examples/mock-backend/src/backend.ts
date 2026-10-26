@@ -70,6 +70,10 @@ export interface BackendControl {
   expireAccess?: true;
   /** Answer the next this many series requests with a server error. */
   failNext?: number;
+  /** End every live stream, as a network outage would; clients reconnect. */
+  dropStreams?: true;
+  /** Move the backend's clock forward, so time passes in a test at once. */
+  advanceMs?: number;
 }
 
 /** Answers a request under /api/, or undefined for any other path. */
@@ -77,6 +81,8 @@ export type Backend = (request: Request) => Promise<Response | undefined>;
 
 const SERIES = /^\/api\/series\/([^/]+)\/([^/]+)$/;
 const STREAM = /^\/api\/stream\/([^/]+)\/([^/]+)$/;
+/** How soon a client reconnects a dropped live stream (the SSE retry). */
+const RECONNECT_MS = 500;
 /** Longer delays would overflow setTimeout, which then fires at once. */
 const MAX_LATENCY = 60_000;
 
@@ -123,13 +129,18 @@ async function readJson(request: Request): Promise<unknown> {
 }
 
 export function createBackend(options: BackendOptions = {}): Backend {
-  const now = options.now ?? Date.now;
+  const clock = options.now ?? Date.now;
+  /** How far BackendControl.advanceMs moved the clock. */
+  let advanced = 0;
+  const now = () => clock() + advanced;
   const auth = options.auth ?? false;
   const pushMs = options.pushMs ?? 1000;
   let latencyMs = options.latencyMs ?? 300;
   let version = 1;
   /** Series requests still to fail (BackendControl.failNext). */
   let failing = 0;
+  /** Ends each open live stream (BackendControl.dropStreams). */
+  const streams = new Set<() => void>();
   let tokens: Tokens = { access: newToken("at"), refresh: newToken("rt") };
   const stats = {
     pages: {} as Record<string, number>,
@@ -235,31 +246,41 @@ export function createBackend(options: BackendOptions = {}): Backend {
       return batch;
     }
 
+    let output: ReadableStreamDefaultController<Uint8Array> | undefined;
+
+    /** Stops the pushes; the reader went away, or end() ended the stream. */
     function close(): void {
       if (!open) return;
       open = false;
       clearInterval(timer);
+      streams.delete(end);
       stats.streams--;
+    }
+
+    function end(): void {
+      close();
+      try {
+        output?.close();
+      } catch {
+        // Already closed by the reader.
+      }
     }
 
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
+        output = controller;
         stats.streams++;
+        streams.add(end);
         const push = () => {
           if (!open) return;
           const data = JSON.stringify(message());
           controller.enqueue(encoder.encode(`event: bar\ndata: ${data}\n\n`));
         };
+        // A dropped stream is reconnected after this many ms.
+        controller.enqueue(encoder.encode(`retry: ${RECONNECT_MS}\n\n`));
         push();
         timer = setInterval(push, pushMs);
-        request.signal.addEventListener("abort", () => {
-          close();
-          try {
-            controller.close();
-          } catch {
-            // Already closed by the reader.
-          }
-        });
+        request.signal.addEventListener("abort", end);
       },
       cancel: close,
     });
@@ -297,6 +318,9 @@ export function createBackend(options: BackendOptions = {}): Backend {
       latencyMs = Math.min(latency, MAX_LATENCY);
     }
     if (body.bumpVersion === true) version++;
+    if (body.dropStreams === true) for (const end of [...streams]) end();
+    const advance = body.advanceMs ?? Number.NaN;
+    if (Number.isSafeInteger(advance) && advance > 0) advanced += advance;
     const failNext = body.failNext ?? Number.NaN;
     if (Number.isSafeInteger(failNext) && failNext >= 0) failing = failNext;
     if (body.expireAccess === true) {

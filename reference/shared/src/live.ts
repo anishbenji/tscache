@@ -12,8 +12,14 @@
 //
 // A put without a range only adds and overwrites points, and a pushed bar
 // at or after the batch's finalizedUntil stays provisional: the cache
-// stores it, but a read that fetches still asks the backend for it, which
-// keeps the cache right should a push go missing.
+// stores it, but a read that fetches still asks the backend for it.
+//
+// That is how a page catches up after the stream breaks. Each time the
+// stream opens (a reconnect, or another tab taking it over), batches may
+// have been missed: whole bars, or the final values of the bar that was
+// forming, which a new stream does not send again. Every tab hears of the
+// opening (onOpened) before the stream's first batch, and a read that
+// fetches over the provisional end mends both.
 
 import type { Connection } from "@tscache/integrations/shared/connection";
 import type { CacheConfig, PutBatch, Range } from "tscache";
@@ -25,7 +31,15 @@ export interface LiveFeedOptions {
   url: string;
   /** A batch is in the cache; `span` is the time its bars cover. */
   onBatch(span: Range): void;
+  /**
+   * The stream opened, after an outage or under another tab: read the
+   * newest bars with a fetch, since batches may have been missed.
+   */
+  onOpened(): void;
 }
+
+/** What the holder passes to the other tabs. */
+type FeedMessage = { kind: "opened" } | { kind: "batch"; batch: PutBatch };
 
 /** A pushed batch, checked at the edge: the cache rejects anything else. */
 function parseBatch(data: string): PutBatch | undefined {
@@ -54,12 +68,20 @@ export function liveFeed({
   config,
   url,
   onBatch,
+  onOpened,
 }: LiveFeedOptions): () => void {
   const name = `tscache-reference:feed:${config.id}`;
   const channel = new BroadcastChannel(name);
   const stop = new AbortController();
-  /** Batches are applied one at a time, in the order they came. */
+  /** Messages are applied one at a time, in the order they came. */
   let queue = Promise.resolve();
+
+  function opened(): Promise<void> {
+    queue = queue.then(() => {
+      if (!stop.signal.aborted) onOpened();
+    });
+    return queue;
+  }
 
   function apply(batch: PutBatch, held: boolean): Promise<void> {
     queue = queue.then(async () => {
@@ -80,8 +102,12 @@ export function liveFeed({
     return queue;
   }
 
-  channel.onmessage = (event: MessageEvent<PutBatch>) => {
-    void apply(event.data, false);
+  function pass(message: FeedMessage): void {
+    if (!stop.signal.aborted) channel.postMessage(message);
+  }
+
+  channel.onmessage = ({ data }: MessageEvent<FeedMessage>) => {
+    void (data.kind === "opened" ? opened() : apply(data.batch, false));
   };
 
   navigator.locks
@@ -91,12 +117,14 @@ export function liveFeed({
       () =>
         new Promise<void>((released) => {
           const source = new EventSource(url);
+          // Fires again on each reconnect, before its first batch.
+          source.addEventListener("open", () => {
+            void opened().then(() => pass({ kind: "opened" }));
+          });
           source.addEventListener("bar", (event) => {
             const batch = parseBatch(event.data);
             if (batch === undefined) return;
-            void apply(batch, true).then(() => {
-              if (!stop.signal.aborted) channel.postMessage(batch);
-            });
+            void apply(batch, true).then(() => pass({ kind: "batch", batch }));
           });
           stop.signal.addEventListener("abort", () => {
             source.close();

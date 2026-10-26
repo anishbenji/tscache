@@ -27,7 +27,10 @@ these clients add what an application needs on top of it.
 - **Takes pushed bars.** The backend streams the bar forming now over Server-Sent Events. One tab
   per browser holds the stream, elected with a Web Lock, and puts each batch into the cache; the
   other tabs hear of it on a BroadcastChannel and read it back from the cache alone, without a fetch
-  (`shared/src/live.ts`). When that tab closes, another takes the stream over.
+  (`shared/src/live.ts`). When that tab closes, another takes the stream over. Each time the
+  stream opens again, after an outage or under another tab, a tab that follows the market reads its
+  newest bars with a fetch, which mends what the stream missed: whole bars, or the final values of
+  the bar that was forming when it broke.
 - **Refreshes credentials once across tabs.** An expired access token reaches every tab as
   `authInvalid`; one tab rotates the tokens under a Web Lock, every tab hands the new token to its
   client, and the reads that came back `auth-pending` are asked again (`shared/src/auth.ts`).
