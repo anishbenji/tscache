@@ -29,7 +29,10 @@ export interface Series {
    * answer replaces this one anyway.
    */
   refresh(range?: Range): void;
-  /** Stops rendering; an answer still in flight is dropped. */
+  /**
+   * Stops rendering; an answer still in flight is dropped, and later
+   * show() and refresh() calls (from a callback still pending) do nothing.
+   */
   dispose(): void;
 }
 
@@ -41,8 +44,10 @@ export function series(
   let latest = 0;
   /** The request number of the show() read in flight, or 0. */
   let showing = 0;
+  let disposed = false;
 
   function read(cacheOnly = false): void {
+    if (disposed) return;
     const state = connection.state;
     if (state.status === "failed") {
       fail(state.error);
@@ -83,6 +88,7 @@ export function series(
       read(true);
     },
     dispose() {
+      disposed = true;
       unsubscribe();
       latest++;
     },

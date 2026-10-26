@@ -141,6 +141,16 @@ describe("series", () => {
     expect(answers).toHaveLength(1);
   });
 
+  it("reads nothing once disposed, whoever calls show() or refresh()", async () => {
+    const { connection } = await connected();
+    const { chart, answers } = recorder(connection);
+    chart.dispose();
+    chart.show(a);
+    chart.refresh(b);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(answers).toEqual([]);
+  });
+
   it("drops an answer in flight when disposed", async () => {
     const { connection } = await connected();
     const { chart, answers } = recorder(connection);

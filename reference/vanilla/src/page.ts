@@ -171,8 +171,17 @@ export function startPage(
   const select = element<HTMLSelectElement>(root, "#chart-kind");
   const signIn = element<HTMLButtonElement>(root, "#sign-in");
   const retry = element<HTMLButtonElement>(root, "#retry");
-  const output = (name: string) =>
-    element<HTMLOutputElement>(root, `[data-testid="${name}"]`);
+
+  // Every write to the markup goes through these two, which do nothing
+  // once the page is torn down: a callback still pending then (a read, a
+  // refresh, a sign-in) must not touch a page started again in its place.
+  function show(name: string, text: string): void {
+    if (disposed) return;
+    element<HTMLOutputElement>(root, `[data-testid="${name}"]`).value = text;
+  }
+  function reveal(button: HTMLButtonElement, visible: boolean): void {
+    if (!disposed) button.hidden = !visible;
+  }
 
   const now = Date.now();
   const opening = openingRange(served?.range.end ?? now);
@@ -201,7 +210,7 @@ export function startPage(
     const pending = result.misses.some(
       (miss) => miss.reason === "auth-pending",
     );
-    output("auth").value = pending ? "refreshing credentials" : "signed in";
+    show("auth", pending ? "refreshing credentials" : "signed in");
   }
 
   /**
@@ -229,7 +238,7 @@ export function startPage(
   function showRange(): void {
     const visible = view?.visible();
     if (visible === undefined) return;
-    output("showing").value = `${utc(visible.start)} – ${utc(visible.end)}`;
+    show("showing", `${utc(visible.start)} – ${utc(visible.end)}`);
   }
 
   const bars = series(connection, {
@@ -238,17 +247,17 @@ export function startPage(
       latest = result;
       view?.draw(result);
       showRange();
-      output("summary").value = summarize(result);
-      output("drawn").value = new Date().toISOString().slice(11, 19);
+      show("summary", summarize(result));
+      show("drawn", new Date().toISOString().slice(11, 19));
       const gaps = gapsOf(result);
       if (gaps.length === 0) failed = false;
       if (gaps.some((gap) => gap.reason === "fetch-failed")) failed = true;
-      output("missing").value = describeGaps(gaps, failed);
-      retry.hidden = !failed;
+      show("missing", describeGaps(gaps, failed));
+      reveal(retry, failed);
       showAuth(result);
     },
     fail(error) {
-      output("connection").value = `read failed: ${String(error)}`;
+      show("connection", `read failed: ${String(error)}`);
     },
   });
 
@@ -278,18 +287,18 @@ export function startPage(
   let installed: unknown;
   const unsubscribe = connection.subscribe(() => {
     const state = connection.state;
-    output("connection").value = describe(state);
+    show("connection", describe(state));
     if (state.status !== "connected" || state.client === installed) return;
     const { client } = state;
     installed = client;
-    output("mode").value = client.mode;
+    show("mode", client.mode);
     uninstall?.();
     const stopRefresh = refreshOnAuthInvalid(client, {
       onRefreshed: () => bars.show(asked),
       onSessionLost: () => {
         sessionLost = true;
-        output("auth").value = "signed out";
-        signIn.hidden = false;
+        show("auth", "signed out");
+        reveal(signIn, true);
       },
     });
     // A new dataset version clears the cache (a pushed batch can carry
@@ -315,8 +324,8 @@ export function startPage(
   function sessionRestored(): void {
     if (disposed) return;
     sessionLost = false;
-    signIn.hidden = true;
-    output("auth").value = "signed in";
+    reveal(signIn, false);
+    show("auth", "signed in");
     bars.show(asked);
   }
 
