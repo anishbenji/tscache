@@ -14,6 +14,13 @@
 // storage before it is spent, so a failed refresh ends the session in
 // every tab instead of being retried with it.
 //
+// It assumes a refresh issues a new access token (N42). A backend that
+// renews a token in place returns the refused string again, so each tab
+// that heard the refusal finds it still stored and refreshes once in
+// turn: every refresh presents the current refresh token, never a spent
+// one, so the session survives, at the cost of one redundant refresh per
+// extra tab.
+//
 // The tokens live in localStorage, which every tab of the origin shares.
 // Only the access token goes into the fetcher's context; the refresh token
 // never leaves the page.

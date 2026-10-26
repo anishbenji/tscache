@@ -303,20 +303,32 @@ export function startPage(
     };
   });
 
-  retry.addEventListener("click", () => bars.show(asked));
+  /**
+   * Removes the controls' listeners on teardown, so a page started again in
+   * the same markup is the only one they reach.
+   */
+  const controls = new AbortController();
+  const { signal } = controls;
+
+  retry.addEventListener("click", () => bars.show(asked), { signal });
 
   function sessionRestored(): void {
+    if (disposed) return;
     sessionLost = false;
     signIn.hidden = true;
     output("auth").value = "signed in";
     bars.show(asked);
   }
 
-  signIn.addEventListener("click", () => {
-    const state = connection.state;
-    if (state.status !== "connected") return;
-    void signInAgain(state.client).then(sessionRestored, reportError);
-  });
+  signIn.addEventListener(
+    "click",
+    () => {
+      const state = connection.state;
+      if (state.status !== "connected") return;
+      void signInAgain(state.client).then(sessionRestored, reportError);
+    },
+    { signal },
+  );
 
   // Another tab signed in: adopt its token, as a tab on a worker of its
   // own must, and read again.
@@ -347,18 +359,23 @@ export function startPage(
 
   const kind = chartKindOf(location.search);
   select.value = kind;
-  select.addEventListener("change", () => {
-    const next = chartKindOf(`?chart=${select.value}`);
-    const url = new URL(location.href);
-    url.searchParams.set("chart", next);
-    history.replaceState(null, "", url);
-    void mountChart(next);
-  });
+  select.addEventListener(
+    "change",
+    () => {
+      const next = chartKindOf(`?chart=${select.value}`);
+      const url = new URL(location.href);
+      url.searchParams.set("chart", next);
+      history.replaceState(null, "", url);
+      void mountChart(next);
+    },
+    { signal },
+  );
   void mountChart(kind);
   bars.show(asked);
 
   return async () => {
     disposed = true;
+    controls.abort();
     onScroll.cancel();
     stopFeed();
     unsubscribe();
