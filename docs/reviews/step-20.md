@@ -1,6 +1,6 @@
 # Step 20 — Reference clients: WebSocket and polling feeds
 
-Branch: `feat/20-feed-transports` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: —
+Branch: `feat/20-feed-transports` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: settled · Verdict after triage: merge
 
 The feed variants the user asked to follow the three reference clients (`docs/roadmap.md`, "Reference clients"; decisions of 2026-10-26). Not an engine step: tests are written with the code.
 
@@ -42,8 +42,13 @@ The first four are the user's (2026-10-26); the rest are mine.
 |---|---|---|---|---|
 | R2-1 | P1 | A storage event delivered after a later choice makes the tab that hears it adopt the older feed | accepted | Validated by reading: `onFeedStored` passed on the event's `newValue`. It now reads what is stored when the event arrives, which is the latest choice. Unit test with a stubbed storage: an event naming `ws` after `poll` was stored adopts `poll`; fails with the event's value restored. 4a738ea |
 
+## Round 3 — reviewer verdict: merge
+
+No findings. The reviewer confirmed R1-1, R1-2, R1-3 and R2-1 fixed.
+
 ## Verification
 
+- `bun run ci` green on the settled branch: 101 Playwright.
 - `bunx vitest run`: 1470 passed, with three new socket tests of the mock backend (subscription and pushes, refused tokens, bad subscriptions and `dropStreams`).
 - `E2E_EXAMPLES=reference-vanilla bunx playwright test --project=examples reference/ -g reference-vanilla`: 20 passed, including the switch, two WebSocket tests (hand-over, mending after a reconnect), the refused-token reconnect and polling.
 - Mutation checks, each failing its test: a non-holding tab that also reads each poll (six fetches against at most three), a socket that reconnects after 4401 without refreshing, a tab that ignores another tab's choice.
