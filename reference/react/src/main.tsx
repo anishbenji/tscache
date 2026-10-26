@@ -1,20 +1,10 @@
-// The client-only page. The session starts before the first render and
-// ends after the root unmounts, so it lives as long as the page, whatever
-// React mounts twice in StrictMode.
+// The client-only page.
 
-import { chartKindOf } from "@reference/shared/chart/load";
-import { startSession } from "@reference/shared/session";
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { App } from "./App";
-import { openClient } from "./client";
+import { startPage } from "./page";
 import "@reference/shared/style.css";
 
 const element = document.getElementById("app");
 if (element === null) throw new Error("index.html has no #app");
-const session = startSession({ open: openClient });
-createRoot(element).render(
-  <StrictMode>
-    <App session={session} initialKind={chartKindOf(location.search)} />
-  </StrictMode>,
-);
+const teardown = startPage(element);
+// In dev, an edit re-runs this module: end the old page first.
+import.meta.hot?.dispose(teardown);

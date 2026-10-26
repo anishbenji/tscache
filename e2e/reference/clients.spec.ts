@@ -352,5 +352,36 @@ for (const app of ["reference-vanilla", "reference-react"] as const) {
         .toBe(true);
       await nextDraw(page);
     });
+
+    // Moves the backend's clock on too, like the test before it.
+    test("a stream that reopens while another chart library loads still mends the broken bar (step 18 R1-1)", async ({
+      context,
+    }) => {
+      const page = await openTab(context);
+      await waitNotices(page, 1);
+      await nextDraw(page);
+      // Hold the uPlot chunk back until the stream has reopened.
+      let release = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route("**/assets/uplot-*.js", async (route) => {
+        await held;
+        await route.continue();
+      });
+      const fetched = (await notices(page)).length;
+      const forming = Math.floor(Date.now() / MINUTE) * MINUTE;
+      await page.selectOption("#chart-kind", "uplot");
+      await control(page, { dropStreams: true, advanceMs: MINUTE });
+      await expect
+        .poll(async () =>
+          (await notices(page))
+            .slice(fetched)
+            .some((notice) => notice.range.end >= forming),
+        )
+        .toBe(true);
+      release();
+      await expect(page.locator("#chart .u-over")).toBeVisible();
+    });
   });
 }

@@ -147,7 +147,9 @@ export interface Session {
   subscribe(listener: () => void): () => void;
   /**
    * The chart on screen: the session asks it which time it shows, to
-   * know whether the page follows the market. Returns the detach.
+   * know whether the page follows the market. Returns the detach, after
+   * which the session goes by what the chart showed last, until the next
+   * chart is attached.
    */
   attachChart(chart: ChartView): () => void;
   /** The user scrolled the chart to `visible`; read it after a pause. */
@@ -171,6 +173,11 @@ export function startSession({ open, served }: SessionOptions): Session {
   let asked = served?.range ?? readRange(opening, now);
   let state = initialState(served);
   let chart: ChartView | undefined;
+  /**
+   * What the last chart showed when it was detached: a chart being
+   * replaced (another library loading) still counts as following.
+   */
+  let lastVisible: Range | undefined;
   let disposed = false;
   const listeners = new Set<() => void>();
 
@@ -216,7 +223,7 @@ export function startSession({ open, served }: SessionOptions): Session {
    * while the user reads history).
    */
   function following(): boolean {
-    const visible = chart?.visible();
+    const visible = chart?.visible() ?? lastVisible;
     return visible !== undefined && visible.end + market.interval >= asked.end;
   }
 
@@ -312,7 +319,9 @@ export function startSession({ open, served }: SessionOptions): Session {
     attachChart(next) {
       chart = next;
       return () => {
-        if (chart === next) chart = undefined;
+        if (chart !== next) return;
+        lastVisible = next.visible() ?? lastVisible;
+        chart = undefined;
       };
     },
     scrolled(visible) {

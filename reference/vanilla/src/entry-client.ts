@@ -14,6 +14,8 @@ import "@reference/shared/style.css";
 
 const root = document.getElementById("app");
 if (root === null) throw new Error("ssr.html has no #app");
-startPage(root, {
+const teardown = startPage(root, {
   served: rehydrate(market, readJson<Dehydrated>(SERVER_READ)),
 });
+// In dev, an edit re-runs this module: end the old page first.
+import.meta.hot?.dispose(teardown);
