@@ -1,6 +1,6 @@
 # Step 17 — Reference clients: vanilla
 
-Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 5 · Status: in review · Verdict after triage: —
+Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 6 · Status: in review · Verdict after triage: —
 
 The first of the three reference clients (`docs/roadmap.md`, "Reference clients"; track (c) after the post-build architecture review). Not an engine step: tests are written with the code. The decisions below were the user's (2026-10-26); the roadmap records them.
 
@@ -60,6 +60,12 @@ Each is reversible and inside the user's decisions; listed so the review can con
 |---|---|---|---|---|
 | R5-1 | P1 | Teardown leaves the controls' listeners, so a page started again in the same markup also runs the disposed page's handlers | accepted | Validated by reading: the three `addEventListener` calls had no removal. They now take an abort signal that teardown aborts, and a sign-in that resolves after teardown returns early. Verified by hand in Chromium against the dev server: a page started, torn down and started again in one element stays "live" after Retry and a chart switch. The same run on the old code showed no visible symptom there (a call on a disposed SharedWorker client does not surface), which is why the reviewer's in-memory reproduction is the evidence; no regression test, since the page module loads only through Vite and no spec remounts a page. 4f0e06f |
 | R5-2 | P2 | `auth.ts` omits N42's prerequisite that a refresh issues a new access token | accepted | Validated against N42 and the example's `auth-refresh.ts`, which states it. The module header now says so, with the redundant refresh per extra tab that follows otherwise. 4f0e06f |
+
+## Round 6 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R6-1 | P1 | A refresh pending at teardown fails later and marks the page started again in the same markup as signed out | accepted; area redesigned | Validated by reading: `refreshOnAuthInvalid`'s unsubscribe stops new events, not a lock callback already queued. **Convergence check:** teardown drew findings in rounds 5 and 6, so instead of guarding this callback the page has one rule: every write to its markup goes through `show` and `reveal`, which do nothing once the page is torn down. The vanilla series, which the pending callbacks reach through `show(asked)`, now ignores `show` and `refresh` after `dispose` (its unit test fails without that). The page-level guard holds by construction; no browser test, for the reason in R5-1. a4f11ef |
 
 ## Verification
 
