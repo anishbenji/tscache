@@ -1,6 +1,6 @@
 # Step 18 — Reference clients: React
 
-Branch: `feat/18-reference-react` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: in review · Verdict after triage: —
+Branch: `feat/18-reference-react` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: —
 
 The second of the three reference clients (`docs/roadmap.md`, "Reference clients"; decisions of 2026-10-26). Not an engine step: tests are written with the code.
 
@@ -21,8 +21,15 @@ The second of the three reference clients (`docs/roadmap.md`, "Reference clients
 | D4 | The chart is an effect on a ref'd element, not state | Both libraries are imperative; their views live in a ref and are created and disposed by an effect keyed on the session and the chart kind, so StrictMode's doubled effects create, dispose and create again | A chart library's React wrapper, which neither library ships officially |
 | D5 | `RenderRequest` gains `url` | The server-rendered page must render the chart kind `?chart=` asks for, or hydration would not match the browser's | Render the default kind on the server and switch after hydration, at the cost of a second mount |
 
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | While another chart library loads, the React chart is detached, so a stream reopening then skips its catch-up and the broken bar stays stale | accepted | Validated by reading: React's effect cleanup detaches before the next library's import resolves, and `following()` saw no chart (the vanilla page detaches only once the new view exists). The session now keeps what the detached chart showed and goes by it until the next chart is attached. The E2E test holds the uPlot chunk back, switches to it, reopens the stream a minute on and waits for the catch-up fetch; with the fix removed it fails for React and passes for vanilla, as the finding predicts. 0af4422 |
+| R1-2 | P1 | Nothing disposes the React session when the root unmounts | accepted | Validated by reading. `react/src/page.tsx`'s `startPage` returns the teardown (unmount the root, then dispose the session), as the vanilla page's does, and both clients' entries call it when Vite re-runs them in dev, which would otherwise start a second session beside the first. No browser test: no spec remounts a page (step 17 R5-1). 0af4422 |
+
 ## Verification
 
-- `bun run ci` green: 1467 Vitest, 74 Playwright, including `e2e/reference/clients.spec.ts` with all 13 tests against each client.
+- `bun run ci` green: 1467 Vitest, 74 Playwright, including `e2e/reference/clients.spec.ts` with all 13 tests against each client (14 after round 1).
 - Run by hand in Chromium against the React dev server: `/ssr?chart=uplot` hydrates with no warning and draws the server's read; `/` draws and follows the market.
 - Not verified: Firefox and Safari; the feed on dedicated-worker or in-process tabs in a real browser.
