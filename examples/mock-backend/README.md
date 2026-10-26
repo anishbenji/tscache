@@ -15,6 +15,7 @@ final once published, while still exercising its other paths.
 | Dataset | Fields | Behaviour |
 |---|---|---|
 | `candles` | `open`, `high`, `low`, `close` (f64), `volume` (u32) | Bars only in weekday sessions (13:30 to 20:00 UTC); daily bars on weekdays. The bar forming now is provisional |
+| `crypto` | as `candles` | Bars around the clock, every day; for the live feeds |
 | `metrics` | `cpu`, `p95` (f32), `requests` (u32) | A point in every slot. Request counts for the last 30 seconds are still arriving, so those points are provisional |
 | `sensor` | `temperature`, `humidity` (f32), `battery` (u8) | Drops about 2 % of readings and goes offline for 15-minute blocks |
 | `events` | `count` (u16) | Mostly empty slots, with bursts |
@@ -31,18 +32,32 @@ All routes live under `/api/`; the `mockBackend()` Vite plugin mounts them on
   `{ timestamps, fields, meta: { version, finalizedUntil }, next? }` for the
   inclusive range, at most 5,000 slots per page and never past now. `next`
   is where the following page starts.
+- `GET /api/stream/<dataset>/<symbol>?interval&offset` is a Server-Sent
+  Events stream: a `bar` event every second carrying a put batch
+  `{ timestamps, fields, meta }`, the bar forming now and, once a bar has
+  closed, that bar with its final values. Unauthenticated, as `EventSource`
+  sends no authorization header.
+- A WebSocket on `/api/live` pushes the same batches. Its first message
+  subscribes: `{ type: "subscribe", token, dataset, symbol, interval,
+  offset? }`. A missing or stale token closes it with code 4401, a bad
+  subscription with 4400; `dropStreams` closes it with 1012.
 - `POST /api/auth/login` answers the current `{ access, refresh }` tokens
   (the demo has one user, already signed in).
 - `POST /api/auth/refresh` with `{ refresh }` rotates both tokens; a refresh
   token works once.
 - `POST /api/control` with any of `{ latencyMs, bumpVersion: true,
-  expireAccess: true }` changes the latency (default 300 ms), restates every
-  series under a new version, or replaces the access token.
-- `GET /api/stats` counts series pages per dataset, refused requests,
-  rotations and reused refresh tokens.
+  expireAccess: true, failNext, dropStreams: true, advanceMs, resetClock:
+  true }` changes the latency (default 300 ms), restates every series under
+  a new version, replaces the access token, fails the next series requests,
+  ends every live stream and socket, or moves the backend's clock on and
+  back.
+- `GET /api/stats` counts series pages per dataset, refused requests and
+  subscriptions, rotations, reused refresh tokens and open live streams,
+  and reports the backend's clock.
 
-Series requests need a bearer token only when the plugin is created with
-`mockBackend({ auth: true })`.
+Series requests and socket subscriptions need a token only when the plugin
+is created with `mockBackend({ auth: true })`. The socket upgrade is served
+by `ws` on the dev and preview servers' HTTP server.
 
 ## Fetcher
 

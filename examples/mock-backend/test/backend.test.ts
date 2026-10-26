@@ -3,6 +3,7 @@ import {
   type Backend,
   type BackendStats,
   createBackend,
+  SOCKET_CLOSE,
   type StreamBatch,
   type Tokens,
 } from "../src/backend";
@@ -269,5 +270,131 @@ describe("live stream", () => {
     expect(
       (await call(backend, "/api/stream/crypto/x?interval=0.5")).status,
     ).toBe(400);
+  });
+});
+
+describe("live socket", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A socket's server side, recording what the backend sends and closes. */
+  function connect(backend: Backend) {
+    const sent: StreamBatch[] = [];
+    const closes: { code: number; reason: string }[] = [];
+    const handler = backend.socket({
+      send: (text) => sent.push(JSON.parse(text) as StreamBatch),
+      close: (code, reason) => closes.push({ code, reason }),
+    });
+    return { sent, closes, handler };
+  }
+
+  const subscription = (token?: string) =>
+    JSON.stringify({
+      type: "subscribe",
+      token,
+      dataset: "crypto",
+      symbol: "BTC",
+      interval: MINUTE,
+    });
+
+  it("pushes the stream's batches after a subscription, until it closes", async () => {
+    vi.useFakeTimers();
+    let now = NOW + 30_000;
+    const backend = createBackend({
+      latencyMs: 0,
+      pushMs: 1000,
+      now: () => now,
+    });
+    const { sent, closes, handler } = connect(backend);
+    expect(sent).toEqual([]);
+    handler.message(subscription());
+    expect((await stats(backend)).streams).toBe(1);
+    expect(sent.map((batch) => batch.timestamps)).toEqual([[NOW]]);
+
+    now = NOW + MINUTE + 1000;
+    vi.advanceTimersByTime(1000);
+    expect(sent[1]?.timestamps).toEqual([NOW, NOW + MINUTE]);
+    // Later messages are not subscriptions.
+    handler.message(subscription());
+    expect(sent).toHaveLength(2);
+
+    handler.closed();
+    expect((await stats(backend)).streams).toBe(0);
+    vi.advanceTimersByTime(5000);
+    expect(sent).toHaveLength(2);
+    expect(closes).toEqual([]);
+  });
+
+  it("refuses a stale token with the refused close code, and takes the current one", async () => {
+    const backend = createBackend({ auth: true, latencyMs: 0, now: () => NOW });
+    const tokens: Tokens = await (
+      await call(backend, "/api/auth/login", post({}))
+    ).json();
+
+    const none = connect(backend);
+    none.handler.message(subscription());
+    expect(none.closes).toEqual([
+      { code: SOCKET_CLOSE.refused, reason: "access token refused" },
+    ]);
+    await call(backend, "/api/control", post({ expireAccess: true }));
+    const stale = connect(backend);
+    stale.handler.message(subscription(tokens.access));
+    expect(stale.closes.map(({ code }) => code)).toEqual([4401]);
+    expect(stale.sent).toEqual([]);
+    expect((await stats(backend)).refused).toBe(2);
+
+    const fresh: Tokens = await (
+      await call(backend, "/api/auth/login", post({}))
+    ).json();
+    const current = connect(backend);
+    current.handler.message(subscription(fresh.access));
+    expect(current.closes).toEqual([]);
+    expect(current.sent).toHaveLength(1);
+    current.handler.closed();
+  });
+
+  it("closes on a bad subscription, and as a restart on dropStreams", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    for (const text of [
+      "not json",
+      JSON.stringify({ type: "hello" }),
+      JSON.stringify({
+        type: "subscribe",
+        dataset: "nope",
+        symbol: "x",
+        interval: MINUTE,
+      }),
+      JSON.stringify({
+        type: "subscribe",
+        dataset: "crypto",
+        symbol: "x",
+        interval: 0.5,
+      }),
+      JSON.stringify({
+        type: "subscribe",
+        dataset: "crypto",
+        symbol: "x",
+        interval: MINUTE,
+        token: 7,
+      }),
+    ]) {
+      const { closes, handler } = connect(backend);
+      handler.message(text);
+      expect(closes.map(({ code }) => code)).toEqual([
+        SOCKET_CLOSE.badSubscription,
+      ]);
+    }
+
+    const { closes, handler } = connect(backend);
+    handler.message(subscription());
+    await call(backend, "/api/control", post({ dropStreams: true }));
+    expect(closes).toEqual([
+      { code: SOCKET_CLOSE.restart, reason: "the server restarted" },
+    ]);
+    expect((await stats(backend)).streams).toBe(0);
+    // The transport reports the close it was asked for; nothing more happens.
+    handler.closed();
+    expect(closes).toHaveLength(1);
   });
 });
