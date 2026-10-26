@@ -77,7 +77,9 @@ const PREFIX = "\0tscache-fetcher-url:";
  * worker has neither, so the fetch would throw a ReferenceError instead of
  * its own error (an expired-token error included). A build whose fetcher
  * graph contains that helper therefore fails, naming the chunk.
- * `build.modulePreload: false` does not remove the helper.
+ * `build.modulePreload: false` does not remove the helper. A fetcher that
+ * needs `import()` is built on its own instead (library mode or another
+ * bundler; the worker setup guide) and passed by URL, without `?fetcher`.
  *
  * TypeScript needs the import's type once per project:
  * `declare module "*?fetcher" { const url: string; export default url; }`.
@@ -154,7 +156,7 @@ export function fetcherUrl(): FetcherUrlPlugin {
           const chunk = bundle[name];
           if (chunk?.code?.includes("vite:preloadError")) {
             this.error(
-              `The fetcher ${fetcher} uses import(): Vite wraps it in a helper (in ${name}) that needs document and window, which tscache's worker lacks. Import the fetcher's dependencies statically.`,
+              `The fetcher ${fetcher} uses import(): Vite wraps it in a helper (in ${name}) that needs document and window, which tscache's worker lacks. Import the fetcher's dependencies statically, or build the fetcher on its own and pass that file's URL instead of using ?fetcher (see "Building the fetcher on its own" in tscache's worker setup guide).`,
             );
           }
           pending.push(

@@ -296,7 +296,9 @@ describe("fetcherUrl (tscache/vite)", () => {
           plugins: [fetcherUrl()],
           build: { outDir: join(app, "dist") },
         }),
-      ).rejects.toThrow(/fetcher .*uses import\(\).*statically/s);
+      ).rejects.toThrow(
+        /fetcher .*uses import\(\).*statically.*Building the fetcher on its own/s,
+      );
     },
   );
 });

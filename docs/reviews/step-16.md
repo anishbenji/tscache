@@ -97,3 +97,57 @@ The first GitHub run failed at Knip: it loads each example's `vite.config.ts`, w
 **Round 7 — reviewer verdict: merge.** No findings; the reviewer confirmed the earlier accepted findings stay fixed under the recorded decision. `bun run ci` passed: 1446 Node tests and 48 browser specs. (Rounds 5 and 6 ran on the closed option B branch, #30.)
 
 **Merge request: `feat/16c-static-fetcher-imports` → `main`.** One commit, the change above, settled in one clean round. Known limit, not verified: the check is conservative. It refuses any build in which a chunk the fetcher reaches carries the helper, so if Rolldown ever merged the helper into a shared chunk that the fetcher loads but never calls, a working build would be refused. No such build was seen. The open follow-up is the backlog item to look for a better option than relying on Vite for the fetcher.
+
+## Follow-up: fetchers that need `import()` (`docs/23-fetcher-prebuild`)
+
+**Question (backlog, user 2026-10-23).** Is there a better option for fetcher authors than the static-import rule `fetcherUrl()` enforces?
+
+**Findings.** Vite 8.3.4 adds its preload helper only to an app's client build: `getInsertPreload` is `consumer === "client" && !config.isWorker && !config.build.lib` (`dist/node/chunks/node.js`). Worker bundles drop the entry's exports (`preserveEntrySignatures: false`), which is why `?worker&url` cannot serve a fetcher. Probes, each with a fetcher that lazily imports a decoder and throws `AuthInvalidError`:
+- A Vite library-mode build keeps the default export, splits the decoder into its own chunk, and contains no helper.
+- `bun build --splitting` keeps the export too. Its own preload code touches `document` only when it exists, so it is worker-safe.
+- Both outputs run in Node, with no `document`: the lazy chunk loads, and the auth error keeps its `code`.
+- A worker entry owned by the app, which imports the fetcher statically and is built through `?worker&url`, also carries no helper.
+
+**Options put to the user.** A, keep the rule. B, a nested library-mode build inside `fetcherUrl()`. C, document building the fetcher on its own. D, a worker entry owned by the app: this would also remove webpack's copy step, but it changes the locked §2.5 contract, so it belongs on the architecture review.
+
+**Decision (user, 2026-10-26).** Keep the rule and document C. The rule's cost is small: a decoder imported statically grows only the worker's fetcher, not the page.
+
+**Change.** `docs/guides/worker-setup.md` gains "Building the fetcher on its own", with the Bun and Vite library-mode commands and the trade-offs: a separate rebuild step with no HMR, the app's aliases and defines not applied, and no content hash in the file name. The build error and the plugin's TSDoc now point to that section. The R3-1 test's pattern also requires the pointer: it fails against the old message and passes against the new one.
+
+### Round 8 — reviewer verdict: merge after fixes
+
+| ID | Sev | Finding | Triage | Evidence |
+|---|---|---|---|---|
+| R8-1 | P1 | The Vite recipe's `fileName: "fetcher"` emits `fetcher.mjs` outside a `"type": "module"` package, so the URL shown 404s | accepted | Reproduced: a library build in a package without `"type": "module"` emits `fetcher.mjs`, and with `fileName: () => "fetcher.js"` it emits `fetcher.js`. My earlier probe ran inside a module package. The recipe now uses the function. Lazy chunks stay `.mjs`, which the entry imports by relative path. |
+| R8-2 | P1 | The URL `/fetcher/fetcher.js` ignores Vite's `base`, so an app under `/app/` gets a 404 | accepted | Vite serves `public/` under `base`. The example now builds the URL from `import.meta.env.BASE_URL`. |
+| — | — | (found while fixing R8-1) The recipe's `outDir` lies inside `public/`, which Vite copies into `outDir` | fixed | Reproduced: without `publicDir: false`, `public/favicon.txt` lands in `public/fetcher/`, and Vite warns that the folders overlap. The recipe sets `publicDir: false`. |
+
+Not taken: the suggested regression tests. The recipe exercises Vite's library build, not tscache code. Each point was checked by building it with Vite 8.3.4, as above.
+
+### Round 9 — reviewer verdict: merge after fixes
+
+| ID | Sev | Finding | Triage | Evidence |
+|---|---|---|---|---|
+| R9-1 | P1 | With a relative Vite `base` (`"./"` or `""`), `BASE_URL` is relative, and the worker resolves it against its own script (`/app/assets/`), not the page | accepted | Confirmed in the source: the client sends `fetcher.module` as an unresolved string (`client/client.ts`), and the worker `import()`s it (`orchestrator/orchestrator.ts`). For a page at `/app/index.html` and a worker at `/app/assets/worker-1.js`, `"./fetcher/fetcher.js"` resolves to `/app/assets/fetcher/fetcher.js` in the worker and to `/app/fetcher/fetcher.js` against the page. With `"/app/"` both give `/app/fetcher/fetcher.js`. The recipe now resolves the URL against `document.baseURI`, and the guide's fetcher section says to pass an absolute URL or path. |
+
+**Convergence check.** R8-2 and R9-1 hit the same area, the recipe's URL, in consecutive rounds. Redesigned in the docs: the URL is resolved against the page, which is correct for every base form (absolute, relative, empty), so no form is left to patch. The root cause sits in the library: a relative `fetcher.module` resolves against the worker, which nobody expects. Making the client resolve it against the page before sending changes behaviour §2.1 documents ("the worker will dynamic-import()"), so it is **escalated to the user** rather than done here.
+
+### Round 10 — reviewer verdict: merge after fixes
+
+| ID | Sev | Finding | Triage | Evidence |
+|---|---|---|---|---|
+| R10-1 | P1 | Re-raises R9-1: with a relative `base`, resolving against the page breaks for a page in a subfolder (`/app/nested/index.html` gives `/app/nested/fetcher/fetcher.js`) | accepted; recipe narrowed | Correct: a relative `base` does not say where the app's root is, so no URL built from `BASE_URL` at runtime finds `public/` from every page. |
+
+**Convergence check, third round in this area (R8-2, R9-1, R10-1).** I stopped patching the URL. The recipe now claims only what holds: with an absolute `base`, the path is `${BASE_URL}fetcher/fetcher.js`. With a relative `base`, the guide says why no derived URL works and has the app give the deployed path itself, for example from an environment variable. The `document.baseURI` resolution from round 9 is gone.
+
+This also weakens the case for the library change the user approved after round 9. Resolving a relative `fetcher.module` against the page would make it behave like other web APIs, but it would not fix the relative-`base` case either. Raised with the user again.
+
+**Decision (user, 2026-10-26).** The library change is dropped. A relative `fetcher.module` keeps resolving against the worker's script, and the guide's rule stands: pass an absolute URL or path.
+
+### Round 11 — reviewer verdict: merge
+
+No findings. Every accepted finding stays fixed. `bun run ci` passed: 1446 Node tests, 48 browser specs.
+
+## Merge request: `docs/23-fetcher-prebuild` → `main`
+
+The worker setup guide gains "Building the fetcher on its own": Bun and Vite library-mode recipes for a fetcher that needs `import()`, with their trade-offs and the rule that the fetcher's URL must be absolute. `fetcherUrl()`'s build error and TSDoc point to that section, and the R3-1 test requires the pointer. Blast radius: documentation and one error message. No behaviour changes. Settled after four rounds: R8-1, R8-2, R9-1 and R10-1 were all recipe defects, each reproduced and fixed. The convergence check narrowed the recipe to absolute paths. Not verified: a prebuilt fetcher running in a real browser worker. The probes ran in Node, which has no `document`.
