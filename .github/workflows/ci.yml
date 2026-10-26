@@ -71,3 +71,51 @@ jobs:
         run: bunx playwright install --with-deps chromium
 
       - run: bun run ci
+
+  # Timings: the head against its base, case by case, in Chromium and Bun
+  # (docs/benchmarking.md). It reports only, in the job summary and an
+  # artifact, until a calibration on this runner (bench-calibrate.yml)
+  # shows the gate catches a known regression and stays quiet without one;
+  # then `--gate` goes on and this check becomes required.
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The base revision's source comes from git history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - name: Resolve base commit
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          base="${PR_BASE:-$PUSH_BEFORE}"
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base=HEAD
+          fi
+          echo "CI_BASE=${base}" >> "$GITHUB_ENV"
+
+      - run: bun install --frozen-lockfile
+
+      - name: Install Chromium for Playwright
+        run: bunx playwright install --with-deps chromium
+
+      - run: bun scripts/bench.ts compare --base "$CI_BASE" --runtime chromium,bun
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: bench-results
+          path: .bench-results/
+          if-no-files-found: ignore

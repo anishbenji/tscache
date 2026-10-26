@@ -20,7 +20,10 @@
     "knip": "knip",
     "fallow": "fallow audit",
     "changelog": "git-cliff -o CHANGELOG.md",
-    "ci": "bash scripts/ci.sh"
+    "ci": "bash scripts/ci.sh",
+    "size": "bun scripts/size.ts",
+    "bench": "bun scripts/bench.ts compare",
+    "bench:smoke": "bun scripts/bench.ts smoke"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",

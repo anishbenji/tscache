@@ -32,6 +32,31 @@ request each: vanilla first, carrying the shared pieces, then React, then Solid.
 landed in step 17, the React client in step 18 and the Solid client in step 19
 (`reference/README.md`).
 
+## Performance measurement and gate (requested 2026-10-26)
+
+Benchmarks and a regression gate, designed by three independent proposals that critiqued each other
+and settled their differences with experiments; method and reasoning in `docs/benchmarking.md`.
+
+- **Landed:** exact budgets that gate every pull request in `bun run ci`:
+  - compressed bytes per package entry;
+  - memory per cached bar;
+  - fetches per scroll-back;
+  - messages and moved bytes per read through the port;
+  - segments a read looks at;
+  - reallocations while a segment grows.
+
+  Hot-path timings compare each pull request with a rebuild of its base in one job, in Chromium (V8)
+  and Bun (JSC), paired and interleaved, with an A/A control and a fresh-process confirmation;
+  report-only for now.
+- **Next:**
+  1. Calibrate on GitHub's runner (`bench-calibrate.yml`): no false alarm in 20 same-revision runs,
+     at least 90 % detection of an injected 25 % slowdown. Then the timing gate blocks: a confirmed
+     regression of 10 % or more fails a pull request unless a `Perf-Accepted` trailer allows it.
+  2. The first optimisation the benches point at: a fast path in `DenseSegment.slice` for fully
+     present spans.
+  3. Chromium end-to-end scenarios (handshake, a read through a SharedWorker, two tabs sharing a
+     fetch), report-only.
+
 ## Design sketch: IndexedDB persistence
 
 **Goal.** A reload or a new tab starts from what an earlier session fetched. Immutable history, the

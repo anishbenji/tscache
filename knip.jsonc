@@ -6,11 +6,13 @@
       "project": []
     },
     "packages/tscache": {
-      "entry": ["src/entries/*.ts", "test/**/*.test.ts"],
-      "project": ["src/**/*.ts", "test/**/*.ts"],
+      // bench/entry.ts is bundled by scripts/bench.ts, not imported.
+      "entry": ["src/entries/*.ts", "test/**/*.test.ts", "bench/entry.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts", "bench/**/*.ts"],
       // The tscache/vite test loads Vite through a computed specifier, so
       // its types (which bring Node's) stay out of the package's type check.
-      "ignoreDependencies": ["vite"]
+      // The bench bundle's revisions, resolved by scripts/bench.ts.
+      "ignoreDependencies": ["vite", "tscache-bench"]
     },
     // The SSR examples' server entries are named only by their Vite config.
     "examples/react-ssr": { "entry": ["src/entry-server.tsx"] },
