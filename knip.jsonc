@@ -23,6 +23,9 @@
     "reference/react": {
       "entry": ["src/entry-server.tsx", "src/entry-client.tsx"]
     },
+    "reference/solid": {
+      "entry": ["src/entry-server.tsx", "src/entry-client.tsx"]
+    },
     // Every snippet is an entry: an app copies it, nothing imports it.
     "integrations": {
       "entry": ["*/*.{ts,tsx}", "test/**/*.test.ts"],
