@@ -10,8 +10,24 @@ these clients add what an application needs on top of it.
 |---|---|
 | `shared/` | What every client uses, whatever its framework (below) |
 | `vanilla/` | Done |
-| `react/` | Next |
-| `solid/` | After React |
+| `react/` | Done |
+| `solid/` | Next |
+
+## How they are built
+
+Every client is the same page. What the page does lives once, in `shared/src/session.ts`: the
+session owns the connection, the reads, the live feed and the credential refresh, and holds the
+page's state as one immutable object, replaced on each change. A client only binds that state to
+its framework and draws the chart:
+
+| Client | Binds the session's state with | Draws the chart in |
+|---|---|---|
+| `vanilla/` | a subscription that writes it into the markup | the page's own functions |
+| `react/` | `useSyncExternalStore` (`react/src/session.ts`) | effects on a ref'd element (`Chart.tsx`) |
+
+The session starts before the framework renders and ends after it tears down, so StrictMode's
+doubled effects never start a second one. A server-rendered page starts from `initialState`, which
+depends on nothing but the server's read, so the browser's hydration render matches the server's.
 
 ## What every client does
 
@@ -42,7 +58,7 @@ these clients add what an application needs on top of it.
 
 ```sh
 bun run build                      # the clients use the built package
-bun run --cwd reference/vanilla dev
+bun run --cwd reference/vanilla dev   # or reference/react
 ```
 
 Open `/` for the client-only page and `/ssr` for the server-rendered one. The mock backend
@@ -52,7 +68,8 @@ Open `/` for the client-only page and `/ssr` for the server-rendered one. The mo
 ## Copying a client
 
 Take the client's folder, `shared/`, and the parts of `integrations/shared/` it imports
-(`connection.ts`, `hydration.ts`, `server.ts`, and for vanilla `integrations/vanilla/series.ts`).
+(`connection.ts`, `hydration.ts`, `server.ts`), with `integrations/vanilla/series.ts`, which the
+session reads through.
 Then replace what belongs to the demo:
 
 - the fetcher (`examples/mock-backend/src/fetcher.ts`) with one for your backend

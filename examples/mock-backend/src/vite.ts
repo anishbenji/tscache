@@ -95,6 +95,8 @@ export interface ServerEntry {
 export interface RenderRequest {
   /** Where this server listens, and so where the mock backend answers. */
   origin: string;
+  /** The page's URL as requested: its path and query. */
+  url: string;
 }
 
 /** Markup for the placeholders in the example's index.html. */
@@ -136,9 +138,9 @@ function pageMiddleware(
 async function fill(
   template: string,
   entry: ServerEntry,
-  origin: string,
+  request: RenderRequest,
 ): Promise<string> {
-  const { head, html } = await entry.render({ origin });
+  const { head, html } = await entry.render(request);
   return template
     .replace("<!--ssr-head-->", () => head)
     .replace("<!--ssr-html-->", () => html);
@@ -194,7 +196,7 @@ export function ssrPage({
         const source = await readFile(`${root}/${template}`, "utf8");
         const html = await server.transformIndexHtml(url, source);
         const module = await ssr.runner.import<ServerEntry>(`/${entry}`);
-        return fill(html, module, origin);
+        return fill(html, module, { origin, url });
       };
       server.middlewares.use(
         pageMiddleware(paths, () => originOf(server), render),
@@ -205,10 +207,10 @@ export function ssrPage({
       // the time a request arrives, so import() would fail here; require()
       // of an ES module (Node 22.12 and later) loads it natively.
       const require = createRequire(`${root}/`);
-      const render: Render = async (_url, origin) => {
+      const render: Render = async (url, origin) => {
         const html = await readFile(`${root}/dist/client/${template}`, "utf8");
         const module = require(`./dist/server/${name}.js`) as ServerEntry;
-        return fill(html, module, origin);
+        return fill(html, module, { origin, url });
       };
       server.middlewares.use(
         pageMiddleware(paths, () => originOf(server), render),

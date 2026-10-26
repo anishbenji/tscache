@@ -45,6 +45,8 @@ export interface BackendStats {
   reused: number;
   /** Live streams open now. */
   streams: number;
+  /** The backend's clock (ms), advanceMs included. */
+  now: number;
 }
 
 /**
@@ -74,6 +76,8 @@ export interface BackendControl {
   dropStreams?: true;
   /** Move the backend's clock forward, so time passes in a test at once. */
   advanceMs?: number;
+  /** Undo every advanceMs, so the next test starts on the real clock. */
+  resetClock?: true;
 }
 
 /** Answers a request under /api/, or undefined for any other path. */
@@ -321,6 +325,7 @@ export function createBackend(options: BackendOptions = {}): Backend {
     if (body.dropStreams === true) for (const end of [...streams]) end();
     const advance = body.advanceMs ?? Number.NaN;
     if (Number.isSafeInteger(advance) && advance > 0) advanced += advance;
+    if (body.resetClock === true) advanced = 0;
     const failNext = body.failNext ?? Number.NaN;
     if (Number.isSafeInteger(failNext) && failNext >= 0) failing = failNext;
     if (body.expireAccess === true) {
@@ -332,6 +337,7 @@ export function createBackend(options: BackendOptions = {}): Backend {
   function snapshot(): BackendStats {
     return {
       ...stats,
+      now: now(),
       version: `v${version}`,
       latencyMs,
       pages: { ...stats.pages },

@@ -11,7 +11,7 @@
     "examples/*/src/entry-server.tsx",
     // The reference clients' pages and their server entries, as above.
     "reference/*/*.html",
-    "reference/*/src/entry-server.ts",
+    "reference/*/src/entry-server.{ts,tsx}",
     // The integration snippets, which an app copies and nothing imports.
     "integrations/*/*.{ts,tsx}"
   ],

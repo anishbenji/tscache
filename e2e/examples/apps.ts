@@ -10,6 +10,7 @@ export const apps = {
   "react-ssr": 5105,
   "solid-ssr": 5106,
   "reference-vanilla": 5201,
+  "reference-react": 5202,
 } as const;
 
 export type App = keyof typeof apps;

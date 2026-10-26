@@ -1,0 +1,24 @@
+{
+  "name": "@reference/react",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader runner",
+    "build": "tsc -p . && vite build --app --configLoader runner",
+    "preview": "vite preview --configLoader runner"
+  },
+  "dependencies": {
+    "@examples/mock-backend": "workspace:*",
+    "@reference/shared": "workspace:*",
+    "@tscache/integrations": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tscache": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "vite": "^8.3.4"
+  }
+}

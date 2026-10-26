@@ -248,6 +248,7 @@ describe("live stream", () => {
     expect((await stats(backend)).streams).toBe(0);
 
     await call(backend, "/api/control", post({ advanceMs: MINUTE }));
+    expect((await stats(backend)).now).toBe(NOW + 30_000 + MINUTE);
     const later = await call(
       backend,
       `/api/stream/crypto/BTC?interval=${MINUTE}`,
@@ -255,6 +256,8 @@ describe("live stream", () => {
     const next = (later.body as ReadableStream<Uint8Array>).getReader();
     expect((await nextBatch(next)).timestamps).toEqual([NOW + MINUTE]);
     await call(backend, "/api/control", post({ dropStreams: true }));
+    await call(backend, "/api/control", post({ resetClock: true }));
+    expect((await stats(backend)).now).toBe(NOW + 30_000);
   });
 
   it("rejects unknown datasets and bad intervals", async () => {
