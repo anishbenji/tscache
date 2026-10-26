@@ -8,7 +8,7 @@ The benchmarks and the regression gate the user asked for on 2026-10-26, while a
 
 | Commit | What |
 |---|---|
-| — | `chore(bench)`: exact budgets (`scripts/size.ts` with `packages/tscache/bench/budgets.json`; `packages/tscache/test/perf/{memory,counters}.test.ts`); the paired timing harness (`packages/tscache/bench/`: fixtures, cases, sampler, gate, runner, entry) and its driver `scripts/bench.ts`; `bench:smoke` and the size check in `scripts/ci.sh`; a report-only `bench` job in `ci.yml`; `bench-calibrate.yml` with `scripts/bench-calibration.ts`; Knip, Fallow, `.gitignore`; `docs/benchmarking.md` and the roadmap entry |
+| c8c38a1 | `chore(bench)`: exact budgets (`scripts/size.ts` with `packages/tscache/bench/budgets.json`; `packages/tscache/test/perf/{memory,counters}.test.ts`); the paired timing harness (`packages/tscache/bench/`: fixtures, cases, sampler, gate, runner, entry) and its driver `scripts/bench.ts`; `bench:smoke` and the size check in `scripts/ci.sh`; a report-only `bench` job in `ci.yml`; `bench-calibrate.yml` with `scripts/bench-calibration.ts`; Knip, Fallow, `.gitignore`; `docs/benchmarking.md` and the roadmap entry |
 
 ## Decisions made in the step
 
