@@ -177,6 +177,21 @@
         "vite": "^8.3.4",
       },
     },
+    "reference/solid": {
+      "name": "@reference/solid",
+      "dependencies": {
+        "@examples/mock-backend": "workspace:*",
+        "@reference/shared": "workspace:*",
+        "@solidjs/web": "2.0.0-rc.14",
+        "@tscache/integrations": "workspace:*",
+        "solid-js": "2.0.0-rc.14",
+        "tscache": "workspace:*",
+      },
+      "devDependencies": {
+        "vite": "^8.3.4",
+        "vite-plugin-solid": "3.0.0-next.27",
+      },
+    },
     "reference/vanilla": {
       "name": "@reference/vanilla",
       "dependencies": {
@@ -436,6 +451,8 @@
     "@reference/react": ["@reference/react@workspace:reference/react"],
 
     "@reference/shared": ["@reference/shared@workspace:reference/shared"],
+
+    "@reference/solid": ["@reference/solid@workspace:reference/solid"],
 
     "@reference/vanilla": ["@reference/vanilla@workspace:reference/vanilla"],
 

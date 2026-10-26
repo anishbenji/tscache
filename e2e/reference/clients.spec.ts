@@ -102,7 +102,11 @@ function candlePixels(page: Page): Promise<number> {
   });
 }
 
-for (const app of ["reference-vanilla", "reference-react"] as const) {
+for (const app of [
+  "reference-vanilla",
+  "reference-react",
+  "reference-solid",
+] as const) {
   test.describe(app, () => {
     test.use({ baseURL: appUrl(app) });
     test.describe.configure({ mode: "serial" });

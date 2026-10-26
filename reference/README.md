@@ -11,7 +11,7 @@ these clients add what an application needs on top of it.
 | `shared/` | What every client uses, whatever its framework (below) |
 | `vanilla/` | Done |
 | `react/` | Done |
-| `solid/` | Next |
+| `solid/` | Done |
 
 ## How they are built
 
@@ -24,6 +24,7 @@ its framework and draws the chart:
 |---|---|---|
 | `vanilla/` | a subscription that writes it into the markup | the page's own functions |
 | `react/` | `useSyncExternalStore` (`react/src/session.ts`) | effects on a ref'd element (`Chart.tsx`) |
+| `solid/` | one signal the session's changes replace (`solid/src/session.ts`) | effects on a ref'd element, after an async memo of the chart library (`Chart.tsx`) |
 
 The session starts before the framework renders and ends after it tears down, so StrictMode's
 doubled effects never start a second one. A server-rendered page starts from `initialState`, which
@@ -58,7 +59,7 @@ depends on nothing but the server's read, so the browser's hydration render matc
 
 ```sh
 bun run build                      # the clients use the built package
-bun run --cwd reference/vanilla dev   # or reference/react
+bun run --cwd reference/vanilla dev   # or reference/react, reference/solid
 ```
 
 Open `/` for the client-only page and `/ssr` for the server-rendered one. The mock backend
