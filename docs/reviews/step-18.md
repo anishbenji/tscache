@@ -1,6 +1,6 @@
 # Step 18 — Reference clients: React
 
-Branch: `feat/18-reference-react` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: —
+Branch: `feat/18-reference-react` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: settled · Verdict after triage: merge
 
 The second of the three reference clients (`docs/roadmap.md`, "Reference clients"; decisions of 2026-10-26). Not an engine step: tests are written with the code.
 
@@ -34,8 +34,12 @@ The second of the three reference clients (`docs/roadmap.md`, "Reference clients
 |---|---|---|---|---|
 | R2-1 | P1 | R1-1 froze the detached chart's range: pushes read during the load move the read range past it, so a later reconnect again skips its catch-up | accepted | Validated by reading `following()` against the frozen range. The session now keeps, on detach, whether the chart followed the market, and goes by that until a chart is attached; `opening` moves the detached range on to the newest bars when it followed, so the next chart opens following. The React chart takes its opening from the session. The E2E test holds the uPlot chunk, moves the backend two bars on (the pushes, read from the cache alone, widen the read range), reopens the stream and waits for the catch-up; it fails for React with the fix removed. Found while testing: the clock-moving tests shaped the tests after them, leaving the backend minutes ahead of the browser; the backend now reports its clock in `/api/stats` and resets it on `resetClock`, which the spec does after every test. 98f9734 |
 
+## Round 3 — reviewer verdict: merge
+
+No findings. The reviewer confirmed R1-1, R1-2 and R2-1 fixed.
+
 ## Verification
 
-- `bun run ci` green: 1467 Vitest, 74 Playwright (78 after round 2), including `e2e/reference/clients.spec.ts` with all 13 tests against each client (15 after round 2).
+- `bun run ci` green: 1467 Vitest, 74 Playwright (78 after round 2), including `e2e/reference/clients.spec.ts` with all 13 tests against each client (15 after round 2); green again for round 3.
 - Run by hand in Chromium against the React dev server: `/ssr?chart=uplot` hydrates with no warning and draws the server's read; `/` draws and follows the market.
 - Not verified: Firefox and Safari; the feed on dedicated-worker or in-process tabs in a real browser.
