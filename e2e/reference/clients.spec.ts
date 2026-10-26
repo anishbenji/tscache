@@ -507,6 +507,29 @@ for (const app of [
         await expect(b.getByTestId("auth")).toHaveText("signed in");
       });
 
+      test("a socket whose session was lost reconnects after a sign-in in its own tab (step 20 R1-2)", async ({
+        context,
+      }) => {
+        const page = await openTab(context, "/?feed=ws");
+        await expect.poll(async () => (await stats(page)).streams).toBe(1);
+        // A refresh token the backend refuses: the socket's refresh fails.
+        await page.evaluate(() => {
+          const key = "tscache-reference:tokens";
+          const tokens = JSON.parse(localStorage.getItem(key) ?? "{}");
+          localStorage.setItem(
+            key,
+            JSON.stringify({ ...tokens, refresh: "rt-x" }),
+          );
+        });
+        await control(page, { expireAccess: true, dropStreams: true });
+        await expect(page.getByTestId("auth")).toHaveText("signed out");
+        expect((await stats(page)).streams).toBe(0);
+        await page.getByRole("button", { name: "Sign in again" }).click();
+        await expect(page.getByTestId("auth")).toHaveText("signed in");
+        await expect.poll(async () => (await stats(page)).streams).toBe(1);
+        await nextDraw(page);
+      });
+
       test("one tab polls, fetching only the newest bars, and the others draw without a fetch", async ({
         context,
       }) => {

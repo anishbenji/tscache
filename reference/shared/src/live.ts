@@ -109,6 +109,12 @@ export function liveFeed({
   const stop = new AbortController();
   /** Messages are applied one at a time, in the order they came. */
   let queue = Promise.resolve();
+  /**
+   * Where this tab's own reads of the holder's polls stopped being
+   * complete (a cache of its own only): the next poll reads from there,
+   * as the holder's next poll does after a failed one of its own.
+   */
+  let unread: number | undefined;
 
   function opened(): Promise<void> {
     queue = queue.then(() => {
@@ -130,26 +136,35 @@ export function liveFeed({
       const state = connection.state;
       if (state.status !== "connected") return false;
       let complete = true;
+      let failed = false;
+      let span =
+        message.kind === "batch" ? spanOf(message.batch) : message.span;
       if (held || state.client.mode !== "shared") {
+        // The holder's span already starts where its last complete poll
+        // ended; this tab's own starts where its own did.
+        if (message.kind === "polled" && !held && unread !== undefined) {
+          span = { start: Math.min(unread, span.start), end: span.end };
+        }
         try {
           const cache = await connection.cache(state.client, config);
           if (message.kind === "batch") {
             await cache.put(message.batch);
           } else {
-            const { misses } = await cache.get(message.span);
+            const { misses } = await cache.get(span);
             complete = misses.every((miss) => miss.reason === "uncached");
           }
         } catch (error) {
           // A lost worker fails the put; the next client fetches instead.
           if (connection.state === state) reportError(error);
-          return false;
+          complete = false;
+          failed = true;
         }
+        if (message.kind === "polled" && !held) {
+          unread = complete ? undefined : span.start;
+        }
+        if (failed) return false;
       }
-      if (!stop.signal.aborted) {
-        onBatch(
-          message.kind === "batch" ? spanOf(message.batch) : message.span,
-        );
-      }
+      if (!stop.signal.aborted) onBatch(span);
       return complete;
     });
     queue = applied.then(() => {});
@@ -236,6 +251,17 @@ export interface SocketOptions {
   lost(error: unknown, retry: () => void): () => void;
 }
 
+/**
+ * A socket's URL: `url` resolved against the page's, with an HTTP scheme
+ * turned into its WebSocket counterpart; `ws:` and `wss:` stay as given.
+ */
+export function socketAddress(url: string, base: string): URL {
+  const address = new URL(url, base);
+  if (address.protocol === "http:") address.protocol = "ws:";
+  if (address.protocol === "https:") address.protocol = "wss:";
+  return address;
+}
+
 /** How soon a dropped socket reconnects, as the SSE stream's retry. */
 const RECONNECT_MS = 500;
 
@@ -260,9 +286,7 @@ export function webSocket({
 
     function connect(access: string): void {
       if (stopped) return;
-      const address = new URL(url, location.href);
-      address.protocol = address.protocol === "https:" ? "wss:" : "ws:";
-      const current = new WebSocket(address);
+      const current = new WebSocket(socketAddress(url, location.href));
       socket = current;
       let first = true;
       current.addEventListener("open", () => current.send(subscribe(access)));
@@ -298,7 +322,10 @@ export function webSocket({
       } catch (error) {
         if (stopped) return;
         stopWaiting = lost(error, () => {
-          stopWaiting?.();
+          // Once, however many ways the sign-in is heard of.
+          if (stopWaiting === undefined) return;
+          stopWaiting();
+          stopWaiting = undefined;
           void start();
         });
         return;

@@ -320,9 +320,13 @@ export function startSession({ open, served, feed }: SessionOptions): Session {
     };
   });
 
+  /** What waits for a sign-in in this tab: the live socket, after a lost session. */
+  const signedIn = new Set<() => void>();
+
   function sessionRestored(): void {
     update({ auth: "signed in" });
     bars.show(asked);
+    for (const resume of [...signedIn]) resume();
   }
 
   // Another tab signed in: adopt its token, as a tab on a worker of its
@@ -349,7 +353,15 @@ export function startSession({ open, served, feed }: SessionOptions): Session {
           lost(error, retry) {
             reportError(error);
             update({ auth: "signed out" });
-            return onTokensStored(() => retry());
+            // A sign-in here stores the tokens without a storage event in
+            // this tab, so the socket hears of it from sessionRestored.
+            const resume = () => retry();
+            signedIn.add(resume);
+            const stopWatching = onTokensStored(resume);
+            return () => {
+              signedIn.delete(resume);
+              stopWatching();
+            };
           },
         });
       case "poll":
