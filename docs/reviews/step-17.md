@@ -1,6 +1,6 @@
 # Step 17 — Reference clients: vanilla
 
-Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: in review · Verdict after triage: —
+Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 5 · Status: in review · Verdict after triage: —
 
 The first of the three reference clients (`docs/roadmap.md`, "Reference clients"; track (c) after the post-build architecture review). Not an engine step: tests are written with the code. The decisions below were the user's (2026-10-26); the roadmap records them.
 
@@ -53,6 +53,13 @@ Each is reversible and inside the user's decisions; listed so the review can con
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R4-1 | P1 | A stream that reconnects inside the next bar sends only that bar, so the bar it broke in keeps its provisional values | accepted; area redesigned | Validated by reading: the gap branch of R3-1 starts only past one bar, and a new stream sends no closed bar. **Convergence check:** the stream's recovery drew findings in rounds 3 and 4, so it was redesigned rather than patched. Every break of the stream ends in an opening (an `EventSource` reconnect, or another tab taking the lock), so the feed now reports each opening to every tab (`onOpened`), ahead of the stream's first batch, and a tab that follows the market reads its newest bars with a fetch. That fetch covers the provisional end, so it mends missed bars and stale provisional ones alike; a batch after a gap takes the same path (`catchUp`). The mock backend gains `dropStreams` and `advanceMs`, and sends an SSE `retry` of 500 ms. The E2E test drops the stream and moves the backend a minute on in one request, then waits for a fetch over the bar the stream broke in; it fails without the catch-up on opening. 2b5a5b4 |
+
+## Round 5 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R5-1 | P1 | Teardown leaves the controls' listeners, so a page started again in the same markup also runs the disposed page's handlers | accepted | Validated by reading: the three `addEventListener` calls had no removal. They now take an abort signal that teardown aborts, and a sign-in that resolves after teardown returns early. Verified by hand in Chromium against the dev server: a page started, torn down and started again in one element stays "live" after Retry and a chart switch. The same run on the old code showed no visible symptom there (a call on a disposed SharedWorker client does not surface), which is why the reviewer's in-memory reproduction is the evidence; no regression test, since the page module loads only through Vite and no spec remounts a page. 4f0e06f |
+| R5-2 | P2 | `auth.ts` omits N42's prerequisite that a refresh issues a new access token | accepted | Validated against N42 and the example's `auth-refresh.ts`, which states it. The module header now says so, with the redundant refresh per extra tab that follows otherwise. 4f0e06f |
 
 ## Verification
 
