@@ -71,7 +71,7 @@ Limits every variant shares:
 - `get` takes no abort signal: an overtaken read is dropped, not cancelled, and its fetch still fills
   the cache.
 - Reading a range again (after `updateAuth`, say) means asking for it again: the vanilla series reads
-  on each `show`, and the Solid, Vue, Svelte and Angular adapters read again when given a new range
-  object. React's `useSeries` caches answers by range value, so it reads again only for a new range or
-  a new client. The reference clients on the roadmap add the credential refresh; until then,
-  `examples/react-lwcharts/src/auth-refresh.ts` shows `authInvalid` with Web Locks.
+  on each `show`, and its `refresh` reads from the cache alone (after a put of pushed data, say); the
+  Solid, Vue, Svelte and Angular adapters read again when given a new range object. React's
+  `useSeries` caches answers by range value, so it reads again only for a new range or a new client.
+  The reference clients (`reference/`) add the credential refresh and pushed data.
