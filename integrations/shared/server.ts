@@ -37,6 +37,12 @@ export interface ServerOptions {
   fetcherModule: string;
   /** The backend's origin: a server has no page origin to resolve against. */
   origin: string;
+  /**
+   * More fetcher context, such as the server's own credential for a
+   * backend that requires one. Never a visitor's: every visitor shares
+   * this client.
+   */
+  context?: Record<string, unknown>;
 }
 
 /**
@@ -47,9 +53,10 @@ export interface ServerOptions {
 export function serverReader({
   fetcherModule,
   origin,
+  context,
 }: ServerOptions): (config: CacheConfig, range: Range) => Promise<ServerRead> {
   const client = serverClient({
-    fetcher: { module: fetcherModule, context: { origin } },
+    fetcher: { module: fetcherModule, context: { ...context, origin } },
   });
   return async (config, range) => {
     const cache = await (await client()).cache(config);

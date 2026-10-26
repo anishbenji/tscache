@@ -22,7 +22,17 @@ export interface SeriesOptions {
 export interface Series {
   /** Reads `range` and renders the answer, unless a later show() overtakes it. */
   show(range: Range): void;
-  /** Stops rendering; an answer still in flight is dropped. */
+  /**
+   * Reads `range` (by default the range on screen) from the cache alone,
+   * without fetching: after a put of pushed data, say. It becomes the range
+   * on screen. Skipped while a show()'s read is still in flight, whose
+   * answer replaces this one anyway.
+   */
+  refresh(range?: Range): void;
+  /**
+   * Stops rendering; an answer still in flight is dropped, and later
+   * show() and refresh() calls (from a callback still pending) do nothing.
+   */
   dispose(): void;
 }
 
@@ -32,8 +42,12 @@ export function series(
 ): Series {
   let range: Range | undefined;
   let latest = 0;
+  /** The request number of the show() read in flight, or 0. */
+  let showing = 0;
+  let disposed = false;
 
-  function read(): void {
+  function read(cacheOnly = false): void {
+    if (disposed) return;
     const state = connection.state;
     if (state.status === "failed") {
       fail(state.error);
@@ -42,9 +56,10 @@ export function series(
     if (state.status !== "connected" || range === undefined) return;
     const request = ++latest;
     const asked = range;
+    if (!cacheOnly) showing = request;
     connection
       .cache(state.client, config)
-      .then((cache) => cache.get(asked))
+      .then((cache) => cache.get(asked, { cacheOnly }))
       .then(
         (result) => {
           if (request === latest) render({ range: asked, result });
@@ -54,17 +69,26 @@ export function series(
           // client reads again, so only a failure on a live client counts.
           if (request === latest && connection.state === state) fail(error);
         },
-      );
+      )
+      .finally(() => {
+        if (showing === request) showing = 0;
+      });
   }
 
   // A new client (the first, or one replacing a lost worker) reads again.
-  const unsubscribe = connection.subscribe(read);
+  const unsubscribe = connection.subscribe(() => read());
   return {
     show(next) {
       range = next;
       read();
     },
+    refresh(next = range) {
+      if (showing !== 0 || next === undefined) return;
+      range = next;
+      read(true);
+    },
     dispose() {
+      disposed = true;
       unsubscribe();
       latest++;
     },

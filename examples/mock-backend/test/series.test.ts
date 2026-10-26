@@ -17,6 +17,7 @@ const LATER = MONDAY + 365 * DAY;
 
 const intervals: Record<DatasetName, number> = {
   candles: 30 * MINUTE,
+  crypto: MINUTE,
   metrics: 5000,
   sensor: 10_000,
   events: MINUTE,
@@ -148,6 +149,24 @@ describe("candles", () => {
 
   it("keep high and low around open and close", () => {
     const { open, high, low, close } = page("candles", MONDAY, MONDAY + 5 * DAY)
+      .fields as Record<string, number[]>;
+    for (const [i, o] of (open ?? []).entries()) {
+      const c = close?.[i] ?? Number.NaN;
+      expect(high?.[i]).toBeGreaterThanOrEqual(Math.max(o, c));
+      expect(low?.[i]).toBeLessThanOrEqual(Math.min(o, c));
+    }
+  });
+});
+
+describe("crypto", () => {
+  it("has a bar in every slot, weekends and nights included", () => {
+    const saturday = MONDAY + 5 * DAY;
+    const p = page("crypto", saturday, saturday + DAY - MINUTE);
+    expect(p.timestamps).toHaveLength(DAY / MINUTE);
+  });
+
+  it("keeps high and low around open and close", () => {
+    const { open, high, low, close } = page("crypto", MONDAY, MONDAY + HOUR)
       .fields as Record<string, number[]>;
     for (const [i, o] of (open ?? []).entries()) {
       const c = close?.[i] ?? Number.NaN;

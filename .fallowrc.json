@@ -9,6 +9,9 @@
     "scripts/*.ts",
     "examples/*/*.html",
     "examples/*/src/entry-server.tsx",
+    // The reference clients' pages and their server entries, as above.
+    "reference/*/*.html",
+    "reference/*/src/entry-server.ts",
     // The integration snippets, which an app copies and nothing imports.
     "integrations/*/*.{ts,tsx}"
   ],
@@ -16,7 +19,7 @@
   // which does not exist yet when `bun run ci` runs Fallow before the build.
   "ignoreUnresolvedImports": ["tscache", "tscache/**"],
   "workspaces": {
-    "packages": ["packages/*", "examples/*", "integrations"]
+    "packages": ["packages/*", "examples/*", "integrations", "reference/*"]
   },
   // Consumed by tsdown's publint/attw integration, not imported anywhere.
   "ignoreDependencies": ["@arethetypeswrong/cli", "publint"],
@@ -26,9 +29,11 @@
     // the coverage-based CRAP estimate cannot see. The framework snippets
     // are type-checked, not run in CI (step ⑭), so the estimate takes them
     // as untested; their shared core and the vanilla snippet stay gated.
+    // The reference clients, like the examples, are covered by Playwright.
     "ignore": [
       "packages/*/test/**",
       "examples/**",
+      "reference/**",
       "integrations/react/**",
       "integrations/solid/**",
       "integrations/vue/**",

@@ -28,7 +28,7 @@ function alignUp(t: number, interval: number, offset: number): number {
   return Math.ceil((t - offset) / interval) * interval + offset;
 }
 
-function alignDown(t: number, interval: number, offset: number): number {
+export function alignDown(t: number, interval: number, offset: number): number {
   return Math.floor((t - offset) / interval) * interval + offset;
 }
 

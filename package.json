@@ -5,14 +5,15 @@
   "workspaces": [
     "packages/*",
     "examples/*",
-    "integrations"
+    "integrations",
+    "reference/*"
   ],
   "engines": {
     "node": ">=22.12"
   },
   "scripts": {
     "check": "biome check .",
-    "typecheck": "tsc -p packages/tscache && tsc -p . && tsc -p e2e && tsc -p examples/mock-backend",
+    "typecheck": "tsc -p packages/tscache && tsc -p . && tsc -p e2e && tsc -p examples/mock-backend && tsc -p reference/shared",
     "check:integrations": "bun run --cwd integrations check",
     "test": "vitest run --passWithNoTests",
     "build": "bun run --filter tscache build",

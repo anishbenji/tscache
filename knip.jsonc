@@ -15,6 +15,11 @@
     // The SSR examples' server entries are named only by their Vite config.
     "examples/react-ssr": { "entry": ["src/entry-server.tsx"] },
     "examples/solid-ssr": { "entry": ["src/entry-server.tsx"] },
+    // The server-rendered page's entries, named by the Vite config and by
+    // ssr.html (Knip reads index.html only).
+    "reference/vanilla": {
+      "entry": ["src/entry-server.ts", "src/entry-client.ts"]
+    },
     // Every snippet is an entry: an app copies it, nothing imports it.
     "integrations": {
       "entry": ["*/*.{ts,tsx}", "test/**/*.test.ts"],

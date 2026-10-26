@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type Backend,
   type BackendStats,
   createBackend,
+  type StreamBatch,
   type Tokens,
 } from "../src/backend";
 
@@ -133,5 +134,137 @@ describe("createBackend", () => {
     expect((await stats(backend)).latencyMs).toBe(40);
     await call(backend, "/api/control", post({ latencyMs: 1e12 }));
     expect((await stats(backend)).latencyMs).toBe(60_000);
+  });
+});
+
+describe("failNext", () => {
+  it("fails that many series requests, then answers again", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const path = `/api/series/metrics/web?${query}`;
+    await call(backend, "/api/control", post({ failNext: 2 }));
+    expect((await call(backend, path)).status).toBe(500);
+    expect((await call(backend, path)).status).toBe(500);
+    expect((await call(backend, path)).status).toBe(200);
+  });
+});
+
+describe("service token", () => {
+  it("accepts series requests with the service token, whatever the user's token", async () => {
+    const backend = createBackend({
+      latencyMs: 0,
+      auth: true,
+      serviceToken: "service",
+      now: () => NOW,
+    });
+    const path = `/api/series/metrics/web?${query}`;
+    const as = (token: string) => ({
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect((await call(backend, path, as("service"))).status).toBe(200);
+    expect((await call(backend, path, as("other"))).status).toBe(401);
+  });
+});
+
+describe("live stream", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The next bar event of an event stream, parsed. */
+  async function nextBatch(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+  ): Promise<StreamBatch> {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("the stream ended");
+      const text = new TextDecoder().decode(value);
+      if (text.startsWith("retry: ")) continue;
+      const data = /^event: bar\ndata: (.*)\n\n$/.exec(text)?.[1];
+      if (data === undefined) throw new Error(`not a bar event: ${text}`);
+      return JSON.parse(data) as StreamBatch;
+    }
+  }
+
+  it("pushes the forming bar, then the closed bar with its final values", async () => {
+    // The clock moves only when the test says, so each message is known.
+    vi.useFakeTimers();
+    let now = NOW + 30_000;
+    const backend = createBackend({
+      latencyMs: 0,
+      pushMs: 1000,
+      now: () => now,
+    });
+    const gone = new AbortController();
+    const response = await call(
+      backend,
+      `/api/stream/crypto/BTC?interval=${MINUTE}`,
+      { signal: gone.signal },
+    );
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    expect((await stats(backend)).streams).toBe(1);
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+
+    const first = await nextBatch(reader);
+    expect(first.timestamps).toEqual([NOW]);
+    expect(first.meta).toEqual({ version: "v1", finalizedUntil: NOW });
+    expect(Object.keys(first.fields)).toEqual([
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume",
+    ]);
+
+    now = NOW + MINUTE + 1000;
+    vi.advanceTimersByTime(1000);
+    const second = await nextBatch(reader);
+    expect(second.timestamps).toEqual([NOW, NOW + MINUTE]);
+    expect(second.meta.finalizedUntil).toBe(NOW + MINUTE);
+    // The closed bar as the series answers it once final.
+    const page = await (
+      await call(
+        backend,
+        `/api/series/crypto/BTC?start=${NOW}&end=${NOW}&interval=${MINUTE}&offset=0`,
+      )
+    ).json();
+    expect(second.fields.close?.[0]).toBe(page.fields.close[0]);
+
+    gone.abort();
+    expect((await stats(backend)).streams).toBe(0);
+  });
+
+  it("ends every stream on dropStreams, and moves the clock on advanceMs", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW + 30_000 });
+    const response = await call(
+      backend,
+      `/api/stream/crypto/BTC?interval=${MINUTE}`,
+    );
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    const { value } = await reader.read();
+    expect(new TextDecoder().decode(value)).toBe("retry: 500\n\n");
+    expect((await nextBatch(reader)).timestamps).toEqual([NOW]);
+    await call(backend, "/api/control", post({ dropStreams: true }));
+    expect((await reader.read()).done).toBe(true);
+    expect((await stats(backend)).streams).toBe(0);
+
+    await call(backend, "/api/control", post({ advanceMs: MINUTE }));
+    const later = await call(
+      backend,
+      `/api/stream/crypto/BTC?interval=${MINUTE}`,
+    );
+    const next = (later.body as ReadableStream<Uint8Array>).getReader();
+    expect((await nextBatch(next)).timestamps).toEqual([NOW + MINUTE]);
+    await call(backend, "/api/control", post({ dropStreams: true }));
+  });
+
+  it("rejects unknown datasets and bad intervals", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    expect((await call(backend, "/api/stream/nope/x?interval=1")).status).toBe(
+      404,
+    );
+    expect((await call(backend, "/api/stream/crypto/x")).status).toBe(400);
+    expect(
+      (await call(backend, "/api/stream/crypto/x?interval=0.5")).status,
+    ).toBe(400);
   });
 });

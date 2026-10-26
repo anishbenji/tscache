@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "description": "Type-checked integration snippets for tscache, one per framework (never published)",
+  "exports": {
+    "./shared/*": "./shared/*.ts",
+    "./vanilla/*": "./vanilla/*.ts"
+  },
   "scripts": {
     "check": "tsc -p shared && tsc -p test && tsc -p vanilla && tsc -p react && tsc -p solid && tsc -p vue && tsc -p svelte && tsc -p angular"
   },

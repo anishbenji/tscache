@@ -1,19 +1,28 @@
-// The mock backend as a fetch-style handler: series pages, bearer-token auth
-// with refresh-token rotation, and controls the example pages call to show
+// The mock backend as a fetch-style handler: series pages, a live stream
+// of the forming bar, bearer-token auth with refresh-token rotation, and
+// controls the example pages call to show
 // what tscache does about latency, a dataset version change or an expired
 // token. All state lives in memory, one backend per dev or preview server.
 
 import { datasets, isDatasetName } from "./datasets";
 import { seedOf } from "./noise";
-import { type SeriesQuery, seriesPage } from "./series";
+import { alignDown, type SeriesQuery, seriesPage } from "./series";
 
 export interface BackendOptions {
   /** Delay before each series page and refresh answer. Default 300 ms. */
   latencyMs?: number;
   /** Require a bearer token on series requests. Default false. */
   auth?: boolean;
+  /**
+   * A bearer token series requests are always accepted with, as a server
+   * that renders pages holds a credential of its own rather than a user's.
+   * Default none.
+   */
+  serviceToken?: string;
   /** Clock, for tests. Default `Date.now`. */
   now?: () => number;
+  /** Time between two messages of a live stream. Default 1000 ms. */
+  pushMs?: number;
 }
 
 /** A pair of tokens, as `/api/auth/login` and `/api/auth/refresh` answer. */
@@ -34,6 +43,19 @@ export interface BackendStats {
   refreshes: number;
   /** Refresh attempts with a refresh token that is not the current one. */
   reused: number;
+  /** Live streams open now. */
+  streams: number;
+}
+
+/**
+ * One message of a live stream (GET /api/stream/<dataset>/<symbol>), in
+ * the shape of a tscache put batch: the bar forming now and, when a bar
+ * has just closed, that bar with its final values first.
+ */
+export interface StreamBatch {
+  timestamps: number[];
+  fields: Record<string, number[]>;
+  meta: { version: string; finalizedUntil: number };
 }
 
 /**
@@ -46,12 +68,21 @@ export interface BackendControl {
   bumpVersion?: true;
   /** Replace the access token; the refresh token stays valid. */
   expireAccess?: true;
+  /** Answer the next this many series requests with a server error. */
+  failNext?: number;
+  /** End every live stream, as a network outage would; clients reconnect. */
+  dropStreams?: true;
+  /** Move the backend's clock forward, so time passes in a test at once. */
+  advanceMs?: number;
 }
 
 /** Answers a request under /api/, or undefined for any other path. */
 export type Backend = (request: Request) => Promise<Response | undefined>;
 
 const SERIES = /^\/api\/series\/([^/]+)\/([^/]+)$/;
+const STREAM = /^\/api\/stream\/([^/]+)\/([^/]+)$/;
+/** How soon a client reconnects a dropped live stream (the SSE retry). */
+const RECONNECT_MS = 500;
 /** Longer delays would overflow setTimeout, which then fires at once. */
 const MAX_LATENCY = 60_000;
 
@@ -98,17 +129,33 @@ async function readJson(request: Request): Promise<unknown> {
 }
 
 export function createBackend(options: BackendOptions = {}): Backend {
-  const now = options.now ?? Date.now;
+  const clock = options.now ?? Date.now;
+  /** How far BackendControl.advanceMs moved the clock. */
+  let advanced = 0;
+  const now = () => clock() + advanced;
   const auth = options.auth ?? false;
+  const pushMs = options.pushMs ?? 1000;
   let latencyMs = options.latencyMs ?? 300;
   let version = 1;
+  /** Series requests still to fail (BackendControl.failNext). */
+  let failing = 0;
+  /** Ends each open live stream (BackendControl.dropStreams). */
+  const streams = new Set<() => void>();
   let tokens: Tokens = { access: newToken("at"), refresh: newToken("rt") };
   const stats = {
     pages: {} as Record<string, number>,
     refused: 0,
     refreshes: 0,
     reused: 0,
+    streams: 0,
   };
+
+  /** The seed of a series under the current dataset version. */
+  function seedFor(dataset: string, symbol: string): number {
+    // The symbol seeds the series as it appears in the path, undecoded: a
+    // malformed escape is just another name.
+    return seedOf(`${dataset}/${symbol}/v${version}`);
+  }
 
   async function series(request: Request, url: URL): Promise<Response> {
     const [, dataset = "", symbol = ""] = SERIES.exec(url.pathname) ?? [];
@@ -116,17 +163,21 @@ export function createBackend(options: BackendOptions = {}): Backend {
     const query = parseQuery(url);
     if (query === undefined) return text(400, "bad query");
     // Decided on arrival, like a real server; the latency only delays it.
+    const presented = request.headers.get("authorization");
     const authorized =
       !auth ||
-      request.headers.get("authorization") === `Bearer ${tokens.access}`;
+      presented === `Bearer ${tokens.access}` ||
+      (options.serviceToken !== undefined &&
+        presented === `Bearer ${options.serviceToken}`);
     const tag = `v${version}`;
-    // The symbol seeds the series as it appears in the path, undecoded: a
-    // malformed escape is just another name.
-    const seed = seedOf(`${dataset}/${symbol}/${tag}`);
+    const seed = seedFor(dataset, symbol);
     const page = authorized
       ? seriesPage(datasets[dataset], seed, query, now())
       : undefined;
+    const fail = authorized && failing > 0;
+    if (fail) failing--;
     await sleep(latencyMs);
+    if (fail) return text(500, "failing on request");
     if (page === undefined) {
       stats.refused++;
       return text(401, "access token refused");
@@ -137,6 +188,108 @@ export function createBackend(options: BackendOptions = {}): Backend {
     return json(
       next === undefined ? { ...data, meta } : { ...data, meta, next },
     );
+  }
+
+  /**
+   * Server-Sent Events: a `bar` event every pushMs with a StreamBatch,
+   * until the client goes away. Unauthenticated: EventSource cannot send
+   * an authorization header (a real feed would take a cookie or a
+   * short-lived ticket in the URL).
+   */
+  function stream(request: Request, url: URL): Response {
+    const [, dataset = "", symbol = ""] = STREAM.exec(url.pathname) ?? [];
+    if (!isDatasetName(dataset)) return text(404, "unknown dataset");
+    const interval = Number(url.searchParams.get("interval") ?? "x");
+    const offset = Number(url.searchParams.get("offset") ?? "0");
+    if (
+      !Number.isSafeInteger(interval) ||
+      interval <= 0 ||
+      !Number.isSafeInteger(offset)
+    ) {
+      return text(400, "bad query");
+    }
+    const set = datasets[dataset];
+    const encoder = new TextEncoder();
+    /** The start of the bar the last message carried. */
+    let forming: number | undefined;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let open = true;
+
+    function message(): StreamBatch {
+      const at = now();
+      const bar = alignDown(at, interval, offset);
+      const seed = seedFor(dataset, symbol);
+      const batch: StreamBatch = {
+        timestamps: [],
+        fields: Object.fromEntries(
+          Object.keys(set.fields).map((name) => [name, []]),
+        ),
+        meta: {
+          version: `v${version}`,
+          finalizedUntil:
+            alignDown(at - set.provisionalMs(interval), interval, offset) +
+            interval,
+        },
+      };
+      const add = (t: number) => {
+        const values = set.point(seed, t, interval, at);
+        if (values === undefined) return;
+        batch.timestamps.push(t);
+        Object.values(batch.fields).forEach((column, i) => {
+          column.push(values[i] ?? Number.NaN);
+        });
+      };
+      // The bar that just closed, with its final values.
+      if (forming !== undefined && forming < bar) add(bar - interval);
+      add(bar);
+      forming = bar;
+      return batch;
+    }
+
+    let output: ReadableStreamDefaultController<Uint8Array> | undefined;
+
+    /** Stops the pushes; the reader went away, or end() ended the stream. */
+    function close(): void {
+      if (!open) return;
+      open = false;
+      clearInterval(timer);
+      streams.delete(end);
+      stats.streams--;
+    }
+
+    function end(): void {
+      close();
+      try {
+        output?.close();
+      } catch {
+        // Already closed by the reader.
+      }
+    }
+
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        output = controller;
+        stats.streams++;
+        streams.add(end);
+        const push = () => {
+          if (!open) return;
+          const data = JSON.stringify(message());
+          controller.enqueue(encoder.encode(`event: bar\ndata: ${data}\n\n`));
+        };
+        // A dropped stream is reconnected after this many ms.
+        controller.enqueue(encoder.encode(`retry: ${RECONNECT_MS}\n\n`));
+        push();
+        timer = setInterval(push, pushMs);
+        request.signal.addEventListener("abort", end);
+      },
+      cancel: close,
+    });
+    return new Response(body, {
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-store",
+      },
+    });
   }
 
   async function refresh(request: Request): Promise<Response> {
@@ -165,6 +318,11 @@ export function createBackend(options: BackendOptions = {}): Backend {
       latencyMs = Math.min(latency, MAX_LATENCY);
     }
     if (body.bumpVersion === true) version++;
+    if (body.dropStreams === true) for (const end of [...streams]) end();
+    const advance = body.advanceMs ?? Number.NaN;
+    if (Number.isSafeInteger(advance) && advance > 0) advanced += advance;
+    const failNext = body.failNext ?? Number.NaN;
+    if (Number.isSafeInteger(failNext) && failNext >= 0) failing = failNext;
     if (body.expireAccess === true) {
       tokens = { ...tokens, access: newToken("at") };
     }
@@ -186,6 +344,9 @@ export function createBackend(options: BackendOptions = {}): Backend {
     const route = `${request.method} ${url.pathname}`;
     if (request.method === "GET" && SERIES.test(url.pathname)) {
       return series(request, url);
+    }
+    if (request.method === "GET" && STREAM.test(url.pathname)) {
+      return stream(request, url);
     }
     switch (route) {
       // The demo has one user, already signed in: login hands out the

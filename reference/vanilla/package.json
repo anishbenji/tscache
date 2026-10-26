@@ -1,0 +1,19 @@
+{
+  "name": "@reference/vanilla",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader runner",
+    "build": "tsc -p . && vite build --app --configLoader runner",
+    "preview": "vite preview --configLoader runner"
+  },
+  "dependencies": {
+    "@examples/mock-backend": "workspace:*",
+    "@reference/shared": "workspace:*",
+    "@tscache/integrations": "workspace:*",
+    "tscache": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  }
+}
