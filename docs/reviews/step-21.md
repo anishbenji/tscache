@@ -1,6 +1,6 @@
 # Chore 21 — Performance measurement and gate
 
-Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: in review · Verdict after triage: —
+Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: —
 
 The benchmarks and the regression gate the user asked for on 2026-10-26, while away ("Add a performance measurement/benchmark/gate in the roadmap"). The method, the measurements and how the design was chosen are in `docs/benchmarking.md`. Tooling, not a commit-plan step: no engine code changes.
 
@@ -25,9 +25,18 @@ The design came from three independent proposals (Claude Opus 5.5, Claude Fable 
 | D7 | Memory per bar gates per fixture between the fields' bytes and the measured value plus about 1.5 %, under Node | Exact across runs once the engine is held alive; the lower bound catches a collected engine | Report-only memory |
 | D8 | The `bench` job runs beside `ci`, not inside `bun run ci` | Timing needs a quiet process and about four minutes; `bun run ci` keeps the exact budgets and a one-second smoke run of every case | Timing inside `bun run ci` |
 
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | A merge that resolves a source conflict by hand leaves an earlier `Perf-Accepted` trailer active (`--no-merges` skips it) | accepted | Validated by reading. A later merge now voids the trailer when its source differs from `git merge-tree --write-tree` of its parents (or the merge had conflicts); merging the base, as GitHub's merge ref does, still does not. Test on a scratch repository: merging `main` with a clean change to the same file keeps the trailer, a hand-resolved conflict voids it; fails with the merge check disabled. 1c3db89 |
+| R1-2 | P1 | A checkout path with a space breaks `scripts/bench.ts` and `scripts/size.ts` (URL `pathname` keeps `%20`) | accepted | Validated by reading. Both resolve their paths with `fileURLToPath`, as `vitest.config.ts` does. 1c3db89 |
+| R1-3 | P1 | Noisy runs count in the calibration's denominator, so 17 detections in 17 quiet runs read as 17 of 20 | accepted | Validated by reading. The tally (`tallyCalibration` in `bench/gate.ts`) leaves noisy runs out of both counts and lists them apart; unit test with mixed runs. 1c3db89 |
+| R1-4 | P1 | A large `--rounds` underflows `0.5 ** n` and hangs `medianRanks` | accepted | Validated by reading. Rounds are bounded to 10–1000 in the driver and in `medianRanks`, which throws outside them; test at both bounds and at 1000 rounds (ranks 469 and 532). 1c3db89 |
+
 ## Verification
 
-- `bunx vitest run packages/tscache/test/perf`: 15 passed (memory, counts, transfer, extents, growth, the gate's decisions, trailers on a scratch repository with a merge ref).
+- `bunx vitest run packages/tscache/test/perf`: 17 passed (memory, counts, transfer, extents, growth, the gate's decisions, trailers on a scratch repository with a merge ref).
 - Mutation checks, each failing its test: no transfer list in the RPC server; a linear scan in `collect`; linear mask growth in `DenseSegment`; trailers voided by commits the base brings in.
 - `bun scripts/bench.ts smoke`: nine cases, each result checked against the fixture.
 - Local calibration in `docs/benchmarking.md` ("Calibration log").
