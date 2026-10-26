@@ -35,6 +35,7 @@ import {
   acceptances,
   flagged,
   GATE,
+  type Git,
   noisy,
   type Verdict,
   verdictOf,
@@ -95,13 +96,19 @@ function parseArgs(argv: string[]): Args {
   };
 }
 
-function git(...args: string[]): string {
-  const result = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
-  if (result.status !== 0) {
-    throw new Error(`git ${args.join(" ")}: ${result.stderr.trim()}`);
-  }
-  return result.stdout.trim();
-}
+const git: Git = Object.assign(
+  (...args: string[]) => {
+    const result = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
+    if (result.status !== 0) {
+      throw new Error(`git ${args.join(" ")}: ${result.stderr.trim()}`);
+    }
+    return result.stdout.trim();
+  },
+  {
+    lenient: (...args: string[]) =>
+      spawnSync("git", args, { cwd: ROOT, encoding: "utf8" }).stdout.trim(),
+  },
+);
 
 /** The base's `src`, extracted from git into `into`; returns its SHA. */
 function extractBase(ref: string, into: string): string {

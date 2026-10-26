@@ -77,41 +77,44 @@ export function trailers(message: string): [string, number][] {
 }
 
 /** Runs git with these arguments and returns its trimmed output. */
-export type Git = (...args: string[]) => string;
+export interface Git {
+  /** Throws when git exits with a failure. */
+  (...args: string[]): string;
+  /** Returns the output whatever the exit status (merge-tree's conflicts). */
+  lenient(...args: string[]): string;
+}
 
 /** The source a trailer accepts: a later change to it voids the trailer. */
 const SOURCE = "packages/tscache/src";
 
 /**
- * Whether merge `merge` changes the source beyond merging its parents:
- * a conflict resolved by hand, or an edit made in the merge. Its source
- * is compared with what git's own merge of the parents gives.
+ * Whether the head's source is what `commit` accepted: the source of
+ * `commit`, merged as git would merge it on its own with the newest base
+ * revision the head contains. Anything else in the head's source is a
+ * later change: a later edit, a conflict resolved by hand (git's own merge
+ * leaves markers there), a branch other than the base merged in. What
+ * the base brings in is not (GitHub's merge ref merges in what landed on
+ * main since), and neither is anything outside the source.
  */
-function resolvedBy(merge: string, git: Git): boolean {
-  const [, ...parents] = git("rev-list", "--parents", "-n", "1", merge).split(
-    " ",
+function stillAccepted(commit: string, baseSha: string, git: Git): boolean {
+  const base = git("merge-base", baseSha, "HEAD");
+  const merged = git.lenient(
+    "merge-tree",
+    "--write-tree",
+    "--no-messages",
+    commit,
+    base,
   );
-  if (parents.length !== 2) return true;
-  let merged: string;
-  try {
-    merged = git("merge-tree", "--write-tree", "--no-messages", ...parents);
-  } catch {
-    // Conflicts: whatever the merge holds, someone wrote it.
-    return true;
-  }
-  const tree = merged.split("\n")[0] as string;
-  return git("diff", "--name-only", tree, merge, "--", SOURCE) !== "";
+  const tree = merged.split("\n")[0] ?? "";
+  if (!/^[0-9a-f]{40,64}$/.test(tree)) return false;
+  return git("diff", "--name-only", tree, "HEAD", "--", SOURCE) === "";
 }
 
 /**
  * What `Perf-Accepted` trailers in base..HEAD allow: per case (optionally
- * `case@runtime`), the highest head/base ratio accepted. A trailer counts
- * only while no later commit of the pull request changes the package's
- * source, so it accepts the code it was written for and not a later
- * change: no later commit that edits it, and no later merge that changes
- * it beyond merging (a resolved conflict). Commits the base brings in (a
- * pull request's merge ref merges in what landed since) do not void it.
- * `ignored` hears of each trailer voided so.
+ * `case@runtime`), the highest head/base ratio accepted, from the trailers
+ * that still accept the head's source (stillAccepted). `ignored` hears of
+ * each trailer a later change voided.
  */
 export function acceptances(
   baseSha: string,
@@ -123,26 +126,7 @@ export function acceptances(
     if (commit === "") continue;
     const found = trailers(git("log", "-1", "--format=%B", commit));
     if (found.length === 0) continue;
-    const later = git(
-      "rev-list",
-      "--no-merges",
-      `${commit}..HEAD`,
-      "--not",
-      baseSha,
-      "--",
-      SOURCE,
-    );
-    const merges = git(
-      "rev-list",
-      "--merges",
-      `${commit}..HEAD`,
-      "--not",
-      baseSha,
-    );
-    const resolved = merges
-      .split("\n")
-      .some((merge) => merge !== "" && resolvedBy(merge, git));
-    if (later !== "" || resolved) {
+    if (!stillAccepted(commit, baseSha, git)) {
       ignored(commit);
       continue;
     }

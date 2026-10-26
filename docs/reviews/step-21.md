@@ -1,6 +1,6 @@
 # Chore 21 — Performance measurement and gate
 
-Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: —
+Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: —
 
 The benchmarks and the regression gate the user asked for on 2026-10-26, while away ("Add a performance measurement/benchmark/gate in the roadmap"). The method, the measurements and how the design was chosen are in `docs/benchmarking.md`. Tooling, not a commit-plan step: no engine code changes.
 
@@ -20,7 +20,7 @@ The design came from three independent proposals (Claude Opus 5.5, Claude Fable 
 | D2 | Chromium and Bun gate; Node can be timed and only reports | All three designers ended here or accepted it; Node is a second, older V8 | Node gating too (Fable's first position); Chromium only (Sol's first) |
 | D3 | Median ≥ 1.10, interval low ≥ 1.03, 0.25 µs floor, confirmed in a fresh process, A/A control | The rule that caught the injected regressions without false alarms in two designers' experiments; the floor is Opus's, so a 3 µs read still fails at +10 % | 1.15 / 1.05 (missed most +15 %); 1.35 with all rounds > 1.15 (missed all +25 %) |
 | D4 | Timing reports only until `bench-calibrate.yml` passes on GitHub's runner (no false alarm in 20 same-revision runs, ≥ 90 % caught at +25 %) | Local evidence cannot stand for a shared runner. The orchestrator does not dispatch the calibration: it spends runner time, so it is the user's to start | Ten report-only pull requests (measures false alarms only) |
-| D5 | `Perf-Accepted: <case>[@runtime] <ratio> <reason>` trailer, voided by a later change to `packages/tscache/src` in the pull request | Two designers wanted a trailer, one a file bound to code hashes with an expiry, so that an old acceptance cannot excuse a later change; voiding on a later source change gives that without hashes that every rebase breaks | Trailer alone; `acceptances.json` with hashes and expiry |
+| D5 | `Perf-Accepted: <case>[@runtime] <ratio> <reason>` trailer, which stands while the head's `packages/tscache/src` equals git's own merge of the trailer's commit with the base the head contains (redesigned in round 2) | Two designers wanted a trailer, one a file bound to code hashes with an expiry, so that an old acceptance cannot excuse a later change; voiding on a later source change gives that without hashes that every rebase breaks | Trailer alone; `acceptances.json` with hashes and expiry |
 | D6 | Growth allocations gate as a tripwire with a lower bound (at least one mask allocation seen, at most 12) | A constructor proxy cannot see every growth strategy; with the lower bound a redesign it cannot see fails loudly instead of passing on zero. Two designers wanted it, the third accepted it | No allocation check (memory and append timing only) |
 | D7 | Memory per bar gates per fixture between the fields' bytes and the measured value plus about 1.5 %, under Node | Exact across runs once the engine is held alive; the lower bound catches a collected engine | Report-only memory |
 | D8 | The `bench` job runs beside `ci`, not inside `bun run ci` | Timing needs a quiet process and about four minutes; `bun run ci` keeps the exact budgets and a one-second smoke run of every case | Timing inside `bun run ci` |
@@ -34,9 +34,15 @@ The design came from three independent proposals (Claude Opus 5.5, Claude Fable 
 | R1-3 | P1 | Noisy runs count in the calibration's denominator, so 17 detections in 17 quiet runs read as 17 of 20 | accepted | Validated by reading. The tally (`tallyCalibration` in `bench/gate.ts`) leaves noisy runs out of both counts and lists them apart; unit test with mixed runs. 1c3db89 |
 | R1-4 | P1 | A large `--rounds` underflows `0.5 ** n` and hangs `medianRanks` | accepted | Validated by reading. Rounds are bounded to 10–1000 in the driver and in `medianRanks`, which throws outside them; test at both bounds and at 1000 rounds (ranks 469 and 532). 1c3db89 |
 
+## Round 2 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | A later merge whose only conflict is outside the source voids a valid trailer (`merge-tree` fails on any conflict) | accepted; area redesigned | Validated by reading. **Convergence check:** the trailer rule drew findings in rounds 1 and 2, so it was redesigned rather than patched. The history inspection (later commits, then each later merge) is replaced by one comparison: merge the trailer's commit with `merge-base(base, HEAD)` as git would (`merge-tree --write-tree`, its tree taken even with conflicts), and keep the trailer only if the head's source equals that tree's. A hand-resolved source conflict differs (git's merge leaves markers), a README-only conflict does not, a merge ref equals it, a branch behind its base equals it. Tests on scratch repositories for each; the old rule fails two of them, accepting everything fails two others. |
+
 ## Verification
 
-- `bunx vitest run packages/tscache/test/perf`: 17 passed (memory, counts, transfer, extents, growth, the gate's decisions, trailers on a scratch repository with a merge ref).
+- `bunx vitest run packages/tscache/test/perf`: 19 passed (memory, counts, transfer, extents, growth, the gate's decisions, trailers on a scratch repository with a merge ref).
 - Mutation checks, each failing its test: no transfer list in the RPC server; a linear scan in `collect`; linear mask growth in `DenseSegment`; trailers voided by commits the base brings in.
 - `bun scripts/bench.ts smoke`: nine cases, each result checked against the fixture.
 - Local calibration in `docs/benchmarking.md` ("Calibration log").

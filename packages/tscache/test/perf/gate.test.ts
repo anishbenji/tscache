@@ -112,8 +112,13 @@ describe("Perf-Accepted trailers in a pull request", () => {
 
   /** A scratch repository: a main line, and a pull request branched off it. */
   async function scratch() {
-    const { execFileSync } = await load<{
+    const { execFileSync, spawnSync } = await load<{
       execFileSync(file: string, args: string[], options: object): string;
+      spawnSync(
+        file: string,
+        args: string[],
+        options: object,
+      ): { stdout: string };
     }>("node:child_process");
     const { mkdtempSync, mkdirSync, writeFileSync } = await load<{
       mkdtempSync(prefix: string): string;
@@ -122,8 +127,14 @@ describe("Perf-Accepted trailers in a pull request", () => {
     }>("node:fs");
     const { tmpdir } = await load<{ tmpdir(): string }>("node:os");
     const dir = mkdtempSync(`${tmpdir()}/tscache-trailers-`);
-    const git: Git = (...args) =>
-      execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+    const git: Git = Object.assign(
+      (...args: string[]) =>
+        execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim(),
+      {
+        lenient: (...args: string[]) =>
+          spawnSync("git", args, { cwd: dir, encoding: "utf8" }).stdout.trim(),
+      },
+    );
     git("init", "-q", "-b", "main");
     git("config", "user.email", "bench@example.com");
     git("config", "user.name", "bench");
@@ -204,6 +215,52 @@ describe("Perf-Accepted trailers in a pull request", () => {
     );
     git("commit", "-q", "-am", "merge main");
     expect(acceptances(conflicting, git)).toEqual(new Map());
+  });
+
+  it("is not voided by a merge whose only conflict is outside the source", async () => {
+    const { git, write } = await scratch();
+    write("README.md", "one\n");
+    write("packages/tscache/src/engine.ts", "a\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "pr");
+    write("packages/tscache/src/engine.ts", "b\n");
+    write("README.md", "pr\n");
+    git(
+      "commit",
+      "-q",
+      "-am",
+      "perf: slower\n\nPerf-Accepted: read-year 1.3 a reason",
+    );
+    git("checkout", "-q", "main");
+    write("README.md", "main\n");
+    git("commit", "-q", "-am", "docs on main");
+    const tip = git("rev-parse", "HEAD");
+    git("checkout", "-q", "pr");
+    try {
+      git("merge", "-q", "--no-edit", "main");
+    } catch {
+      // A conflict in the README only.
+    }
+    write("README.md", "both\n");
+    git("commit", "-q", "-am", "merge main");
+    expect(acceptances(tip, git)).toEqual(new Map([["read-year", 1.3]]));
+  });
+
+  it("stands for a branch behind its base, against the base it contains", async () => {
+    const { git, commit } = await scratch();
+    commit("packages/tscache/src/engine.ts", "base");
+    git("checkout", "-q", "-b", "pr");
+    commit(
+      "packages/tscache/src/engine.ts",
+      "perf: slower\n\nPerf-Accepted: fill-month 1.2 a reason",
+    );
+    // Main moves on and the branch has not merged it: a local compare
+    // against main's tip.
+    git("checkout", "-q", "main");
+    const tip = commit("packages/tscache/src/other.ts", "main moves on");
+    git("checkout", "-q", "pr");
+    expect(acceptances(tip, git)).toEqual(new Map([["fill-month", 1.2]]));
   });
 
   it("is not voided by a later change outside the source", async () => {
