@@ -1,6 +1,6 @@
 # Step 17 — Reference clients: vanilla
 
-Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: —
+Branch: `feat/17-reference-vanilla` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: —
 
 The first of the three reference clients (`docs/roadmap.md`, "Reference clients"; track (c) after the post-build architecture review). Not an engine step: tests are written with the code. The decisions below were the user's (2026-10-26); the roadmap records them.
 
@@ -34,9 +34,16 @@ Each is reversible and inside the user's decisions; listed so the review can con
 | R1-2 | P1 | Switching chart libraries opens the new chart at the opening range, away from the history on screen | accepted | Reproduced. `ChartView` gains `visible()`, and a new chart opens at the old one's range. The page shows the range on screen (`showing`), which the E2E test compares across a switch after scrolling back; it fails with the old opening restored. 198c849 |
 | R1-3 | P1 | The page never shows coverage or misses other than auth-pending, so a failed history fetch looks like a confirmed gap | accepted | Validated against the roadmap's scope ("render coverage and misses"). The page shows what an answer lacks by reason, leaving out the provisional forming bar, and offers Retry after a failed fetch. Found while testing: the next push's cache-only redraw reports the failed range as uncached, so the page keeps naming the failure until nothing is missing. The mock backend gains `failNext`; the E2E test fails a history fetch, sees "fetch failed", and retries. 198c849 |
 
+## Round 2 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | uPlot keeps the previous bars for an answer without any (a version clear whose refill fails, in history) | accepted | Validated by reading: `draw` returned before `setData` for no bars. uPlot now sets the empty columns and keeps the time on screen; both views keep it, so later bars appear where the user was. The E2E test scrolls two screens back with uPlot, fails every fetch, bumps the version, and counts candle-coloured pixels down to zero; it fails with the early return restored. Found while fixing: Lightweight Charts' `setData` reports the chart's default range at once, and the view took it for the range on screen, so the opening range was applied only through the old "no bars before" branch. The view now decides the range before `setData`, and keeps the time on screen across a resize. fd19e87 |
+| R2-2 | P1 | A tab whose session was lost stays "signed out" after another tab signs in | accepted | Validated by reading: only the tab's own sign-in cleared the state. `onTokensStored` (auth.ts) hears another tab store refreshable tokens through the `storage` event; a signed-out tab gives its client the token and reads again. The E2E test spoils the refresh token, signs both tabs out with an expired access token, signs in from one and waits for the other; it fails without the recovery. fd19e87 |
+
 ## Verification
 
 - `bunx vitest run examples/mock-backend integrations reference`: the new stream, dataset, service-token, series and range tests pass.
-- `E2E_EXAMPLES=reference-vanilla bunx playwright test --project=examples reference/`: 9 passed after round 1 (6 before it) — one stream for two tabs and a hand-over when the holder closes, pushed bars drawn without a fetch, history fetched once on scrolling back with each chart library and not again on scrolling forward, one token refresh across two tabs, the server-rendered page fetching only the forming bar, and switching the library without a fetch.
+- `E2E_EXAMPLES=reference-vanilla bunx playwright test --project=examples reference/`: 11 passed after round 2 (6 before round 1) — one stream for two tabs and a hand-over when the holder closes, pushed bars drawn without a fetch, history fetched once on scrolling back with each chart library and not again on scrolling forward, one token refresh across two tabs, the server-rendered page fetching only the forming bar, and switching the library without a fetch.
 - Run by hand in Chromium against the dev server: both libraries draw, follow the live bar and scroll back through history; the server-rendered page draws the server's read before the client connects.
 - Not verified: Firefox and Safari; the dedicated-worker and in-process paths of the feed (D2) in a real browser.
