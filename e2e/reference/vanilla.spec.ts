@@ -161,3 +161,67 @@ test("switching the chart library keeps what is drawn without fetching", async (
   await expect(page.locator("#chart canvas").first()).toBeVisible();
   expect((await notices(page)).length).toBe(fetched);
 });
+
+/** The bar count the page shows. */
+async function barCount(page: Page): Promise<number> {
+  const text = (await page.getByTestId("summary").textContent()) ?? "";
+  return Number(/^(\d+) bars/.exec(text)?.[1] ?? Number.NaN);
+}
+
+/** The start of the range on screen, in ms (shown as `MM-DD HH:MM`). */
+async function showingStart(page: Page): Promise<number> {
+  const text = (await page.getByTestId("showing").textContent()) ?? "";
+  const start = text.split(" – ")[0] ?? "";
+  const year = new Date().getUTCFullYear();
+  return Date.parse(`${year}-${start.replace(" ", "T")}:00Z`);
+}
+
+test("a dataset version pushed with a bar refills the history it cleared (R1-1)", async ({
+  context,
+}) => {
+  const page = await openTab(context);
+  await waitNotices(page, 1);
+  const fetched = (await notices(page)).length;
+  expect(await barCount(page)).toBeGreaterThan(600);
+  await control(page, { bumpVersion: true });
+  // The next pushed batch carries the new version and clears the cache;
+  // the page reads its range again rather than from the cache alone.
+  const after = await waitNotices(page, fetched + 1);
+  expect(after.slice(fetched).filter(isHistory).length).toBeGreaterThan(0);
+  await expect.poll(() => barCount(page)).toBeGreaterThan(600);
+});
+
+test("switching the chart library after scrolling keeps the time on screen (R1-2)", async ({
+  context,
+}) => {
+  const page = await openTab(context);
+  await waitNotices(page, 1);
+  const opening = await showingStart(page);
+  const before = (await notices(page)).length;
+  await drag(page, "back");
+  await waitNotices(page, before + 1);
+  await expect.poll(() => showingStart(page)).toBeLessThan(opening - HOUR);
+  const scrolled = await showingStart(page);
+  await page.selectOption("#chart-kind", "uplot");
+  await expect(page.locator("#chart .u-over")).toBeVisible();
+  // Past a pushed bar's redraw too, the new chart stays where the old was.
+  await nextDraw(page);
+  expect(Math.abs((await showingStart(page)) - scrolled)).toBeLessThanOrEqual(
+    2 * MINUTE,
+  );
+});
+
+test("a failed history fetch shows as missing, and Retry fetches it (R1-3)", async ({
+  context,
+}) => {
+  const page = await openTab(context);
+  await waitNotices(page, 1);
+  await expect(page.getByTestId("missing")).toHaveText("nothing missing");
+  await control(page, { failNext: 2 });
+  await drag(page, "back");
+  await expect(page.getByTestId("missing")).toContainText("fetch failed");
+  await control(page, { failNext: 0 });
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByTestId("missing")).toHaveText("nothing missing");
+  await expect(page.getByRole("button", { name: "Retry" })).toBeHidden();
+});

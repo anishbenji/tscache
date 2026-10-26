@@ -19,6 +19,8 @@ export interface ChartView {
    * Returns the unsubscribe.
    */
   onScroll(listener: (visible: Range) => void): () => void;
+  /** The time range on screen, once bars are drawn. */
+  visible(): Range | undefined;
   /** Removes the chart from its element. */
   dispose(): void;
 }

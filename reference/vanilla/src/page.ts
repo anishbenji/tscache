@@ -36,7 +36,13 @@ import {
 } from "@tscache/integrations/shared/connection";
 import type { ServerRead } from "@tscache/integrations/shared/hydration";
 import { series } from "@tscache/integrations/vanilla/series";
-import { createClient, type GetResult, type Range } from "tscache";
+import {
+  createClient,
+  type GetResult,
+  type Miss,
+  type MissReason,
+  type Range,
+} from "tscache";
 import workerUrl from "tscache/worker?worker&url";
 
 /** How long scrolling must pause before the new range is read. */
@@ -58,7 +64,12 @@ export function pageMarkup(summary: string): string {
 </header>
 <p class="status">
   <output data-testid="summary">${summary}</output> ·
-  drawn <output data-testid="drawn">–</output> UTC ·
+  showing <output data-testid="showing">–</output> UTC ·
+  drawn <output data-testid="drawn">–</output> ·
+  <output data-testid="missing">nothing missing</output>
+  <button type="button" id="retry" hidden>Retry</button>
+</p>
+<p class="status">
   mode <output data-testid="mode">…</output> ·
   <output data-testid="connection">connecting</output> ·
   <output data-testid="auth">signed in</output>
@@ -74,6 +85,46 @@ function element<T extends HTMLElement>(
   const found = root.querySelector<T>(selector);
   if (found === null) throw new Error(`the page has no ${selector}`);
   return found;
+}
+
+const MISSING: Record<MissReason, string> = {
+  uncached: "not loaded",
+  "fetch-failed": "fetch failed",
+  "auth-pending": "waiting for credentials",
+};
+
+/**
+ * What the answer lacks. The bar forming now is left out: it stays
+ * provisional, so a read from the cache alone reports it uncached though
+ * it is drawn.
+ */
+function gapsOf({ timestamps, misses }: GetResult): Miss[] {
+  const newest = timestamps.at(-1) ?? Number.POSITIVE_INFINITY;
+  return misses.filter(
+    ({ reason, range }) => reason !== "uncached" || range.start < newest,
+  );
+}
+
+/**
+ * The gaps by reason. After a failed fetch, a read from the cache alone
+ * reports the same ranges as uncached; `failed` keeps naming the cause
+ * until nothing is missing.
+ */
+function describeGaps(gaps: Miss[], failed: boolean): string {
+  const counts = new Map<MissReason, number>();
+  for (const { reason } of gaps) {
+    const shown = failed && reason === "uncached" ? "fetch-failed" : reason;
+    counts.set(shown, (counts.get(shown) ?? 0) + 1);
+  }
+  if (counts.size === 0) return "nothing missing";
+  return [...counts]
+    .map(([reason, n]) => `${MISSING[reason]}: ${n} range${n === 1 ? "" : "s"}`)
+    .join(", ");
+}
+
+/** A UTC time as `MM-DD HH:MM`, the same in every locale. */
+function utc(t: number): string {
+  return new Date(t).toISOString().slice(5, 16).replace("T", " ");
 }
 
 function describe(state: ConnectionState): string {
@@ -118,6 +169,7 @@ export function startPage(
   const chartElement = element<HTMLElement>(root, "#chart");
   const select = element<HTMLSelectElement>(root, "#chart-kind");
   const signIn = element<HTMLButtonElement>(root, "#sign-in");
+  const retry = element<HTMLButtonElement>(root, "#retry");
   const output = (name: string) =>
     element<HTMLOutputElement>(root, `[data-testid="${name}"]`);
 
@@ -131,6 +183,8 @@ export function startPage(
   let mounts = 0;
   let disposed = false;
   let sessionLost = false;
+  /** A fetch failed, and what it lacked is still missing. */
+  let failed = false;
 
   const connection = connect(
     async () =>
@@ -149,13 +203,25 @@ export function startPage(
     output("auth").value = pending ? "refreshing credentials" : "signed in";
   }
 
+  function showRange(): void {
+    const visible = view?.visible();
+    if (visible === undefined) return;
+    output("showing").value = `${utc(visible.start)} – ${utc(visible.end)}`;
+  }
+
   const bars = series(connection, {
     config: market,
     render({ result }) {
       latest = result;
       view?.draw(result);
+      showRange();
       output("summary").value = summarize(result);
       output("drawn").value = new Date().toISOString().slice(11, 19);
+      const gaps = gapsOf(result);
+      if (gaps.length === 0) failed = false;
+      if (gaps.some((gap) => gap.reason === "fetch-failed")) failed = true;
+      output("missing").value = describeGaps(gaps, failed);
+      retry.hidden = !failed;
       showAuth(result);
     },
     fail(error) {
@@ -164,6 +230,7 @@ export function startPage(
   });
 
   const onScroll = debounce(SCROLL_PAUSE_MS, (visible: Range) => {
+    showRange();
     asked = readRange(visible, Date.now());
     bars.show(asked);
   });
@@ -173,24 +240,28 @@ export function startPage(
     const mount = ++mounts;
     const create = await loadChart(kind);
     if (disposed || mount !== mounts) return;
+    // The new chart opens where the old one was, history included.
+    const shown = view?.visible() ?? opening;
     view?.dispose();
     chartElement.replaceChildren();
-    view = create(chartElement, { interval: market.interval, opening });
+    view = create(chartElement, { interval: market.interval, opening: shown });
     view.onScroll(onScroll);
     if (latest !== undefined) view.draw(latest);
+    showRange();
   }
 
-  /** The refresh installed on the current client, removed with it. */
-  let uninstallRefresh: (() => void) | undefined;
-  let refreshed: unknown;
+  /** The listeners installed on the current client, removed with it. */
+  let uninstall: (() => void) | undefined;
+  let installed: unknown;
   const unsubscribe = connection.subscribe(() => {
     const state = connection.state;
     output("connection").value = describe(state);
-    if (state.status !== "connected" || state.client === refreshed) return;
-    refreshed = state.client;
-    output("mode").value = state.client.mode;
-    uninstallRefresh?.();
-    uninstallRefresh = refreshOnAuthInvalid(state.client, {
+    if (state.status !== "connected" || state.client === installed) return;
+    const { client } = state;
+    installed = client;
+    output("mode").value = client.mode;
+    uninstall?.();
+    const stopRefresh = refreshOnAuthInvalid(client, {
       onRefreshed: () => bars.show(asked),
       onSessionLost: () => {
         sessionLost = true;
@@ -198,7 +269,18 @@ export function startPage(
         signIn.hidden = false;
       },
     });
+    // A new dataset version clears the cache (a pushed batch can carry
+    // it); reads from the cache alone would never fetch the history back.
+    const stopClear = client.on("cacheCleared", ({ cacheId }) => {
+      if (cacheId === market.id) bars.show(asked);
+    });
+    uninstall = () => {
+      stopRefresh();
+      stopClear();
+    };
   });
+
+  retry.addEventListener("click", () => bars.show(asked));
 
   signIn.addEventListener("click", () => {
     const state = connection.state;
@@ -241,7 +323,7 @@ export function startPage(
     onScroll.cancel();
     stopFeed();
     unsubscribe();
-    uninstallRefresh?.();
+    uninstall?.();
     bars.dispose();
     view?.dispose();
     await connection.dispose();

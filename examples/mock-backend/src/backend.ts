@@ -68,6 +68,8 @@ export interface BackendControl {
   bumpVersion?: true;
   /** Replace the access token; the refresh token stays valid. */
   expireAccess?: true;
+  /** Answer the next this many series requests with a server error. */
+  failNext?: number;
 }
 
 /** Answers a request under /api/, or undefined for any other path. */
@@ -126,6 +128,8 @@ export function createBackend(options: BackendOptions = {}): Backend {
   const pushMs = options.pushMs ?? 1000;
   let latencyMs = options.latencyMs ?? 300;
   let version = 1;
+  /** Series requests still to fail (BackendControl.failNext). */
+  let failing = 0;
   let tokens: Tokens = { access: newToken("at"), refresh: newToken("rt") };
   const stats = {
     pages: {} as Record<string, number>,
@@ -159,7 +163,10 @@ export function createBackend(options: BackendOptions = {}): Backend {
     const page = authorized
       ? seriesPage(datasets[dataset], seed, query, now())
       : undefined;
+    const fail = authorized && failing > 0;
+    if (fail) failing--;
     await sleep(latencyMs);
+    if (fail) return text(500, "failing on request");
     if (page === undefined) {
       stats.refused++;
       return text(401, "access token refused");
@@ -290,6 +297,8 @@ export function createBackend(options: BackendOptions = {}): Backend {
       latencyMs = Math.min(latency, MAX_LATENCY);
     }
     if (body.bumpVersion === true) version++;
+    const failNext = body.failNext ?? Number.NaN;
+    if (Number.isSafeInteger(failNext) && failNext >= 0) failing = failNext;
     if (body.expireAccess === true) {
       tokens = { ...tokens, access: newToken("at") };
     }

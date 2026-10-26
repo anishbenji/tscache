@@ -182,6 +182,7 @@ export function createUplotChart(
       });
       drawing = false;
     },
+    visible: () => shown,
     onScroll(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

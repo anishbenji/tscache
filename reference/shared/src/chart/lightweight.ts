@@ -172,6 +172,7 @@ export function createLightweightChart(
         to: logicalAt(target.end),
       });
     },
+    visible: () => shown,
     onScroll(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

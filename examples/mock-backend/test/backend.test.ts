@@ -137,6 +137,17 @@ describe("createBackend", () => {
   });
 });
 
+describe("failNext", () => {
+  it("fails that many series requests, then answers again", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const path = `/api/series/metrics/web?${query}`;
+    await call(backend, "/api/control", post({ failNext: 2 }));
+    expect((await call(backend, path)).status).toBe(500);
+    expect((await call(backend, path)).status).toBe(500);
+    expect((await call(backend, path)).status).toBe(200);
+  });
+});
+
 describe("service token", () => {
   it("accepts series requests with the service token, whatever the user's token", async () => {
     const backend = createBackend({
