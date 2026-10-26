@@ -239,21 +239,20 @@ test("a failed history fetch shows as missing, and Retry fetches it (R1-3)", asy
 /** How many pixels of the chart's canvases have a candle's colour. */
 function candlePixels(page: Page): Promise<number> {
   return page.evaluate(() => {
-    let count = 0;
-    for (const canvas of document.querySelectorAll<HTMLCanvasElement>(
-      "#chart canvas",
-    )) {
-      const context = canvas.getContext("2d");
-      if (context === null) continue;
-      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
-      for (let i = 0; i < data.length; i += 4) {
-        const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
-        const up = r === 0x2a && g === 0x78 && b === 0xd6;
-        const down = r === 0xeb && g === 0x68 && b === 0x34;
-        if (up || down) count++;
-      }
-    }
-    return count;
+    // Opaque RGBA pixels read as little-endian words: 0xAABBGGRR.
+    const candles = new Set([0xffd6782a, 0xff3468eb]);
+    const canvases =
+      document.querySelectorAll<HTMLCanvasElement>("#chart canvas");
+    return [...canvases]
+      .map((canvas) => {
+        const context = canvas.getContext("2d");
+        const image = context?.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = new Uint32Array(
+          image?.data.buffer ?? new ArrayBuffer(0),
+        );
+        return pixels.filter((pixel) => candles.has(pixel)).length;
+      })
+      .reduce((sum, n) => sum + n, 0);
   });
 }
 
@@ -297,4 +296,24 @@ test("a tab signed out with the others recovers when one signs in (R2-2)", async
   await expect(a.getByTestId("auth")).toHaveText("signed in");
   await expect(b.getByTestId("auth")).toHaveText("signed in");
   await expect(b.getByRole("button", { name: "Sign in again" })).toBeHidden();
+});
+
+test("bars after a gap in the stream are read through it while the chart follows (R3-1)", async ({
+  context,
+}) => {
+  const page = await context.newPage();
+  // The page's clock three minutes behind the backend's: its first read
+  // ends three bars before the first pushed bar, as after a stream outage.
+  await page.clock.setSystemTime(Date.now() - 3 * MINUTE);
+  await recordNotices(page);
+  await page.goto("/");
+  await expect(page.getByTestId("connection")).toHaveText("live");
+  await expect(page.getByTestId("summary")).toContainText("bars");
+  const fetched = (await notices(page)).length;
+  const opened = await barCount(page);
+  // The fetch flank reaches one bar past the read, so two remain to fill.
+  await expect.poll(() => barCount(page)).toBeGreaterThanOrEqual(opened + 2);
+  expect((await notices(page)).length).toBeGreaterThan(fetched);
+  // Then the chart follows the stream again.
+  await nextDraw(page);
 });

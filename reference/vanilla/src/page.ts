@@ -204,6 +204,16 @@ export function startPage(
     output("auth").value = pending ? "refreshing credentials" : "signed in";
   }
 
+  /**
+   * Whether the chart follows the market: what is on screen reaches the end
+   * of what is read, which is now (a screen of history lies past its end
+   * while the user reads history).
+   */
+  function following(): boolean {
+    const visible = view?.visible();
+    return visible !== undefined && visible.end + market.interval >= asked.end;
+  }
+
   function showRange(): void {
     const visible = view?.visible();
     if (visible === undefined) return;
@@ -309,12 +319,21 @@ export function startPage(
     config: market,
     url: feedUrl,
     onBatch(span) {
-      // Pushed bars on screen, or just past its end as the market moves on.
-      if (span.end < asked.start || span.start > asked.end + market.interval) {
+      if (span.end < asked.start) return;
+      // Pushed bars on screen, or just past its end as the market moves on:
+      // they are in the cache, so read from it alone.
+      if (span.start <= asked.end + market.interval) {
+        asked = { start: asked.start, end: Math.max(asked.end, span.end) };
+        bars.refresh(asked);
         return;
       }
-      asked = { start: asked.start, end: Math.max(asked.end, span.end) };
-      bars.refresh(asked);
+      // Bars after a gap, as when the stream was down for minutes. While
+      // the chart follows the market, read through the gap, which fetches
+      // the bars the stream missed; while the user reads history, wait.
+      if (following()) {
+        asked = { start: asked.start, end: span.end };
+        bars.show(asked);
+      }
     },
   });
 
