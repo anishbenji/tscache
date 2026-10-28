@@ -1,6 +1,6 @@
 # Chore 21 — Performance measurement and gate
 
-Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 5 · Status: in review · Verdict after triage: —
+Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 6 · Status: settled · Verdict after triage: merge
 
 The benchmarks and the regression gate the user asked for on 2026-10-26, while away ("Add a performance measurement/benchmark/gate in the roadmap"). The method, the measurements and how the design was chosen are in `docs/benchmarking.md`. Tooling, not a commit-plan step: no engine code changes.
 
@@ -61,6 +61,10 @@ Reviewed after the push fix above.
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R5-1 | P1 | Both artifact uploads omit `include-hidden-files`, so `.bench-results/` is never uploaded and the calibration summary has nothing to tally | accepted | Validated against the pinned `upload-artifact` source: `include-hidden-files` defaults to false and sets the glob's `excludeHiddenFiles`. Both uploads include hidden files; a calibration run with no report fails (`if-no-files-found: error`). Verified on GitHub only: the `bench` job's artifact on this pull request; the calibration runs when the user dispatches it. db65f6c |
+
+## Round 6 — reviewer verdict: merge
+
+No findings; the reviewer confirmed all seven accepted findings fixed, and the `GIT_*` isolation in the trailer tests. The review is settled.
 
 ## Verification
 
