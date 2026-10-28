@@ -104,7 +104,8 @@ Perf-Accepted: put-page@bun 1.15 JSC only; V8 is unchanged
 The case may then be up to that ratio slower; beyond it, it fails again. A trailer accepts the package's source as it stood at its commit, together with whatever the base has brought in since. The gate merges the trailer's commit with the newest base revision the head contains, as git would on its own (`git merge-tree`). The trailer stands only while the head's `packages/tscache/src` is exactly that merge's, so these void it:
 - a later edit of the source;
 - a source conflict resolved by hand, where git's own merge leaves markers;
-- another branch merged in.
+- another branch merged in;
+- any uncommitted change to the source (staged, unstaged or untracked), since the working tree is what gets benchmarked.
 
 GitHub's merge ref, a conflict outside the source, and a branch behind its base keep it. It retires with the merge, since the next pull request's base already contains that code.
 

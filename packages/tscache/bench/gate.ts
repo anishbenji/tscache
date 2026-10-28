@@ -113,8 +113,10 @@ function stillAccepted(commit: string, baseSha: string, git: Git): boolean {
 /**
  * What `Perf-Accepted` trailers in base..HEAD allow: per case (optionally
  * `case@runtime`), the highest head/base ratio accepted, from the trailers
- * that still accept the head's source (stillAccepted). `ignored` hears of
- * each trailer a later change voided.
+ * that still accept the head's source (stillAccepted). The working tree's
+ * source is what gets benchmarked, so any uncommitted change to it (staged,
+ * unstaged or untracked) voids them all. `ignored` hears of each trailer a
+ * later change voided.
  */
 export function acceptances(
   baseSha: string,
@@ -122,11 +124,13 @@ export function acceptances(
   ignored: (commit: string) => void = () => {},
 ): Map<string, number> {
   const accepted = new Map<string, number>();
+  const uncommitted =
+    git("status", "--porcelain", "--untracked-files=all", "--", SOURCE) !== "";
   for (const commit of git("rev-list", `${baseSha}..HEAD`).split("\n")) {
     if (commit === "") continue;
     const found = trailers(git("log", "-1", "--format=%B", commit));
     if (found.length === 0) continue;
-    if (!stillAccepted(commit, baseSha, git)) {
+    if (uncommitted || !stillAccepted(commit, baseSha, git)) {
       ignored(commit);
       continue;
     }

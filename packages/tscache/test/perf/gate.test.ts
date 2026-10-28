@@ -273,6 +273,29 @@ describe("Perf-Accepted trailers in a pull request", () => {
     commit("README.md", "docs: say so");
     expect(acceptances(base, git)).toEqual(new Map([["put-page@bun", 1.15]]));
   });
+
+  it("is voided by uncommitted source, which is what gets benchmarked", async () => {
+    const { git, commit, write } = await scratch();
+    const base = commit("packages/tscache/src/engine.ts", "base");
+    commit(
+      "packages/tscache/src/engine.ts",
+      "perf: slower read\n\nPerf-Accepted: read-viewport 1.25 a reason",
+    );
+    write("README.md", "not source\n");
+    expect(acceptances(base, git)).toEqual(new Map([["read-viewport", 1.25]]));
+
+    // An unstaged edit, a staged one, an untracked file: each voids it.
+    write("packages/tscache/src/engine.ts", "edited\n");
+    const voided: string[] = [];
+    expect(acceptances(base, git, (c) => voided.push(c))).toEqual(new Map());
+    expect(voided).toHaveLength(1);
+    git("add", "packages/tscache/src/engine.ts");
+    expect(acceptances(base, git)).toEqual(new Map());
+    git("checkout", "-q", "HEAD", "--", "packages/tscache/src/engine.ts");
+    expect(acceptances(base, git)).toEqual(new Map([["read-viewport", 1.25]]));
+    write("packages/tscache/src/added.ts", "new\n");
+    expect(acceptances(base, git)).toEqual(new Map());
+  });
 });
 
 describe("a calibration's tally", () => {
