@@ -1,6 +1,6 @@
 # Chore 21 — Performance measurement and gate
 
-Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: settled · Verdict after triage: merge
+Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 5 · Status: in review · Verdict after triage: —
 
 The benchmarks and the regression gate the user asked for on 2026-10-26, while away ("Add a performance measurement/benchmark/gate in the roadmap"). The method, the measurements and how the design was chosen are in `docs/benchmarking.md`. Tooling, not a commit-plan step: no engine code changes.
 
@@ -53,6 +53,14 @@ No findings; the reviewer confirmed the six accepted findings of rounds 1–3 fi
 ## After settling: the first push
 
 The first push ran the scratch-repository trailer tests inside the pre-push hook, where git exports `GIT_DIR` for the repository being pushed. Inherited, it sent the tests' git commands to the real repository: they rewrote its `.git/config` (`core.bare`, a `user` and `commit.gpgsign`), moved `main` and the branch, and created a branch `pr`. Nothing was pushed (the hook failed), and every change was local and restored from the reflog. The tests now run git without any `GIT_*` variable, and a regression test points `GIT_DIR` at a decoy repository and checks that the scratch commands stay in their own, failing without the fix. Round CI had not caught it because `bun run ci` runs outside a hook.
+
+## Round 5 — reviewer verdict: merge after fixes
+
+Reviewed after the push fix above.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R5-1 | P1 | Both artifact uploads omit `include-hidden-files`, so `.bench-results/` is never uploaded and the calibration summary has nothing to tally | accepted | Validated against the pinned `upload-artifact` source: `include-hidden-files` defaults to false and sets the glob's `excludeHiddenFiles`. Both uploads include hidden files; a calibration run with no report fails (`if-no-files-found: error`). Verified on GitHub only: the `bench` job's artifact on this pull request; the calibration runs when the user dispatches it. db65f6c |
 
 ## Verification
 
