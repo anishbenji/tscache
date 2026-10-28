@@ -1,6 +1,6 @@
 # Chore 21 — Performance measurement and gate
 
-Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in review · Verdict after triage: —
+Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: settled · Verdict after triage: merge
 
 The benchmarks and the regression gate the user asked for on 2026-10-26, while away ("Add a performance measurement/benchmark/gate in the roadmap"). The method, the measurements and how the design was chosen are in `docs/benchmarking.md`. Tooling, not a commit-plan step: no engine code changes.
 
@@ -45,6 +45,10 @@ The design came from three independent proposals (Claude Opus 5.5, Claude Fable 
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R3-1 | P1 | Trailers are checked against the committed head, but the driver benchmarks the working tree, so an uncommitted source edit runs under an acceptance that never covered it | accepted | Validated by reading: `compare` bundles `packages/tscache/src` from the working tree, `stillAccepted` diffs against `HEAD`. Any staged, unstaged or untracked change under the source now voids every trailer (one `git status` before the loop); CI checks out a clean tree, so only local runs are affected. Test on a scratch repository for each kind of change, failing without the check; `docs/benchmarking.md` lists the case. **Convergence check:** the trailer area drew a finding a third round running, but not in the comparison redesigned in round 2: this one is about which source is compared, a precondition outside it. cef0e15 |
+
+## Round 4 — reviewer verdict: merge
+
+No findings; the reviewer confirmed the six accepted findings of rounds 1–3 fixed. The review is settled.
 
 ## Verification
 
