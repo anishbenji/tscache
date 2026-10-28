@@ -1,6 +1,6 @@
 # Chore 21 — Performance measurement and gate
 
-Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: —
+Branch: `chore/21-perf-gate` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in review · Verdict after triage: —
 
 The benchmarks and the regression gate the user asked for on 2026-10-26, while away ("Add a performance measurement/benchmark/gate in the roadmap"). The method, the measurements and how the design was chosen are in `docs/benchmarking.md`. Tooling, not a commit-plan step: no engine code changes.
 
@@ -40,9 +40,15 @@ The design came from three independent proposals (Claude Opus 5.5, Claude Fable 
 |---|---|---|---|---|
 | R2-1 | P1 | A later merge whose only conflict is outside the source voids a valid trailer (`merge-tree` fails on any conflict) | accepted; area redesigned | Validated by reading. **Convergence check:** the trailer rule drew findings in rounds 1 and 2, so it was redesigned rather than patched. The history inspection (later commits, then each later merge) is replaced by one comparison: merge the trailer's commit with `merge-base(base, HEAD)` as git would (`merge-tree --write-tree`, its tree taken even with conflicts), and keep the trailer only if the head's source equals that tree's. A hand-resolved source conflict differs (git's merge leaves markers), a README-only conflict does not, a merge ref equals it, a branch behind its base equals it. Tests on scratch repositories for each; the old rule fails two of them, accepting everything fails two others. f263036 |
 
+## Round 3 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | Trailers are checked against the committed head, but the driver benchmarks the working tree, so an uncommitted source edit runs under an acceptance that never covered it | accepted | Validated by reading: `compare` bundles `packages/tscache/src` from the working tree, `stillAccepted` diffs against `HEAD`. Any staged, unstaged or untracked change under the source now voids every trailer (one `git status` before the loop); CI checks out a clean tree, so only local runs are affected. Test on a scratch repository for each kind of change, failing without the check; `docs/benchmarking.md` lists the case. **Convergence check:** the trailer area drew a finding a third round running, but not in the comparison redesigned in round 2: this one is about which source is compared, a precondition outside it. cef0e15 |
+
 ## Verification
 
-- `bunx vitest run packages/tscache/test/perf`: 19 passed (memory, counts, transfer, extents, growth, the gate's decisions, trailers on a scratch repository with a merge ref).
+- `bunx vitest run packages/tscache/test/perf`: 20 passed (memory, counts, transfer, extents, growth, the gate's decisions, trailers on a scratch repository with a merge ref).
 - Mutation checks, each failing its test: no transfer list in the RPC server; a linear scan in `collect`; linear mask growth in `DenseSegment`; trailers voided by commits the base brings in.
 - `bun scripts/bench.ts smoke`: nine cases, each result checked against the fixture.
 - Local calibration in `docs/benchmarking.md` ("Calibration log").
