@@ -10,7 +10,7 @@ const MINUTE = 60_000;
 const START = Date.UTC(2026, 5, 1);
 const NOW = START + 30 * 24 * 60 * MINUTE;
 
-function serve(backend: Backend): void {
+function serve(backend: (request: Request) => ReturnType<Backend>): void {
   vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
     const response = await backend(
       new Request(new URL(input, "http://localhost"), init),

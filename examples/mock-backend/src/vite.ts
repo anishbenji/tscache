@@ -8,7 +8,8 @@
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { isRunnableDevEnvironment, type Plugin } from "vite";
-import { type BackendOptions, createBackend } from "./backend";
+import { WebSocketServer } from "ws";
+import { type Backend, type BackendOptions, createBackend } from "./backend";
 
 // The parts of Node's request and response the adapter uses; declared here
 // so the examples need no Node type definitions.
@@ -67,7 +68,44 @@ async function send(res: NodeResponse, response: Response): Promise<void> {
   res.end();
 }
 
-/** Serves the mock backend under /api/ on `vite` and `vite preview`. */
+/** The path live sockets connect to (Backend.socket). */
+const SOCKET_PATH = "/api/live";
+
+/** The parts of Node's HTTP server the socket upgrade uses. */
+interface UpgradingServer {
+  on(
+    event: "upgrade",
+    listener: (req: NodeRequest, socket: unknown, head: unknown) => void,
+  ): unknown;
+}
+
+/**
+ * Hands each WebSocket upgrade on /api/live to the backend. Other upgrades
+ * (Vite's own HMR socket) are left to their listeners.
+ */
+function serveSockets(backend: Backend, server: UpgradingServer | null): void {
+  const sockets = new WebSocketServer({ noServer: true });
+  server?.on("upgrade", (req, socket, head) => {
+    if (new URL(req.url ?? "/", "http://localhost").pathname !== SOCKET_PATH) {
+      return;
+    }
+    sockets.handleUpgrade(req, socket, head, (ws) => {
+      const handler = backend.socket({
+        send: (text) => ws.send(text),
+        close: (code, reason) => ws.close(code, reason),
+      });
+      ws.on("message", (data) => handler.message(String(data)));
+      ws.on("close", () => handler.closed());
+      // A socket error closes it; without a listener it would throw.
+      ws.on("error", () => handler.closed());
+    });
+  });
+}
+
+/**
+ * Serves the mock backend under /api/ on `vite` and `vite preview`: HTTP
+ * requests, and live sockets on /api/live.
+ */
 export function mockBackend(options?: BackendOptions): Plugin {
   const backend = createBackend(options);
   const middleware: Middleware = (req, res, next) => {
@@ -82,8 +120,14 @@ export function mockBackend(options?: BackendOptions): Plugin {
   };
   return {
     name: "tscache-examples:mock-backend",
-    configureServer: (server) => void server.middlewares.use(middleware),
-    configurePreviewServer: (server) => void server.middlewares.use(middleware),
+    configureServer(server) {
+      server.middlewares.use(middleware);
+      serveSockets(backend, server.httpServer);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware);
+      serveSockets(backend, server.httpServer);
+    },
   };
 }
 

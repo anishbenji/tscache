@@ -5,6 +5,12 @@
 // matches, and then the session's state takes over.
 
 import { type ChartKind, chartKindOf } from "@reference/shared/chart/load";
+import {
+  FEED_OPTIONS,
+  type FeedKind,
+  feedKindOf,
+  showFeedInUrl,
+} from "@reference/shared/feed";
 import { summarize } from "@reference/shared/market";
 import {
   describeConnection,
@@ -14,7 +20,7 @@ import {
   utc,
 } from "@reference/shared/session";
 import type { ServerRead } from "@tscache/integrations/shared/hydration";
-import { createMemo, createSignal, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, Show } from "solid-js";
 import type { GetResult, Range } from "tscache";
 import { Chart } from "./Chart";
 import { createSessionState } from "./session";
@@ -26,6 +32,8 @@ export interface AppProps {
   served?: ServerRead | undefined;
   /** The chart library the URL asked for (`?chart=`). */
   initialKind: ChartKind;
+  /** The feed the URL asked for (`?feed=`), if any. */
+  initialFeed?: FeedKind | undefined;
 }
 
 function time(t: number | undefined): string {
@@ -45,7 +53,12 @@ function describeAnswer(answer: GetResult | undefined): string {
 export function App(props: AppProps) {
   // The session and the server's read are the page's, fixed for its life.
   const { session } = props;
-  const state = createSessionState(session, initialState(props.served));
+  const state = createSessionState(
+    session,
+    initialState(props.served, props.initialFeed),
+  );
+  const feed = createMemo(() => state().feed);
+  createEffect(feed, showFeedInUrl);
   // Most changes leave the answer as it was (the connection, the auth
   // status); what reads it through this memo runs only for a new one.
   const answer = createMemo(() => state().answer);
@@ -77,6 +90,23 @@ export function App(props: AppProps) {
             <option value="uplot" selected={kind() === "uplot"}>
               uPlot
             </option>
+          </select>
+        </label>
+        <label>
+          Feed{" "}
+          <select
+            id="feed-kind"
+            onChange={(event) => {
+              const chosen = feedKindOf(`?feed=${event.currentTarget.value}`);
+              if (chosen !== undefined) session?.chooseFeed(chosen);
+            }}
+          >
+            {/* A constant list: mapped once, nothing to track. */}
+            {FEED_OPTIONS.map(([value, name]) => (
+              <option value={value} selected={feed() === value}>
+                {name}
+              </option>
+            ))}
           </select>
         </label>
       </header>

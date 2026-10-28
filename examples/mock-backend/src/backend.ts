@@ -1,5 +1,6 @@
 // The mock backend as a fetch-style handler: series pages, a live stream
-// of the forming bar, bearer-token auth with refresh-token rotation, and
+// of the forming bar over Server-Sent Events or a WebSocket, bearer-token
+// auth with refresh-token rotation, and
 // controls the example pages call to show
 // what tscache does about latency, a dataset version change or an expired
 // token. All state lives in memory, one backend per dev or preview server.
@@ -37,22 +38,26 @@ export interface BackendStats {
   latencyMs: number;
   /** Series pages answered, per dataset. */
   pages: Record<string, number>;
-  /** Series requests refused for a missing or stale access token. */
+  /**
+   * Series requests and socket subscriptions refused for a missing or
+   * stale access token.
+   */
   refused: number;
   /** Successful rotations. */
   refreshes: number;
   /** Refresh attempts with a refresh token that is not the current one. */
   reused: number;
-  /** Live streams open now. */
+  /** Live streams open now, over either transport. */
   streams: number;
   /** The backend's clock (ms), advanceMs included. */
   now: number;
 }
 
 /**
- * One message of a live stream (GET /api/stream/<dataset>/<symbol>), in
- * the shape of a tscache put batch: the bar forming now and, when a bar
- * has just closed, that bar with its final values first.
+ * One message of a live stream (GET /api/stream/<dataset>/<symbol>, or a
+ * socket on /api/live), in the shape of a tscache put batch: the bar
+ * forming now and, when a bar has just closed, that bar with its final
+ * values first.
  */
 export interface StreamBatch {
   timestamps: number[];
@@ -72,7 +77,10 @@ export interface BackendControl {
   expireAccess?: true;
   /** Answer the next this many series requests with a server error. */
   failNext?: number;
-  /** End every live stream, as a network outage would; clients reconnect. */
+  /**
+   * End every live stream and socket, as a network outage would; clients
+   * reconnect.
+   */
   dropStreams?: true;
   /** Move the backend's clock forward, so time passes in a test at once. */
   advanceMs?: number;
@@ -80,8 +88,52 @@ export interface BackendControl {
   resetClock?: true;
 }
 
-/** Answers a request under /api/, or undefined for any other path. */
-export type Backend = (request: Request) => Promise<Response | undefined>;
+/**
+ * The first message on a live socket: the series to push, and the access
+ * token, which a browser's WebSocket cannot send as a header.
+ */
+interface SocketSubscription {
+  type: "subscribe";
+  token?: string;
+  dataset: string;
+  symbol: string;
+  interval: number;
+  offset?: number;
+}
+
+/** A live socket's close codes (4000–4999 are the application's). */
+export const SOCKET_CLOSE = {
+  /** The access token was missing or stale: refresh it and reconnect. */
+  refused: 4401,
+  /** The first message was not a subscription the backend can serve. */
+  badSubscription: 4400,
+  /** dropStreams ended it, as a server restart would: reconnect. */
+  restart: 1012,
+} as const;
+
+/** The transport's side of a live socket, as the server holds it. */
+interface SocketPeer {
+  send(text: string): void;
+  close(code: number, reason: string): void;
+}
+
+/** The backend's side of a live socket. */
+interface SocketHandler {
+  /** A text message from the client. */
+  message(text: string): void;
+  /** The socket closed, whichever side closed it. */
+  closed(): void;
+}
+
+export interface Backend {
+  /** Answers a request under /api/, or undefined for any other path. */
+  (request: Request): Promise<Response | undefined>;
+  /**
+   * Serves a live socket (/api/live): its first message is a
+   * SocketSubscription, and every message after it a StreamBatch.
+   */
+  socket(peer: SocketPeer): SocketHandler;
+}
 
 const SERIES = /^\/api\/series\/([^/]+)\/([^/]+)$/;
 const STREAM = /^\/api\/stream\/([^/]+)\/([^/]+)$/;
@@ -132,6 +184,23 @@ async function readJson(request: Request): Promise<unknown> {
   }
 }
 
+function parseSubscription(text: string): SocketSubscription | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null) return undefined;
+  const { type, token, dataset, symbol } = value as Record<string, unknown>;
+  if (type !== "subscribe") return undefined;
+  if (typeof dataset !== "string" || typeof symbol !== "string") {
+    return undefined;
+  }
+  if (token !== undefined && typeof token !== "string") return undefined;
+  return value as SocketSubscription;
+}
+
 export function createBackend(options: BackendOptions = {}): Backend {
   const clock = options.now ?? Date.now;
   /** How far BackendControl.advanceMs moved the clock. */
@@ -154,6 +223,15 @@ export function createBackend(options: BackendOptions = {}): Backend {
     streams: 0,
   };
 
+  /** Whether `token` may read series: always, without auth. */
+  function accepts(token: string | null | undefined): boolean {
+    return (
+      !auth ||
+      token === tokens.access ||
+      (options.serviceToken !== undefined && token === options.serviceToken)
+    );
+  }
+
   /** The seed of a series under the current dataset version. */
   function seedFor(dataset: string, symbol: string): number {
     // The symbol seeds the series as it appears in the path, undecoded: a
@@ -168,11 +246,9 @@ export function createBackend(options: BackendOptions = {}): Backend {
     if (query === undefined) return text(400, "bad query");
     // Decided on arrival, like a real server; the latency only delays it.
     const presented = request.headers.get("authorization");
-    const authorized =
-      !auth ||
-      presented === `Bearer ${tokens.access}` ||
-      (options.serviceToken !== undefined &&
-        presented === `Bearer ${options.serviceToken}`);
+    const authorized = accepts(
+      presented?.startsWith("Bearer ") ? presented.slice(7) : null,
+    );
     const tag = `v${version}`;
     const seed = seedFor(dataset, symbol);
     const page = authorized
@@ -194,26 +270,46 @@ export function createBackend(options: BackendOptions = {}): Backend {
     );
   }
 
-  /**
-   * Server-Sent Events: a `bar` event every pushMs with a StreamBatch,
-   * until the client goes away. Unauthenticated: EventSource cannot send
-   * an authorization header (a real feed would take a cookie or a
-   * short-lived ticket in the URL).
-   */
-  function stream(request: Request, url: URL): Response {
-    const [, dataset = "", symbol = ""] = STREAM.exec(url.pathname) ?? [];
-    if (!isDatasetName(dataset)) return text(404, "unknown dataset");
-    const interval = Number(url.searchParams.get("interval") ?? "x");
-    const offset = Number(url.searchParams.get("offset") ?? "0");
+  /** What a live stream pushes, from either transport. */
+  interface Feed {
+    dataset: string;
+    symbol: string;
+    interval: number;
+    offset: number;
+  }
+
+  /** The feed a query or a subscription asks for, if the backend has it. */
+  function feedOf(
+    dataset: string,
+    symbol: string,
+    interval: unknown,
+    offset: unknown,
+  ): Feed | undefined {
+    if (!isDatasetName(dataset)) return undefined;
     if (
+      typeof interval !== "number" ||
       !Number.isSafeInteger(interval) ||
       interval <= 0 ||
+      typeof offset !== "number" ||
       !Number.isSafeInteger(offset)
     ) {
-      return text(400, "bad query");
+      return undefined;
     }
+    return { dataset, symbol, interval, offset };
+  }
+
+  /**
+   * Pushes a StreamBatch to `deliver` at once and every pushMs after, until
+   * the returned stop is called. dropStreams stops it too, and then calls
+   * `dropped`, for the transport to close.
+   */
+  function push(
+    { dataset, symbol, interval, offset }: Feed,
+    deliver: (batch: StreamBatch) => void,
+    dropped: () => void,
+  ): () => void {
+    if (!isDatasetName(dataset)) throw new Error(`no dataset ${dataset}`);
     const set = datasets[dataset];
-    const encoder = new TextEncoder();
     /** The start of the bar the last message carried. */
     let forming: number | undefined;
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -250,43 +346,70 @@ export function createBackend(options: BackendOptions = {}): Backend {
       return batch;
     }
 
-    let output: ReadableStreamDefaultController<Uint8Array> | undefined;
-
-    /** Stops the pushes; the reader went away, or end() ended the stream. */
-    function close(): void {
+    function stop(): void {
       if (!open) return;
       open = false;
       clearInterval(timer);
-      streams.delete(end);
+      streams.delete(drop);
       stats.streams--;
     }
 
-    function end(): void {
-      close();
-      try {
-        output?.close();
-      } catch {
-        // Already closed by the reader.
-      }
+    function drop(): void {
+      stop();
+      dropped();
     }
+
+    stats.streams++;
+    streams.add(drop);
+    deliver(message());
+    timer = setInterval(() => {
+      if (open) deliver(message());
+    }, pushMs);
+    return stop;
+  }
+
+  /**
+   * Server-Sent Events: a `bar` event every pushMs with a StreamBatch,
+   * until the client goes away. Unauthenticated: EventSource cannot send
+   * an authorization header (a real feed would take a cookie or a
+   * short-lived ticket in the URL).
+   */
+  function stream(request: Request, url: URL): Response {
+    const [, dataset = "", symbol = ""] = STREAM.exec(url.pathname) ?? [];
+    if (!isDatasetName(dataset)) return text(404, "unknown dataset");
+    const feed = feedOf(
+      dataset,
+      symbol,
+      Number(url.searchParams.get("interval") ?? "x"),
+      Number(url.searchParams.get("offset") ?? "0"),
+    );
+    if (feed === undefined) return text(400, "bad query");
+    const encoder = new TextEncoder();
+    let stop: (() => void) | undefined;
 
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        output = controller;
-        stats.streams++;
-        streams.add(end);
-        const push = () => {
-          if (!open) return;
-          const data = JSON.stringify(message());
-          controller.enqueue(encoder.encode(`event: bar\ndata: ${data}\n\n`));
+        const end = () => {
+          stop?.();
+          try {
+            controller.close();
+          } catch {
+            // Already closed by the reader.
+          }
         };
         // A dropped stream is reconnected after this many ms.
         controller.enqueue(encoder.encode(`retry: ${RECONNECT_MS}\n\n`));
-        push();
-        timer = setInterval(push, pushMs);
+        stop = push(
+          feed,
+          (batch) => {
+            const data = JSON.stringify(batch);
+            controller.enqueue(encoder.encode(`event: bar\ndata: ${data}\n\n`));
+          },
+          end,
+        );
         request.signal.addEventListener("abort", end);
       },
-      cancel: close,
+      cancel: () => stop?.(),
     });
     return new Response(body, {
       headers: {
@@ -294,6 +417,58 @@ export function createBackend(options: BackendOptions = {}): Backend {
         "cache-control": "no-store",
       },
     });
+  }
+
+  /**
+   * A live socket: the client subscribes with its first message, token
+   * included, and the backend pushes a StreamBatch every pushMs. The token
+   * is checked when the client subscribes, as many servers check it only
+   * on connect; a refused one closes the socket with SOCKET_CLOSE.refused.
+   */
+  function socket(peer: SocketPeer): SocketHandler {
+    let stop: (() => void) | undefined;
+    let subscribed = false;
+    let closed = false;
+    const close = (code: number, reason: string) => {
+      if (closed) return;
+      closed = true;
+      stop?.();
+      peer.close(code, reason);
+    };
+    return {
+      message(text) {
+        if (subscribed || closed) return;
+        subscribed = true;
+        const value = parseSubscription(text);
+        const feed =
+          value === undefined
+            ? undefined
+            : feedOf(
+                value.dataset,
+                value.symbol,
+                value.interval,
+                value.offset ?? 0,
+              );
+        if (feed === undefined) {
+          close(SOCKET_CLOSE.badSubscription, "bad subscription");
+          return;
+        }
+        if (!accepts(value?.token)) {
+          stats.refused++;
+          close(SOCKET_CLOSE.refused, "access token refused");
+          return;
+        }
+        stop = push(
+          feed,
+          (batch) => peer.send(JSON.stringify(batch)),
+          () => close(SOCKET_CLOSE.restart, "the server restarted"),
+        );
+      },
+      closed() {
+        closed = true;
+        stop?.();
+      },
+    };
   }
 
   async function refresh(request: Request): Promise<Response> {
@@ -344,7 +519,7 @@ export function createBackend(options: BackendOptions = {}): Backend {
     };
   }
 
-  return async (request) => {
+  const handle = async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) return undefined;
     const route = `${request.method} ${url.pathname}`;
@@ -369,4 +544,5 @@ export function createBackend(options: BackendOptions = {}): Backend {
         return text(404, "not found");
     }
   };
+  return Object.assign(handle, { socket });
 }

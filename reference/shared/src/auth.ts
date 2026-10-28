@@ -21,9 +21,13 @@
 // one, so the session survives, at the cost of one redundant refresh per
 // extra tab.
 //
+// The live feed's WebSocket (live.ts) presents the access token too, and
+// a socket the backend refuses refreshes it the same way, under the same
+// lock, so a fetch and a socket refused at once rotate the tokens once.
+//
 // The tokens live in localStorage, which every tab of the origin shares.
-// Only the access token goes into the fetcher's context; the refresh token
-// never leaves the page.
+// Only the access token goes into the fetcher's context and the socket's
+// subscription; the refresh token never leaves the page.
 
 import type { ExampleContext } from "@examples/mock-backend/fetcher";
 import type { TscacheClient } from "tscache";
@@ -86,7 +90,35 @@ function contextOf(access: string): ExampleContext {
  * createClient.
  */
 export async function fetcherContext(): Promise<ExampleContext> {
-  return contextOf((load() ?? (await signIn())).access);
+  return contextOf(await accessToken());
+}
+
+/** The stored access token, or a new sign-in's when no tab has signed in. */
+export async function accessToken(): Promise<string> {
+  return (load() ?? (await signIn())).access;
+}
+
+/**
+ * The access token that replaces `refused`: another tab's, when it already
+ * replaced it, or a refresh's, under the lock. Throws when the session
+ * cannot be recovered; the user must sign in again.
+ */
+export function refreshAccess(refused: string | undefined): Promise<string> {
+  return navigator.locks.request(LOCK, async () => {
+    const stored = load();
+    if (stored === undefined || stored.refresh === null) {
+      throw new Error("the session ended in another tab");
+    }
+    // Otherwise another tab already replaced the refused token. A caller
+    // too old to name it (refused undefined) gets a refresh.
+    if (refused !== undefined && stored.access !== refused) {
+      return stored.access;
+    }
+    save({ access: stored.access, refresh: null });
+    const tokens = await post("/api/auth/refresh", { refresh: stored.refresh });
+    save(tokens);
+    return tokens.access;
+  });
 }
 
 export interface RefreshOptions {
@@ -106,33 +138,13 @@ export function refreshOnAuthInvalid(
 ): () => void {
   return client.on("authInvalid", ({ context }) => {
     const refused = (context as ExampleContext | undefined)?.token;
-    void navigator.locks
-      .request(LOCK, async () => {
-        let tokens: Tokens;
-        try {
-          const stored = load();
-          if (stored === undefined || stored.refresh === null) {
-            throw new Error("the session ended in another tab");
-          }
-          tokens = stored;
-          // Otherwise another tab already replaced the refused token. A
-          // worker too old to name it (refused undefined) gets a refresh.
-          if (refused === undefined || tokens.access === refused) {
-            save({ access: tokens.access, refresh: null });
-            tokens = await post("/api/auth/refresh", {
-              refresh: stored.refresh,
-            });
-            save(tokens);
-          }
-        } catch (error) {
-          onSessionLost(error);
-          return;
-        }
+    void refreshAccess(refused)
+      .then(async (access) => {
         // Tabs sharing a SharedWorker would recover from one tab's update,
         // but tabs on workers of their own (after a fallback) need theirs.
-        await client.updateAuth(contextOf(tokens.access));
+        await client.updateAuth(contextOf(access));
         onRefreshed();
-      })
+      }, onSessionLost)
       .catch(reportError);
   });
 }

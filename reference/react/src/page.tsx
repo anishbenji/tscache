@@ -3,6 +3,7 @@
 // long as the page, whatever StrictMode mounts twice.
 
 import { chartKindOf } from "@reference/shared/chart/load";
+import { feedKindOf } from "@reference/shared/feed";
 import { startSession } from "@reference/shared/session";
 import type { ServerRead } from "@tscache/integrations/shared/hydration";
 import { StrictMode } from "react";
@@ -21,13 +22,15 @@ export function startPage(
   element: HTMLElement,
   served?: ServerRead,
 ): () => Promise<void> {
-  const session = startSession({ open: openClient, served });
+  const feed = feedKindOf(location.search);
+  const session = startSession({ open: openClient, served, feed });
   const app = (
     <StrictMode>
       <App
         session={session}
         served={served}
         initialKind={chartKindOf(location.search)}
+        initialFeed={feed}
       />
     </StrictMode>
   );

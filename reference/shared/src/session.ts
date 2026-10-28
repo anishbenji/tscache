@@ -6,12 +6,14 @@
 // and starts each client's cache from the server's read when the page was
 // rendered on the server. A series reads the range around what is on
 // screen and keeps only the latest answer. Scrolling asks for the new
-// range, and the cache fetches only what it does not hold. Pushed bars go
-// into the cache (live.ts) and are read back from it alone, so a push
-// costs no fetch; each time the stream opens, a page that follows the
-// market reads its newest bars with a fetch, mending what the stream
-// missed. An expired token is refreshed once across tabs (auth.ts), and
-// the reads it held back are asked again.
+// range, and the cache fetches only what it does not hold. New bars come
+// from the live feed (live.ts), over Server-Sent Events, a WebSocket or
+// polling, as every tab of the origin chose (feed.ts); they go into the
+// cache and are read back from it alone, so a push costs no fetch. Each
+// time the feed opens, a page that follows the market reads its newest
+// bars with a fetch, mending what the feed missed. An expired token is
+// refreshed once across tabs (auth.ts), and the reads it held back are
+// asked again.
 //
 // The session holds the page's state as one immutable object, replaced on
 // each change, which a framework subscribes to: the vanilla page writes it
@@ -34,13 +36,37 @@ import type {
   Range,
   TscacheClient,
 } from "tscache";
-import { onTokensStored, refreshOnAuthInvalid, signInAgain } from "./auth";
+import {
+  accessToken,
+  onTokensStored,
+  refreshAccess,
+  refreshOnAuthInvalid,
+  signInAgain,
+} from "./auth";
 import type { ChartView } from "./chart/view";
-import { liveFeed } from "./live";
-import { feedUrl, market, openingRange, readRange } from "./market";
+import {
+  DEFAULT_FEED,
+  type FeedKind,
+  onFeedStored,
+  storedFeed,
+  storeFeed,
+} from "./feed";
+import { eventSource, liveFeed, polling, type Source, webSocket } from "./live";
+import {
+  feedUrl,
+  market,
+  openingRange,
+  readRange,
+  socketSubscription,
+  socketUrl,
+} from "./market";
 
 /** How long scrolling must pause before the new range is read. */
 const SCROLL_PAUSE_MS = 150;
+/** How often the polling feed reads the newest bars. */
+const POLL_MS = 2000;
+/** The live socket's close code for a refused token (the mock backend's). */
+const REFUSED = 4401;
 
 export type AuthStatus = "signed in" | "refreshing credentials" | "signed out";
 
@@ -60,6 +86,8 @@ export interface SessionState {
   /** A fetch failed, and what it lacked is still missing: offer Retry. */
   readonly fetchFailed: boolean;
   readonly auth: AuthStatus;
+  /** The live feed every tab of the origin takes. */
+  readonly feed: FeedKind;
 }
 
 /**
@@ -79,7 +107,10 @@ function gapsOf({ timestamps, misses }: GetResult): Miss[] {
  * hydration render, so their markup matches: nothing about it depends on
  * the clock.
  */
-export function initialState(served?: ServerRead): SessionState {
+export function initialState(
+  served?: ServerRead,
+  feed: FeedKind = DEFAULT_FEED,
+): SessionState {
   return {
     status: "connecting",
     error: undefined,
@@ -89,6 +120,7 @@ export function initialState(served?: ServerRead): SessionState {
     gaps: served === undefined ? [] : gapsOf(served.result),
     fetchFailed: false,
     auth: "signed in",
+    feed,
   };
 }
 
@@ -134,6 +166,11 @@ export interface SessionOptions {
    * from it, and the state shows it until the client's first answer.
    */
   served?: ServerRead | undefined;
+  /**
+   * The feed the page's URL asks for (`?feed=`), which becomes every tab's;
+   * without one, the feed chosen last, in any tab.
+   */
+  feed?: FeedKind | undefined;
 }
 
 export interface Session {
@@ -163,6 +200,8 @@ export interface Session {
   retry(): void;
   /** Signs in again after a lost session. */
   signIn(): void;
+  /** Makes `feed` the live feed of every tab of the origin. */
+  chooseFeed(feed: FeedKind): void;
   /** Tears the page's session down; nothing reaches its state after. */
   dispose(): Promise<void>;
 }
@@ -171,12 +210,13 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function startSession({ open, served }: SessionOptions): Session {
+export function startSession({ open, served, feed }: SessionOptions): Session {
   const now = Date.now();
   const opening = openingRange(served?.range.end ?? now);
   /** The range the series reads: what is on screen, and a screen each side. */
   let asked = served?.range ?? readRange(opening, now);
-  let state = initialState(served);
+  if (feed !== undefined) storeFeed(feed);
+  let state = initialState(served, feed ?? storedFeed());
   let chart: ChartView | undefined;
   /**
    * The last chart, when it was detached and no chart has been attached
@@ -280,9 +320,13 @@ export function startSession({ open, served }: SessionOptions): Session {
     };
   });
 
+  /** What waits for a sign-in in this tab: the live socket, after a lost session. */
+  const signedIn = new Set<() => void>();
+
   function sessionRestored(): void {
     update({ auth: "signed in" });
     bars.show(asked);
+    for (const resume of [...signedIn]) resume();
   }
 
   // Another tab signed in: adopt its token, as a tab on a worker of its
@@ -293,24 +337,69 @@ export function startSession({ open, served }: SessionOptions): Session {
     void now.client.updateAuth(context).then(sessionRestored, reportError);
   });
 
-  const stopFeed = liveFeed({
-    connection,
-    config: market,
-    url: feedUrl,
-    onBatch(span) {
-      if (span.end < asked.start) return;
-      // Pushed bars on screen, or just past its end as the market moves on:
-      // they are in the cache, so read from it alone.
-      if (span.start <= asked.end + market.interval) {
-        asked = { start: asked.start, end: Math.max(asked.end, span.end) };
-        bars.refresh(asked);
-        return;
-      }
-      // Bars after a gap the stream did not fill.
-      catchUp(span.end);
-    },
-    onOpened: () => catchUp(Date.now()),
-  });
+  /** The source of new bars, for the tab that holds the feed. */
+  function sourceOf(kind: FeedKind): Source {
+    switch (kind) {
+      case "sse":
+        return eventSource(feedUrl);
+      case "ws":
+        return webSocket({
+          url: socketUrl,
+          subscribe: (token) =>
+            JSON.stringify({ ...socketSubscription, token }),
+          refusedCode: REFUSED,
+          token: accessToken,
+          refresh: refreshAccess,
+          lost(error, retry) {
+            reportError(error);
+            update({ auth: "signed out" });
+            // A sign-in here stores the tokens without a storage event in
+            // this tab, so the socket hears of it from sessionRestored.
+            const resume = () => retry();
+            signedIn.add(resume);
+            const stopWatching = onTokensStored(resume);
+            return () => {
+              signedIn.delete(resume);
+              stopWatching();
+            };
+          },
+        });
+      case "poll":
+        return polling(POLL_MS);
+    }
+  }
+
+  function startFeed(kind: FeedKind): () => void {
+    return liveFeed({
+      connection,
+      config: market,
+      source: sourceOf(kind),
+      onBatch(span) {
+        if (span.end < asked.start) return;
+        // New bars on screen, or just past its end as the market moves on:
+        // they are in the cache, so read from it alone.
+        if (span.start <= asked.end + market.interval) {
+          asked = { start: asked.start, end: Math.max(asked.end, span.end) };
+          bars.refresh(asked);
+          return;
+        }
+        // Bars after a gap the feed did not fill.
+        catchUp(span.end);
+      },
+      onOpened: () => catchUp(Date.now()),
+    });
+  }
+
+  let stopFeed = startFeed(state.feed);
+
+  /** Takes `kind` as this tab's feed, which every tab now takes. */
+  function adoptFeed(kind: FeedKind): void {
+    if (disposed || kind === state.feed) return;
+    stopFeed();
+    update({ feed: kind });
+    stopFeed = startFeed(kind);
+  }
+  const stopWatchingFeed = onFeedStored(adoptFeed);
 
   bars.show(asked);
 
@@ -353,12 +442,18 @@ export function startSession({ open, served }: SessionOptions): Session {
       if (now.status !== "connected") return;
       void signInAgain(now.client).then(sessionRestored, reportError);
     },
+    chooseFeed(kind) {
+      if (disposed) return;
+      storeFeed(kind);
+      adoptFeed(kind);
+    },
     async dispose() {
       if (disposed) return;
       disposed = true;
       listeners.clear();
       clearTimeout(scrollTimer);
       stopFeed();
+      stopWatchingFeed();
       unsubscribe();
       uninstall?.();
       stopWatchingTokens();

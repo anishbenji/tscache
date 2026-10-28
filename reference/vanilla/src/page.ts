@@ -11,6 +11,11 @@ import {
   loadChart,
 } from "@reference/shared/chart/load";
 import type { ChartView } from "@reference/shared/chart/view";
+import {
+  FEED_OPTIONS,
+  feedKindOf,
+  showFeedInUrl,
+} from "@reference/shared/feed";
 import { market, summarize } from "@reference/shared/market";
 import {
   describeConnection,
@@ -34,6 +39,11 @@ export function pageMarkup(summary: string): string {
     <select id="chart-kind">
       <option value="lightweight">Lightweight Charts</option>
       <option value="uplot">uPlot</option>
+    </select>
+  </label>
+  <label>Feed
+    <select id="feed-kind">
+${FEED_OPTIONS.map(([kind, name]) => `      <option value="${kind}">${name}</option>`).join("\n")}
     </select>
   </label>
 </header>
@@ -81,6 +91,7 @@ export function startPage(
 ): () => Promise<void> {
   const chartElement = element<HTMLElement>(root, "#chart");
   const select = element<HTMLSelectElement>(root, "#chart-kind");
+  const feedSelect = element<HTMLSelectElement>(root, "#feed-kind");
   const signIn = element<HTMLButtonElement>(root, "#sign-in");
   const retry = element<HTMLButtonElement>(root, "#retry");
   const output = (name: string) =>
@@ -93,6 +104,7 @@ export function startPage(
         fetcher: { module: fetcherModule, context: await fetcherContext() },
       }),
     served,
+    feed: feedKindOf(location.search),
   });
   let view: ChartView | undefined;
   let detach: (() => void) | undefined;
@@ -124,6 +136,10 @@ export function startPage(
     output("connection").value = describeConnection(state);
     output("auth").value = state.auth;
     signIn.hidden = state.auth !== "signed out";
+    if (state.feed !== shown?.feed) {
+      feedSelect.value = state.feed;
+      showFeedInUrl(state.feed);
+    }
     shown = state;
   }
   // The session changes nothing after teardown, so neither does this.
@@ -169,6 +185,14 @@ export function startPage(
       url.searchParams.set("chart", next);
       history.replaceState(null, "", url);
       void mountChart(next);
+    },
+    { signal },
+  );
+  feedSelect.addEventListener(
+    "change",
+    () => {
+      const chosen = feedKindOf(`?feed=${feedSelect.value}`);
+      if (chosen !== undefined) session.chooseFeed(chosen);
     },
     { signal },
   );
