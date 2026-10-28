@@ -4,6 +4,8 @@
   // so are the SSR examples' server entries, which their Vite config names.
   "entry": [
     "packages/*/src/entries/*.ts",
+    // Bundled by scripts/bench.ts, not imported.
+    "packages/*/bench/entry.ts",
     // Read by tsdown, not imported.
     "packages/*/tsdown.config.ts",
     "scripts/*.ts",
@@ -22,7 +24,14 @@
     "packages": ["packages/*", "examples/*", "integrations", "reference/*"]
   },
   // Consumed by tsdown's publint/attw integration, not imported anywhere.
-  "ignoreDependencies": ["@arethetypeswrong/cli", "publint"],
+  // The bench bundle's revisions, resolved by scripts/bench.ts.
+  "ignoreDependencies": [
+    "@arethetypeswrong/cli",
+    "publint",
+    "tscache-bench:base",
+    "tscache-bench:control",
+    "tscache-bench:head"
+  ],
   "health": {
     // Test tables run long by design; size thresholds gate src only. The
     // example apps are demo code covered by their Playwright specs, which
@@ -30,8 +39,15 @@
     // are type-checked, not run in CI (step ⑭), so the estimate takes them
     // as untested; their shared core and the vanilla snippet stay gated.
     // The reference clients, like the examples, are covered by Playwright.
+    // The benchmark driver and the size check run in every `bun run ci`
+    // (smoke and budgets), which the estimate cannot see either; what the
+    // gate decides is in bench/gate.ts, which stays gated and is tested.
     "ignore": [
       "packages/*/test/**",
+      "packages/tscache/bench/run.ts",
+      "scripts/bench.ts",
+      "scripts/bench-calibration.ts",
+      "scripts/size.ts",
       "examples/**",
       "reference/**",
       "integrations/react/**",

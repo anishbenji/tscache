@@ -56,4 +56,8 @@ bunx vitest run --passWithNoTests
 # app would see it (starter §5, §7).
 bun run check:integrations
 bunx playwright test --pass-with-no-tests
-# bench smoke joins here with the first bench files (commit plan step ⑥+)
+# Performance (docs/benchmarking.md): the package entries' sizes against
+# their budgets, and every benchmark once, its result checked. The timings
+# run in the separate bench job, which reports and does not gate yet.
+bun scripts/size.ts
+bun scripts/bench.ts smoke
