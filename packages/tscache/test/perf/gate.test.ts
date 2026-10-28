@@ -126,13 +126,24 @@ describe("Perf-Accepted trailers in a pull request", () => {
       writeFileSync(path: string, data: string): void;
     }>("node:fs");
     const { tmpdir } = await load<{ tmpdir(): string }>("node:os");
+    const { env } = await load<{ env: Record<string, string | undefined> }>(
+      "node:process",
+    );
     const dir = mkdtempSync(`${tmpdir()}/tscache-trailers-`);
+    // Without git's own variables: under a hook, GIT_DIR names the
+    // repository being pushed, and would send every command there.
+    const options = {
+      cwd: dir,
+      encoding: "utf8",
+      env: Object.fromEntries(
+        Object.entries(env).filter(([name]) => !name.startsWith("GIT_")),
+      ),
+    };
     const git: Git = Object.assign(
-      (...args: string[]) =>
-        execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim(),
+      (...args: string[]) => execFileSync("git", args, options).trim(),
       {
         lenient: (...args: string[]) =>
-          spawnSync("git", args, { cwd: dir, encoding: "utf8" }).stdout.trim(),
+          spawnSync("git", args, options).stdout.trim(),
       },
     );
     git("init", "-q", "-b", "main");
@@ -148,8 +159,48 @@ describe("Perf-Accepted trailers in a pull request", () => {
     };
     const write = (file: string, text: string) =>
       writeFileSync(`${dir}/${file}`, text);
-    return { git, commit, write };
+    return { git, commit, write, dir };
   }
+
+  it("keeps to its scratch repository when git's environment points elsewhere", async () => {
+    // A git hook (pre-push runs these tests) exports GIT_DIR for the
+    // repository being pushed; inherited, it sends every scratch command
+    // there. A decoy stands in for that repository.
+    const { env } = await load<{ env: Record<string, string | undefined> }>(
+      "node:process",
+    );
+    const { execFileSync } = await load<{
+      execFileSync(file: string, args: string[], options: object): string;
+    }>("node:child_process");
+    const { mkdtempSync, realpathSync } = await load<{
+      mkdtempSync(p: string): string;
+      realpathSync(p: string): string;
+    }>("node:fs");
+    const { tmpdir } = await load<{ tmpdir(): string }>("node:os");
+    const decoy = mkdtempSync(`${tmpdir()}/tscache-decoy-`);
+    const clean = Object.fromEntries(
+      Object.entries(env).filter(([name]) => !name.startsWith("GIT_")),
+    );
+    execFileSync("git", ["init", "-q", decoy], { env: clean });
+    const saved = env.GIT_DIR;
+    env.GIT_DIR = `${decoy}/.git`;
+    let gitDir: string;
+    try {
+      const { git, commit, dir } = await scratch();
+      commit("packages/tscache/src/engine.ts", "base");
+      gitDir = `${git("rev-parse", "--absolute-git-dir")}|${realpathSync(`${dir}/.git`)}`;
+    } finally {
+      if (saved === undefined) delete env.GIT_DIR;
+      else env.GIT_DIR = saved;
+    }
+    const [used, own] = gitDir.split("|");
+    expect(used).toBe(own);
+    const decoyLog = execFileSync("git", ["-C", decoy, "rev-list", "--all"], {
+      env: clean,
+      encoding: "utf8",
+    });
+    expect(decoyLog).toBe("");
+  });
 
   it("accepts the code it was written for, also on a merge ref, and not a later change", async () => {
     const { git, commit } = await scratch();

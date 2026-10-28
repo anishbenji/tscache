@@ -50,9 +50,13 @@ The design came from three independent proposals (Claude Opus 5.5, Claude Fable 
 
 No findings; the reviewer confirmed the six accepted findings of rounds 1–3 fixed. The review is settled.
 
+## After settling: the first push
+
+The first push ran the scratch-repository trailer tests inside the pre-push hook, where git exports `GIT_DIR` for the repository being pushed. Inherited, it sent the tests' git commands to the real repository: they rewrote its `.git/config` (`core.bare`, a `user` and `commit.gpgsign`), moved `main` and the branch, and created a branch `pr`. Nothing was pushed (the hook failed), and every change was local and restored from the reflog. The tests now run git without any `GIT_*` variable, and a regression test points `GIT_DIR` at a decoy repository and checks that the scratch commands stay in their own, failing without the fix. Round CI had not caught it because `bun run ci` runs outside a hook.
+
 ## Verification
 
-- `bunx vitest run packages/tscache/test/perf`: 20 passed (memory, counts, transfer, extents, growth, the gate's decisions, trailers on a scratch repository with a merge ref).
+- `bunx vitest run packages/tscache/test/perf`: 21 passed, also with `GIT_DIR` set (memory, counts, transfer, extents, growth, the gate's decisions, trailers on a scratch repository with a merge ref).
 - Mutation checks, each failing its test: no transfer list in the RPC server; a linear scan in `collect`; linear mask growth in `DenseSegment`; trailers voided by commits the base brings in.
 - `bun scripts/bench.ts smoke`: nine cases, each result checked against the fixture.
 - Local calibration in `docs/benchmarking.md` ("Calibration log").
