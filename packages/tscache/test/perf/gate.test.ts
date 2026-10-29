@@ -9,7 +9,13 @@ import {
   trailers,
   verdictOf,
 } from "../../bench/gate";
-import { medianRanks, type Sample, sample } from "../../bench/sample";
+import {
+  medianRanks,
+  type Sample,
+  sample,
+  sampleAsync,
+  summarise,
+} from "../../bench/sample";
 
 // The timing gate's decisions (docs/benchmarking.md), which fail a pull
 // request: tested here, apart from any timing.
@@ -101,6 +107,53 @@ describe("the sampler", () => {
     expect(same.ratio).toBeGreaterThan(0.7);
     expect(same.ratio).toBeLessThan(1.4);
     const double = sample(work, twice, options);
+    expect(double.ratio).toBeGreaterThan(1.5);
+  });
+
+  it("summarises paired rounds into ratios, a median and its interval", () => {
+    const base = Array.from({ length: 20 }, () => 10);
+    const head = Array.from({ length: 20 }, (_, i) => 10 + i);
+    const s = summarise(base, head, 5);
+    expect(s.ratios).toEqual(head.map((h) => h / 10));
+    expect(s.ratio).toBeCloseTo(1.95);
+    // Ranks 6 and 15 of 20 (medianRanks).
+    expect(s.low).toBeCloseTo(1.5);
+    expect(s.high).toBeCloseTo(2.4);
+    expect(s.baseMs).toBe(2);
+    expect(s.headMs).toBeCloseTo(3.9);
+    expect(s.batch).toBe(5);
+  });
+
+  it("times asynchronous operations the same way, resetting after each batch", async () => {
+    let x = 0;
+    const work = () => {
+      for (let i = 0; i < 2000; i++) x = (x + i) % 9973;
+      return x;
+    };
+    const once = async () => work();
+    const twice = async () => work() + work();
+    let resets = 0;
+    let calls = 0;
+    const options = {
+      rounds: 10,
+      batchMs: 5,
+      warmupMs: 20,
+      between: async () => {
+        resets++;
+      },
+    };
+    const counted = async () => {
+      calls++;
+      return once();
+    };
+    const same = await sampleAsync(counted, once, options);
+    expect(same.ratios).toHaveLength(10);
+    expect(same.ratio).toBeGreaterThan(0.7);
+    expect(same.ratio).toBeLessThan(1.4);
+    // Four warm-ups, two per calibration step, then two per round.
+    expect(resets).toBeGreaterThanOrEqual(4 + 2 + 20);
+    expect(calls).toBeGreaterThanOrEqual(same.batch * 10);
+    const double = await sampleAsync(once, twice, options);
     expect(double.ratio).toBeGreaterThan(1.5);
   });
 });

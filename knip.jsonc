@@ -6,8 +6,14 @@
       "project": []
     },
     "packages/tscache": {
-      // bench/entry.ts is bundled by scripts/bench.ts, not imported.
-      "entry": ["src/entries/*.ts", "test/**/*.test.ts", "bench/entry.ts"],
+      // bench/entry.ts and bench/e2e.ts are bundled by scripts/bench.ts and
+      // scripts/bench-e2e.ts, not imported.
+      "entry": [
+        "src/entries/*.ts",
+        "test/**/*.test.ts",
+        "bench/entry.ts",
+        "bench/e2e.ts"
+      ],
       "project": ["src/**/*.ts", "test/**/*.ts", "bench/**/*.ts"],
       // The tscache/vite test loads Vite through a computed specifier, so
       // its types (which bring Node's) stay out of the package's type check.

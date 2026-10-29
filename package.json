@@ -23,7 +23,8 @@
     "ci": "bash scripts/ci.sh",
     "size": "bun scripts/size.ts",
     "bench": "bun scripts/bench.ts compare",
-    "bench:smoke": "bun scripts/bench.ts smoke"
+    "bench:smoke": "bun scripts/bench.ts smoke",
+    "bench:e2e": "bun scripts/bench.ts e2e"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",

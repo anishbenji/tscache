@@ -101,6 +101,29 @@ export function medianRanks(n: number): [number, number] {
   return [r, n + 1 - r];
 }
 
+/**
+ * The sample of paired rounds: one batch of `batch` operations per side
+ * per round, in the order run.
+ */
+export function summarise(
+  baseTimes: readonly number[],
+  headTimes: readonly number[],
+  batch: number,
+): Sample {
+  const ratios = headTimes.map((b, i) => b / (baseTimes[i] as number));
+  const sorted = [...ratios].sort((x, y) => x - y);
+  const [lowRank, highRank] = medianRanks(ratios.length);
+  return {
+    ratios,
+    ratio: median(sorted),
+    low: sorted[lowRank - 1] as number,
+    high: sorted[highRank - 1] as number,
+    baseMs: median([...baseTimes].sort((x, y) => x - y)) / batch,
+    headMs: median([...headTimes].sort((x, y) => x - y)) / batch,
+    batch,
+  };
+}
+
 /** Times `head` against `base`. Both must do the same work. */
 export function sample(
   base: Op,
@@ -115,32 +138,106 @@ export function sample(
   run(base, warmupMs / 2);
   run(head, warmupMs / 2);
   const n = calibrate(base, head, batchMs);
-  const ratios: number[] = [];
   const baseTimes: number[] = [];
   const headTimes: number[] = [];
   for (let round = 0; round < rounds; round++) {
-    let a: number;
-    let b: number;
     if (round % 2 === 0) {
-      a = time(base, n);
-      b = time(head, n);
+      baseTimes.push(time(base, n));
+      headTimes.push(time(head, n));
     } else {
-      b = time(head, n);
-      a = time(base, n);
+      headTimes.push(time(head, n));
+      baseTimes.push(time(base, n));
     }
-    baseTimes.push(a);
-    headTimes.push(b);
-    ratios.push(b / a);
   }
-  const sorted = [...ratios].sort((x, y) => x - y);
-  const [lowRank, highRank] = medianRanks(rounds);
-  return {
-    ratios,
-    ratio: median(sorted),
-    low: sorted[lowRank - 1] as number,
-    high: sorted[highRank - 1] as number,
-    baseMs: median(baseTimes.sort((x, y) => x - y)) / n,
-    headMs: median(headTimes.sort((x, y) => x - y)) / n,
-    batch: n,
-  };
+  return summarise(baseTimes, headTimes, n);
+}
+
+/**
+ * An operation that completes later, as a request to a worker does. It
+ * returns a number, as `Op` does.
+ */
+export type AsyncOp = () => Promise<number>;
+
+export interface AsyncSampleOptions extends SampleOptions {
+  /**
+   * Runs after every batch, outside the timer: resets what the batch left
+   * behind (a cache it filled), so the next batch starts as this one did.
+   */
+  between?: () => Promise<void>;
+}
+
+/** Times a batch of `n`, then runs `between`, outside the timer. */
+async function timeAsync(
+  op: AsyncOp,
+  n: number,
+  between: () => Promise<void>,
+): Promise<number> {
+  const start = performance.now();
+  let fold = 0;
+  for (let i = 0; i < n; i++) fold += await op();
+  const ms = performance.now() - start;
+  sink = (sink + fold) % 1_000_000_007;
+  await between();
+  return ms;
+}
+
+/** Runs `op` one at a time for `ms`, then `between`. */
+async function runAsync(
+  op: AsyncOp,
+  ms: number,
+  between: () => Promise<void>,
+): Promise<void> {
+  const end = performance.now() + ms;
+  while (performance.now() < end) {
+    const value = await op();
+    sink = (sink + value) % 1_000_000_007;
+  }
+  await between();
+}
+
+/** `calibrate` for operations that complete later. */
+async function calibrateAsync(
+  a: AsyncOp,
+  b: AsyncOp,
+  ms: number,
+  between: () => Promise<void>,
+): Promise<number> {
+  let n = 1;
+  for (;;) {
+    const first = await timeAsync(a, n, between);
+    const slowest = Math.max(first, await timeAsync(b, n, between));
+    if (slowest >= ms || n >= 1 << 24) return n;
+    n *= slowest < ms / 8 ? 8 : 2;
+  }
+}
+
+/**
+ * `sample` for operations that complete later: the same warm-up, batches
+ * and paired rounds, each operation awaited before the next starts.
+ */
+export async function sampleAsync(
+  base: AsyncOp,
+  head: AsyncOp,
+  options: AsyncSampleOptions = {},
+): Promise<Sample> {
+  const rounds = options.rounds ?? 20;
+  const batchMs = options.batchMs ?? 40;
+  const warmupMs = options.warmupMs ?? 500;
+  const between = options.between ?? (async () => {});
+  for (const op of [base, head, base, head]) {
+    await runAsync(op, warmupMs / 2, between);
+  }
+  const n = await calibrateAsync(base, head, batchMs, between);
+  const baseTimes: number[] = [];
+  const headTimes: number[] = [];
+  for (let round = 0; round < rounds; round++) {
+    if (round % 2 === 0) {
+      baseTimes.push(await timeAsync(base, n, between));
+      headTimes.push(await timeAsync(head, n, between));
+    } else {
+      headTimes.push(await timeAsync(head, n, between));
+      baseTimes.push(await timeAsync(base, n, between));
+    }
+  }
+  return summarise(baseTimes, headTimes, n);
 }
