@@ -1,6 +1,6 @@
 # Chore 23 — Chromium end-to-end benchmark scenarios
 
-Branch: `chore/23-bench-e2e` · Reviewer: Codex (high) · Status: in review
+Branch: `chore/23-bench-e2e` · Reviewer: Codex (high) · Rounds: 2 · Status: settled · Verdict after triage: merge
 
 The third "Next" item of the performance work (`docs/benchmarking.md`; roadmap, "Performance measurement and gate"): Chromium scenarios through a real SharedWorker, report-only. Chosen by Claude while the user was away, under the user's grant of 2026-10-30 to pick tasks by priority; built by a Claude Opus 5.5 subagent, reviewed and triaged by the orchestrator. Tooling, not a commit-plan step: no engine code changes.
 
@@ -35,3 +35,14 @@ Taken by the subagent and accepted by the orchestrator under the grant (logged f
 | R1-1 | P1 | A revision whose `get()` never resolves leaves `page.evaluate()` waiting until the job's 15-minute limit, so the whole `bench` job fails despite `continue-on-error` | Accept. Valid: a job timeout is not a step failure, so `continue-on-error` does not apply | 65c8823 gives the step `timeout-minutes: 3` (a normal run takes about ten seconds locally; the whole `bench` job took about two minutes on #42) |
 
 Rebased onto `main` after #43 (step 22) merged: the docs' "Next" lists conflicted and keep step 22's lines. The local results table predates step 22, which made reads faster.
+
+## Round 2 — reviewer verdict: merge
+
+No findings; `bun run ci` passed on the rebased branch.
+
+## Verification
+
+- `bun run ci` passed in both rounds; its last lines are the three e2e smoke results.
+- `bun run bench:e2e` (base and head the same code): ratios 0.973–1.029.
+- Failure checks by the subagent: a head whose `get` drops its last bar fails the smoke and the paired run; a second tab with its own cache fails `two-tabs-one-fetch` on its fetch count.
+- Not verified: the step on GitHub's runner (this pull request's `bench` job shows it), its noise there, and the time it adds to the job.
