@@ -35,3 +35,9 @@ Mutation checks: copying with `subarray` instead of `slice` fails 10 tests (the 
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R2-1 | P1 | `bun run ci` failed in Playwright: a vanilla polling fetch spanned 180 000 ms against the 120 000 ms bound (`e2e/reference/clients.spec.ts:556`); the reviewer notes the evidence does not tie it to this change | Accept that CI must pass; reject a code cause. The step touches no reference or polling code, and the test passed 5 of 5 alone (`--repeat-each 5`). Locally, Playwright's servers use fixed ports with `reuseExistingServer`, and a second checkout ran its own `bun run ci` at the same time, so the two runs could share the e2e servers and the mock backend's state | Round 3 reruns the full CI with no other checkout running it. Recorded as a tooling follow-up: concurrent local CI runs in two worktrees collide on the Playwright ports |
+
+## Round 3 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | `bun run ci` failed in Vitest: the sampler's same-operation check in `perf/gate.test.ts` measured a ratio of 1.655 against `< 1.4`; the reviewer notes it does not establish a regression from this change | Accept that CI must pass; reject a code cause. The test times a synthetic loop, not the engine, and predates this step. It did not fail in 28 local runs: 8 of the package's tests, 8 of the whole suite, and 6 of each with every core saturated by `yes`. The failing round ran while another checkout's agent was building and benchmarking on the same machine; R2-1 had the same cause | Round 4 reruns CI on an idle machine. Both rounds point at one area, concurrent heavy work on one machine, so the durable fix is procedural: no review round runs while another checkout runs CI or benchmarks (backlog item 9 also covers the Playwright ports) |
