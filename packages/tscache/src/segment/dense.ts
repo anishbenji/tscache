@@ -100,30 +100,59 @@ export class DenseSegment implements Segment {
     return row;
   }
 
-  /** Present slots inside `range`, ascending. */
-  #presentIn(range: SlotRange): number[] {
-    const extent = this.#extent;
-    const present: number[] = [];
-    if (extent === undefined) return present;
-    const end = Math.min(range.end, extent.end);
-    for (let slot = Math.max(range.start, extent.start); slot <= end; slot++) {
-      if (this.#has(slot)) present.push(slot);
+  /** Present slots in `[start, end]`, which lies inside the extent. */
+  #countIn(start: number, end: number): number {
+    // A tight extent holding as many points as it spans has every slot set.
+    const extent = this.#extent as SlotRange;
+    if (this.#size === extent.end - extent.start + 1) return end - start + 1;
+    let count = 0;
+    for (let slot = start; slot <= end; slot++) {
+      if (this.#has(slot)) count++;
     }
-    return present;
+    return count;
   }
 
   slice(range: SlotRange): Columns {
     assertSlotRange(range, "range");
-    const present = this.#presentIn(range);
+    const extent = this.#extent;
+    if (extent === undefined) return this.#copySpan(0, 0);
+    const start = Math.max(range.start, extent.start);
+    const end = Math.min(range.end, extent.end);
+    if (start > end) return this.#copySpan(start, 0);
+    const count = this.#countIn(start, end);
+    return count === end - start + 1
+      ? this.#copySpan(start, count)
+      : this.#gather(start, end, count);
+  }
+
+  /** `count` slots from `start`, all present: one copy per column. */
+  #copySpan(start: number, count: number): Columns {
+    const slots = new Float64Array(count);
+    for (let k = 0; k < count; k++) slots[k] = start + k;
+    const from = start - this.#base;
     const fields: Record<string, FieldArray> = {};
     for (const column of this.#columns) {
-      const out = new column.ctor(present.length);
-      for (let k = 0; k < present.length; k++) {
-        out[k] = column.data[(present[k] as number) - this.#base] as number;
+      setOwn(fields, column.name, column.data.slice(from, from + count));
+    }
+    return { slots, fields };
+  }
+
+  /** The `count` present slots in `[start, end]`, which has gaps. */
+  #gather(start: number, end: number, count: number): Columns {
+    const slots = new Float64Array(count);
+    let k = 0;
+    for (let slot = start; slot <= end; slot++) {
+      if (this.#has(slot)) slots[k++] = slot;
+    }
+    const fields: Record<string, FieldArray> = {};
+    for (const column of this.#columns) {
+      const out = new column.ctor(count);
+      for (let i = 0; i < count; i++) {
+        out[i] = column.data[(slots[i] as number) - this.#base] as number;
       }
       setOwn(fields, column.name, out);
     }
-    return { slots: Float64Array.from(present), fields };
+    return { slots, fields };
   }
 
   mergeFrom(points: Columns, authority?: SlotRange): void {

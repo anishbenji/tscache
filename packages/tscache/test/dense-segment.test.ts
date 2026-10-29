@@ -158,6 +158,140 @@ describe("DenseSegment presence and reads — architecture §4.2", () => {
   });
 });
 
+function span(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+}
+
+/** Every array a slice returns owns a buffer of exactly its own size. */
+function expectOwnBuffers(result: Columns): void {
+  for (const array of [result.slots, ...Object.values(result.fields)]) {
+    expect(array.byteOffset).toBe(0);
+    expect(array.buffer.byteLength).toBe(array.byteLength);
+  }
+}
+
+describe("DenseSegment slice over contiguous runs — architecture §4.2", () => {
+  // Built by a prepend after an append, so the buffers start before the
+  // extent and hold spare slots on both sides.
+  function dense(): Segment {
+    const segment = new DenseSegment(options);
+    segment.mergeFrom(points(span(10, 19)));
+    segment.mergeFrom(points(span(0, 9)));
+    return segment;
+  }
+
+  it.each([
+    { name: "entire extent", start: 0, end: 19, slots: span(0, 19) },
+    { name: "interior", start: 5, end: 12, slots: span(5, 12) },
+    { name: "left clipped", start: -50, end: 3, slots: span(0, 3) },
+    { name: "right clipped", start: 17, end: 50, slots: span(17, 19) },
+    { name: "both flanks beyond", start: -5, end: 25, slots: span(0, 19) },
+    { name: "one slot", start: 7, end: 7, slots: [7] },
+    { name: "wholly outside", start: 20, end: 30, slots: [] },
+  ])(
+    "a fully present segment reads as a copy: $name",
+    ({ start, end, slots }) => {
+      const segment = dense();
+      const result = segment.slice({ start, end });
+      expect(result).toEqual({
+        slots: new Float64Array(slots),
+        fields: {
+          price: new Float64Array(slots),
+          volume: new Int16Array(slots),
+        },
+      });
+      expectOwnBuffers(result);
+    },
+  );
+
+  it("a fully present read is independent of the segment and of other reads", () => {
+    const segment = dense();
+    const first = segment.slice({ start: 2, end: 15 });
+    const second = segment.slice({ start: 2, end: 15 });
+    first.slots.fill(-1);
+    for (const array of Object.values(first.fields)) array.fill(-1);
+    expect(second).toEqual(segment.slice({ start: 2, end: 15 }));
+    expect(segment.lookup(2)).toEqual({ price: 2, volume: 2 });
+    segment.mergeFrom(points([3], [300], [30]));
+    expect(second.fields.price?.[1]).toBe(3);
+  });
+
+  it("reads runs separated by gaps, and a segment made whole again", () => {
+    const segment = dense();
+    // Clearing interior slots leaves the extent but breaks it into runs.
+    segment.mergeFrom(points([]), { start: 4, end: 6 });
+    segment.mergeFrom(points([]), { start: 12, end: 12 });
+    const runs = [...span(0, 3), ...span(7, 11), ...span(13, 19)];
+    for (const [start, end] of [
+      [0, 19],
+      [2, 14],
+      [4, 6],
+      [5, 13],
+      [12, 12],
+      [11, 13],
+    ] as const) {
+      const selected = runs.filter((slot) => start <= slot && slot <= end);
+      const result = segment.slice({ start, end });
+      expect(result).toEqual({
+        slots: new Float64Array(selected),
+        fields: {
+          price: new Float64Array(selected),
+          volume: new Int16Array(selected),
+        },
+      });
+      expectOwnBuffers(result);
+    }
+    // Clearing a flank shrinks the tight extent; refilling a gap makes the
+    // segment whole again.
+    segment.mergeFrom(points([]), { start: 0, end: 6 });
+    segment.mergeFrom(points([12], [12], [12]));
+    expect(segment.extent).toEqual({ start: 7, end: 19 });
+    expect(segment.size).toBe(13);
+    expect(segment.slice({ start: 0, end: 30 })).toEqual({
+      slots: new Float64Array(span(7, 19)),
+      fields: {
+        price: new Float64Array(span(7, 19)),
+        volume: new Int16Array(span(7, 19)),
+      },
+    });
+  });
+
+  it.each([7, 0xbadcafe])(
+    "random runs and ranges match a set of present slots (seed %i)",
+    (seed) => {
+      const next = randomInt(seed);
+      const segment = new DenseSegment(options);
+      const present = new Set<number>();
+      for (let step = 0; step < 60; step += 1) {
+        const start = next(-40, 40);
+        const end = start + next(0, 12);
+        if (next(0, 3) === 0) {
+          segment.mergeFrom(points([]), { start, end });
+          for (const slot of span(start, end)) present.delete(slot);
+        } else {
+          segment.mergeFrom(points(span(start, end)));
+          for (const slot of span(start, end)) present.add(slot);
+        }
+        const a = next(-50, 60);
+        const b = next(-50, 60);
+        const read = { start: Math.min(a, b), end: Math.max(a, b) };
+        const selected = [...present]
+          .filter((slot) => read.start <= slot && slot <= read.end)
+          .sort((x, y) => x - y);
+        const result = segment.slice(read);
+        expect(result).toEqual({
+          slots: new Float64Array(selected),
+          fields: {
+            price: new Float64Array(selected),
+            volume: new Int16Array(selected),
+          },
+        });
+        expectOwnBuffers(result);
+      }
+    },
+  );
+});
+
 // Literal assignment expectations include truncation, wrapping and f32 rounding.
 const dtypeCases: { dtype: Dtype; expected: FieldArray }[] = [
   {

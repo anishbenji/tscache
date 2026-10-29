@@ -159,5 +159,5 @@ Fable then reviewed the implementation against the converged design. It found a 
 ## Next
 
 1. **Calibrate on GitHub's runner** (above) and turn the gate on.
-2. **The first optimisation the benches point at.** `DenseSegment.slice` builds each read point by point (a per-slot presence check, a `number[]`, then `Float64Array.from`). Both measuring designs found it the hot spot: a 500-row read costs 7.5 µs against a 2.3 µs raw copy under V8. A fast path for fully present spans should take about a third of the time, judged by `read-viewport` in both runtimes.
+2. **Done (step 22): the first optimisation the benches pointed at.** `DenseSegment.slice` built each read point by point (a per-slot presence check, a `number[]`, then `Float64Array.from`). It now counts the present slots first (free when the segment has no gap), allocates each result once, and copies a fully present span with one `TypedArray.prototype.slice` per column. Measured locally against `main` (`bun scripts/bench.ts compare --base main --runtime bun,chromium`, head/base median): `read-viewport` 0.150 in Bun and 0.590 in Chromium, `read-viewport-sessions` 0.151 and 0.716, `read-year` 0.097 and 0.526, `snapshot-roundtrip` 0.748 and 0.972.
 3. **Chromium end-to-end scenarios**, report-only: handshake to first read, a read through a SharedWorker, two tabs sharing a fetch.
