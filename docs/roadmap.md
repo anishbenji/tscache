@@ -52,8 +52,8 @@ and settled their differences with experiments; method and reasoning in `docs/be
   1. Calibrate on GitHub's runner (`bench-calibrate.yml`): no false alarm in 20 same-revision runs,
      at least 90 % detection of an injected 25 % slowdown. Then the timing gate blocks: a confirmed
      regression of 10 % or more fails a pull request unless a `Perf-Accepted` trailer allows it.
-  2. The first optimisation the benches point at: a fast path in `DenseSegment.slice` for fully
-     present spans.
+  2. Done in step 22: a fast path in `DenseSegment.slice` for fully present spans (`read-viewport`
+     about 6.7 times faster in Bun and 1.7 times in Chromium; `docs/benchmarking.md`).
   3. Chromium end-to-end scenarios (handshake, a read through a SharedWorker, two tabs sharing a
      fetch), report-only.
 
