@@ -14,7 +14,8 @@ tscache is meant to be fast at what a chart does: read the screen it shows, take
 - **Timings compare the pull request with its base** in one job, case by case. Both revisions sit in one bundle, which is timed in **Chromium** (V8, which most users run) and **Bun** (JSC, the engine of Safari). The rounds alternate their order, so a busy runner slows both sides alike.
 - **When a timing fails:** a case fails when its median slowdown is 10 % or more and the 95 % confidence interval lies above 3 %, and a second run in a fresh process confirms it. A same-revision control, timed just before in a process of its own, must stay quiet, or the run is called noisy and nothing fails.
 - **Timing reports only until it is calibrated on GitHub's runner** (`bench-calibrate.yml`): it must fire in none of 20 same-revision runs and catch at least 90 % of runs with a 25 % slowdown injected. Then `--gate` goes on and the `bench` check becomes required.
-- **No new dependency.** The sampler is about 140 lines (`packages/tscache/bench/sample.ts`).
+- **End-to-end scenarios in Chromium only report:** a new tab's first read, a read through a SharedWorker, and two tabs sharing a fetch, each paired against the base. They fail on a wrong result or an extra fetch (a smoke run in `bun run ci`), never on a timing.
+- **No new dependency.** The sampler is about 240 lines, with its variant for operations that complete later (`packages/tscache/bench/sample.ts`).
 
 ## What is measured
 
@@ -49,7 +50,28 @@ Every case drives the public engine (`tscache/engine`), the one engine all three
 
 Times are from an Apple Silicon Mac, as an example of scale; the gate compares ratios, never these. Each case returns a number derived from its result (the put cases read back the bar they wrote), which `bench:smoke` checks against the fixture, so a case cannot quietly stop doing its work.
 
-Not measured: the network and the fetcher (the backend's cost, not the library's), chart rendering, GC pauses, Firefox and Safari themselves, the Vite plugin, and the coverage index in isolation (below the timer's resolution at realistic sizes; the extent budget guards its algorithm). Chromium end-to-end scenarios (handshake to first read, a read through a SharedWorker, two tabs sharing a fetch) are the next addition, report-only.
+Not measured here: the network and the fetcher (the backend's cost, not the library's), chart rendering, GC pauses, Firefox and Safari themselves, the Vite plugin, and the coverage index in isolation (below the timer's resolution at realistic sizes; the extent budget guards its algorithm). The end-to-end scenarios below add the worker, the port and a fetch over the loopback interface.
+
+### End-to-end scenarios (`packages/tscache/bench/e2e.ts`, `scripts/bench-e2e.ts`)
+
+These time what a page sees: the client, a real SharedWorker and its port, and the fetcher, in Chromium. Every scenario reads 1,500 one-minute bars, the screen and one each side.
+
+| Scenario | What a page does | Timed from, to | Base, Chromium |
+|---|---|---|---:|
+| `handshake-first-read` | a new tab creates a client, connects to a new SharedWorker and reads bars the worker fetches | `createClient` called, to the first `get` resolving: worker start, handshake, the fetcher module's import, one fetch, the merge and the transfer | 7.4–7.5 ms |
+| `read-viewport-shared` | `get` cached bars through a SharedWorker | the request posted, to its result in the page: the port round trip, the engine's read and the transfer | 32–33 µs |
+| `two-tabs-one-fetch` | two tabs of one browser ask for the same new range at once | the first tab asking, to both tabs holding the bars: one fetch, its merge, two reads and transfers, and one `BroadcastChannel` message each way between the tabs | 400–450 µs |
+
+**How they run.** The driver bundles the package's client, worker and fetcher entries of each revision with Bun (unminified ESM, as `tsdown` emits) and serves them beside the scenario page, the Playwright suites' mock backend (`scripts/e2e-backend.ts`) and their fixture fetcher (`e2e/pages/fetcher.js`). Each scenario gets a BrowserContext of its own, so its pages share its SharedWorkers and no other scenario's.
+- `handshake-first-read` opens a new page for every run, and a worker URL no earlier run used, so each run starts a new SharedWorker. The driver alternates the revisions, base then head, head then base, one run per side per round, after two warm-up runs per side. A run takes milliseconds, far above the clock's 100 µs, so a batch is one run.
+- `read-viewport-shared` connects one page to both revisions, each with its own SharedWorker, fills each cache with three screens by one fetch, and reads the middle screen. `sampleAsync` times it as `sample` times a case: warm-up, 40 ms batches, 20 paired rounds, each operation awaited before the next starts.
+- `two-tabs-one-fetch` connects two pages to each revision. The first page sends the range to the second over a `BroadcastChannel` and asks for it itself; the operation ends when its own get has resolved and the second page's answer has arrived. Each operation asks for a range no earlier one did, and the cache is cleared between batches, outside the timer.
+
+**What fails them.** Every operation checks what it read (the bar count, the first and last timestamp, the last price, no misses) and throws on a wrong result. After each scenario the driver asks the backend what it served: `handshake-first-read` one fetch per run, `read-viewport-shared` only its fill (every read is a cache hit), `two-tabs-one-fetch` one fetch per operation, of a range asked for once. The second tab's get either joins the fetch in flight or, if that fetch has already landed, reads the cache; either way the tabs share one fetch. `e2e/dedup.spec.ts` proves the join itself, with the backend holding the fetch open.
+
+**Why report-only.** Two scenarios include a fetch over the loopback interface and a server's response time, which the engine does not control, and none has been calibrated. They have no A/A control and no confirmation, and nothing gates on them; their step in the `bench` job continues on error, so that job's result does not depend on them once it is required. A regression shows as a ratio in the job summary, for a reviewer to read.
+
+Times are from the Apple Silicon Mac, in two runs with base and head the same revision (2026-10-30). Their median ratios were 0.973–1.029, and every 95 % interval held 1; a full run takes about 10 s.
 
 ## How a timing is taken
 
@@ -83,7 +105,9 @@ The paired sampler serves all three runtimes. Vitest remains the runner for the 
 | Entry sizes | `bun run ci`, the `ci` job | over budget, always |
 | Memory, fetch, port, extent and growth budgets | Vitest: pre-push, `bun run ci`, the `ci` job | over budget, always |
 | `bench:smoke`: every case once, its result checked | `bun run ci` | a case returns the wrong result |
+| `e2e --smoke`: every end-to-end scenario once, in Chromium, checked | `bun run ci` | a wrong result, or a fetch the scenario should not make |
 | Timing, Chromium and Bun | the `bench` job | report-only now; once calibrated: a confirmed regression no trailer allows |
+| End-to-end timings, Chromium | the `bench` job | never: report-only, the step continues on error |
 
 **A timing regression** must meet all of these:
 - a median head/base ratio of at least **1.10**;
@@ -120,6 +144,9 @@ Detection at 15 % is recorded too. Then the `bench` job gets `--gate` and become
 ```sh
 bun run size            # entry sizes against their budgets
 bun run bench:smoke     # every case once, results checked (about a second)
+bun scripts/bench.ts e2e --smoke   # every end-to-end scenario once, checked (about 2 s)
+bun run bench:e2e       # the end-to-end scenarios, the working tree against origin/main
+bun scripts/bench.ts e2e --base main --only two-tabs-one-fetch --rounds 30
 bun run bench           # the working tree against origin/main, in Chromium and Bun
 bun scripts/bench.ts compare --base main --only read-viewport --runtime bun
 bun scripts/bench.ts compare --base HEAD --slowdown 0.25   # local calibration run
@@ -127,7 +154,7 @@ bunx vitest run packages/tscache/test/perf                 # the exact budgets
 bun scripts/size.ts --update                               # reseed the size budgets (review the diff)
 ```
 
-`compare` writes `.bench-results/<runtime>.json` (schema version, both SHAs, the gate, every round, verdicts) and `summary.md`, and appends the table to the job summary on GitHub. A local run against `origin/main` takes about a minute per runtime.
+`compare` writes `.bench-results/<runtime>.json` (schema version, both SHAs, the gate, every round, verdicts) and `summary.md`, and appends the table to the job summary on GitHub. A local run against `origin/main` takes about a minute per runtime. `e2e` writes `.bench-results/e2e.json` and `e2e-summary.md` the same way, in about 10 s; it takes `--base`, `--only` and `--rounds`, and refuses `--runtime`, `--gate` and `--slowdown`.
 
 ## Calibration log
 
@@ -160,4 +187,3 @@ Fable then reviewed the implementation against the converged design. It found a 
 
 1. **Calibrate on GitHub's runner** (above) and turn the gate on.
 2. **Done (step 22): the first optimisation the benches pointed at.** `DenseSegment.slice` built each read point by point (a per-slot presence check, a `number[]`, then `Float64Array.from`). It now counts the present slots first (free when the segment has no gap), allocates each result once, and copies a fully present span with one `TypedArray.prototype.slice` per column. Measured locally against `main` (`bun scripts/bench.ts compare --base main --runtime bun,chromium`, head/base median): `read-viewport` 0.150 in Bun and 0.590 in Chromium, `read-viewport-sessions` 0.151 and 0.716, `read-year` 0.097 and 0.526, `snapshot-roundtrip` 0.748 and 0.972.
-3. **Chromium end-to-end scenarios**, report-only: handshake to first read, a read through a SharedWorker, two tabs sharing a fetch.

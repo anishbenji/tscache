@@ -47,15 +47,15 @@ and settled their differences with experiments; method and reasoning in `docs/be
 
   Hot-path timings compare each pull request with a rebuild of its base in one job, in Chromium (V8)
   and Bun (JSC), paired and interleaved, with an A/A control and a fresh-process confirmation;
-  report-only for now.
+  report-only for now. Chromium end-to-end scenarios (a new tab's first read, a read through a
+  SharedWorker, two tabs sharing a fetch) are paired the same way and report only; a smoke run in
+  `bun run ci` fails on a wrong result or an extra fetch.
 - **Next:**
   1. Calibrate on GitHub's runner (`bench-calibrate.yml`): no false alarm in 20 same-revision runs,
      at least 90 % detection of an injected 25 % slowdown. Then the timing gate blocks: a confirmed
      regression of 10 % or more fails a pull request unless a `Perf-Accepted` trailer allows it.
   2. Done in step 22: a fast path in `DenseSegment.slice` for fully present spans (`read-viewport`
      about 6.7 times faster in Bun and 1.7 times in Chromium; `docs/benchmarking.md`).
-  3. Chromium end-to-end scenarios (handshake, a read through a SharedWorker, two tabs sharing a
-     fetch), report-only.
 
 ## Design sketch: IndexedDB persistence
 
