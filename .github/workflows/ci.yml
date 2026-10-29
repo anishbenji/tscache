@@ -115,9 +115,12 @@ jobs:
 
       # End-to-end scenarios in Chromium, head against base. Report-only: a
       # failure here never fails this job, which is to become a required
-      # check. A wrong result fails the ci job's smoke run instead.
+      # check. A wrong result fails the ci job's smoke run instead. The step
+      # timeout (about ten times a normal run) keeps a hung read inside the
+      # job's budget, so continue-on-error still applies.
       - run: bun scripts/bench.ts e2e --base "$CI_BASE"
         continue-on-error: true
+        timeout-minutes: 3
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
