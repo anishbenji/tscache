@@ -29,3 +29,9 @@ Mutation checks: copying with `subarray` instead of `slice` fails 10 tests (the 
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R1-1 | P1 | `bun run ci` fails: the rewritten `slice` exceeds Fallow's CRAP threshold (37.1) | Accept. Valid: the pre-commit hook does not run Fallow, and CI was not run before the commit | 0d73d78 splits it into `#copySpan` and `#gather`; `FALLOW_AUDIT_BASE=main bun run fallow` clean, tests and measurements unchanged |
+
+## Round 2 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | `bun run ci` failed in Playwright: a vanilla polling fetch spanned 180 000 ms against the 120 000 ms bound (`e2e/reference/clients.spec.ts:556`); the reviewer notes the evidence does not tie it to this change | Accept that CI must pass; reject a code cause. The step touches no reference or polling code, and the test passed 5 of 5 alone (`--repeat-each 5`). Locally, Playwright's servers use fixed ports with `reuseExistingServer`, and a second checkout ran its own `bun run ci` at the same time, so the two runs could share the e2e servers and the mock backend's state | Round 3 reruns the full CI with no other checkout running it. Recorded as a tooling follow-up: concurrent local CI runs in two worktrees collide on the Playwright ports |
