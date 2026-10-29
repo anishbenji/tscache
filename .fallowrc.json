@@ -4,8 +4,9 @@
   // so are the SSR examples' server entries, which their Vite config names.
   "entry": [
     "packages/*/src/entries/*.ts",
-    // Bundled by scripts/bench.ts, not imported.
+    // Bundled by scripts/bench.ts and scripts/bench-e2e.ts, not imported.
     "packages/*/bench/entry.ts",
+    "packages/*/bench/e2e.ts",
     // Read by tsdown, not imported.
     "packages/*/tsdown.config.ts",
     "scripts/*.ts",
@@ -39,13 +40,15 @@
     // are type-checked, not run in CI (step ⑭), so the estimate takes them
     // as untested; their shared core and the vanilla snippet stay gated.
     // The reference clients, like the examples, are covered by Playwright.
-    // The benchmark driver and the size check run in every `bun run ci`
-    // (smoke and budgets), which the estimate cannot see either; what the
+    // The benchmark drivers and the size check run in every `bun run ci`
+    // (smokes and budgets), which the estimate cannot see either; what the
     // gate decides is in bench/gate.ts, which stays gated and is tested.
     "ignore": [
       "packages/*/test/**",
       "packages/tscache/bench/run.ts",
+      "packages/tscache/bench/e2e.ts",
       "scripts/bench.ts",
+      "scripts/bench-e2e.ts",
       "scripts/bench-calibration.ts",
       "scripts/size.ts",
       "examples/**",

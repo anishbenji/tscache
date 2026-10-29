@@ -12,6 +12,12 @@
 //       Perf-Accepted trailer allows (Node only reports). --slowdown makes
 //       the head that much slower, to calibrate the gate on a known
 //       regression; with --base HEAD it measures a same-revision run.
+//   bun scripts/bench.ts e2e [--base <ref>] [--only a,b] [--rounds 20]
+//   bun scripts/bench.ts e2e --smoke
+//       the end-to-end scenarios in Chromium (scripts/bench-e2e.ts): a new
+//       tab's first read, a read through a SharedWorker, two tabs sharing a
+//       fetch; paired against the base and report-only, or with --smoke
+//       each once on the working tree, checked (part of `bun run ci`)
 //
 // One bundle carries both revisions of the engine: the base's source,
 // taken from git (`git archive`, nothing checked out), and the working
@@ -42,6 +48,7 @@ import {
 } from "../packages/tscache/bench/gate";
 import type { CaseResult, RunOptions } from "../packages/tscache/bench/run";
 import type { Sample } from "../packages/tscache/bench/sample";
+import { type E2eResult, runE2e } from "./bench-e2e";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PACKAGE = join(ROOT, "packages/tscache");
@@ -57,13 +64,15 @@ type Runtime = "bun" | "node" | "chromium";
 const GATED: ReadonlySet<Runtime> = new Set(["chromium", "bun"]);
 
 interface Args {
-  command: "smoke" | "compare";
+  command: "smoke" | "compare" | "e2e";
   base: string;
   runtimes: Runtime[];
   only: string[] | undefined;
   rounds: number;
   gate: boolean;
   slowdown: number | undefined;
+  /** e2e: each scenario once on the working tree, checked. */
+  smoke: boolean;
 }
 
 /** 10 to 1000 rounds (medianRanks): fewer give no 95 % interval. */
@@ -77,8 +86,16 @@ function roundsOf(text: string | undefined): number {
 
 function parseArgs(argv: string[]): Args {
   const [command = "", ...rest] = argv;
-  if (command !== "smoke" && command !== "compare") {
-    throw new Error("usage: bun scripts/bench.ts smoke | compare [options]");
+  if (command !== "smoke" && command !== "compare" && command !== "e2e") {
+    throw new Error(
+      "usage: bun scripts/bench.ts smoke | compare [options] | e2e [options]",
+    );
+  }
+  // The scenarios run in Chromium only and never gate.
+  const timingOnly = ["--runtime", "--gate", "--slowdown"];
+  const misplaced = timingOnly.filter((flag) => rest.includes(flag));
+  if (command === "e2e" && misplaced.length > 0) {
+    throw new Error(`e2e takes no ${misplaced.join(", ")}`);
   }
   const value = (flag: string) => {
     const i = rest.indexOf(flag);
@@ -93,6 +110,7 @@ function parseArgs(argv: string[]): Args {
     rounds: roundsOf(value("--rounds")),
     gate: rest.includes("--gate"),
     slowdown: slowdown === undefined ? undefined : Number(slowdown),
+    smoke: rest.includes("--smoke"),
   };
 }
 
@@ -317,9 +335,9 @@ function render(report: RuntimeReport): string[] {
   ];
 }
 
-function publish(summary: string): void {
+function publish(summary: string, file = "summary.md"): void {
   console.log(summary);
-  writeFileSync(join(RESULTS, "summary.md"), `${summary}\n`);
+  writeFileSync(join(RESULTS, file), `${summary}\n`);
   const step = process.env.GITHUB_STEP_SUMMARY;
   if (step) appendFileSync(step, `${summary}\n`);
 }
@@ -372,13 +390,53 @@ async function smoke(): Promise<number> {
   const bundlePath = join(work, "bench.js");
   const src = join(PACKAGE, "src");
   await bundle(src, src, bundlePath);
-  const results = runProcess("bun", bundlePath, { mode: "smoke" });
-  for (const { name, value, expected } of results) {
+  return checks(runProcess("bun", bundlePath, { mode: "smoke" }));
+}
+
+function checks(results: (CaseResult & { ms?: number })[]): number {
+  for (const { name, value, expected, ms: time } of results) {
     const note = value === expected ? "ok  " : "FAIL";
-    console.log(`${note} ${name}: ${value} (expected ${expected})`);
+    const took = time === undefined ? "" : `, ${ms(time)}`;
+    console.log(`${note} ${name}: ${value} (expected ${expected})${took}`);
   }
   return results.every((r) => r.value === r.expected) ? 0 : 1;
 }
 
+/**
+ * The end-to-end scenarios in Chromium, paired against the base and
+ * reported, or with --smoke each once, checked. Never fails on a timing;
+ * a wrong result or a fetch too many throws.
+ */
+async function e2e(args: Args): Promise<number> {
+  const work = mkdtempSync(join(tmpdir(), "tscache-bench-"));
+  const headSrc = join(PACKAGE, "src");
+  const run = { headSrc, work, rounds: args.rounds, only: args.only };
+  if (args.smoke) return checks(await runE2e({ ...run, baseSrc: undefined }));
+  const baseSha = extractBase(args.base, work);
+  const headSha = git("rev-parse", "HEAD");
+  const baseSrc = join(work, "packages/tscache/src");
+  const results: E2eResult[] = await runE2e({ ...run, baseSrc });
+  mkdirSync(RESULTS, { recursive: true });
+  const record = { schema: 1, base: baseSha, head: headSha, results };
+  const file = join(RESULTS, "e2e.json");
+  writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+  const rows = results.flatMap(({ name, sample }) =>
+    sample === undefined ? [] : [row(name, sample, undefined)],
+  );
+  const lines = [
+    `### End-to-end scenarios, Chromium: \`${headSha.slice(0, 9)}\` against \`${baseSha.slice(0, 9)}\` (${args.base})`,
+    "",
+    "Report-only: no timing here fails a pull request (docs/benchmarking.md).",
+    "",
+    "| Scenario | Base | Head | Head/base | 95 % CI | |",
+    "|---|---:|---:|---:|---:|---|",
+    ...rows,
+    "",
+  ];
+  publish(lines.join("\n"), "e2e-summary.md");
+  return 0;
+}
+
 const args = parseArgs(process.argv.slice(2));
-process.exit(args.command === "smoke" ? await smoke() : await compare(args));
+const commands = { smoke, compare, e2e } as const;
+process.exit(await commands[args.command](args));
