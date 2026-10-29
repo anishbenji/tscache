@@ -27,7 +27,8 @@ const STEPS = 40;
 /**
  * Added to every port of the suite. Outside CI, Playwright reuses a server
  * it finds on its port, so two checkouts running the suite at once would
- * share servers and mock backends (step 22, R2-1). Each checkout gets an
+ * share servers and mock backends, and one would test the other's build.
+ * Each checkout gets an
  * offset from a hash of its path instead (1 to 39 thousand);
  * `E2E_PORT_OFFSET` (0 to 39, in thousands) overrides it, and CI uses none.
  */
