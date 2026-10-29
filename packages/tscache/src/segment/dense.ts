@@ -115,25 +115,36 @@ export class DenseSegment implements Segment {
   slice(range: SlotRange): Columns {
     assertSlotRange(range, "range");
     const extent = this.#extent;
-    const start =
-      extent === undefined ? 0 : Math.max(range.start, extent.start);
-    const end = extent === undefined ? -1 : Math.min(range.end, extent.end);
-    const count = start > end ? 0 : this.#countIn(start, end);
+    if (extent === undefined) return this.#copySpan(0, 0);
+    const start = Math.max(range.start, extent.start);
+    const end = Math.min(range.end, extent.end);
+    if (start > end) return this.#copySpan(start, 0);
+    const count = this.#countIn(start, end);
+    return count === end - start + 1
+      ? this.#copySpan(start, count)
+      : this.#gather(start, end, count);
+  }
+
+  /** `count` slots from `start`, all present: one copy per column. */
+  #copySpan(start: number, count: number): Columns {
     const slots = new Float64Array(count);
+    for (let k = 0; k < count; k++) slots[k] = start + k;
+    const from = start - this.#base;
     const fields: Record<string, FieldArray> = {};
-    if (count === end - start + 1) {
-      // Every slot is present: each column is one copy of its span.
-      for (let k = 0; k < count; k++) slots[k] = start + k;
-      const from = start - this.#base;
-      for (const column of this.#columns) {
-        setOwn(fields, column.name, column.data.slice(from, from + count));
-      }
-      return { slots, fields };
+    for (const column of this.#columns) {
+      setOwn(fields, column.name, column.data.slice(from, from + count));
     }
+    return { slots, fields };
+  }
+
+  /** The `count` present slots in `[start, end]`, which has gaps. */
+  #gather(start: number, end: number, count: number): Columns {
+    const slots = new Float64Array(count);
     let k = 0;
     for (let slot = start; slot <= end; slot++) {
       if (this.#has(slot)) slots[k++] = slot;
     }
+    const fields: Record<string, FieldArray> = {};
     for (const column of this.#columns) {
       const out = new column.ctor(count);
       for (let i = 0; i < count; i++) {
