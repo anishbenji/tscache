@@ -1,6 +1,6 @@
 # Step 22 — Fast path in `DenseSegment.slice`
 
-Branch: `feat/22-slice-fast-path` · Reviewer: Codex (high) · Status: in review
+Branch: `feat/22-slice-fast-path` · Reviewer: Codex (high) · Rounds: 4 · Status: settled · Verdict after triage: merge
 
 The first optimisation the benchmarks pointed at (`docs/benchmarking.md`, "Next" item 2; roadmap, "Performance measurement and gate"). Chosen by Claude while the user was away, under the user's grant of 2026-10-30 to pick tasks by priority. No API or contract change: `Segment.slice` keeps its contract (architecture §4.2), and the new tests pass on the old implementation too.
 
@@ -41,3 +41,14 @@ Mutation checks: copying with `subarray` instead of `slice` fails 10 tests (the 
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R3-1 | P1 | `bun run ci` failed in Vitest: the sampler's same-operation check in `perf/gate.test.ts` measured a ratio of 1.655 against `< 1.4`; the reviewer notes it does not establish a regression from this change | Accept that CI must pass; reject a code cause. The test times a synthetic loop, not the engine, and predates this step. It did not fail in 28 local runs: 8 of the package's tests, 8 of the whole suite, and 6 of each with every core saturated by `yes`. The failing round ran while another checkout's agent was building and benchmarking on the same machine; R2-1 had the same cause | Round 4 reruns CI on an idle machine. Both rounds point at one area, concurrent heavy work on one machine, so the durable fix is procedural: no review round runs while another checkout runs CI or benchmarks (backlog item 9 also covers the Playwright ports) |
+
+## Round 4 — reviewer verdict: merge
+
+No findings. `bun run ci` passed on an idle machine.
+
+## Verification
+
+- `bun run ci` passed in round 4 (host run supplied to the reviewer).
+- `bunx vitest run packages/tscache/test/dense-segment.test.ts`: 98 passed; the two mutation checks above fail it.
+- Benchmarks re-run after R1-1: `read-viewport` 0.145 in Bun and 0.596 in Chromium; `read-viewport-sessions` 0.154 and 0.716.
+- Not verified: the timings on GitHub's runner (the `bench` job reports them on this pull request).
