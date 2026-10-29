@@ -365,7 +365,7 @@ export function startSession({ open, served, feed }: SessionOptions): Session {
           },
         });
       case "poll":
-        return polling(POLL_MS);
+        return polling(POLL_MS, market);
     }
   }
 

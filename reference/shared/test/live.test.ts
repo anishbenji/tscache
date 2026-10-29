@@ -1,8 +1,8 @@
 import type { Connection } from "@tscache/integrations/shared/connection";
 import type { GetResult, Range, TscacheClient } from "tscache";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { liveFeed, socketAddress } from "../src/live";
-import { market } from "../src/market";
+import { type Holder, liveFeed, polling, socketAddress } from "../src/live";
+import { MINUTE, market } from "../src/market";
 
 describe("socketAddress", () => {
   it("turns the page's scheme into a socket's, and keeps a socket's", () => {
@@ -84,5 +84,36 @@ describe("liveFeed on a cache of its own", () => {
     await vi.waitFor(() => expect(reads).toHaveLength(3));
     expect(reads[2]).toEqual({ start: 63_000, end: 65_000 });
     expect(drawn.at(-1)).toEqual({ start: 63_000, end: 65_000 });
+  });
+});
+
+describe("polling", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("reads up to the bar forming now, never past it", async () => {
+    // A poll ending between grid points would snap outward to the next
+    // bar, which cannot exist yet: across a minute boundary the fetch
+    // would then take the bar before, the bar that closed, the one
+    // forming and that one.
+    vi.useFakeTimers({ now: 57_000 });
+    const spans: Range[] = [];
+    const holder: Holder = {
+      opened: () => {},
+      pushed: () => {},
+      polled: async (span) => {
+        spans.push(span);
+        return true;
+      },
+    };
+    const stop = polling(2000, market)(holder);
+    for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(2000);
+    stop();
+    expect(spans).toEqual([
+      { start: 0, end: 0 },
+      { start: 0, end: MINUTE },
+      { start: MINUTE, end: MINUTE },
+    ]);
   });
 });

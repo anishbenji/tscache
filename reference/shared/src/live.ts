@@ -345,19 +345,28 @@ export function webSocket({
 
 /**
  * Polls every `everyMs`: reads the time since the last complete poll with
- * a fetch. Its first poll is the opening, when every tab that follows the
- * market reads its newest bars.
+ * a fetch, up to the bar forming now. Its first poll is the opening, when
+ * every tab that follows the market reads its newest bars.
+ *
+ * A span ending between grid points would snap outward to the next one, a
+ * bar that cannot exist yet, so both ends lie on the grid of `config`.
  */
-export function polling(everyMs: number): Source {
+export function polling(everyMs: number, config: CacheConfig): Source {
+  const { interval, alignmentOffset = 0 } = config;
+  /** The start of the bar forming now. */
+  const forming = () => {
+    const now = Date.now();
+    return now - ((((now - alignmentOffset) % interval) + interval) % interval);
+  };
   return ({ opened, polled }) => {
     opened();
-    let since = Date.now();
+    let since = forming();
     let polling = false;
     const timer = setInterval(() => {
       // A slow poll is not overtaken by the next.
       if (polling) return;
       polling = true;
-      const span = { start: since, end: Date.now() };
+      const span = { start: since, end: forming() };
       void polled(span)
         .then((complete) => {
           // Otherwise the next poll asks for this span again.
