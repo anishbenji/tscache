@@ -28,8 +28,8 @@ const STEPS = 40;
  * Added to every port of the suite. Outside CI, Playwright reuses a server
  * it finds on its port, so two checkouts running the suite at once would
  * share servers and mock backends (step 22, R2-1). Each checkout gets an
- * offset from a hash of its path instead; `E2E_PORT_OFFSET` (0 to 39, in
- * thousands) overrides it, and CI uses none.
+ * offset from a hash of its path instead (1 to 39 thousand);
+ * `E2E_PORT_OFFSET` (0 to 39, in thousands) overrides it, and CI uses none.
  */
 export function portOffset(
   env: Readonly<Record<string, string | undefined>>,
@@ -37,7 +37,7 @@ export function portOffset(
 ): number {
   if (env.CI) return 0;
   const set = env.E2E_PORT_OFFSET;
-  if (set !== undefined) {
+  if (set !== undefined && set !== "") {
     const steps = Number(set);
     if (!Number.isInteger(steps) || steps < 0 || steps >= STEPS) {
       throw new RangeError(
@@ -46,8 +46,9 @@ export function portOffset(
     }
     return steps * STEP;
   }
+  // Never 0, which CI and a checkout without offsets use.
   const hash = createHash("sha256").update(root).digest().readUInt32BE(0);
-  return (hash % STEPS) * STEP;
+  return (1 + (hash % (STEPS - 1))) * STEP;
 }
 
 const offset = portOffset(
