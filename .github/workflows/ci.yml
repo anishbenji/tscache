@@ -113,6 +113,12 @@ jobs:
 
       - run: bun scripts/bench.ts compare --base "$CI_BASE" --runtime chromium,bun
 
+      # End-to-end scenarios in Chromium, head against base. Report-only: a
+      # failure here never fails this job, which is to become a required
+      # check. A wrong result fails the ci job's smoke run instead.
+      - run: bun scripts/bench.ts e2e --base "$CI_BASE"
+        continue-on-error: true
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
