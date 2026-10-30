@@ -61,3 +61,7 @@ None.
 ## Round 1 — reviewer verdict: merge
 
 No findings, on the branch rebased onto `main` 59b8da5; `bun run ci` passed. Settled. Reviewed and settled by the director while the user was away.
+
+## After the pull request opened
+
+GitHub CI on the merge with `main` (after #49 and #51) failed the entry-size budget: `index` 14.30 kB brotli against 14.25 kB. `main` alone sat exactly at the budget; this branch adds 0.05 kB. `main` was merged into the branch (no rebase: the branch was pushed) and the budget reset by the documented rule, measured + 512 B (ca4aa35). Decided by the director under the user's grant.
