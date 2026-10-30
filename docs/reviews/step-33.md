@@ -1,6 +1,6 @@
 # Step 33 — Reads copy each point once
 
-Branch: `feat/33-read-single-copy` · Reviewer: not yet reviewed · Rounds: 0 · Status: awaiting review · Verdict after triage: —
+Branch: `feat/33-read-single-copy` · Reviewer: Codex (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 Item 1 of the performance plan of 2026-10-30 (experiment E1): a read across segments copied every point twice. `collect` sliced each overlapping segment into fresh arrays, then allocated the result and copied the slices into it. It now counts first, allocates each result array once, and has each segment write its points straight into it. Built by an implementation child while the user was away, under the user's grant of 2026-10-30; the experiment was measured on a scratch checkout first. No public API or contract change: `GetResult`, `collect` and `read` (architecture §4.4) are unchanged, and every existing test passes unmodified.
 
@@ -8,7 +8,7 @@ Item 1 of the performance plan of 2026-10-30 (experiment E1): a read across segm
 
 | Commit | What |
 |---|---|
-| 77cb8c7 | `perf(read)`: `Segment` gains `countIn(range)` and `sliceInto(range, out, at)` (architecture §4.2, internal). `collect` counts the points of every overlapping segment, allocates each result array once, and has each segment write into it at its offset; no slice per segment, no second copy. `sliceInto` checks its offset and the target's room before writing anything. `slice` keeps its contract and its `TypedArray.prototype.slice` fast path from step 22; its gather branch now shares `sliceInto`'s. Tests: `test/dense-segment-slice-into.test.ts` (49), written first. Docs: architecture §4.2 (both methods, the new programming errors, where they came from) |
+| a0bfab0 | `perf(read)`: `Segment` gains `countIn(range)` and `sliceInto(range, out, at)` (architecture §4.2, internal). `collect` counts the points of every overlapping segment, allocates each result array once, and has each segment write into it at its offset; no slice per segment, no second copy. `sliceInto` checks its offset and the target's room before writing anything. `slice` keeps its contract and its `TypedArray.prototype.slice` fast path from step 22; its gather branch now shares `sliceInto`'s. Tests: `test/dense-segment-slice-into.test.ts` (49), written first. Docs: architecture §4.2 (both methods, the new programming errors, where they came from) |
 
 ## Decisions
 
@@ -32,7 +32,7 @@ Every read is checked against `slice` and against sentinel values outside the wr
 
 **Full suite.** `~/code/tscache-reports/bin/heavy-run.sh "perf child: vitest feat/33" bunx vitest run`: 72 files, 1,557 tests passed. `bunx tsc -p packages/tscache` and `bunx tsc -p .` clean, `bunx biome check .` clean, `FALLOW_AUDIT_BASE=origin/main bun run fallow` reports no issues in the changed files.
 
-**Benchmarks.** Base `origin/main` at `6b18b57`, whose `packages/tscache/src` is identical to `a3926ca`, the branch's base (only documentation changed in between). Head `77cb8c7`. Apple Silicon Mac, Bun 1.4 and Chromium, each command run under the heavy-job lock:
+**Benchmarks.** Base `origin/main` at `6b18b57`, whose `packages/tscache/src` is identical to `a3926ca`, the branch's base (only documentation changed in between). Head `a0bfab0`. Apple Silicon Mac, Bun 1.4 and Chromium, each command run under the heavy-job lock:
 
 ```sh
 ~/code/tscache-reports/bin/heavy-run.sh "perf child: bench feat/33" bash -c '
@@ -74,3 +74,7 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 1 — reviewer verdict: merge
+
+No findings, on the branch rebased onto `main` 59b8da5; `bun run ci` passed. Settled. Reviewed and settled by the director while the user was away.
