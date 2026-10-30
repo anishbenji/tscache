@@ -9,6 +9,7 @@ tscache is meant to be fast at what a chart does: read the screen it shows, take
   - the memory a cached bar keeps;
   - what a chart scrolling back costs the backend;
   - what a read costs the port between page and worker;
+  - how often an orchestrated `get` reads the engine;
   - how many segments a read looks at;
   - how often a growing segment reallocates.
 - **Timings compare the pull request with its base** in one job, case by case. Both revisions sit in one bundle, which is timed in **Chromium** (V8, which most users run) and **Bun** (JSC, the engine of Safari). The rounds alternate their order, so a busy runner slows both sides alike.
@@ -27,6 +28,7 @@ tscache is meant to be fast at what a chart does: read the screen it shows, take
 | ArrayBuffer bytes per cached bar, a year put day by day (Node, after a full collection, engine held alive) | 24/7: 36.233 B, sessions: 36.000, with dropouts: 36.745, against 36 B of fields | below 36 B (the engine was collected: the reading is wrong) or above 36.75 / 36.75 / 37.25 | `memory.test.ts` |
 | Fetches for a chart's opening read and twelve screens back, then forward again | 13 fetches; what they cover is at most 0.2 % more than what was read; none on the way forward | another count, more overfetch, or any repeat | `counters.test.ts` |
 | A cached read of 1,500 bars through the port | one message each way; 66,000 bytes moved (8 B timestamp and 36 B of fields per bar); no buffer copied; the sender keeps none | anything else | `counters.test.ts` |
+| Engine reads per orchestrated `get`: a fetch of the provisional newest bar, a cache hit, `cacheOnly` | 1 each (planned from coverage, read once after the fetches) | another count | `counters.test.ts` |
 | Segment extents a read looks at among 8,192 single-point segments | 14 | more than 24 (a scan would read 8,192) | `counters.test.ts` |
 | Mask allocations while a segment grows by 16,384 single-point appends | doubling | none observed (the counting no longer sees the growth: a redesign must update the test), more than 12, or more than 12,288 bytes | `counters.test.ts` |
 

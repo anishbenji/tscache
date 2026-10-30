@@ -225,8 +225,10 @@ export class Orchestrator {
   }
 
   /**
-   * §4.9: engine → coalesced fetches (deduplicated) → engine again. The
-   * `requestId` names the get on request-scoped mergeWarning events.
+   * §4.9: coverage → coalesced fetches (deduplicated) → one engine read.
+   * The fetches are planned from coverage, so the engine is read once:
+   * after the fetches, or at once when nothing is missing. The `requestId`
+   * names the get on request-scoped mergeWarning events.
    */
   async get(
     cacheId: string,
@@ -234,16 +236,13 @@ export class Orchestrator {
     options?: GetOptions,
     requestId?: string,
   ): Promise<GetResult> {
-    // Every read whose result may be returned takes `options.snapshot`, so
-    // a snapshot comes from the same state as the columns (§2.8, N36).
-    let result = this.#engine.get(cacheId, range, options);
     if (this.#fetcher === undefined || options?.cacheOnly === true) {
-      return result;
+      return this.#engine.get(cacheId, range, options);
     }
     const grid = this.#engine.configOf(cacheId);
     const request = snapOut(range, grid);
     const settled: Settled[] = [];
-    let wanted = this.#plan(cacheId, request, uncached(result, grid), []);
+    let wanted = this.#plan(cacheId, request, []);
     // Two passes at most: the second re-requests only what is still
     // uncached after a version-fence drop, minus what already failed (N29).
     for (let attempt = 0; attempt < 2 && wanted.length > 0; attempt++) {
@@ -253,13 +252,15 @@ export class Orchestrator {
       for (const [i, r] of wanted.entries()) {
         settled.push({ range: r, outcome: outcomes[i] as Outcome });
       }
-      result = this.#engine.get(cacheId, range, options);
       if (attempt === 1 || !outcomes.some((o) => o.kind === "dropped")) break;
       const blocked = settled
         .filter((s) => s.outcome.kind === "failed" || s.outcome.kind === "auth")
         .map((s) => s.range);
-      wanted = this.#plan(cacheId, request, uncached(result, grid), blocked);
+      wanted = this.#plan(cacheId, request, blocked);
     }
+    // The only read: its result and `options.snapshot` come from one state
+    // (§2.8, N36), with no await between the last fetch and it.
+    const result = this.#engine.get(cacheId, range, options);
     return {
       ...result,
       misses: result.misses.flatMap((m) => annotate(m, settled, grid)),
@@ -299,18 +300,18 @@ export class Orchestrator {
     return settled.map((o) => o ?? { kind: "auth" });
   }
 
-  /** The coalesced slot ranges to fetch for these misses, minus `blocked`. */
+  /**
+   * The coalesced slot ranges to fetch: the request's uncovered slots, as
+   * the engine would report them uncached now, minus `blocked`.
+   */
   #plan(
     cacheId: string,
     request: SlotRange,
-    misses: SlotRange[],
     blocked: SlotRange[],
   ): SlotRange[] {
-    const open = misses.flatMap((m) => subtract(m, blocked));
-    if (open.length === 0) return [];
     const grid = this.#engine.configOf(cacheId);
     // Coverage one slot beyond the request too: a miss at the edge may abut
-    // covered slots the result itself cannot show. Only safe grid points.
+    // covered slots the request itself cannot show. Only safe grid points.
     const probe: SlotRange = {
       start: safeSlot(request.start - 1, grid)
         ? request.start - 1
@@ -320,6 +321,8 @@ export class Orchestrator {
     const around = this.#engine
       .coverage(cacheId, toMs(probe, grid))
       .map((r) => snapOut(r, grid));
+    const open = subtract(request, around).flatMap((m) => subtract(m, blocked));
+    if (open.length === 0) return [];
     return coalesce(open, around, grid);
   }
 
@@ -434,13 +437,6 @@ export class Orchestrator {
     }
     return { kind: "applied", warnings };
   }
-}
-
-/** The uncached misses of a result, in slots (their ends are aligned). */
-function uncached(result: GetResult, grid: Grid): SlotRange[] {
-  return result.misses
-    .filter((m) => m.reason === "uncached")
-    .map((m) => snapOut(m.range, grid));
 }
 
 /**
