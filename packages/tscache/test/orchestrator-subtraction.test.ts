@@ -195,10 +195,13 @@ describe("N31 in-flight subtraction", () => {
       const error = failed.misses[0]?.error;
       if (failure === "rejection")
         expect(error).toEqual({ name: "Error", message: "E" });
+      // A miss carries the error's name and message only (§4.9): the class
+      // is documented, the message text is not, and PutError's code
+      // (§2.6) does not travel on a miss.
       else
-        expect(error).toMatchObject({
+        expect(error).toEqual({
           name: "PutError",
-          message: expect.stringMatching(/align/i),
+          message: expect.any(String),
         });
       expect(failed.misses).toEqual([
         { range: r(3, 103), reason: "fetch-failed", error },
