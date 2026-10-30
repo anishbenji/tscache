@@ -79,7 +79,7 @@ Times are from the Apple Silicon Mac, in two runs with base and head the same re
 
 **Paired rounds** (`bench/sample.ts`):
 1. Each side is warmed up for half a second.
-2. A batch is calibrated to last at least 100 ms in `compare` (the sampler's own default, used by the end-to-end scenarios, is 40 ms). Chromium coarsens `performance.now()` to 100 µs without cross-origin isolation; 40 ms keeps that under 0.3 %. The longer batch is for the runner, not the timer: with 40 ms batches and 20 rounds, Chromium's A/A control left its bounds in 5 of 20 runs on GitHub's runner, and with 100 ms batches and 30 rounds in 1 of 20 (calibration log, chore 39).
+2. A batch is calibrated to last at least 100 ms in `compare` (the sampler's own default, used by the end-to-end scenarios, is 40 ms). Chromium coarsens `performance.now()` to 100 µs without cross-origin isolation; 40 ms keeps that under 0.3 %. The longer batch is for the runner, not the timer: with 40 ms batches and 20 rounds, Chromium's A/A control left its bounds in 5 of 20 runs on GitHub's runner, and with 100 ms batches and 30 rounds in 1 of 20 (calibration log, chore 39). Each batch size is timed three times per side and the fastest timing counts: a pause of the process only adds time, and one paused timing would otherwise end calibration early with batches far shorter than intended.
 3. Thirty rounds (twenty for the end-to-end scenarios) time one batch of each side, in the order A B, B A, A B…, and each round gives a ratio, head over base.
 4. The result is the median ratio, with a distribution-free 95 % confidence interval: for 30 rounds the 10th and 21st of the sorted ratios (for 20, the 6th and 15th), by the binomial distribution of the median. Nothing is assumed about how timings are distributed.
 
@@ -116,7 +116,7 @@ The paired sampler serves all three runtimes. Vitest remains the runner for the 
 - the same in a **confirmation**: the case timed again in a fresh process with 30 rounds;
 - an A/A control inside its bounds.
 
-`bench/gate.ts` holds these decisions, and `test/perf/gate.test.ts` tests them.
+`bench/gate.ts` holds these decisions, and `test/perf/gate.test.ts` tests them. The same file tests the sampler's logic (pairing, alternation, calibration, the median and its interval) on a virtual clock that its operations advance, so the correctness suite measures no time and cannot fail on a busy machine. How the sampler behaves on real hardware is measured where timing belongs: the A/A control in every `bench` run, and the calibration dispatches below.
 
 **Accepting a deliberate regression.** Add a trailer to a commit of the pull request:
 
