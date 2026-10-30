@@ -4,8 +4,10 @@
 // `/head/index.js`), whose SharedWorkers fetch from the Playwright suites'
 // mock backend through their fixture fetcher (e2e/pages/fetcher.js: price
 // is the timestamp, volume how often the backend was asked for the range).
-// Every operation checks what it read and throws on a wrong result, so a
-// scenario cannot quietly stop doing its work.
+// live-tail-get's worker uses a fetcher that answers from memory instead
+// (/tail-fetcher.js, served by the driver), so it times the worker's own
+// work. Every operation checks what it read and throws on a wrong result,
+// so a scenario cannot quietly stop doing its work.
 
 import type * as Client from "../src/entries/index";
 import type {
@@ -34,6 +36,21 @@ function config(id: string): CacheConfig {
   return { id, interval: INTERVAL, fields: { price: "f64", volume: "i16" } };
 }
 
+/**
+ * live-tail-get's cache: the newest bar of its screen (rangeOf(0)) is
+ * provisional, so every get misses it and fetches it again, as a polling
+ * live chart does. volume counts the fetches (u32: the sampler runs
+ * tens of thousands).
+ */
+function tailConfig(id: string): CacheConfig {
+  return {
+    id,
+    interval: INTERVAL,
+    fields: { price: "f64", volume: "u32" },
+    finalizedUntil: rangeOf(0).end,
+  };
+}
+
 /** The `seq`th read: BARS bars, right after the previous read's. */
 function rangeOf(seq: number): Range {
   const start = T0 + seq * BARS * INTERVAL;
@@ -59,6 +76,34 @@ function checked(got: GetResult, range: Range): number {
   return n;
 }
 
+/**
+ * The bars of a live-tail read, once checked: the screen, its newest bar
+ * still a miss (provisional), and that bar fetched for the `fetches`th
+ * time (the tail fetcher's volume counts the fetches of a range).
+ */
+function checkedTail(got: GetResult, range: Range, fetches: number): number {
+  const n = got.timestamps.length;
+  const price = got.fields.price as Float64Array;
+  const volume = got.fields.volume as Uint32Array;
+  const [miss] = got.misses;
+  const right =
+    n === BARS &&
+    got.timestamps[0] === range.start &&
+    got.timestamps[n - 1] === range.end &&
+    price[n - 1] === range.end &&
+    volume[n - 1] === fetches &&
+    got.misses.length === 1 &&
+    miss?.reason === "uncached" &&
+    miss.range.start === range.end &&
+    miss.range.end === range.end;
+  if (!right) {
+    throw new Error(
+      `wrong live-tail result: ${n} bars, newest bar fetched ${volume[n - 1]} times (expected ${fetches}), misses ${JSON.stringify(got.misses)}`,
+    );
+  }
+  return n;
+}
+
 /** The client entry of `side`'s revision, as the bench server serves it. */
 async function load(side: Side): Promise<typeof Client> {
   const url = `/${side}/index.js`;
@@ -69,10 +114,15 @@ async function load(side: Side): Promise<typeof Client> {
  * Options for a client of `side`, whose SharedWorker is the one named by
  * `worker` (a fresh name starts a fresh worker).
  */
-function options(side: Side, ns: string, worker: string): ClientOptions {
+function options(
+  side: Side,
+  ns: string,
+  worker: string,
+  module = "/fetcher.js",
+): ClientOptions {
   return {
     workerUrl: `/${side}/worker.js?${worker}`,
-    fetcher: { module: "/fetcher.js", context: { ns, token: "at-0" } },
+    fetcher: { module, context: { ns, token: "at-0" } },
   };
 }
 
@@ -112,6 +162,20 @@ function readViewport(cache: CacheHandle, entry: Prepared): AsyncOp {
   return async () => {
     entry.calls++;
     return checked(await cache.get(range), range);
+  };
+}
+
+/**
+ * A cache holding the screen; the operation gets it again, which fetches
+ * the provisional newest bar and reads the screen.
+ */
+function liveTail(cache: CacheHandle, entry: Prepared): AsyncOp {
+  const range = rangeOf(0);
+  let fetches = 0;
+  return async () => {
+    entry.calls++;
+    fetches++;
+    return checkedTail(await cache.get(range), range, fetches);
   };
 }
 
@@ -176,10 +240,25 @@ function lead(
 
 async function prepare(p: Preparation): Promise<void> {
   const { createClient } = await load(p.side);
-  const client = shared(await createClient(options(p.side, p.ns, p.scenario)));
-  const cache = await client.cache(config(p.id));
+  const tail = p.scenario === "live-tail-get";
+  const client = shared(
+    await createClient(
+      options(
+        p.side,
+        p.ns,
+        p.scenario,
+        tail ? "/tail-fetcher.js" : "/fetcher.js",
+      ),
+    ),
+  );
+  const cache = await client.cache(tail ? tailConfig(p.id) : config(p.id));
   const state: Prepared = { reset: async () => {}, calls: 0 };
-  if (p.scenario === "read-viewport-shared") {
+  if (tail) {
+    // The opening read fetches the screen; volume 1 is that fetch's.
+    const range = rangeOf(0);
+    checkedTail(await cache.get(range), range, 1);
+    state.op = liveTail(cache, state);
+  } else if (p.scenario === "read-viewport-shared") {
     const wide = { start: rangeOf(0).start, end: rangeOf(2).end };
     checked(await cache.get(wide), wide);
     state.op = readViewport(cache, state);
