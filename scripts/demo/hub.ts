@@ -138,6 +138,7 @@ function page(origins: Record<App, string>): string {
 <header>
   <h1>tscache demo hub</h1>
   <p>Every example app and reference client, each on its own origin with its own mock backend, so each has its own SharedWorker. Open a page twice to see two tabs share one cache; watch the backend counters below while you do.</p>
+  <p>Documentation: <code>bun run docs:dev</code> serves the site at <a href="http://localhost:5173/" target="_blank">http://localhost:5173/</a>; its <a href="http://localhost:5173/guide/demo" target="_blank">Demo hub</a> page describes this one.</p>
 </header>
 <section class="entries">
 ${catalog.map((entry) => entryHtml(entry, origins[entry.app])).join("\n")}
