@@ -34,11 +34,6 @@ export interface Case {
   expect: number;
   /** Builds the state outside any timer and returns the operation. */
   prepare(impl: Impl): Op;
-  /**
-   * How calibration slows the head (run.ts, `slowed`): `repeat` runs the
-   * operation again rather than waiting, for one that allocates heavily.
-   */
-  slowdownBy?: "repeat";
 }
 
 /** The screen a chart shows: 500 one-minute bars. */
@@ -132,9 +127,6 @@ export function cases(): Case[] {
       name: "read-year",
       what: "get a whole year of 24/7 bars (525,600)",
       expect: expectRead(allDay, allDay.range),
-      // About 25 MB of new columns per call: slowed by a wait, its
-      // calibration measured a fraction of the slowdown on the runner.
-      slowdownBy: "repeat",
       prepare(impl) {
         const engine = filled(impl, allDay, "a");
         return () => fold(engine.get("a", allDay.range));
