@@ -6,7 +6,7 @@
 
 import { ConfigError, TscacheError } from "../errors";
 import type { PortClient } from "../rpc/port-client";
-import type { FetcherConfig } from "../rpc/protocol";
+import type { Evt, FetcherConfig } from "../rpc/protocol";
 import type {
   CacheConfig,
   ClientEvents,
@@ -15,6 +15,7 @@ import type {
   ResolvedCacheConfig,
 } from "../types";
 import { CacheHandle } from "./cache";
+import { warnMerges } from "./dev";
 import { ClientEmitter } from "./events";
 import {
   type Hosting,
@@ -154,7 +155,10 @@ class Client implements TscacheClient {
     this.#hosting = hosting;
     this.#port = hosting.client;
     this.mode = hosting.mode;
-    this.#port.on((evt) => this.#events.receive(evt));
+    this.#port.on((evt) => {
+      this.#warnFetched(evt);
+      this.#events.receive(evt);
+    });
     this.#port.onLost((error) => this.#lose(error));
     // The chain ran before anyone could subscribe: deliver its steps on the
     // next macrotask, after the awaiting caller has had its turn. Every
@@ -253,6 +257,22 @@ class Client implements TscacheClient {
       // Raised inside a port or lock callback, where nobody awaits it.
       report(failure);
     }
+  }
+
+  /**
+   * Decision #8 for orchestrated fetches, whose warnings reach the page only
+   * as events: the tab whose get started the fetch prints each one. Other
+   * tabs' requests are theirs to print, and a put prints from its result.
+   */
+  #warnFetched(evt: Evt): void {
+    if (evt.scope !== "request" || evt.event !== "mergeWarning") return;
+    const own = `${this.#port.clientId}:`;
+    if (!evt.requestId.startsWith(own)) return;
+    const id = Number(evt.requestId.slice(own.length));
+    if (this.#port.pendingOp(id) === "put") return;
+    const { cacheId, range, fields } =
+      evt.payload as ClientEvents["mergeWarning"];
+    warnMerges(cacheId, [{ range, fields }], "fetch");
   }
 
   #live(): void {
