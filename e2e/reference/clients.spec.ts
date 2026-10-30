@@ -340,9 +340,7 @@ for (const app of [
       context,
     }) => {
       const page = await context.newPage();
-      // A render first: the server's cache outlives tests, and after one
-      // that restated the data it would serve almost nothing once.
-      expect((await page.request.get("/ssr")).ok()).toBe(true);
+      await serverReadsCurrentVersion(page);
       await recordNotices(page);
       const opening = await holdStream(page);
       await page.goto("/ssr");
