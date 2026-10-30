@@ -131,18 +131,28 @@ export class SegmentStore {
     return { slots: points.slots, names: this.#names, columns };
   }
 
-  /** Points `[from, to)` of schema-ordered columns, as views. */
+  /**
+   * Points `[from, to)` of schema-ordered columns, as views; the arrays
+   * themselves when that is all of them, as for most single-segment puts.
+   * Segments copy what they are given, so neither is kept.
+   */
   #columns(
     slots: Float64Array,
     from: number,
     to: number,
     columns: readonly FieldArray[],
   ): Columns {
+    const whole = from === 0 && to === slots.length;
     const fields: Record<string, FieldArray> = {};
-    this.#names.forEach((name, c) => {
-      setOwn(fields, name, (columns[c] as FieldArray).subarray(from, to));
-    });
-    return { slots: slots.subarray(from, to), fields };
+    for (let c = 0; c < this.#names.length; c++) {
+      const column = columns[c] as FieldArray;
+      setOwn(
+        fields,
+        this.#names[c] as string,
+        whole ? column : column.subarray(from, to),
+      );
+    }
+    return { slots: whole ? slots : slots.subarray(from, to), fields };
   }
 
   /**

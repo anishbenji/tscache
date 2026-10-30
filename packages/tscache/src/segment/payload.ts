@@ -142,7 +142,12 @@ function presentPoints(
     }
     setOwn(fields, name, out);
   }
-  return { slots: Float64Array.from(indices, (i) => first + i), fields };
+  // Indexed rather than Float64Array.from, which iterates its source.
+  const slots = new Float64Array(indices.length);
+  for (let k = 0; k < indices.length; k++) {
+    slots[k] = first + (indices[k] as number);
+  }
+  return { slots, fields };
 }
 
 /**

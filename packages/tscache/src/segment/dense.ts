@@ -360,8 +360,9 @@ export class DenseSegment implements Segment {
   /** Stores validated points; the buffers already hold their slots. */
   #write(points: Columns): void {
     const { slots } = points;
-    for (const slot of slots) {
-      const i = slot - this.#base;
+    // Indexed: JSC iterates a typed array with for…of several times slower.
+    for (let k = 0; k < slots.length; k++) {
+      const i = (slots[k] as number) - this.#base;
       const bit = 1 << (i & 7);
       if (((this.#mask[i >> 3] as number) & bit) !== 0) continue;
       (this.#mask[i >> 3] as number) |= bit;
