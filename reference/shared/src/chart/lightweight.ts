@@ -11,6 +11,9 @@
 // and tells no difference; so a change counts as a scroll only while the
 // user is working the chart (and for a moment after, while a flick
 // coasts).
+//
+// A live bar changes only the newest bars of the answer: those go to the
+// series with update(), which redraws the bar it is given, not every bar.
 
 import {
   type CandlestickData,
@@ -22,7 +25,14 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import type { GetResult, Range } from "tscache";
-import { type ChartOptions, type ChartView, keptRange, moved } from "./view";
+import {
+  appendedFrom,
+  type ChartOptions,
+  type ChartView,
+  countDraw,
+  keptRange,
+  moved,
+} from "./view";
 
 const UP = "#2a78d6";
 const DOWN = "#eb6834";
@@ -38,13 +48,19 @@ interface Bars {
   volumes: HistogramData<UTCTimestamp>[];
 }
 
-/** The answer as the chart's bars, one object per bar, as it requires. */
-function toBars({ timestamps, fields }: GetResult): Bars | undefined {
+/**
+ * The answer's bars from `from` on as the chart's, one object per bar, as
+ * it requires.
+ */
+function toBars(
+  { timestamps, fields }: GetResult,
+  from: number,
+): Bars | undefined {
   const { open, high, low, close, volume } = fields;
   if (!open || !high || !low || !close || !volume) return undefined;
   const out: Bars = { bars: [], volumes: [] };
-  timestamps.forEach((t, i) => {
-    const time = seconds(t);
+  for (let i = from; i < timestamps.length; i++) {
+    const time = seconds(timestamps[i] ?? 0);
     const o = open[i] ?? Number.NaN;
     const c = close[i] ?? Number.NaN;
     const h = high[i] ?? o;
@@ -55,7 +71,7 @@ function toBars({ timestamps, fields }: GetResult): Bars | undefined {
       value: volume[i] ?? 0,
       color: c >= o ? UP : DOWN,
     });
-  });
+  }
   return out;
 }
 
@@ -90,6 +106,8 @@ export function createLightweightChart(
   /** The timestamps of the bars drawn, in ms. */
   let times: ArrayLike<number> & { at(i: number): number | undefined } =
     new Float64Array(0);
+  /** The answer drawn last. */
+  let drawn: GetResult | undefined;
   /** The range on screen as last drawn or reported. */
   let shown: Range | undefined;
   const listeners = new Set<(visible: Range) => void>();
@@ -171,16 +189,25 @@ export function createLightweightChart(
 
   return {
     draw(result) {
-      const data = toBars(result);
+      const from = appendedFrom(drawn, result);
+      const data = toBars(result, from ?? 0);
       if (data === undefined) return;
-      // Decided before setData, which reports the chart's own range.
+      // Decided before the bars change, which reports the chart's own range.
       const target =
         shown === undefined
           ? opening
           : keptRange(shown, times.at(-1), result.timestamps.at(-1));
       times = result.timestamps;
-      candles.setData(data.bars);
-      volume.setData(data.volumes);
+      drawn = result;
+      if (from === undefined) {
+        candles.setData(data.bars);
+        volume.setData(data.volumes);
+      } else {
+        // The forming bar replaces the last one; later bars are added.
+        for (const bar of data.bars) candles.update(bar);
+        for (const bar of data.volumes) volume.update(bar);
+      }
+      countDraw(element, from !== undefined);
       // An answer without bars clears the chart and keeps the time on
       // screen, so the bars of a later answer appear where the user was.
       if (times.length === 0) return;
