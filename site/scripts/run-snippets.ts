@@ -203,6 +203,53 @@ const RUNS: Record<string, Run> = {
     check(typeof response.meta?.version === "string", "no version");
     check(typeof response.meta?.finalizedUntil === "number", "no watermark");
   },
+  async "fetcher-columns.ts"() {
+    const { default: json } = await import(FETCHER);
+    const { default: columns } = await load("fetcher-columns.ts");
+    // Several pages, joined, hold what the JSON fetcher reads.
+    const request: FetchRequest = {
+      cacheId: "crypto/BTC",
+      range: { start: now - 5 * 24 * 60 * MINUTE, end: now - 60 * MINUTE },
+      interval: MINUTE,
+      alignmentOffset: 0,
+      context: { origin },
+    };
+    const [binary, text] = await Promise.all([
+      columns.fetch(request),
+      json.fetch(request),
+    ]);
+    check(binary.timestamps instanceof Float64Array, "timestamps not typed");
+    check(
+      binary.fields.volume instanceof Uint32Array,
+      "volume not a u32 column",
+    );
+    check(
+      binary.timestamps.length > 5000 &&
+        binary.timestamps.join() === text.timestamps.join(),
+      "the timestamps differ from the JSON fetcher's",
+    );
+    for (const name of CANDLE_FIELDS) {
+      check(
+        Array.from(binary.fields[name] as ArrayLike<number>).join() ===
+          (text.fields[name] as number[]).join(),
+        `field ${name} differs from the JSON fetcher's`,
+      );
+    }
+    // The watermark follows the clock, which may tick between the two.
+    check(binary.meta?.version === text.meta?.version, "the versions differ");
+    check(typeof binary.meta?.finalizedUntil === "number", "no watermark");
+    // One page: its columns are views over the one body fetched.
+    const hour = await columns.fetch({
+      ...request,
+      range: { start: now - 2 * 60 * MINUTE, end: now - 60 * MINUTE },
+    });
+    const buffers = new Set(
+      [hour.timestamps, ...Object.values(hour.fields)].map(
+        (view) => (view as Float64Array).buffer,
+      ),
+    );
+    check(buffers.size === 1, `one page decoded into ${buffers.size} buffers`);
+  },
   async "getting-started.ts"() {
     const { result } = await load("getting-started.ts");
     check(result.coverage.length > 0, "nothing covered");
