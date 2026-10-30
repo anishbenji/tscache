@@ -1,6 +1,6 @@
 # Fix 26 — Polls end on the bar forming now
 
-Branch: `fix/26-polling-flake` · Reviewer: Codex (high) · Rounds: in progress · Status: under review
+Branch: `fix/26-polling-flake` · Reviewer: Codex (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 The Playwright test `e2e/reference/clients.spec.ts` "one tab polls, fetching only the newest bars, and the others draw without a fetch" failed intermittently: a polling fetch spanned 180 000 ms against the test's 120 000 ms bound. Step 22 (R2-1) first blamed concurrent CI in two checkouts sharing Playwright ports; chore 25 corrected that triage. Investigated by a delegate while the user was away, under the user's grant of 2026-10-30; accepted as a client bug (logged in the auto-approved decisions).
 
@@ -20,6 +20,10 @@ The Playwright test `e2e/reference/clients.spec.ts` "one tab polls, fetching onl
 - Before the fix: the polling test failed 3 of 30 runs under full CPU load (`yes` per core, three workers).
 - After the fix: 60 of 60 passed under the same load; noticed fetches span one minute.
 - `bun run ci` passed after the fix.
+
+## Round 1 — reviewer verdict: merge
+
+No findings. `bun run ci` passed on an idle machine (host run supplied to the reviewer).
 
 ## Follow-up (separate fix)
 
