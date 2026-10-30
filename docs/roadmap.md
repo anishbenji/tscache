@@ -61,7 +61,7 @@ and settled their differences with experiments; method and reasoning in `docs/be
 
 ## Design sketch: IndexedDB persistence
 
-**Specified in `docs/architecture.md` §4.10 (step 38, decisions N45–N60); where this sketch and §4.10
+**Specified in `docs/architecture.md` §4.10 (step 38, decisions N45–N61); where this sketch and §4.10
 differ, §4.10 governs.** The main differences: coverage is stored in each page record rather than in
 the cache record (N55), and removals are written at once rather than debounced (N58).
 
