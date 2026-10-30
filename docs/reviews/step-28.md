@@ -66,3 +66,7 @@ None weakened. `orchestrator.test.ts` and `client.test.ts` are implementer tests
 ## Decision concerns
 
 None from a reviewer yet. For the user: the removal of chore 19's 20 s timeout above.
+
+## User decision (2026-10-30)
+
+The user approved returning Vitest to its 5 s default timeout, replacing chore 19's 20 s mask (the user's decision of 2026-10-23).
