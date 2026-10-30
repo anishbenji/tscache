@@ -1,6 +1,6 @@
 # Step 42 — Binary fetch format in the examples, reference backends and guide
 
-Branch: `docs/42-binary-fetcher` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: round 2 triaged, awaiting round 3
+Branch: `docs/42-binary-fetcher` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: round 3 triaged, awaiting round 4
 
 Item 5 of the performance plan (§6): a binary columnar response format for the examples' mock backend (which the reference clients also use), its fetchers and the Playwright fixture, documented in the site's fetcher guide. The library does not change. Implemented by Claude while the user was away, under the director's child rules of 2026-10-30.
 
@@ -15,6 +15,8 @@ Item 5 of the performance plan (§6): a binary columnar response format for the 
 | 2475fef | Round 1 fixes: `joinColumns`, `isColumnsType` and `acceptsColumns` in `columns.ts`, used by the snippet, the examples' fetcher, the e2e fixture and both backends |
 | 946f5b7 | Round 1 triage |
 | 984001e | Round 2 fixes: structural schema comparison in `joinColumns` and in the examples' fetcher; explicit aligned copy in `decodeColumns` |
+| 48250a4 | Round 2 triage |
+| c84feaa | Round 3: page joining restructured into normalize-then-join (`fromColumns`, `fromJson`, `joinPages`), used by the examples' fetcher and the guide's snippet |
 
 ## Decisions
 
@@ -118,6 +120,30 @@ The guide's "Asking for it" section now shows the negotiation (`#negotiate` regi
 | `decodeColumns` duplicate-name check | `Set` of the raw names | unchanged: no encoding |
 | column lookup by name (`decodeColumns`, `joinColumns`, the fetcher) | prototype-free records keyed by the raw name | unchanged |
 | `e2e/pages/fetcher.js`, `/columns.js` | no comparison of its own; `/columns.js` is `columns.ts` with types stripped | carries the fix |
+
+## Round 3 — reviewer verdict: merge after fixes
+
+**Convergence check fired again.** Page joining drew a finding in all three rounds (R1-1, R2-1, R3-1), so no further special case was added: joining was restructured into normalize-then-join with an explicit widening table. Each page is normalized as it arrives, whatever its format (`fromColumns`, `fromJson`: every column a typed array of a known dtype, or a list of JSON numbers), and the normalized pages are joined by one rule (`joinPages`), which the examples' fetcher and the guide's snippet both use. The old per-format `join()` of the fetcher and `joinColumns` are gone.
+
+The rule table, in `examples/mock-backend/src/columns.ts` (region `join`) and in the guide's "Joining pages":
+
+| The pages hold | Joined as |
+|---|---|
+| one dtype throughout (columns bodies) | that dtype |
+| JSON numbers throughout | `number[]` |
+| anything else: columns and JSON, or columns of different dtypes | `Float64Array`, when every dtype involved is exact in float64; otherwise `ColumnsError` |
+
+Nothing is narrowed or rounded. Names and their order are still compared one by one (R2-1).
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | A range whose pages come in both formats (one columns, one JSON, as during a backend's rolling upgrade) fails as a whole: `join()` refuses columns whose constructors differ (`Float64Array`, `Array`), so pages with timestamps `[0]` and `[60000]` throw "the pages' columns differ in type" | accepted | Reproduced in both orders against the examples' fetcher. Fixed in c84feaa by the restructure above. Tests first; on the current `join()` the fetcher-level ones failed with that very error: the reviewer's `[0]`/`[60000]` pages in both orders; every dtype of the format joined with a JSON page holding 70,000.25, in both orders, at unit and fetcher level, each value kept exactly in a `Float64Array`; every ordered pair of distinct dtypes widened exactly; a u8 1 and a u16 300 widened to `[1, 300]`; JSON columns holding `null`, strings or no list refused (`null` is how JSON writes `NaN`, and a typed array would store it as 0); and the property test, now drawing each page's format at random as well as its names and dtypes, asserting that differing names are refused and that equal names join to exactly the pages' values, in the type the table gives (2,000 seeded pairs; over 300 of them mixed). `docs:run` checks the guide's fetcher against u8 then u16, columns then JSON, JSON then columns, and R2-1's collision. With the old rule restored in `joinPages` for one run (refuse when kinds or dtypes differ), six tests (three unit, the property test among them, and three at fetcher level) and `docs:run` failed; restored, all pass |
+
+**No reject case can be tested.** Every dtype of the format (f64, f32, i32, u32, i16, u16, i8, u8) is exact in float64, and the format has no 64-bit integer dtype, so the "otherwise `ColumnsError`" row cannot be reached today. `EXACT_IN_FLOAT64` is typed `Record<Dtype, boolean>`, so a dtype added to tscache's `Dtype` fails the type check until it is marked; marked `false`, its mixed joins are refused. JSON numbers are float64 by the time they are parsed, so an integer above 2^53 in a JSON body is rounded by `JSON.parse` before the fetcher sees it; no fetcher can detect that.
+
+**A round 1 behaviour changed, on the director's rule.** Round 1 made two binary dtypes in one column a refusal (R1-1). The rule table now widens them to float64, which keeps every value and so still prevents the narrowing R1-1 reported. The two tests that pinned the refusal (`fetcher.test.ts`: u8 then u16, f64 then f32; `columns.test.ts`: differing dtypes) now pin the exact widened values, which is the stronger check, and the `docs:run` case expects `Float64Array [1, 300]`. No contract test is involved.
+
+**Every place pages are joined:** the examples' fetcher and the guide's snippet (both now `joinPages`; the snippet also reads JSON pages). The e2e fixture fetcher and the bench read one page per range and join nothing; `/columns.js` is `columns.ts` with types stripped.
 
 ## Contract-test changes
 
