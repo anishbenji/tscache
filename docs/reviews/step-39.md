@@ -1,6 +1,6 @@
 # Chore 39 — Chromium bench noise on GitHub's runner
 
-Branch: `chore/39-bench-chromium-noise` · Reviewer: not yet reviewed · Rounds: 0 · Status: awaiting review
+Branch: `chore/39-bench-chromium-noise` · Reviewer: Codex (high) · Rounds: 1 · Status: settled
 
 Runs the Chromium noise experiment of the performance plan (§7.3): which setup keeps Chromium's A/A control inside [0.95, 1.05] on GitHub's runner. Implemented and dispatched by Claude while the user was away, under the user's grant of 2026-10-30 (standard runner minutes are free on a public repository; no larger or paid runner was used).
 
@@ -45,3 +45,7 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 1 — reviewer verdict: merge
+
+No findings; `bun run ci` passed. Settled. Reviewed and settled by the director while the user was away.
