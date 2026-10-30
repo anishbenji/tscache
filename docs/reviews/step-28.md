@@ -103,3 +103,9 @@ The user approved returning Vitest to its 5 s default timeout, replacing chore 1
 ## Round 4 — reviewer verdict: merge
 
 No findings; all seven accepted findings from rounds 1–3 confirmed fixed; clock check 100 files clean. `bun run ci` passed. Settled.
+
+## After the pull request opened
+
+Main moved on while #60 waited, and GitHub reported the branch as conflicting. The branch was already pushed, so main was merged into it (f7af534) rather than rebased. One file conflicted, `e2e/reference/clients.spec.ts`, where both sides had added helpers in the same places. Both sides were kept: this branch's `serverReadsCurrentVersion` beside fix 31's `barStart` and `holdStream` (#59), and this branch's `shownTime` and backend-clock `showingStart` beside step 41's `draws` counter (#58). The tests merged without conflict. In 6cb85a4, fix 31's server-rendered test uses `serverReadsCurrentVersion` in place of its inline warm-up render.
+
+After the merge, `bun scripts/test-clocks.ts` reported 108 files clean: the tests main brought in (fix 31's pinned clocks, step 41's draw counters, the Bun timing gate's `gated.test.ts`) already follow the rules. The reference spec under load (`scripts/flake-hunt.sh -n 3 --load e2e/reference/clients.spec.ts`, under the heavy-job lock) passed 207 of 207. `bun run ci` passed on this file's commit.
