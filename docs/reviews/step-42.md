@@ -1,6 +1,6 @@
 # Step 42 — Binary fetch format in the examples, reference backends and guide
 
-Branch: `docs/42-binary-fetcher` · Reviewer: not yet run (the director runs the review loop) · Status: implemented, awaiting review
+Branch: `docs/42-binary-fetcher` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: round 1 triaged, awaiting round 2
 
 Item 5 of the performance plan (§6): a binary columnar response format for the examples' mock backend (which the reference clients also use), its fetchers and the Playwright fixture, documented in the site's fetcher guide. The library does not change. Implemented by Claude while the user was away, under the director's child rules of 2026-10-30.
 
@@ -11,7 +11,8 @@ Item 5 of the performance plan (§6): a binary columnar response format for the 
 | 008e4e0 | `examples/mock-backend/src/columns.ts`: the format, `encodeColumns`, `decodeColumns`, `ColumnsError`. The mock backend answers series pages as a columns body when `Accept` names `application/vnd.tscache.columns` (JSON otherwise, `Vary: Accept` on both) and counts pages per format in `/api/stats`. The examples' fetcher asks for columns by default (`format: "json"` in its context asks for JSON), reads JSON from a backend that answers it, and returns a one-page range as views over the body |
 | 9a1ef86 | The Playwright backend answers candles as columns on request; both e2e servers serve the columns module, types stripped, as `/columns.js`; the fixture fetcher asks for columns unless its context says JSON. `bun scripts/bench.ts e2e --fetchers base,head` chooses the fixture's format per side. The reference clients' spec checks that every series page came as columns |
 | 646c545 | The fetcher guide's "Binary pages" section (why, the format, the decoder, Arrow IPC), its snippet `site/snippets/fetcher-columns.ts` run by `docs:run`, and a tip on the performance page |
-| (this commit) | This file |
+| 3ec70e7 | This file |
+| 2475fef | Round 1 fixes: `joinColumns`, `isColumnsType` and `acceptsColumns` in `columns.ts`, used by the snippet, the examples' fetcher, the e2e fixture and both backends |
 
 ## Decisions
 
@@ -75,6 +76,27 @@ Readings:
 - A big-endian platform: both encoder and decoder refuse to run on one (`requireLittleEndian`), which no test can reach on this machine.
 - The Arrow IPC paragraph is guidance only; no Arrow code runs in `docs:run`, since that would add `apache-arrow` as a dependency of the site.
 - Firefox and Safari: the e2e and bench suites run Chromium only.
+
+## Round 1 — reviewer verdict: block
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P0 | The guide's binary fetcher (`site/snippets/fetcher-columns.ts`) joins pages into the first page's typed array without comparing dtypes: `volume` as `u8 [1]` then `u16 [300]` returns `[1, 44]` | accepted | Reproduced: the snippet returned `Uint8Array [1,44]` for those two pages under one version. Fixed in 2475fef: joining moved into `joinColumns` (`examples/mock-backend/src/columns.ts`), which refuses pages whose columns differ in name, order or dtype with `ColumnsError`; the snippet uses it. Tests first: five `joinColumns` unit tests (red before), and a `docs:run` check that the snippet refuses a u8 page followed by a u16 one. With the dtype check disabled, `docs:run` failed with "pages of u8 then u16 volume gave 1,44, not a ColumnsError", and the unit tests failed too; with it restored, both pass. The examples' fetcher already refused differing constructors; a test of the exact u8 then u16 case now pins that |
+| R1-2 | P1 | The examples' fetcher compares `Content-Type` exactly, so a columns body sent with `; charset=binary` goes to the JSON parser and throws `SyntaxError` | accepted | Reproduced: `SyntaxError: JSON Parse error: Unexpected identifier "TSC"`. Fixed in 2475fef: `isColumnsType` compares the media type before any `;`, trimmed and lowercased; the examples' fetcher and the e2e fixture fetcher use it. Tests first: `isColumnsType` unit tests over parameters, case, spacing and near misses, and a fetcher test that reads bodies typed `; charset=binary`, `Application/VND.tscache.Columns` and ` …columns ;v=1` (red before, green after) |
+
+**Siblings checked for the same two classes** (all fixed in 2475fef):
+
+| Where | Class | Finding | Resolution |
+|---|---|---|---|
+| `e2e/pages/fetcher.js` (the fixture the Playwright suites and the bench use) | decoder choice | Exact `===` on `Content-Type`, as R1-2 | Uses `isColumnsType` from `/columns.js` |
+| `/columns.js` | both | Served from `columns.ts` with its types stripped | Carries the fixes; no code of its own |
+| `examples/mock-backend/src/backend.ts` (the reference backend too) | `Accept` negotiation | Matched the type whatever its quality: `…columns;q=0, application/json` and `application/json, …columns;q=0.1` were both answered with columns. Reproduced | `acceptsColumns`: columns only when a range names the type, with a quality above 0 and no lower than that of the most specific range matching JSON (`application/json`, then `application/*`, then `*/*`); a malformed quality is ignored. Unit tests over 19 Accept values; a backend test for `q=0`, JSON preferred, and upper case |
+| `scripts/e2e-backend.ts` | `Accept` negotiation | `accept.includes(type)`: ignored q-values as above, and missed `APPLICATION/VND.TSCACHE.COLUMNS`. Reproduced | Uses `acceptsColumns` |
+| `examples/mock-backend/src/fetcher.ts` | page joining | Already refused columns of differing constructors (and differing names) | Unchanged; the new u8 then u16 test pins it |
+| `site/snippets/fetcher-columns.ts` | decoder choice | Asks for columns only and decodes every answer; a JSON answer throws `ColumnsError` (not a columns body), a clean `'fetch-failed'` | Unchanged |
+| reference clients (`reference/*`) | both | No fetcher or backend of their own: they load the examples' fetcher and mount the mock backend | Covered by the fixes above |
+
+The guide's "Asking for it" section now shows the negotiation (`#negotiate` region) and states both rules; the README describes them.
 
 ## Contract-test changes
 
