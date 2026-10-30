@@ -1,35 +1,6 @@
-import type { GetResult } from "tscache";
 import { describe, expect, it } from "vitest";
 import { appendedFrom } from "../src/chart/view";
-
-const MINUTE = 60_000;
-const T0 = Date.UTC(2026, 9, 30, 12, 0);
-
-type Bar = [open: number, high: number, low: number, close: number];
-
-/** An answer of one-minute bars from T0 + `first` minutes on. */
-function answer(bars: readonly Bar[], first = 0): GetResult {
-  const column = (k: number) => Float64Array.from(bars, (bar) => bar[k] ?? 0);
-  return {
-    timestamps: Float64Array.from(bars, (_, i) => T0 + (first + i) * MINUTE),
-    fields: {
-      open: column(0),
-      high: column(1),
-      low: column(2),
-      close: column(3),
-      volume: Float64Array.from(bars, (_, i) => 100 + i),
-    },
-    coverage: [],
-    misses: [],
-  };
-}
-
-const HISTORY: Bar[] = [
-  [10, 12, 9, 11],
-  [11, 13, 10, 12],
-  [12, 14, 11, 13],
-  [13, 15, 12, 14],
-];
+import { answer, type Bar, HISTORY, MINUTE, T0 } from "./answers";
 
 describe("appendedFrom", () => {
   it("draws only a bar appended after the last one", () => {
