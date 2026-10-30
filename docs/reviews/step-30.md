@@ -1,6 +1,6 @@
 # Chore 30 — Local demo hub
 
-Branch: `chore/30-demo-hub` · Reviewer: Codex (high) · Rounds: 4 · Status: fixes in, awaiting round 5 · Verdict after triage: merge after round 5
+Branch: `chore/30-demo-hub` · Reviewer: Codex (high) · Rounds: 5 · Status: settled · Verdict after triage: merge
 
 One command that shows and launches every sample app: `bun run demo`. Requested by the director while the user was away, under the user's grant of 2026-10-30; built by a Claude Opus 5.5 subagent. Tooling, not a commit-plan step: no package, example or reference-client code changes.
 
@@ -102,3 +102,7 @@ Launcher cleanup has drawn a finding in every round (R1-1, R2-1, R2-2, R3-1, R4-
 - Round 1: `E2E_EXAMPLES=demo bunx playwright test --project=demo`: 28 passed in 18.4 s.
 - Round 2: `E2E_EXAMPLES=demo bunx playwright test --project=demo --repeat-each 3`: 90 passed in 32.8 s; the launcher spec `--repeat-each 5` under CPU load: 15 passed; no `vite preview` left afterwards. By hand: SIGINT to a running demo exits 130 with no listener or server left, each server leading its own process group.
 - D10: `--repeat-each 6 --workers 6` on the Expire token test: in the parallel project (the original placement and assertion) 5 failed with `auth` `pending`; in `demo-shared`, 6 passed on one worker.
+
+## Round 5 — reviewer verdict: merge
+
+No findings; all accepted findings from rounds 1–4 confirmed fixed. `bun run ci` passed. Settled.
