@@ -4,6 +4,9 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // Node's API for the Node side (the port offset in examples/apps.ts);
+    // Bun's definitions carry Node's, as for the scripts.
+    "types": ["bun"],
     "isolatedDeclarations": false,
     "declaration": false,
     // The package's exports point into dist/, which `bun run ci` builds

@@ -52,3 +52,7 @@ No findings. `bun run ci` passed on an idle machine.
 - `bunx vitest run packages/tscache/test/dense-segment.test.ts`: 98 passed; the two mutation checks above fail it.
 - Benchmarks re-run after R1-1: `read-viewport` 0.145 in Bun and 0.596 in Chromium; `read-viewport-sessions` 0.154 and 0.716.
 - Not verified: the timings on GitHub's runner (the `bench` job reports them on this pull request).
+
+## Correction (chore 25, 2026-10-30)
+
+The R2-1 and R3-1 triage blamed a second checkout's concurrent `bun run ci`, through Playwright's shared fixed ports for R2-1. Chore 25 gave each checkout its own ports and then ran the reference suite in three checkouts at once: the same polling assertion failed in two of the three, each on its own ports. The ports were not the cause of R2-1, and neither was load. Fix 26 found the cause: a poll ending between bar boundaries also fetched the next, not yet existing, slot, so a poll that crossed a minute boundary fetched three minutes; the test failed whenever its window of about six seconds held a minute boundary (`docs/reviews/step-26.md`). The conclusion that this step did not cause it stands: the step changes no reference or polling code, and `main` fails the same way.
