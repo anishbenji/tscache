@@ -24,3 +24,9 @@ Outside CI, Playwright reuses a server it finds on its port (`reuseExistingServe
 - Offsets: this worktree 33 000, `/private/tmp/tscache-ports2` 10 000, the main checkout 24 000; 5 000 sample paths all in 1 000–39 000.
 - The full Playwright suite ran in this worktree and a second checkout of the branch at the same time: 101 passed in each, on 9173/10201 and 4173/5201 (before 5f47460 the second hashed to 0).
 - After 5f47460: the reference and dedup specs in three checkouts at once (this branch twice, the main checkout without the change) listened on 37173/38201, 14173/15201 and 4173/5201, with no shared server. The polling assertion at `e2e/reference/clients.spec.ts:556` still failed in two of the three runs, on their own ports. So the ports were not the cause of step 22's R2-1, as its triage assumed. Fix 26 found the real cause (a poll crossing a minute boundary fetched one slot too many), and step 22's review file now records the correction. This chore stands on its own: a checkout must not test another checkout's servers.
+
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | No test covers the offset's CI precedence, override bounds, invalid values, empty or unset values, or nonzero hashes; a regression to 0 would pass CI, which uses 0 | Accept. Valid: `portOffset` had no unit test | `e2e/examples/apps.test.ts` (run by Vitest; Playwright's projects skip it) covers each case. Writing it found a bug: `Number()` read `" "` as 0, and `"0x1"` and `"1e1"` as numbers, so a blank or hex override was accepted; the override is now digits only. A test that two sample paths get different offsets was dropped: the hash can collide by design (one pair in 39, D1), and those two did |

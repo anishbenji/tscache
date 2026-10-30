@@ -40,7 +40,8 @@ export function portOffset(
   const set = env.E2E_PORT_OFFSET;
   if (set !== undefined && set !== "") {
     const steps = Number(set);
-    if (!Number.isInteger(steps) || steps < 0 || steps >= STEPS) {
+    // Digits only: Number() also reads " ", "0x1" and "1e1".
+    if (!/^\d+$/.test(set) || steps >= STEPS) {
       throw new RangeError(
         `E2E_PORT_OFFSET must be an integer from 0 to ${STEPS - 1}, not ${set}`,
       );
