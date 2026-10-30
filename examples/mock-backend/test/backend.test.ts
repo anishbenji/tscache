@@ -96,6 +96,23 @@ describe("createBackend", () => {
     expect(timestamps).toHaveLength(PAGE_SLOTS);
   });
 
+  it("answers JSON when the Accept refuses columns or prefers JSON", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const typeFor = async (accept: string) =>
+      (
+        await call(backend, `/api/series/metrics/web?${query}`, {
+          headers: { accept },
+        })
+      ).headers.get("content-type");
+    expect(await typeFor(`${COLUMNS_TYPE};q=0, application/json`)).toMatch(
+      /^application\/json/,
+    );
+    expect(await typeFor(`application/json, ${COLUMNS_TYPE};q=0.1`)).toMatch(
+      /^application\/json/,
+    );
+    expect(await typeFor("APPLICATION/VND.TSCACHE.COLUMNS")).toBe(COLUMNS_TYPE);
+  });
+
   it("answers JSON to a request that accepts anything", async () => {
     const backend = createBackend({ latencyMs: 0, now: () => NOW });
     const response = await call(backend, `/api/series/metrics/web?${query}`, {

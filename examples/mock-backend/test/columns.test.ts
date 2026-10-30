@@ -1,11 +1,14 @@
 import type { Dtype } from "tscache";
 import { describe, expect, it } from "vitest";
 import {
+  acceptsColumns,
   COLUMNS_TYPE,
   ColumnsError,
   type ColumnsInput,
   decodeColumns,
   encodeColumns,
+  isColumnsType,
+  joinColumns,
 } from "../src/columns";
 
 const T0 = Date.UTC(2026, 5, 1);
@@ -274,5 +277,123 @@ describe("columns format", () => {
     bytes.set([0x54, 0x53, 0x43, 0x01]);
     new DataView(bytes.buffer).setUint32(4, 1_000, true);
     expect(() => decodeColumns(bytes.buffer)).toThrow(ColumnsError);
+  });
+});
+
+describe("isColumnsType", () => {
+  it("matches the media type whatever its parameters, case or spacing", () => {
+    for (const value of [
+      COLUMNS_TYPE,
+      `${COLUMNS_TYPE}; charset=binary`,
+      `${COLUMNS_TYPE};v=1`,
+      "Application/VND.TSCache.Columns",
+      `  ${COLUMNS_TYPE}  ; x=y`,
+    ]) {
+      expect(isColumnsType(value), value).toBe(true);
+    }
+  });
+
+  it("matches nothing else", () => {
+    for (const value of [
+      null,
+      "",
+      "application/json",
+      "application/json; charset=utf-8",
+      `${COLUMNS_TYPE}2`,
+      `x-${COLUMNS_TYPE}`,
+      "application/octet-stream",
+    ]) {
+      expect(isColumnsType(value), String(value)).toBe(false);
+    }
+  });
+});
+
+describe("acceptsColumns", () => {
+  it("chooses columns only when the Accept names them and does not prefer JSON", () => {
+    const cases: [string | null, boolean][] = [
+      [COLUMNS_TYPE, true],
+      [`${COLUMNS_TYPE}, application/json;q=0.5`, true],
+      [`application/json;q=0.5, ${COLUMNS_TYPE}`, true],
+      [`APPLICATION/VND.TSCACHE.COLUMNS`, true],
+      [`${COLUMNS_TYPE} ; q=0.8 , application/json;q=0.5`, true],
+      [`${COLUMNS_TYPE}, */*`, true],
+      [`${COLUMNS_TYPE};Q=0.9, application/*;q=0.2`, true],
+      // Refused outright, or ranked below JSON.
+      [`${COLUMNS_TYPE};q=0, application/json`, false],
+      [`${COLUMNS_TYPE};q=0`, false],
+      [`application/json, ${COLUMNS_TYPE};q=0.1`, false],
+      [`${COLUMNS_TYPE};q=0.4, */*;q=0.5`, false],
+      // Not named: wildcards and other types get JSON.
+      [null, false],
+      ["", false],
+      ["*/*", false],
+      ["application/*", false],
+      ["application/json", false],
+      [`${COLUMNS_TYPE}2`, false],
+      // A quality that is not one is not a preference.
+      [`${COLUMNS_TYPE};q=2`, false],
+      [`${COLUMNS_TYPE};q=abc`, false],
+    ];
+    for (const [accept, columns] of cases) {
+      expect(acceptsColumns(accept), String(accept)).toBe(columns);
+    }
+  });
+});
+
+describe("joinColumns", () => {
+  const page = (dtypes: Record<string, Dtype>, start: number, n: number) => {
+    const timestamps = Array.from(
+      { length: n },
+      (_, i) => T0 + (start + i) * MINUTE,
+    );
+    const fields = Object.fromEntries(
+      Object.keys(dtypes).map((name) => [
+        name,
+        timestamps.map((_, i) => (start + i) * 100),
+      ]),
+    );
+    return decodeColumns(body(encodeColumns({ timestamps, fields, dtypes })));
+  };
+
+  it("returns a single page's views as they are", () => {
+    const only = page({ close: "f64" }, 0, 3);
+    const joined = joinColumns([only]);
+    expect(joined.timestamps).toBe(only.timestamps);
+    expect(joined.fields.close).toBe(only.fields.close);
+  });
+
+  it("joins pages into one array of each column's dtype", () => {
+    const dtypes: Record<string, Dtype> = { close: "f64", volume: "u16" };
+    const joined = joinColumns([page(dtypes, 0, 2), page(dtypes, 2, 3)]);
+    expect([...joined.timestamps]).toEqual(
+      [0, 1, 2, 3, 4].map((i) => T0 + i * MINUTE),
+    );
+    expect(joined.fields.volume).toBeInstanceOf(Uint16Array);
+    expect([...(joined.fields.volume ?? [])]).toEqual([0, 100, 200, 300, 400]);
+    expect([...(joined.fields.close ?? [])]).toEqual([0, 100, 200, 300, 400]);
+  });
+
+  it("refuses pages whose columns differ in dtype, rather than convert", () => {
+    // A u16 value written into the first page's u8 array would wrap: 300
+    // becomes 44.
+    const pages = [page({ volume: "u8" }, 0, 1), page({ volume: "u16" }, 3, 1)];
+    expect(() => joinColumns(pages)).toThrow(ColumnsError);
+    expect(() => joinColumns(pages)).toThrow(/columns differ/);
+  });
+
+  it("refuses pages whose columns differ in name or order", () => {
+    const ab = page({ a: "f64", b: "f64" }, 0, 1);
+    for (const other of [
+      page({ a: "f64" }, 1, 1),
+      page({ b: "f64", a: "f64" }, 1, 1),
+      page({ a: "f64", c: "f64" }, 1, 1),
+      page({ a: "f64", b: "f64", c: "f64" }, 1, 1),
+    ]) {
+      expect(() => joinColumns([ab, other])).toThrow(ColumnsError);
+    }
+  });
+
+  it("refuses no pages at all", () => {
+    expect(() => joinColumns([])).toThrow(ColumnsError);
   });
 });

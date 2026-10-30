@@ -9,7 +9,7 @@
 // the columns decoder at /columns.js; there are no such paths in the
 // repository.
 // fallow-ignore-next-line unresolved-import
-import { COLUMNS_TYPE, decodeColumns } from "/columns.js";
+import { COLUMNS_TYPE, decodeColumns, isColumnsType } from "/columns.js";
 // fallow-ignore-next-line unresolved-import
 import { AuthInvalidError } from "/dist/fetcher.js";
 
@@ -30,7 +30,7 @@ export default {
       throw new AuthInvalidError("candles refused the access token");
     }
     if (!response.ok) throw new Error(`candles answered ${response.status}`);
-    if (response.headers.get("content-type") === COLUMNS_TYPE) {
+    if (isColumnsType(response.headers.get("content-type"))) {
       const { header, timestamps } = decodeColumns(
         await response.arrayBuffer(),
       );

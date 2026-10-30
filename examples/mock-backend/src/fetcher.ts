@@ -12,7 +12,12 @@ import {
   type FetchRequest,
   type FetchResponse,
 } from "tscache/fetcher";
-import { COLUMNS_TYPE, decodeColumns, type NumericColumn } from "./columns";
+import {
+  COLUMNS_TYPE,
+  decodeColumns,
+  isColumnsType,
+  type NumericColumn,
+} from "./columns";
 import { type FetchNotice, postFetchNotice } from "./notices";
 
 /** The fetcher context the examples pass to createClient and updateAuth. */
@@ -83,7 +88,7 @@ async function fetchPage(
     throw new AuthInvalidError("the backend refused the access token");
   }
   if (!response.ok) throw new Error(`the backend answered ${response.status}`);
-  if (response.headers.get("content-type") !== COLUMNS_TYPE) {
+  if (!isColumnsType(response.headers.get("content-type"))) {
     return (await response.json()) as Page;
   }
   // Views over the body: no value is parsed or copied.

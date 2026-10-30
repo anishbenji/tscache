@@ -141,6 +141,46 @@ describe("fetcher", () => {
     expect(await noticed).toMatchObject({ outcome: "failed" });
   });
 
+  it("reads a columns body whatever the parameters or case of its type", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    for (const type of [
+      `${COLUMNS_TYPE}; charset=binary`,
+      "Application/VND.tscache.Columns",
+      ` ${COLUMNS_TYPE} ;v=1`,
+    ]) {
+      serve(async (req) => {
+        const response = (await backend(req)) as Response;
+        return new Response(await response.arrayBuffer(), {
+          headers: { "content-type": type },
+        });
+      });
+      const response = await fetcher.fetch(request());
+      expect(response.timestamps, type).toBeInstanceOf(Float64Array);
+      expect(response.timestamps).toHaveLength(2 * PAGE_SLOTS + 11);
+    }
+  });
+
+  it("refuses a u8 page followed by a u16 page rather than wrap 300 to 44", async () => {
+    const page = (dtype: "u8" | "u16", value: number, next?: number) =>
+      new Response(
+        encodeColumns(
+          {
+            timestamps: [next === undefined ? START + MINUTE : START],
+            fields: { volume: [value] },
+            dtypes: { volume: dtype },
+          },
+          {
+            meta: { version: "v1", finalizedUntil: NOW },
+            ...(next === undefined ? {} : { next }),
+          },
+        ),
+        { headers: { "content-type": COLUMNS_TYPE } },
+      );
+    const pages = [page("u8", 1, START + MINUTE), page("u16", 300)];
+    vi.stubGlobal("fetch", async () => pages.shift());
+    await expect(fetcher.fetch(request())).rejects.toThrow(/columns differ/);
+  });
+
   it("refuses pages whose columns disagree", async () => {
     const page = (dtype: "f64" | "f32", next?: number) =>
       new Response(

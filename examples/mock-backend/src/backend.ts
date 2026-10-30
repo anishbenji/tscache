@@ -5,7 +5,7 @@
 // what tscache does about latency, a dataset version change or an expired
 // token. All state lives in memory, one backend per dev or preview server.
 
-import { COLUMNS_TYPE, encodeColumns } from "./columns";
+import { acceptsColumns, COLUMNS_TYPE, encodeColumns } from "./columns";
 import { datasets, isDatasetName } from "./datasets";
 import { seedOf } from "./noise";
 import { alignDown, type SeriesQuery, seriesPage } from "./series";
@@ -165,20 +165,6 @@ function json(body: unknown, headers: Record<string, string> = {}): Response {
   });
 }
 
-/**
- * Whether a request asks for a columns body (src/columns.ts). Only an
- * Accept that names the type does; a wildcard, or no Accept at all, gets
- * JSON, which every client can read.
- */
-function acceptsColumns(request: Request): boolean {
-  const accept = request.headers.get("accept") ?? "";
-  return accept
-    .split(",")
-    .some(
-      (range) => range.split(";")[0]?.trim().toLowerCase() === COLUMNS_TYPE,
-    );
-}
-
 function parseQuery(url: URL): SeriesQuery | undefined {
   const value = (name: string) => Number(url.searchParams.get(name) ?? "x");
   const query = {
@@ -269,7 +255,7 @@ export function createBackend(options: BackendOptions = {}): Backend {
     const authorized = accepts(
       presented?.startsWith("Bearer ") ? presented.slice(7) : null,
     );
-    const columns = acceptsColumns(request);
+    const columns = acceptsColumns(request.headers.get("accept"));
     const tag = `v${version}`;
     const seed = seedFor(dataset, symbol);
     const page = authorized

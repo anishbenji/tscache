@@ -32,9 +32,10 @@ All routes live under `/api/`; the `mockBackend()` Vite plugin mounts them on
   `{ timestamps, fields, meta: { version, finalizedUntil }, next? }` for the
   inclusive range, at most 5,000 slots per page and never past now. `next`
   is where the following page starts. A request whose `Accept` names
-  `application/vnd.tscache.columns` gets the same page as a binary columns
-  body instead (below); any other request gets JSON. Both answers carry
-  `Vary: Accept`.
+  `application/vnd.tscache.columns`, with a quality above 0 and no lower
+  than JSON's, gets the same page as a binary columns body instead (below);
+  any other request, a wildcard alone included, gets JSON. Both answers
+  carry `Vary: Accept`.
 - `GET /api/stream/<dataset>/<symbol>?interval&offset` is a Server-Sent
   Events stream: a `bar` event every second carrying a put batch
   `{ timestamps, fields, meta }`, the bar forming now and, once a bar has
@@ -80,7 +81,9 @@ The body ends with the last column. Because every column starts on an
 8-byte boundary, `decodeColumns` returns typed-array views over the one
 `ArrayBuffer` that `response.arrayBuffer()` gives, with no copy. It throws
 `ColumnsError` for a body that is truncated, longer than its columns, or
-not this format. Integer columns cannot carry `NaN`, so `encodeColumns`
+not this format. `joinColumns` joins a range's pages and refuses pages
+whose columns differ in name, order or dtype; `isColumnsType` and
+`acceptsColumns` compare media types without their parameters or case. Integer columns cannot carry `NaN`, so `encodeColumns`
 refuses a value its dtype cannot hold. The fetcher guide on the site
 explains the format and when to use it.
 

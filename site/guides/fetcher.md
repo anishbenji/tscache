@@ -103,21 +103,30 @@ integer dtype cannot hold rather than store it as 0.
 
 ### Asking for it
 
-The mock backend serves both formats from one URL: a request whose `Accept` names
-`application/vnd.tscache.columns` gets a columns body, any other request gets JSON, and both answers
-carry `Vary: Accept` so that a cache between them keeps the two apart. This fetcher is the one at the
-top of this page, asking for columns:
+The mock backend serves both formats from one URL, and both answers carry `Vary: Accept` so that a
+cache between them keeps the two apart. A request gets a columns body only when its `Accept` names
+`application/vnd.tscache.columns`, with a quality above 0 and no lower than JSON's; a wildcard alone,
+or no `Accept`, gets JSON, so a client that has not heard of the format is unaffected. Media types are
+compared without their parameters and without regard to case, on both sides:
+
+<<< ../../examples/mock-backend/src/columns.ts#negotiate{ts}
+
+This fetcher is the one at the top of this page, asking for columns:
 
 <<< @/snippets/fetcher-columns.ts#fetcher{ts}
 
 A range that fits one page is returned as views over the body, with no copy at all; a longer one is
-joined into one array per column, which tscache copies into its segments either way.
+joined into one array per column, which tscache copies into its segments either way. `joinColumns`
+refuses pages whose columns differ in name, order or dtype, since a value written into another dtype's
+array is converted without a word: a u16 300 joined into a u8 column reads as 44.
 
 ### The decoder
 
 `decodeColumns` checks the body against its header before viewing it: a body that is truncated, longer
 than its columns, or not in this format throws a `ColumnsError`, which the fetcher lets through, so the
-range is `'fetch-failed'` and the next `get` tries again.
+range is `'fetch-failed'` and the next `get` tries again. A fetcher that also reads JSON should pick the
+decoder with `isColumnsType(response.headers.get("content-type"))`, which allows for parameters such as
+`; charset=binary`, rather than comparing the header's text.
 
 <<< ../../examples/mock-backend/src/columns.ts#decode{ts}
 

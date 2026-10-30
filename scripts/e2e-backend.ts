@@ -8,6 +8,7 @@
 // Accept names that format.
 
 import {
+  acceptsColumns,
   COLUMNS_TYPE,
   encodeColumns,
 } from "../examples/mock-backend/src/columns";
@@ -120,7 +121,7 @@ async function candles(
   await pass(state, "candles");
   if (!valid) return new Response("access token refused", { status: 401 });
   const timestamps = gridPoints(start, end, interval, offset);
-  if (request.headers.get("accept")?.includes(COLUMNS_TYPE)) {
+  if (acceptsColumns(request.headers.get("accept"))) {
     const body = encodeColumns(
       { timestamps, fields: {}, dtypes: {} },
       { version, calls },

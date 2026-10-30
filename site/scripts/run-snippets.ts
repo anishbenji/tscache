@@ -14,6 +14,11 @@
 
 import { readdirSync } from "node:fs";
 import { createBackend } from "@examples/mock-backend/backend";
+import {
+  COLUMNS_TYPE,
+  ColumnsError,
+  encodeColumns,
+} from "@examples/mock-backend/columns";
 import { decodeSnapshot, type EncodedSnapshot, type GetResult } from "tscache";
 import type { FetchRequest } from "tscache/fetcher";
 
@@ -249,6 +254,51 @@ const RUNS: Record<string, Run> = {
       ),
     );
     check(buffers.size === 1, `one page decoded into ${buffers.size} buffers`);
+    // Pages whose columns differ in dtype are refused, not converted: a u16
+    // 300 joined into the first page's u8 array would read as 44 (step 42
+    // R1-1).
+    const meta = { version: "v1", finalizedUntil: now };
+    const pages = [
+      encodeColumns(
+        {
+          timestamps: [now - MINUTE],
+          fields: { volume: [1] },
+          dtypes: { volume: "u8" },
+        },
+        { meta, next: now },
+      ),
+      encodeColumns(
+        {
+          timestamps: [now],
+          fields: { volume: [300] },
+          dtypes: { volume: "u16" },
+        },
+        { meta },
+      ),
+    ];
+    const pageFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(
+      async () =>
+        new Response(pages.shift(), {
+          headers: { "content-type": COLUMNS_TYPE },
+        }),
+      pageFetch,
+    );
+    try {
+      const mixed = await columns
+        .fetch({ ...request, range: { start: now - MINUTE, end: now } })
+        .then(
+          (response: { fields: Record<string, ArrayLike<number>> }) =>
+            Array.from(response.fields.volume ?? []).join(),
+          (error: unknown) => error,
+        );
+      check(
+        mixed instanceof ColumnsError,
+        `pages of u8 then u16 volume gave ${String(mixed)}, not a ColumnsError`,
+      );
+    } finally {
+      globalThis.fetch = pageFetch;
+    }
   },
   async "getting-started.ts"() {
     const { result } = await load("getting-started.ts");

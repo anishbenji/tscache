@@ -108,6 +108,60 @@ function align8(offset: number): number {
   return Math.ceil(offset / 8) * 8;
 }
 
+// #region negotiate
+/**
+ * The media type of a Content-Type, or of one range of an Accept: what
+ * precedes its parameters, trimmed and lowercased, as media types are
+ * compared.
+ */
+function mediaTypeOf(value: string): string {
+  return (value.split(";")[0] ?? "").trim().toLowerCase();
+}
+
+/**
+ * A range's quality: its `q` parameter, 1 without one, or undefined when
+ * the value is not a quality (0 to 1, at most three decimals).
+ */
+function qualityOf(range: string): number | undefined {
+  for (const parameter of range.split(";").slice(1)) {
+    const [name = "", value = ""] = parameter.split("=").map((s) => s.trim());
+    if (name.toLowerCase() !== "q") continue;
+    return /^(0(\.\d{0,3})?|1(\.0{0,3})?)$/.test(value)
+      ? Number(value)
+      : undefined;
+  }
+  return 1;
+}
+
+/** Ranges that match JSON, from the most specific. */
+const JSON_RANGES = ["application/json", "application/*", "*/*"];
+
+/**
+ * Whether to answer a request with a columns body, from its Accept header.
+ * Only a range that names COLUMNS_TYPE selects it, never a wildcard, so a
+ * client that has not heard of the format keeps getting JSON. Its quality
+ * must be above 0 and at least JSON's: the quality of the most specific
+ * range that matches `application/json`, or 0 when none does.
+ */
+export function acceptsColumns(accept: string | null): boolean {
+  let columns = 0;
+  /** The most specific JSON range seen, as an index into JSON_RANGES. */
+  let jsonRank = JSON_RANGES.length;
+  let json = 0;
+  for (const range of (accept ?? "").split(",")) {
+    const type = mediaTypeOf(range);
+    const quality = qualityOf(range);
+    if (quality === undefined) continue;
+    if (type === COLUMNS_TYPE) columns = Math.max(columns, quality);
+    const rank = JSON_RANGES.indexOf(type);
+    if (rank < 0 || rank > jsonRank) continue;
+    json = rank < jsonRank ? quality : Math.max(json, quality);
+    jsonRank = rank;
+  }
+  return columns > 0 && columns >= json;
+}
+// #endregion negotiate
+
 /** What a backend encodes: one page, in the shape of its JSON form. */
 export interface ColumnsInput {
   timestamps: ArrayLike<number>;
@@ -271,5 +325,58 @@ export function decodeColumns(body: ArrayBuffer | Uint8Array): DecodedColumns {
     );
   }
   return { header, timestamps, fields };
+}
+
+/**
+ * Whether a response's Content-Type is COLUMNS_TYPE, whatever its
+ * parameters (`; charset=binary`) or case.
+ */
+export function isColumnsType(contentType: string | null): boolean {
+  return contentType !== null && mediaTypeOf(contentType) === COLUMNS_TYPE;
+}
+
+/** The columns of a range fetched in several pages. */
+export interface JoinedColumns {
+  timestamps: Float64Array;
+  fields: Record<string, NumericColumn>;
+}
+
+/**
+ * The pages' columns joined, in page order: one page's views as they are,
+ * else one new array per column. Throws ColumnsError when the pages'
+ * columns differ in name, order or dtype: a value of one dtype written into
+ * another's array would be converted silently (300 into a u8 is 44).
+ */
+export function joinColumns(pages: readonly DecodedColumns[]): JoinedColumns {
+  const [first] = pages;
+  if (first === undefined) throw new ColumnsError("no pages to join");
+  const specs = (page: DecodedColumns) =>
+    page.header.fields.map(({ name, dtype }) => `${name}:${dtype}`).join("\0");
+  if (pages.some((page) => specs(page) !== specs(first))) {
+    throw new ColumnsError("the pages' columns differ in name, order or dtype");
+  }
+  if (pages.length === 1) {
+    return { timestamps: first.timestamps, fields: first.fields };
+  }
+  const join = (Column: ColumnConstructor, parts: NumericColumn[]) => {
+    const joined = new Column(parts.reduce((n, part) => n + part.length, 0));
+    let at = 0;
+    for (const part of parts) {
+      joined.set(part, at);
+      at += part.length;
+    }
+    return joined;
+  };
+  // No prototype, as in decodeColumns.
+  const fields: Record<string, NumericColumn> = Object.create(null);
+  for (const { name, dtype } of first.header.fields) {
+    const parts = pages.map((page) => page.fields[name] as NumericColumn);
+    fields[name] = join(COLUMN_TYPES[dtype], parts);
+  }
+  const timestamps = join(
+    Float64Array,
+    pages.map((page) => page.timestamps),
+  ) as Float64Array;
+  return { timestamps, fields };
 }
 // #endregion decode
