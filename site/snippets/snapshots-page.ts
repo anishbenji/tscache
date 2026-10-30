@@ -1,6 +1,5 @@
-// The page's entry, as a bundler builds it. Not run by `bun run docs:run`:
-// it reads `document` and imports through Vite's `?worker&url` and
-// `?fetcher`.
+// The page's entry, as a bundler builds it: it imports through Vite's
+// `?worker&url` and `?fetcher`, and reads the server's script element.
 // #region page
 import workerUrl from "tscache/worker?worker&url";
 import fetcherModule from "./fetcher.ts?fetcher";

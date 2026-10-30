@@ -1,9 +1,16 @@
 // Runs the site's code examples against the examples' mock backend and
 // checks what they produce (`bun run docs:run`, after `bun run build`).
 // `docs:check` only type-checks them; this catches what compiles but does
-// not work, such as a server fetch with no origin to resolve against
-// (step 29 R2-1). Every snippet is either run here or listed in SKIPPED
-// with the reason it cannot run outside a browser.
+// not work: a server fetch with no origin to resolve against (step 29
+// R2-1), a listener for an event the backend never sends (R3-1). Every
+// snippet runs here, except those in SKIPPED, each with its reason; a
+// snippet in neither list fails the check.
+//
+// Bun is not a browser, so the page's environment is stood in for by
+// shims (installShims): the bundler's `?worker&url` and `?fetcher`
+// imports, a page origin for relative URLs, an EventSource, and no
+// workers, so every client falls back to in-process, as the chain does
+// where workers are missing.
 
 import { readdirSync } from "node:fs";
 import { createBackend } from "@examples/mock-backend/backend";
@@ -14,22 +21,9 @@ const SNIPPETS = new URL("../snippets/", import.meta.url);
 const FETCHER = new URL("fetcher.ts", SNIPPETS).href;
 const MINUTE = 60_000;
 
-/** Snippets that need a browser or a bundler, and why. */
+/** Snippets that cannot run here, and why. */
 const SKIPPED: Record<string, string> = {
-  "client.ts":
-    "imports tscache/worker?worker&url and ?fetcher, which only a bundler resolves",
-  "errors.ts":
-    "imports tscache/worker?worker&url, which only a bundler resolves",
-  "getting-started.ts":
-    "imports tscache/worker?worker&url and ?fetcher, which only a bundler resolves",
-  "live.ts":
-    "imports through Vite and opens an EventSource and a timer that never end",
-  "patterns.ts":
-    "defines functions only; their calls are the cache methods cache.ts runs",
-  "snapshots-page.ts":
-    "reads document and imports through Vite; its startCache() runs here",
-  "vite-config.ts": "a Vite config, which only Vite runs",
-  "env.d.ts": "declarations only",
+  "env.d.ts": "type declarations only",
 };
 
 function check(condition: boolean, message: string): asserts condition {
@@ -47,19 +41,144 @@ function checkColumns(result: GetResult, fields: readonly string[]): void {
   }
 }
 
-const backend = createBackend({ latencyMs: 0 });
+/** Nothing failed to fetch: every miss is uncached (the provisional tail). */
+function checkFetched(result: GetResult): void {
+  const failed = result.misses.filter((miss) => miss.reason !== "uncached");
+  check(failed.length === 0, `misses ${JSON.stringify(failed)}`);
+}
+
+/** Resolves when `arm` calls its callback; rejects after `ms`. */
+function within(
+  ms: number,
+  what: string,
+  arm: (done: () => void) => () => void,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let stop = () => {};
+    const timer = setTimeout(() => {
+      stop();
+      reject(new Error(`${what} within ${ms} ms`));
+    }, ms);
+    stop = arm(() => {
+      clearTimeout(timer);
+      stop();
+      resolve();
+    });
+  });
+}
+
+const backend = createBackend({ latencyMs: 0, pushMs: 200 });
 const server = Bun.serve({
   port: 0,
   fetch: async (request) =>
     (await backend(request)) ?? new Response("not found", { status: 404 }),
 });
 const origin = server.url.origin;
+
+/**
+ * An EventSource as the spec dispatches: a message with an `event:` field
+ * goes to listeners of that type only, and `onmessage` hears only events
+ * without one. No reconnection: the check ends its streams itself.
+ */
+class TestEventSource extends EventTarget {
+  onmessage: ((event: MessageEvent<string>) => void) | null = null;
+  readonly #abort = new AbortController();
+
+  constructor(url: string | URL) {
+    super();
+    this.#read(new URL(url, origin)).catch(() => {});
+  }
+
+  close(): void {
+    this.#abort.abort();
+  }
+
+  async #read(url: URL): Promise<void> {
+    const response = await fetch(url, { signal: this.#abort.signal });
+    if (response.body === null) return;
+    const reader = response.body
+      .pipeThrough(new TextDecoderStream())
+      .getReader();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buffer += value;
+      for (
+        let end = buffer.indexOf("\n\n");
+        end >= 0;
+        end = buffer.indexOf("\n\n")
+      ) {
+        this.#dispatch(buffer.slice(0, end));
+        buffer = buffer.slice(end + 2);
+      }
+    }
+  }
+
+  #dispatch(block: string): void {
+    let type = "message";
+    const data: string[] = [];
+    for (const line of block.split("\n")) {
+      if (line.startsWith("event:")) type = line.slice(6).trim();
+      else if (line.startsWith("data:")) {
+        data.push(line.slice(5).replace(/^ /, ""));
+      }
+    }
+    if (data.length === 0) return;
+    const event = new MessageEvent(type, { data: data.join("\n") });
+    if (type === "message") this.onmessage?.(event);
+    this.dispatchEvent(event);
+  }
+}
+
+function installShims(): void {
+  // What a bundler gives these imports: a worker URL nothing will load
+  // (there are no workers below), and the fetcher module's file URL.
+  Bun.plugin({
+    name: "docs-snippet-imports",
+    setup(build) {
+      // Bun resolves the file and keeps the query on its path.
+      build.onLoad({ filter: /\?(worker&url|fetcher)$/ }, (args) => ({
+        contents: `export default ${JSON.stringify(args.path.endsWith("?fetcher") ? FETCHER : "/worker.js")};`,
+        loader: "js",
+      }));
+    },
+  });
+  const page = globalThis as Record<string, unknown>;
+  // No SharedWorker, no Worker: the chain steps down to in-process.
+  for (const name of ["SharedWorker", "Worker"]) {
+    Object.defineProperty(page, name, { value: undefined, configurable: true });
+  }
+  // The page's origin is the backend's, as with the examples' dev server.
+  const realFetch = globalThis.fetch;
+  const pageFetch = (input: RequestInfo | URL, init?: RequestInit) =>
+    realFetch(
+      typeof input === "string" && input.startsWith("/")
+        ? new URL(input, origin)
+        : input,
+      init,
+    );
+  globalThis.fetch = Object.assign(pageFetch, realFetch);
+  page.EventSource = TestEventSource;
+}
+
 /** The last six hours, ending on the bar forming now. */
 const now = Math.floor(Date.now() / MINUTE) * MINUTE;
 const sixHours = { start: now - 6 * 60 * MINUTE, end: now };
 const CANDLE_FIELDS = ["open", "high", "low", "close", "volume"];
+const CANDLES = {
+  open: "f64",
+  high: "f64",
+  low: "f64",
+  close: "f64",
+  volume: "u32",
+} as const;
+const load = (file: string) => import(new URL(file, SNIPPETS).href);
 
-const RUNS: Record<string, () => Promise<void>> = {
+/** Each run gets what its snippets logged, in order. */
+type Run = (logs: unknown[][]) => Promise<void>;
+
+const RUNS: Record<string, Run> = {
   async "fetcher.ts"() {
     const { default: fetcher } = await import(FETCHER);
     // Five days of one-minute bars: more than one page of the backend's.
@@ -84,8 +203,25 @@ const RUNS: Record<string, () => Promise<void>> = {
     check(typeof response.meta?.version === "string", "no version");
     check(typeof response.meta?.finalizedUntil === "number", "no watermark");
   },
+  async "getting-started.ts"() {
+    const { result } = await load("getting-started.ts");
+    check(result.coverage.length > 0, "nothing covered");
+    checkFetched(result);
+    checkColumns(result, CANDLE_FIELDS);
+  },
+  async "client.ts"(logs) {
+    await load("client.ts");
+    // Its modeFallback listener reports each step down to in-process; the
+    // client delivers those steps on a timer after createClient resolves.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const steps = logs.filter((line) => String(line[0]).startsWith("tscache:"));
+    check(
+      steps.length === 2 && String(steps[1]?.[0]).endsWith("using in-process"),
+      `logged ${JSON.stringify(logs)}`,
+    );
+  },
   async "cache.ts"() {
-    const { result } = await import(new URL("cache.ts", SNIPPETS).href);
+    const { result } = await load("cache.ts");
     check(
       result.timestamps.length === 2,
       `${result.timestamps.length} points, expected the range put's 2`,
@@ -96,8 +232,16 @@ const RUNS: Record<string, () => Promise<void>> = {
     );
     checkColumns(result, ["temperature", "errors"]);
   },
+  async "errors.ts"(logs) {
+    await load("errors.ts");
+    // The ConfigError and the InvalidRangeError, each caught and logged.
+    check(
+      logs.filter((line) => line[0] === true).length === 2,
+      `logged ${JSON.stringify(logs)}`,
+    );
+  },
   async "engine.ts"() {
-    const { week, other } = await import(new URL("engine.ts", SNIPPETS).href);
+    const { week, other } = await load("engine.ts");
     check(week.timestamps.length === 2, `${week.timestamps.length} points`);
     check(
       week.coverage.length === 1 && week.misses.length === 0,
@@ -110,7 +254,7 @@ const RUNS: Record<string, () => Promise<void>> = {
     );
   },
   async "grid.ts"() {
-    const { week } = await import(new URL("grid.ts", SNIPPETS).href);
+    const { week } = await load("grid.ts");
     const snapped = week.misses[0]?.range;
     check(
       snapped?.start === Date.UTC(2026, 9, 25, 14, 30) &&
@@ -118,10 +262,56 @@ const RUNS: Record<string, () => Promise<void>> = {
       `snapped to ${JSON.stringify(snapped)}`,
     );
   },
-  async "snapshots-server.ts, snapshots-browser.ts"() {
-    const { createRenderer } = await import(
-      new URL("snapshots-server.ts", SNIPPETS).href
+  async "live.ts"() {
+    const { cache, followStream, startPolling } = await load("live.ts");
+    // The first streamed batch reaches the cache, then the stream closes.
+    await within(5000, "no streamed bar reached the cache", (done) =>
+      followStream(cache, done),
     );
+    const pushed: GetResult = await cache.get(
+      { start: now - MINUTE, end: now + MINUTE },
+      { cacheOnly: true },
+    );
+    check(pushed.timestamps.length > 0, "the streamed bar is not in the cache");
+    // One poll fetches the newest bars.
+    await within(5000, "no poll answered", (done) =>
+      startPolling(cache, done, 50),
+    );
+    const polled: GetResult = await cache.get(
+      { start: now - 5 * MINUTE, end: now },
+      { cacheOnly: true },
+    );
+    check(
+      polled.timestamps.length >= 5,
+      `the poll left ${polled.timestamps.length} bars`,
+    );
+  },
+  async "patterns.ts"() {
+    const { forgetYesterday, readWithRetry } = await load("patterns.ts");
+    const { createClient } = await import("tscache");
+    const client = await createClient({
+      mode: "in-process",
+      fetcher: { module: FETCHER, context: { origin } },
+    });
+    const cache = await client.cache({
+      id: "crypto/BTC",
+      interval: MINUTE,
+      fields: CANDLES,
+    });
+    const result: GetResult = await readWithRetry(cache, sixHours);
+    check(result.timestamps.length > 300, `${result.timestamps.length} points`);
+    checkFetched(result);
+    await forgetYesterday(cache);
+  },
+  async "vite-config.ts"() {
+    const { default: config } = await load("vite-config.ts");
+    check(
+      config.plugins?.[0]?.name === "tscache:fetcher-url",
+      "the plugin is not configured",
+    );
+  },
+  async "snapshots-server.ts, snapshots-browser.ts, snapshots-page.ts"(logs) {
+    const { createRenderer } = await load("snapshots-server.ts");
     const render = await createRenderer({ fetcherModule: FETCHER, origin });
     const html: string = await render(sixHours);
     const text =
@@ -133,9 +323,7 @@ const RUNS: Record<string, () => Promise<void>> = {
     check(snapshot.segments.length > 0, "the server read no points");
     check(snapshot.coverage.length > 0, "the server's snapshot covers nothing");
     // The browser's half, in-process here, against the same backend.
-    const { startCache } = await import(
-      new URL("snapshots-browser.ts", SNIPPETS).href
-    );
+    const { startCache } = await load("snapshots-browser.ts");
     const result: GetResult = await startCache(
       { mode: "in-process", fetcher: { module: FETCHER, context: { origin } } },
       sixHours,
@@ -152,9 +340,27 @@ const RUNS: Record<string, () => Promise<void>> = {
     );
     check(tailOnly, `misses ${JSON.stringify(result.misses)}`);
     checkColumns(result, CANDLE_FIELDS);
+    // The page entry, with the server's script element in its document.
+    const page = globalThis as Record<string, unknown>;
+    page.document = {
+      getElementById: (id: string) =>
+        id === "tscache-snapshot" ? { textContent: text } : null,
+    };
+    try {
+      const before = logs.length;
+      await load("snapshots-page.ts");
+      const points = logs.slice(before).at(-1)?.[0];
+      check(
+        typeof points === "number" && points > 300,
+        `the page read ${String(points)} points`,
+      );
+    } finally {
+      delete page.document;
+    }
   },
 };
 
+installShims();
 const covered = new Set([
   ...Object.keys(RUNS).flatMap((name) => name.split(", ")),
   ...Object.keys(SKIPPED),
@@ -166,24 +372,30 @@ for (const file of unlisted) {
     `✗ ${file}: neither run nor skipped; add it to RUNS or SKIPPED`,
   );
 }
-// The snippets log what they show; keep the check's output to its verdicts.
+// The snippets log what they show (log and warn): collect it for the runs to check, and
+// keep the output to the verdicts.
 const log = console.log;
+const warn = console.warn;
 for (const [name, run] of Object.entries(RUNS)) {
-  console.log = () => {};
+  const logs: unknown[][] = [];
+  console.log = console.warn = (...line: unknown[]) => logs.push(line);
   try {
-    await run();
+    await run(logs);
     console.log = log;
+    console.warn = warn;
     log(`ok   ${name}`);
   } catch (error) {
     console.log = log;
+    console.warn = warn;
     failed = true;
     console.error(
       `✗ ${name}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
-for (const [name, reason] of Object.entries(SKIPPED))
+for (const [name, reason] of Object.entries(SKIPPED)) {
   log(`skip ${name}: ${reason}`);
+}
 server.stop(true);
 // In-process clients hold their message ports open: end the process here.
 process.exit(failed ? 1 : 0);

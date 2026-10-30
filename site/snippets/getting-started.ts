@@ -37,4 +37,8 @@ for (const range of result.coverage) {
 for (const miss of result.misses) {
   console.log("not loaded", miss.range, miss.reason, miss.error?.message);
 }
+
 // #endregion get
+
+// Read by `bun run docs:run`, which checks what the example produced.
+export { result };
