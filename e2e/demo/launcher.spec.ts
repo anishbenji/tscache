@@ -7,6 +7,9 @@ import { expect, test } from "@playwright/test";
 // server behind, so a second try can bind the same ports (step 30 R1-1).
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
+const launcherPath = fileURLToPath(
+  new URL("../../scripts/demo.ts", import.meta.url),
+);
 
 function listen(port: number): Promise<Server> {
   return new Promise((resolve, reject) => {
@@ -39,7 +42,7 @@ test("a hub port in use stops the launcher and every app server it started", asy
   for (const port of apps) expect(await free(port)).toBe(true);
   const taken = await listen(hub);
   try {
-    const launcher = spawn("bun", ["scripts/demo.ts", "--reuse-builds"], {
+    const launcher = spawn("bun", [launcherPath, "--reuse-builds"], {
       cwd: root,
       env: { ...process.env, DEMO_PORT: String(hub) },
       stdio: ["ignore", "ignore", "pipe"],
