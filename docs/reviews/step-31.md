@@ -1,6 +1,6 @@
 # Fix 31 — Reads and catch-ups end on the bar forming now
 
-Branch: `fix/31-readrange-catchup-midbar` · Reviewer: Codex (high) · Rounds: 1 · Status: waiting for fix 32, then round 2
+Branch: `fix/31-readrange-catchup-midbar` · Reviewer: Codex (high) · Rounds: 2 · Status: settled
 
 The follow-up recorded in fix 26. The reference clients ended two kinds of read at `Date.now()`, between grid points: `readRange` clamped a read's end to now, and the live feed's catch-up (`onOpened`) read up to now. The cache snaps an unaligned end outward to the next grid point (architecture §8, N1), a bar that cannot exist yet. When a minute boundary passed between the read before the catch-up (the page's first read, or the server's render) and the catch-up itself, the catch-up fetched three minutes: the bar before (the flank into coverage), the bar that closed, the bar forming and the one after it. The reference spec bounds those fetches at two minutes, so `e2e/reference/clients.spec.ts` (the server-rendered test, formerly line 224) failed whenever the boundary fell in that window. Done by a child agent while the user was away, under the user's grant of 2026-10-30.
 
@@ -59,3 +59,7 @@ None.
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R1-1 | P1 | The host `bun run ci` failed: `packages/tscache/test/perf/gate.test.ts:108` measured `sample(work, work)` at 1.518 against `< 1.4` | Accept as valid, not caused by this branch | The failure is the known sampler flake (step 22 R3-1, fix 26 pre-push), which this branch does not touch. Fix 32 removes its root cause (a virtual-clock sampler test; 48 of 120 parallel-load failures before, 0 of 120 after). This branch is rebased onto `main` once fix 32 merges, and round 2 confirms CI is green |
+
+## Round 2 — reviewer verdict: merge
+
+No findings; R1-1 resolved: the branch now includes fix 32 (#55) and `bun run ci` passed. Settled.
