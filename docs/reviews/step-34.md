@@ -1,6 +1,6 @@
 # Step 34 — A leaner put path
 
-Branch: `feat/34-put-overhead` · Reviewer: not yet reviewed · Rounds: 0 · Status: awaiting review · Verdict after triage: —
+Branch: `feat/34-put-overhead` · Reviewer: Codex (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 Item 2 of the performance plan of 2026-10-30 (experiment E2): a put of a few bars spent most of its time on bookkeeping, not data. Built by an implementation child while the user was away, under the user's grant of 2026-10-30; the experiment was measured on a scratch checkout first. No API, contract or error-message change; every existing test passes unmodified.
 
@@ -8,9 +8,9 @@ Item 2 of the performance plan of 2026-10-30 (experiment E2): a put of a few bar
 
 | Commit | What |
 |---|---|
-| c928625 | `test(put)`: `test/put-path-checks.test.ts` (9 tests), written before the code it guards and passing on the base. They pin, on both `SegmentStore.put` and `DenseSegment.mergeFrom`, what the field-name check must still reject: a schema field hidden behind a non-enumerable property, one that is only inherited, one given only under a symbol key, the right count of names with one wrong (`toString`); with and without an authority, each leaving the store and the segment unchanged. They also pin that a put keeps no array of its batch: one chunk and several, views at a nonzero offset into larger buffers, and a batch already in the store's dtypes |
-| a4ff0d3 | `perf(put)`: `SegmentStore` hands a chunk that is the whole batch to the segment as the batch's own arrays instead of building views (the segment copies what it is given, §4.2); `assertFields` checks the field names without building a `Set`: as many enumerable own names as the schema has, with every schema name among them (same rule, same messages); `assertAscending` loops by index instead of `for…of` |
-| c0041b7 | `perf(segment)`: an indexed loop instead of `for…of` in `DenseSegment.#write`, and an indexed fill instead of `Float64Array.from` in `presentPoints` (payload decoding) |
+| c00d225 | `test(put)`: `test/put-path-checks.test.ts` (9 tests), written before the code it guards and passing on the base. They pin, on both `SegmentStore.put` and `DenseSegment.mergeFrom`, what the field-name check must still reject: a schema field hidden behind a non-enumerable property, one that is only inherited, one given only under a symbol key, the right count of names with one wrong (`toString`); with and without an authority, each leaving the store and the segment unchanged. They also pin that a put keeps no array of its batch: one chunk and several, views at a nonzero offset into larger buffers, and a batch already in the store's dtypes |
+| 3c4bd09 | `perf(put)`: `SegmentStore` hands a chunk that is the whole batch to the segment as the batch's own arrays instead of building views (the segment copies what it is given, §4.2); `assertFields` checks the field names without building a `Set`: as many enumerable own names as the schema has, with every schema name among them (same rule, same messages); `assertAscending` loops by index instead of `for…of` |
+| 10a5871 | `perf(segment)`: an indexed loop instead of `for…of` in `DenseSegment.#write`, and an indexed fill instead of `Float64Array.from` in `presentPoints` (payload decoding) |
 
 ## Decisions
 
@@ -23,7 +23,7 @@ Item 2 of the performance plan of 2026-10-30 (experiment E2): a put of a few bar
 
 **Full suite.** `~/code/tscache-reports/bin/heavy-run.sh "perf child: vitest feat/34" bunx vitest run`: 72 files, 1,517 tests passed (1,508 on the base plus these 9). `bunx tsc -p packages/tscache` and `bunx tsc -p .` clean, `bunx biome check .` clean, `FALLOW_AUDIT_BASE=origin/main bun run fallow` reports no issues in the changed files.
 
-**Benchmarks.** Base `origin/main` at `59b8da5`, whose `packages/tscache/src` and `packages/tscache/bench` are identical to `a3926ca`, the branch's base (only documentation and e2e tooling changed in between). Head `c0041b7`. Apple Silicon Mac, Bun 1.4 and Chromium, under the heavy-job lock:
+**Benchmarks.** Base `origin/main` at `59b8da5`, whose `packages/tscache/src` and `packages/tscache/bench` are identical to `a3926ca`, the branch's base (only documentation and e2e tooling changed in between). Head `10a5871`. Apple Silicon Mac, Bun 1.4 and Chromium, under the heavy-job lock:
 
 ```sh
 ~/code/tscache-reports/bin/heavy-run.sh "perf child: bench feat/34" bash -c 'bun scripts/bench.ts compare --base origin/main > /tmp/perf34-compare.log 2>&1; echo compare=$?; cp .bench-results/summary.md /tmp/perf34-summary.md'
@@ -57,3 +57,7 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 1 — reviewer verdict: merge
+
+No findings, on the branch rebased onto `main` 59b8da5; `bun run ci` passed. Settled. Reviewed and settled by the director while the user was away.
