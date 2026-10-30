@@ -1,6 +1,6 @@
 # Chore 27 — Narrow the project's permission ask rules
 
-Branch: `chore/27-narrow-ask-rules` · Reviewer: Codex (high) · Rounds: 2 + confirmation · Status: user decided (Option A, 2026-10-30)
+Branch: `chore/27-narrow-ask-rules` · Reviewer: Codex (high) · Rounds: 3 · Status: settled (user decided Option A, 2026-10-30)
 
 Requested by the user on 2026-10-30: the thread should run unattended while the user is away, and approval prompts kept stopping it. In Claude Code an `ask` rule prompts even in full-access mode, so routine commands on step branches (`git rebase main`, `git merge`, `git push` of a feature branch, `bun install --frozen-lockfile` in a fresh worktree) raised prompts.
 
@@ -47,3 +47,7 @@ The user chose Option A for the escalated push rules: accept the documented gaps
   - A colon-delete of a branch other than `main` (`git push origin :feature`) does not prompt. No permission pattern can match a leading colon, since a trailing `:*` is a wildcard. `-d` and `--delete` still prompt (R1-1, R2-1).
   - An implicit push to `main` in a form outside the fixed rules, for example `git push origin some-local-branch` whose upstream is `main`, does not prompt. GitHub's branch protection rejects any direct push to `main`, since a pull request and the `ci` check are required.
 - One confirmation round follows. Per the user's instruction, findings that fall inside the accepted gaps are settled by this decision and do not reopen the loop.
+
+## Round 3 — reviewer verdict: merge
+
+Confirmation round after the user's decision. No findings: R1-2 fixed, the fixed-form rules present, the remaining gaps accepted under Option A. `bun run ci` passed. Settled.
