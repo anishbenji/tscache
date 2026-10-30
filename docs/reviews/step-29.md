@@ -1,6 +1,6 @@
 # Docs 29 — User documentation site
 
-Branch: `docs/29-docs-site` · Reviewer: Codex (high) · Rounds: 2 · Status: re-review pending (round 2 raised a P1; the area was redesigned) · Verdict after triage: merge after re-review
+Branch: `docs/29-docs-site` · Reviewer: Codex (high) · Rounds: 3 · Status: re-review pending (round 3 raised a P1; the skip list was closed) · Verdict after triage: merge after re-review
 
 Comprehensive documentation for library users, as a site in its own Bun workspace (`site/`), with an API reference generated from the TSDoc and a build check in `bun run ci`. Built by a Claude Opus 5.5 subagent while the user was away, under the user's grant of 2026-10-30; not a commit-plan step. No engine behaviour changes: the only edits under `packages/tscache/src` are TSDoc comments.
 
@@ -17,6 +17,8 @@ Comprehensive documentation for library users, as a site in its own Bun workspac
 | 2af0c3f | `docs(site)`: the grid example says why its client has no fetcher (round 1 sweep) |
 | 220681e | `docs(site)`: R2-1: the server half of the snapshot example is a renderer created with the fetcher module and the backend's origin, which the fetcher resolves requests against; the example is split into `snapshots-server.ts`, `snapshots-browser.ts` (`startCache`) and `snapshots-page.ts`; the fetcher example speaks the mock backend's protocol; the live example's schema matches its candles |
 | 93a9081 | `build(site)`: `bun run docs:run` (`site/scripts/run-snippets.ts`), in `bun run ci` after `docs:check`: the snippets run against the examples' mock backend and are checked for their data (below); `@examples/mock-backend` exports `./backend`; the miss-reason table corrected (the provisional tail stays `'uncached'`) |
+| 9da0a97 | `docs(site)`: R3-1: the live example listens for the backend's named `bar` events; its feeds are functions returning their stop |
+| 6ee8e2b | `build(site)`: every snippet runs in `docs:run` behind page shims (bundler imports, page origin, a spec-following `EventSource`, `document`, no workers); only `env.d.ts` is skipped |
 
 Pages: getting started; concepts (coverage and gaps, the grid and `alignmentOffset`, segments and slots, versions and watermarks, invalidation and clearing, events in three scopes); the API by example (client, cache, snapshots, fetcher module, engine, errors) beside the generated reference; guides (workers and fallback, writing a fetcher, the Vite plugin and its static-import rule, credentials and `tscache:auth-invalid`, server rendering, live feeds by SSE, WebSocket and polling, expiry and other patterns); vanilla, React, Solid and chart libraries; performance (a summary of `docs/benchmarking.md`); troubleshooting and FAQ; an architecture map for contributors. The internal documents (`docs/architecture.md`, `docs/workflow.md`, `docs/reviews/`, `docs/review-checklist.md`, `docs/guides/`) stay where they are; the site links to them on GitHub.
 
@@ -71,6 +73,16 @@ The reviewer confirmed R1-1, R1-2 and R1-3 fixed.
 **Convergence check fired.** `site/snippets/snapshots.ts` drew P1s in rounds 1 and 2 (docs/workflow.md, review loop step 7). Their common cause was that the snippets were only type-checked, so code that compiled but did not work passed CI. The area was redesigned rather than patched: the snippets are now executed in CI (93a9081). `bun run docs:run` starts the examples' mock backend on a free port in the Bun process, runs `fetcher.ts` (five days of bars, so more than one page), `cache.ts`, `engine.ts`, `grid.ts`, and the server and browser halves of server rendering (the browser half in-process against the same backend, with the server's snapshot), and asserts the data each produced: point counts, coverage, columns, the snapped range, and that only the provisional tail is missing. `client.ts`, `errors.ts`, `getting-started.ts`, `live.ts`, `snapshots-page.ts` and `vite-config.ts` need a bundler's `?worker&url`/`?fetcher` imports, `document`, or a stream that never ends, and are listed with that reason; `patterns.ts` defines functions only and `env.d.ts` declarations only. A snippet in neither list fails the check. No Playwright, so it is not a heavy job; it takes about a second.
 
 The first run of the check found a documentation error the reviews had not: the provisional tail is reported as an `'uncached'` miss even right after its fetch returned its points (`orchestrator.ts`, the rest of a fetched range stays uncached while it is uncovered), but the miss-reason table said `'uncached'` meant nobody had asked the backend. The table now says so (93a9081).
+
+## Round 3 — reviewer verdict: merge after fixes
+
+The reviewer confirmed R1-1 to R2-1 fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | The SSE example listens with `events.onmessage`, but the mock backend sends `event: bar`, which `onmessage` never hears, so copied code never puts a pushed bar; CI missed it because `live.ts` was on the runner's skip list | accepted | Confirmed against `examples/mock-backend/src/backend.ts` (`event: bar`) and reproduced: with `live.ts` running behind a spec-following `EventSource`, `bun run docs:run` failed on the old code with "✗ live.ts: no streamed bar reached the cache within 5000 ms" (exit 1). 9da0a97 listens with `addEventListener("bar", …)`; the check then passed. The page's other feeds hold: the polling example now runs and is checked (one poll fills the newest bars), and the WebSocket is described in prose only, consistent with the backend's protocol (a subscription with the token as the first message, then put batches) |
+
+**The skip list was the remaining gap.** The round-2 redesign held, but `docs:run` skipped eight of the fourteen snippets, and R3-1 was in one of them. 6ee8e2b closes the list instead of adding one more run: shims stand in for the page (the bundler's `?worker&url` and `?fetcher` imports, the backend as the page's origin for relative URLs, an `EventSource` that dispatches named events as the spec does, a `document` holding the server's script element for the page entry, and no workers, so every client falls back to in-process as the chain does where workers are missing). Every snippet now runs and is checked for what it produced: the getting-started read, the client's fallback events, the two errors caught, the first streamed bar and the first poll in the cache, the retry pattern's read, the Vite config's plugin, and the page entry's read from the server's snapshot. Only `env.d.ts`, declarations, is skipped. The check still uses no browser and takes a few seconds.
 
 ## Found while writing
 
