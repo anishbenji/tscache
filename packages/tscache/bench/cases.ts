@@ -34,6 +34,11 @@ export interface Case {
   expect: number;
   /** Builds the state outside any timer and returns the operation. */
   prepare(impl: Impl): Op;
+  /**
+   * How calibration slows the head (run.ts, `slowed`): `repeat` runs the
+   * operation again rather than waiting, for one that allocates heavily.
+   */
+  slowdownBy?: "repeat";
 }
 
 /** The screen a chart shows: 500 one-minute bars. */

@@ -24,6 +24,17 @@ export interface RunOptions {
   slowdown?: number;
 }
 
+/** How an injected slowdown is applied (`Case.slowdownBy`). */
+export interface SlowedOptions {
+  /**
+   * `repeat`: run the operation again that often, whatever its length.
+   * Absent: decided by the operation's length (below).
+   */
+  by?: "repeat";
+  /** The clock, in milliseconds. Default `performance.now`; for tests. */
+  clock?: () => number;
+}
+
 /**
  * `op`, made `fraction` slower, as a real regression would be. How is
  * decided once, from the mean of warm calls (a first, cold call can take
@@ -31,24 +42,35 @@ export interface RunOptions {
  * Chromium's coarsest clock, then waits that fraction of its own time
  * after each call; a shorter one runs again that often, which over a
  * batch of thousands is the same, and reads no clock, whose cost would be
- * a slowdown of its own (0.17 µs a call in Chromium).
+ * a slowdown of its own (0.17 µs a call in Chromium). A case whose
+ * operation allocates heavily asks for repetition whatever its length
+ * (`by: "repeat"`): a wait would leave the engine's background threads
+ * time to free the previous call's memory, and absorb part of the
+ * slowdown.
  */
-function slowed(op: Op, fraction: number): Op {
-  let calls = 0;
-  const start = performance.now();
-  do {
-    op();
-    calls++;
-  } while (performance.now() - start < 5 && calls < 1000);
-  const long = (performance.now() - start) / calls >= 2;
+export function slowed(
+  op: Op,
+  fraction: number,
+  { by, clock = () => performance.now() }: SlowedOptions = {},
+): Op {
+  let long = false;
+  if (by === undefined) {
+    let calls = 0;
+    const start = clock();
+    do {
+      op();
+      calls++;
+    } while (clock() - start < 5 && calls < 1000);
+    long = (clock() - start) / calls >= 2;
+  }
   let owed = 0;
   return () => {
     if (long) {
-      const begin = performance.now();
+      const begin = clock();
       let value = op();
-      const end = performance.now();
+      const end = clock();
       const until = end + (end - begin) * fraction;
-      while (performance.now() < until) value += 0;
+      while (clock() < until) value += 0;
       return value;
     }
     let value = op();
@@ -101,7 +123,11 @@ export function runBench(
     const head =
       slowdown === undefined || slowdown === 0
         ? prepared
-        : slowed(prepared, slowdown);
+        : slowed(
+            prepared,
+            slowdown,
+            c.slowdownBy === undefined ? {} : { by: c.slowdownBy },
+          );
     const { rounds, batchMs } = options;
     results.push({
       name: c.name,
