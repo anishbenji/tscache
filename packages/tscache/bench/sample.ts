@@ -6,7 +6,8 @@
 // (Chromium coarsens performance.now() to 100 µs without cross-origin
 // isolation; a 40 ms batch keeps that under 0.3 %). The two sides run in
 // rounds, ordered A B, B A, A B…, so neither always runs first, and each
-// round gives one ratio, head over base. The result is the median ratio,
+// round gives one ratio, head over base. The batch is sized from the
+// fastest of a few timings, since a pause of the process only adds time. The result is the median ratio,
 // with a distribution-free confidence interval from the order statistics
 // of the rounds: no assumption about how the timings are distributed.
 
@@ -20,7 +21,26 @@ export interface SampleOptions {
   batchMs?: number;
   /** Milliseconds each side runs before timing starts. Default 500. */
   warmupMs?: number;
+  /**
+   * The clock, in milliseconds. Default `performance.now`; the sampler's
+   * tests pass one their operations move, so its logic does not depend on
+   * the machine's speed or load.
+   */
+  clock?: Clock;
 }
+
+/** A monotonic clock in milliseconds. */
+type Clock = () => number;
+
+const performanceClock: Clock = () => performance.now();
+
+/**
+ * Timings of one batch size taken while calibrating. A stall (another
+ * process, a collection) only lengthens a timing, so the fastest of these
+ * is the batch's own; one stalled timing would otherwise end calibration
+ * with batches far shorter than `batchMs`.
+ */
+const CALIBRATION_TIMINGS = 3;
 
 export interface Sample {
   /** Head over base, per round, in the order run. */
@@ -45,25 +65,34 @@ export function checksum(): number {
   return sink;
 }
 
-function time(op: Op, n: number): number {
-  const start = performance.now();
+function time(op: Op, n: number, clock: Clock): number {
+  const start = clock();
   let fold = 0;
   for (let i = 0; i < n; i++) fold += op();
-  const ms = performance.now() - start;
+  const ms = clock() - start;
   sink = (sink + fold) % 1_000_000_007;
   return ms;
 }
 
-function run(op: Op, ms: number): void {
-  const end = performance.now() + ms;
-  while (performance.now() < end) time(op, 1);
+function run(op: Op, ms: number, clock: Clock): void {
+  const end = clock() + ms;
+  while (clock() < end) time(op, 1, clock);
+}
+
+/** The fastest of CALIBRATION_TIMINGS timings of a batch of `n`. */
+function fastest(op: Op, n: number, clock: Clock): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < CALIBRATION_TIMINGS; i++) {
+    best = Math.min(best, time(op, n, clock));
+  }
+  return best;
 }
 
 /** How many operations fill a batch of `ms`, for the slower side. */
-function calibrate(a: Op, b: Op, ms: number): number {
+function calibrate(a: Op, b: Op, ms: number, clock: Clock): number {
   let n = 1;
   for (;;) {
-    const slowest = Math.max(time(a, n), time(b, n));
+    const slowest = Math.max(fastest(a, n, clock), fastest(b, n, clock));
     if (slowest >= ms || n >= 1 << 24) return n;
     n *= slowest < ms / 8 ? 8 : 2;
   }
@@ -133,20 +162,18 @@ export function sample(
   const rounds = options.rounds ?? 20;
   const batchMs = options.batchMs ?? 40;
   const warmupMs = options.warmupMs ?? 500;
-  run(base, warmupMs / 2);
-  run(head, warmupMs / 2);
-  run(base, warmupMs / 2);
-  run(head, warmupMs / 2);
-  const n = calibrate(base, head, batchMs);
+  const clock = options.clock ?? performanceClock;
+  for (const op of [base, head, base, head]) run(op, warmupMs / 2, clock);
+  const n = calibrate(base, head, batchMs, clock);
   const baseTimes: number[] = [];
   const headTimes: number[] = [];
   for (let round = 0; round < rounds; round++) {
     if (round % 2 === 0) {
-      baseTimes.push(time(base, n));
-      headTimes.push(time(head, n));
+      baseTimes.push(time(base, n, clock));
+      headTimes.push(time(head, n, clock));
     } else {
-      headTimes.push(time(head, n));
-      baseTimes.push(time(base, n));
+      headTimes.push(time(head, n, clock));
+      baseTimes.push(time(base, n, clock));
     }
   }
   return summarise(baseTimes, headTimes, n);
@@ -171,11 +198,12 @@ async function timeAsync(
   op: AsyncOp,
   n: number,
   between: () => Promise<void>,
+  clock: Clock,
 ): Promise<number> {
-  const start = performance.now();
+  const start = clock();
   let fold = 0;
   for (let i = 0; i < n; i++) fold += await op();
-  const ms = performance.now() - start;
+  const ms = clock() - start;
   sink = (sink + fold) % 1_000_000_007;
   await between();
   return ms;
@@ -186,13 +214,28 @@ async function runAsync(
   op: AsyncOp,
   ms: number,
   between: () => Promise<void>,
+  clock: Clock,
 ): Promise<void> {
-  const end = performance.now() + ms;
-  while (performance.now() < end) {
+  const end = clock() + ms;
+  while (clock() < end) {
     const value = await op();
     sink = (sink + value) % 1_000_000_007;
   }
   await between();
+}
+
+/** `fastest` for operations that complete later. */
+async function fastestAsync(
+  op: AsyncOp,
+  n: number,
+  between: () => Promise<void>,
+  clock: Clock,
+): Promise<number> {
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < CALIBRATION_TIMINGS; i++) {
+    best = Math.min(best, await timeAsync(op, n, between, clock));
+  }
+  return best;
 }
 
 /** `calibrate` for operations that complete later. */
@@ -201,11 +244,12 @@ async function calibrateAsync(
   b: AsyncOp,
   ms: number,
   between: () => Promise<void>,
+  clock: Clock,
 ): Promise<number> {
   let n = 1;
   for (;;) {
-    const first = await timeAsync(a, n, between);
-    const slowest = Math.max(first, await timeAsync(b, n, between));
+    const first = await fastestAsync(a, n, between, clock);
+    const slowest = Math.max(first, await fastestAsync(b, n, between, clock));
     if (slowest >= ms || n >= 1 << 24) return n;
     n *= slowest < ms / 8 ? 8 : 2;
   }
@@ -224,19 +268,20 @@ export async function sampleAsync(
   const batchMs = options.batchMs ?? 40;
   const warmupMs = options.warmupMs ?? 500;
   const between = options.between ?? (async () => {});
+  const clock = options.clock ?? performanceClock;
   for (const op of [base, head, base, head]) {
-    await runAsync(op, warmupMs / 2, between);
+    await runAsync(op, warmupMs / 2, between, clock);
   }
-  const n = await calibrateAsync(base, head, batchMs, between);
+  const n = await calibrateAsync(base, head, batchMs, between, clock);
   const baseTimes: number[] = [];
   const headTimes: number[] = [];
   for (let round = 0; round < rounds; round++) {
     if (round % 2 === 0) {
-      baseTimes.push(await timeAsync(base, n, between));
-      headTimes.push(await timeAsync(head, n, between));
+      baseTimes.push(await timeAsync(base, n, between, clock));
+      headTimes.push(await timeAsync(head, n, between, clock));
     } else {
-      headTimes.push(await timeAsync(head, n, between));
-      baseTimes.push(await timeAsync(base, n, between));
+      headTimes.push(await timeAsync(head, n, between, clock));
+      baseTimes.push(await timeAsync(base, n, between, clock));
     }
   }
   return summarise(baseTimes, headTimes, n);

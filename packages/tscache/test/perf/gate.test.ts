@@ -95,19 +95,97 @@ describe("the sampler", () => {
     expect(() => medianRanks(1001)).toThrow(RangeError);
   });
 
-  it("finds no difference between the same operation and itself, and a large one", () => {
-    let x = 0;
-    const work = () => {
-      for (let i = 0; i < 2000; i++) x = (x + i) % 9973;
-      return x;
+  /**
+   * A clock the operations move, so the sampler's logic runs the same on
+   * any machine at any load: each call of an operation takes exactly its
+   * cost, and `stall` adds a pause to one call, as a busy machine does.
+   */
+  function virtualTime() {
+    let now = 0;
+    const calls: string[] = [];
+    const op =
+      (side: string, cost: number, stall?: { call: number; ms: number }) =>
+      () => {
+        calls.push(side);
+        now += cost;
+        if (stall?.call === calls.length) now += stall.ms;
+        return 1;
+      };
+    return {
+      clock: () => now,
+      calls,
+      op,
+      advance: (ms: number) => (now += ms),
     };
-    const twice = () => work() + work();
+  }
+
+  it("finds no difference between an operation and itself, and the exact ratio of a slower one", () => {
     const options = { rounds: 10, batchMs: 5, warmupMs: 20 };
-    const same = sample(work, work, options);
-    expect(same.ratio).toBeGreaterThan(0.7);
-    expect(same.ratio).toBeLessThan(1.4);
-    const double = sample(work, twice, options);
-    expect(double.ratio).toBeGreaterThan(1.5);
+    const a = virtualTime();
+    const same = sample(a.op("base", 0.25), a.op("head", 0.25), {
+      ...options,
+      clock: a.clock,
+    });
+    expect(same.ratios).toEqual(Array(10).fill(1));
+    expect([same.ratio, same.low, same.high]).toEqual([1, 1, 1]);
+    const b = virtualTime();
+    const double = sample(b.op("base", 0.25), b.op("head", 0.5), {
+      ...options,
+      clock: b.clock,
+    });
+    expect(double.ratios).toEqual(Array(10).fill(2));
+    expect([double.ratio, double.low, double.high]).toEqual([2, 2, 2]);
+    expect([double.baseMs, double.headMs]).toEqual([0.25, 0.5]);
+    // The slower side's batch reaches batchMs: 16 calls of 0.5 ms.
+    expect(double.batch).toBe(16);
+  });
+
+  it("alternates which side runs first in each round", () => {
+    const t = virtualTime();
+    const s = sample(t.op("base", 0.25), t.op("head", 0.5), {
+      rounds: 10,
+      batchMs: 5,
+      warmupMs: 20,
+      clock: t.clock,
+    });
+    // The rounds are the last calls, one batch per side per round.
+    const batches = t.calls
+      .slice(-20 * s.batch)
+      .filter((_, i) => i % s.batch === 0);
+    expect(batches).toEqual(
+      Array.from({ length: 10 }, (_, round) =>
+        round % 2 === 0 ? ["base", "head"] : ["head", "base"],
+      ).flat(),
+    );
+  });
+
+  it("sizes batches from undisturbed timings, so a stall while calibrating does not shorten them", () => {
+    // No warm-up, so the head's first call is calibration's: it stalls for
+    // 100 ms, which alone would pass for a batch long enough.
+    const t = virtualTime();
+    const s = sample(
+      t.op("base", 0.25),
+      t.op("head", 0.5, { call: 2, ms: 100 }),
+      { rounds: 10, batchMs: 5, warmupMs: 0, clock: t.clock },
+    );
+    expect(s.batch * 0.5).toBeGreaterThanOrEqual(5);
+    expect(s.ratio).toBe(2);
+  });
+
+  it("keeps the median and its interval when one round stalls", () => {
+    const t = virtualTime();
+    const rounds = 10;
+    // Calibration takes 3 timings per side at 1, 8 and 16 calls; the head's
+    // calls in its fourth round batch come after those and three rounds.
+    const calibration = 3 * (1 + 8 + 16) * 2;
+    const stallAt = calibration + 3 * 2 * 16 + 1;
+    const s = sample(
+      t.op("base", 0.25),
+      t.op("head", 0.5, { call: stallAt, ms: 50 }),
+      { rounds, batchMs: 5, warmupMs: 0, clock: t.clock },
+    );
+    expect(Math.max(...s.ratios)).toBeGreaterThan(2);
+    expect([s.ratio, s.low, s.high]).toEqual([2, 2, 2]);
   });
 
   it("summarises paired rounds into ratios, a median and its interval", () => {
@@ -124,37 +202,49 @@ describe("the sampler", () => {
     expect(s.batch).toBe(5);
   });
 
-  it("times asynchronous operations the same way, resetting after each batch", async () => {
-    let x = 0;
-    const work = () => {
-      for (let i = 0; i < 2000; i++) x = (x + i) % 9973;
-      return x;
-    };
-    const once = async () => work();
-    const twice = async () => work() + work();
+  it("times asynchronous operations the same way, resetting after each batch, outside the timer", async () => {
+    const t = virtualTime();
+    const asynchronous = (op: () => number) => async () => op();
     let resets = 0;
-    let calls = 0;
     const options = {
       rounds: 10,
       batchMs: 5,
       warmupMs: 20,
+      clock: t.clock,
+      // A reset that takes far longer than a batch moves no timing.
       between: async () => {
         resets++;
+        t.advance(1000);
       },
     };
-    const counted = async () => {
-      calls++;
-      return once();
-    };
-    const same = await sampleAsync(counted, once, options);
-    expect(same.ratios).toHaveLength(10);
-    expect(same.ratio).toBeGreaterThan(0.7);
-    expect(same.ratio).toBeLessThan(1.4);
-    // Four warm-ups, two per calibration step, then two per round.
+    const same = await sampleAsync(
+      asynchronous(t.op("base", 0.25)),
+      asynchronous(t.op("head", 0.25)),
+      options,
+    );
+    expect(same.ratios).toEqual(Array(10).fill(1));
+    // Four warm-ups, two per calibration timing, then two per round.
     expect(resets).toBeGreaterThanOrEqual(4 + 2 + 20);
-    expect(calls).toBeGreaterThanOrEqual(same.batch * 10);
-    const double = await sampleAsync(once, twice, options);
-    expect(double.ratio).toBeGreaterThan(1.5);
+    const double = await sampleAsync(
+      asynchronous(t.op("base", 0.25)),
+      asynchronous(t.op("head", 0.5)),
+      options,
+    );
+    expect(double.ratios).toEqual(Array(10).fill(2));
+    expect([double.ratio, double.low, double.high]).toEqual([2, 2, 2]);
+    expect(double.batch).toBe(16);
+  });
+
+  it("sizes asynchronous batches from undisturbed timings too", async () => {
+    const t = virtualTime();
+    const asynchronous = (op: () => number) => async () => op();
+    const s = await sampleAsync(
+      asynchronous(t.op("base", 0.25)),
+      asynchronous(t.op("head", 0.5, { call: 2, ms: 100 })),
+      { rounds: 10, batchMs: 5, warmupMs: 0, clock: t.clock },
+    );
+    expect(s.batch * 0.5).toBeGreaterThanOrEqual(5);
+    expect(s.ratio).toBe(2);
   });
 });
 
