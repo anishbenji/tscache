@@ -166,11 +166,20 @@ bun scripts/size.ts --update                               # reseed the size bud
 | 2026-10-30 | GitHub runner (`ubuntu-24.04`), main at `0797cb5`, runs 40970018107, 40970030587, 40970043045 | 0 | Bun: no case fired in the 16 quiet runs (4 noisy). Chromium: all 20 runs noisy, so none counted |
 | 2026-10-30 | the same | 0.15 | Bun, 16 quiet runs: from 2 (`read-year`) to 16 (`put-page`, `put-live-bar`) per case. Chromium: 1 quiet run |
 | 2026-10-30 | the same | 0.25 | Bun, 19 quiet runs: 19 in six cases, 18 in `append-bars` and `snapshot-roundtrip`, 16 (84 %) in `read-year`. Chromium: 3 quiet runs |
+| 2026-10-30 | GitHub runner, main at `f2a6020` (after step 22), runs 40974332908, 40974342113, 40974350981 | 0 | Bun: no case fired in 20 quiet runs. Chromium: no case fired in 16 quiet runs (4 noisy) |
+| 2026-10-30 | the same | 0.15 | Bun, 20 quiet runs: 20 in four cases, 18 in `put-live-bar` and `read-transfer`, 12 in `snapshot-roundtrip`, 11 in `append-bars`, 1 in `read-year`. Chromium, 10 quiet runs: 10 in four cases, 8 in `put-page`, 5 in `read-viewport`, `read-viewport-sessions` and `read-transfer`, 0 in `fill-month` |
+| 2026-10-30 | the same | 0.25 | Bun, 18 quiet runs (2 noisy): 18 in six cases, 16 (89 %) in `append-bars` and `snapshot-roundtrip`, 3 (17 %) in `read-year`. Chromium, 15 quiet runs: 15 in `read-year`, `put-live-bar`, `append-bars` and `snapshot-roundtrip`, 11 in `put-page`, 9 in `read-transfer`, 7 in `read-viewport` and `read-viewport-sessions`, 3 in `fill-month` |
 
 **Verdict of the 2026-10-30 calibration: the timing gate stays report-only.** Bun met both conditions except `read-year` at 25 % (84 %, below 90 %). Chromium could not be judged: its A/A control left [0.95, 1.05] in 17 to 20 of the 20 runs per dispatch. The batches were long enough (512 calls of about 0.11 ms, some 56 ms, against the 40 ms the timer needs), and the control's round ratios split into groups near 0.7, 1.0 and 1.4, so the noise comes from the runner (two shared vCPUs for Chromium's processes), not from the timer. Before the gate can block:
-1. Recalibrate on a main that includes step 22 (#43), which made the reads several times faster and so changes what each case measures.
+1. Done: recalibrate on a main that includes step 22 (#43), which made the reads several times faster and so changes what each case measures.
 2. Find a Chromium setup the runner keeps quiet: more rounds, longer batches, fewer Chromium processes, or a larger runner. A larger runner costs money, so it is the user's decision.
 3. Decide whether Bun gates alone in the meantime, with `read-year` left out until it reaches 90 %.
+
+**Verdict of the recalibration after step 22: the timing gate still stays report-only.** No false alarm in either runtime, and Chromium's runs were mostly quiet this time (16 of 20 at 0 %, against none before), so its noise is not constant on the runner. Detection fell short in both runtimes:
+- Bun caught every 25 % slowdown in six cases (`read-viewport`, `read-viewport-sessions`, `put-page`, `put-live-bar`, `fill-month`, `read-transfer`). `append-bars` and `snapshot-roundtrip` reached 89 %, just below 90 %. `read-year` fell from 84 % to 17 %: since step 22 it is one large copy per column, and an injected extra call no longer costs its full share of time, so the injection, not only the gate, needs a look for this case.
+- Chromium caught every 25 % slowdown in four cases and missed the others often, including the viewport reads.
+
+Next: find out why an injected slowdown in `read-year` measures smaller than injected, then decide whether the six Bun cases that pass gate on their own while the rest stay report-only. Item 2 above (a quieter Chromium setup) stands.
 
 ## How this setup was chosen
 
