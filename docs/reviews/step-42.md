@@ -1,6 +1,6 @@
 # Step 42 — Binary fetch format in the examples, reference backends and guide
 
-Branch: `docs/42-binary-fetcher` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: round 1 triaged, awaiting round 2
+Branch: `docs/42-binary-fetcher` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: round 2 triaged, awaiting round 3
 
 Item 5 of the performance plan (§6): a binary columnar response format for the examples' mock backend (which the reference clients also use), its fetchers and the Playwright fixture, documented in the site's fetcher guide. The library does not change. Implemented by Claude while the user was away, under the director's child rules of 2026-10-30.
 
@@ -13,6 +13,8 @@ Item 5 of the performance plan (§6): a binary columnar response format for the 
 | 646c545 | The fetcher guide's "Binary pages" section (why, the format, the decoder, Arrow IPC), its snippet `site/snippets/fetcher-columns.ts` run by `docs:run`, and a tip on the performance page |
 | 3ec70e7 | This file |
 | 2475fef | Round 1 fixes: `joinColumns`, `isColumnsType` and `acceptsColumns` in `columns.ts`, used by the snippet, the examples' fetcher, the e2e fixture and both backends |
+| 946f5b7 | Round 1 triage |
+| 984001e | Round 2 fixes: structural schema comparison in `joinColumns` and in the examples' fetcher; explicit aligned copy in `decodeColumns` |
 
 ## Decisions
 
@@ -97,6 +99,25 @@ Readings:
 | reference clients (`reference/*`) | both | No fetcher or backend of their own: they load the examples' fetcher and mount the mock backend | Covered by the fixes above |
 
 The guide's "Asking for it" section now shows the negotiation (`#negotiate` region) and states both rules; the README describes them.
+
+## Round 2 — reviewer verdict: block
+
+**Convergence check fired.** Page-join validation drew a P0 in rounds 1 and 2 (R1-1, then R2-1 re-raising it), so the area was redesigned rather than patched again: the schema signature string was removed and replaced by a structural comparison (`sameColumns`: equal column counts, then each name and dtype compared directly in place). No schema is encoded as a string anywhere any more.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P0 | R1-1 re-raised: `joinColumns`'s signature (`name:dtype` joined with NUL) is ambiguous for names holding its delimiters; `[("a","u8"), ("a:u8\0a","u16")]` and `[("a:u8\0a","u8"), ("a","u16")]` share one, and a u16 300 narrows to 44 | accepted | Reproduced under Bun and Node: `a: [1,44]`. Fixed in 984001e by the redesign above. Tests first, each red against the signature: R2-1's exact collision; a property test over 2,000 seeded schema pairs (mulberry32) whose names mix `:`, NUL, `"`, `\`, `,`, `{`, `}` and dtype names, drawn as unrelated pairs, equal pairs, one-change neighbours (a dtype, the order, a column) and R2-1's construction, asserting every differing pair is refused and every equal one joined, and that each kind occurred (over 800 refused, 300 collisions, 300 joined); and the collision in `docs:run` against the guide's fetcher. With the signature put back for one run, the unit collision and the property test failed (the property test on a generated pair, `[["{f64u8\\","u16"],[":{","u8"]]` against `[["{f64u8\\:u16\u0000:{","u8"]]`), and `docs:run` reported `a: [1,44]`; restored, all pass |
+| R2-2 | P1 | A Node `Buffer` passes as a `Uint8Array`, but its `slice()` shares memory, so `Buffer.subarray(3)` keeps its unaligned offset and building the timestamp view throws `RangeError` | accepted | Reproduced under Bun and Node (`RangeError`). Fixed in 984001e: `decodeColumns` views any input as a plain `Uint8Array` over the same bytes and, when it is not 8-aligned, copies it explicitly (`new Uint8Array(length)` and `set`); `slice()` is no longer used on input. Tests first: Buffers at offsets 1, 3, 5 and 7 of a pool decode correctly into the decoder's own copy, and an aligned Buffer is still viewed in place, under Vitest (Node); the same unaligned Buffer under Bun in `docs:run`, which failed with `byteOffset modulo TypedArray.BYTES_PER_ELEMENT must be 0` when `slice()` was put back for one run |
+
+**Every place that compares or keys on schemas**, checked for the same class:
+
+| Where | Before | After |
+|---|---|---|
+| `joinColumns` (`columns.ts`), used by the guide's snippet | signature string (R2-1) | `sameColumns`, structural |
+| `fetchRange`/`collect` in `examples/mock-backend/src/fetcher.ts` | field names joined with NUL: `["a\0b"]` and `["a","b"]` alike, then a `TypeError` on the missing column | names compared one by one after the counts; a fetcher test for that case, red before |
+| `decodeColumns` duplicate-name check | `Set` of the raw names | unchanged: no encoding |
+| column lookup by name (`decodeColumns`, `joinColumns`, the fetcher) | prototype-free records keyed by the raw name | unchanged |
+| `e2e/pages/fetcher.js`, `/columns.js` | no comparison of its own; `/columns.js` is `columns.ts` with types stripped | carries the fix |
 
 ## Contract-test changes
 
