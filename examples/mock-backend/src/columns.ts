@@ -278,20 +278,32 @@ function parseHeader(bytes: Uint8Array): ColumnsHeader {
 }
 
 /**
+ * The body's bytes as a plain Uint8Array starting on an 8-byte boundary of
+ * its buffer: the caller's memory when it already does, else an explicit
+ * copy. Never `slice()`: on a subclass such as Node's Buffer it returns a
+ * view of the same memory, at the same unaligned offset.
+ */
+function alignedBytes(body: ArrayBuffer | Uint8Array): Uint8Array {
+  const view = ArrayBuffer.isView(body)
+    ? new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+    : new Uint8Array(body);
+  if (view.byteOffset % 8 === 0) return view;
+  const copy = new Uint8Array(view.byteLength);
+  copy.set(view);
+  return copy;
+}
+
+/**
  * The columns of a body, as typed-array views over it. Pass what
- * `response.arrayBuffer()` returns: nothing is copied. A Uint8Array that
- * does not start on an 8-byte boundary of its buffer is copied once, since
- * its columns could not be viewed in place. Throws ColumnsError for a body
- * that is not one, truncated, or longer than its columns.
+ * `response.arrayBuffer()` returns: nothing is copied. A view that does not
+ * start on an 8-byte boundary of its buffer (a Node Buffer from a pool, say)
+ * is copied once, since its columns could not be viewed in place. Throws
+ * ColumnsError for a body that is not one, truncated, or longer than its
+ * columns.
  */
 export function decodeColumns(body: ArrayBuffer | Uint8Array): DecodedColumns {
   requireLittleEndian();
-  const bytes =
-    body instanceof Uint8Array
-      ? body.byteOffset % 8 === 0
-        ? body
-        : body.slice()
-      : new Uint8Array(body);
+  const bytes = alignedBytes(body);
   const { buffer, byteOffset, byteLength } = bytes;
   if (byteLength < PREAMBLE || MAGIC.some((byte, i) => bytes[i] !== byte)) {
     throw new ColumnsError("not a columns body");
@@ -342,17 +354,33 @@ export interface JoinedColumns {
 }
 
 /**
+ * Whether two pages have the same columns: as many, each with the same name
+ * and dtype in the same place. Compared value by value, never through a
+ * string built from them, which names holding its delimiters could make
+ * alike (step 42 R2-1).
+ */
+function sameColumns(
+  a: readonly ColumnSpec[],
+  b: readonly ColumnSpec[],
+): boolean {
+  return (
+    a.length === b.length &&
+    a.every((spec, i) => spec.name === b[i]?.name && spec.dtype === b[i]?.dtype)
+  );
+}
+
+/**
  * The pages' columns joined, in page order: one page's views as they are,
  * else one new array per column. Throws ColumnsError when the pages'
- * columns differ in name, order or dtype: a value of one dtype written into
- * another's array would be converted silently (300 into a u8 is 44).
+ * columns differ in name, order or dtype (sameColumns): a value of one
+ * dtype written into another's array would be converted silently (300 into
+ * a u8 is 44).
  */
 export function joinColumns(pages: readonly DecodedColumns[]): JoinedColumns {
   const [first] = pages;
   if (first === undefined) throw new ColumnsError("no pages to join");
-  const specs = (page: DecodedColumns) =>
-    page.header.fields.map(({ name, dtype }) => `${name}:${dtype}`).join("\0");
-  if (pages.some((page) => specs(page) !== specs(first))) {
+  const columns = first.header.fields;
+  if (pages.some((page) => !sameColumns(page.header.fields, columns))) {
     throw new ColumnsError("the pages' columns differ in name, order or dtype");
   }
   if (pages.length === 1) {

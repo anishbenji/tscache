@@ -189,6 +189,28 @@ describe("columns format", () => {
     expect([...(decoded.fields.close ?? [])]).toEqual([1, 2]);
   });
 
+  it("decodes a Node Buffer at an unaligned offset of its pool (R2-2)", () => {
+    // A Buffer's slice() shares memory, so a copy must be made explicitly.
+    const bytes = encodeColumns(
+      input({ close: ["f64", [1.5, 2.5]], volume: ["u16", [3, 4]] }),
+    );
+    for (const offset of [1, 3, 5, 7]) {
+      const pool = Buffer.alloc(bytes.byteLength + offset);
+      pool.set(bytes, offset);
+      const decoded = decodeColumns(pool.subarray(offset));
+      expect([...decoded.timestamps]).toEqual([T0, T0 + MINUTE]);
+      expect([...(decoded.fields.close ?? [])]).toEqual([1.5, 2.5]);
+      expect([...(decoded.fields.volume ?? [])]).toEqual([3, 4]);
+      // The copy is the decoder's own, not a view of the caller's pool.
+      expect(decoded.timestamps.buffer).not.toBe(pool.buffer);
+    }
+    // An aligned Buffer is viewed in place.
+    const aligned = Buffer.alloc(bytes.byteLength + 8);
+    aligned.set(bytes, 8);
+    const view = aligned.subarray(8);
+    expect(decodeColumns(view).timestamps.buffer).toBe(view.buffer);
+  });
+
   it("keeps fields whose names Object.prototype also has", () => {
     const decoded = decodeColumns(
       body(
@@ -395,5 +417,141 @@ describe("joinColumns", () => {
 
   it("refuses no pages at all", () => {
     expect(() => joinColumns([])).toThrow(ColumnsError);
+  });
+
+  /** A one-point page of these columns, every value 1. */
+  const pageOf = (schema: readonly [string, Dtype][], t: number) =>
+    decodeColumns(
+      body(
+        encodeColumns({
+          timestamps: [T0 + t * MINUTE],
+          fields: Object.fromEntries(schema.map(([name]) => [name, [1]])),
+          dtypes: Object.fromEntries(schema),
+        }),
+      ),
+    );
+
+  it("refuses names built to collide with a delimited signature (R2-1)", () => {
+    // Joined as `name:dtype` with NUL between columns, both schemas read
+    // "a:u8\0a:u8\0a:u16"; a u16 300 then narrowed to the u8 44.
+    const odd = "a:u8\u0000a";
+    const first = pageOf(
+      [
+        ["a", "u8"],
+        [odd, "u16"],
+      ],
+      0,
+    );
+    const second = pageOf(
+      [
+        [odd, "u8"],
+        ["a", "u16"],
+      ],
+      1,
+    );
+    expect(() => joinColumns([first, second])).toThrow(ColumnsError);
+  });
+
+  it("refuses every schema that differs, whatever its names hold (property)", () => {
+    type Schema = [string, Dtype][];
+    // Names from characters that delimit, quote or escape in a signature
+    // or in the JSON header; schemas of one to three columns.
+    const alphabet = [
+      "a",
+      ":",
+      "\u0000",
+      '"',
+      "\\",
+      ",",
+      "{",
+      "}",
+      "u8",
+      "f64",
+    ];
+    const dtypes: Dtype[] = ["u8", "u16", "f64"];
+    // mulberry32, seeded: the same 2,000 cases on every run.
+    let seed = 42;
+    const random = (n: number) => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return Math.floor((((t ^ (t >>> 14)) >>> 0) / 2 ** 32) * n);
+    };
+    const name = () =>
+      Array.from(
+        { length: 1 + random(4) },
+        () => alphabet[random(alphabet.length)],
+      ).join("");
+    const schema = (): Schema => {
+      const columns: Schema = [];
+      for (let i = random(3) + 1; i > 0; i--) {
+        const column = name();
+        if (!columns.some(([taken]) => taken === column)) {
+          columns.push([column, dtypes[random(dtypes.length)] as Dtype]);
+        }
+      }
+      return columns;
+    };
+    /** A schema one change away from `of`: a dtype, the order, a column. */
+    const near = (of: Schema): Schema => {
+      const next = of.map(([n, d]): [string, Dtype] => [n, d]);
+      const column = next[random(next.length)] as [string, Dtype];
+      switch (random(3)) {
+        case 0:
+          column[1] = dtypes[(dtypes.indexOf(column[1]) + 1) % 3] as Dtype;
+          return next;
+        case 1:
+          return next.reverse();
+        default:
+          return next.length > 1 ? next.slice(1) : [...next, ["zz", "u8"]];
+      }
+    };
+    /**
+     * R2-1's construction from `of` (given a second column if it has one
+     * only): a schema whose first name runs the first two columns together
+     * as a `name:dtype` signature joined with NUL writes them, so the two
+     * schemas' signatures are one string.
+     */
+    const collision = (of: Schema): [Schema, Schema] => {
+      const a: Schema = of.length > 1 ? of : [...of, [`${of[0]?.[0]}b`, "u16"]];
+      const [[n1, d1], [n2, d2], ...rest] = a as [
+        [string, Dtype],
+        [string, Dtype],
+        ...Schema,
+      ];
+      return [a, [[`${n1}:${d1}\u0000${n2}`, d2], ...rest]];
+    };
+    const same = (a: Schema, b: Schema) =>
+      a.length === b.length &&
+      a.every(([n, d], i) => n === b[i]?.[0] && d === b[i]?.[1]);
+    let refused = 0;
+    let collisions = 0;
+    let joined = 0;
+    for (let run = 0; run < 2000; run++) {
+      const kind = random(4);
+      const a = schema();
+      const [first, second] =
+        kind === 0
+          ? [a, schema()]
+          : kind === 1
+            ? collision(a)
+            : [a, kind === 2 ? a : near(a)];
+      const pages = [pageOf(first, 0), pageOf(second, 1)];
+      if (same(first, second)) {
+        expect(() => joinColumns(pages)).not.toThrow();
+        joined++;
+      } else {
+        expect(
+          () => joinColumns(pages),
+          JSON.stringify([first, second]),
+        ).toThrow(ColumnsError);
+        refused++;
+        if (kind === 1) collisions++;
+      }
+    }
+    // Every outcome was exercised, not one of them only.
+    expect(refused).toBeGreaterThan(800);
+    expect(collisions).toBeGreaterThan(300);
+    expect(joined).toBeGreaterThan(300);
   });
 });

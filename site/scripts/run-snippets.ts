@@ -17,9 +17,15 @@ import { createBackend } from "@examples/mock-backend/backend";
 import {
   COLUMNS_TYPE,
   ColumnsError,
+  decodeColumns,
   encodeColumns,
 } from "@examples/mock-backend/columns";
-import { decodeSnapshot, type EncodedSnapshot, type GetResult } from "tscache";
+import {
+  type Dtype,
+  decodeSnapshot,
+  type EncodedSnapshot,
+  type GetResult,
+} from "tscache";
 import type { FetchRequest } from "tscache/fetcher";
 
 const SNIPPETS = new URL("../snippets/", import.meta.url);
@@ -254,51 +260,84 @@ const RUNS: Record<string, Run> = {
       ),
     );
     check(buffers.size === 1, `one page decoded into ${buffers.size} buffers`);
-    // Pages whose columns differ in dtype are refused, not converted: a u16
-    // 300 joined into the first page's u8 array would read as 44 (step 42
-    // R1-1).
-    const meta = { version: "v1", finalizedUntil: now };
-    const pages = [
-      encodeColumns(
-        {
-          timestamps: [now - MINUTE],
-          fields: { volume: [1] },
-          dtypes: { volume: "u8" },
-        },
-        { meta, next: now },
-      ),
-      encodeColumns(
-        {
-          timestamps: [now],
-          fields: { volume: [300] },
-          dtypes: { volume: "u16" },
-        },
-        { meta },
-      ),
+    // Pages whose columns differ are refused, not converted: a u16 300
+    // joined into the first page's u8 array would read as 44 (step 42
+    // R1-1), and so would names built to make a delimited signature of the
+    // two schemas alike (R2-1).
+    const odd = "a:u8\u0000a";
+    const mixtures: [
+      string,
+      [string, Dtype, number][],
+      [string, Dtype, number][],
+    ][] = [
+      ["u8 then u16 volume", [["volume", "u8", 1]], [["volume", "u16", 300]]],
+      [
+        "colliding names",
+        [
+          ["a", "u8", 1],
+          [odd, "u16", 2],
+        ],
+        [
+          [odd, "u8", 3],
+          ["a", "u16", 300],
+        ],
+      ],
     ];
     const pageFetch = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async () =>
-        new Response(pages.shift(), {
-          headers: { "content-type": COLUMNS_TYPE },
-        }),
-      pageFetch,
-    );
     try {
-      const mixed = await columns
-        .fetch({ ...request, range: { start: now - MINUTE, end: now } })
-        .then(
-          (response: { fields: Record<string, ArrayLike<number>> }) =>
-            Array.from(response.fields.volume ?? []).join(),
-          (error: unknown) => error,
+      for (const [what, first, second] of mixtures) {
+        const meta = { version: "v1", finalizedUntil: now };
+        const page = (columns: [string, Dtype, number][], t: number) =>
+          encodeColumns(
+            {
+              timestamps: [t],
+              fields: Object.fromEntries(columns.map(([n, , v]) => [n, [v]])),
+              dtypes: Object.fromEntries(columns.map(([n, d]) => [n, d])),
+            },
+            t === now ? { meta } : { meta, next: now },
+          );
+        const pages = [page(first, now - MINUTE), page(second, now)];
+        globalThis.fetch = Object.assign(
+          async () =>
+            new Response(pages.shift(), {
+              headers: { "content-type": COLUMNS_TYPE },
+            }),
+          pageFetch,
         );
-      check(
-        mixed instanceof ColumnsError,
-        `pages of u8 then u16 volume gave ${String(mixed)}, not a ColumnsError`,
-      );
+        const mixed = await columns
+          .fetch({ ...request, range: { start: now - MINUTE, end: now } })
+          .then(
+            (response: { fields: Record<string, ArrayLike<number>> }) =>
+              JSON.stringify(
+                Object.entries(response.fields).map(([n, v]) => [
+                  n,
+                  Array.from(v),
+                ]),
+              ),
+            (error: unknown) => error,
+          );
+        check(
+          mixed instanceof ColumnsError,
+          `pages of ${what} gave ${String(mixed)}, not a ColumnsError`,
+        );
+      }
     } finally {
       globalThis.fetch = pageFetch;
     }
+    // Under Bun as under Node (Vitest): a Buffer at an unaligned offset of
+    // its pool decodes, from a copy (R2-2).
+    const bytes = encodeColumns({
+      timestamps: [now],
+      fields: { close: [1.5] },
+      dtypes: { close: "f64" },
+    });
+    const pool = Buffer.alloc(bytes.byteLength + 3);
+    pool.set(bytes, 3);
+    const fromBuffer = decodeColumns(pool.subarray(3));
+    check(
+      fromBuffer.timestamps[0] === now && fromBuffer.fields.close?.[0] === 1.5,
+      "an unaligned Buffer did not decode",
+    );
   },
   async "getting-started.ts"() {
     const { result } = await load("getting-started.ts");

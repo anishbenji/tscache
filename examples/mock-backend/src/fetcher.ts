@@ -159,7 +159,10 @@ async function collect(
   const fields: Record<string, Column> = Object.create(null);
   const names = Object.keys(pages[0]?.fields ?? {});
   for (const { fields: columns } of pages) {
-    if (Object.keys(columns).join("\0") !== names.join("\0")) {
+    // Name by name: a string joined from the names could make two lists
+    // alike, as ["a\0b"] and ["a", "b"] are once joined with NUL.
+    const own = Object.keys(columns);
+    if (own.length !== names.length || own.some((n, i) => n !== names[i])) {
       throw new Error("the pages' columns differ in name");
     }
   }

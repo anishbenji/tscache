@@ -181,6 +181,25 @@ describe("fetcher", () => {
     await expect(fetcher.fetch(request())).rejects.toThrow(/columns differ/);
   });
 
+  it("refuses pages whose field names only join to the same text", async () => {
+    // ["a\0b"] and ["a", "b"] read alike once joined with NUL (R2-1's class).
+    const page = (fields: Record<string, number[]>, next?: number) =>
+      new Response(
+        JSON.stringify({
+          timestamps: [next === undefined ? START + MINUTE : START],
+          fields,
+          meta: { version: "v1", finalizedUntil: NOW },
+          ...(next === undefined ? {} : { next }),
+        }),
+      );
+    const pages = [
+      page({ "a\u0000b": [1] }, START + MINUTE),
+      page({ a: [2], b: [3] }),
+    ];
+    vi.stubGlobal("fetch", async () => pages.shift());
+    await expect(fetcher.fetch(request())).rejects.toThrow(/columns differ/);
+  });
+
   it("refuses pages whose columns disagree", async () => {
     const page = (dtype: "f64" | "f32", next?: number) =>
       new Response(
