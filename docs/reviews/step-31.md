@@ -15,7 +15,7 @@ The test at the former line 273 ("switching the chart library after scrolling ke
 | Commit | What |
 |---|---|
 | fcf914e | `fix(reference)`: `formingBar(now, config = market)` in `market.ts` gives the start of the bar forming at a time on the grid. `readRange` ends there at the latest, so the server renders and a scroll near now end on the grid; the feed's catch-up reads up to `formingBar(Date.now())`; `polling()` uses the same helper. Tests below |
-| — | `test(e2e)`: the new server-rendered test first has the server render once (see "Found while verifying") |
+| d443a24 | `test(e2e)`: the new server-rendered test first has the server render once (see "Found while verifying") |
 
 ## Tests
 
@@ -37,7 +37,7 @@ All Playwright runs used `E2E_EXAMPLES=reference-vanilla,reference-react,referen
 | After the fix, the whole spec | `bunx playwright test e2e/reference/clients.spec.ts --project examples` | 59 of 59 passed |
 | Stress, after the fix | `stress-load.sh bash -c 'bunx playwright test e2e/reference/clients.spec.ts --project examples --repeat-each 5 --workers 1 --grep-invert "shows the server.s read and fetches only the forming bar"'` (a `yes` per core, ten cores) | 280 of 280 passed in 17.1 min |
 
-`bunx vitest run reference/shared`: 14 passed. `tsc -p reference/shared`, `tsc -p e2e` and Biome clean.
+`bunx vitest run reference/shared`: 14 passed. `tsc -p reference/shared`, `tsc -p e2e` and Biome clean. `bun run ci` (under the heavy-job lock) passed on d443a24 and again on this file's commit: 1511 Vitest tests, 107 Playwright tests, sizes and both bench smokes.
 
 ## Found while verifying
 
