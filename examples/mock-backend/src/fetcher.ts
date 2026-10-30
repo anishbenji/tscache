@@ -88,7 +88,9 @@ async function collect(
   let page = await fetchPage(path, request, request.range.start);
   const { version } = page.meta;
   const timestamps: number[] = [];
-  const fields: Record<string, number[]> = {};
+  // No prototype, so a field named `constructor` or `__proto__` is a key
+  // like any other rather than an inherited member.
+  const fields: Record<string, number[]> = Object.create(null);
   // The earliest watermark of all pages: a later page was answered later,
   // and its watermark would claim an earlier page's provisional points.
   let finalizedUntil = page.meta.finalizedUntil;

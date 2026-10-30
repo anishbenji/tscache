@@ -119,6 +119,22 @@ describe("fetcher", () => {
     }
   });
 
+  it("keeps fields whose names Object.prototype also has", async () => {
+    // Raw JSON, so __proto__ arrives as an own key, as from a backend; an
+    // object literal would set the prototype instead.
+    const meta = `"meta":{"version":"v1","finalizedUntil":${NOW}}`;
+    const pages = [
+      `{"timestamps":[${START}],"fields":{"constructor":[1],"__proto__":[2]},${meta},"next":${START + MINUTE}}`,
+      `{"timestamps":[${START + MINUTE}],"fields":{"constructor":[3],"__proto__":[4]},${meta}}`,
+    ];
+    vi.stubGlobal("fetch", async () => new Response(pages.shift()));
+    const response = await fetcher.fetch(request());
+    expect(Object.entries(response.fields)).toEqual([
+      ["constructor", [1, 3]],
+      ["__proto__", [2, 4]],
+    ]);
+  });
+
   it("rejects a cache id that names no series", async () => {
     serve(createBackend({ latencyMs: 0, now: () => NOW }));
     await expect(
