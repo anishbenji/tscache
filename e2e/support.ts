@@ -141,6 +141,7 @@ export async function connect(
     }
     // modeFallback arrives on a zero timer queued inside createClient; this
     // later one runs after it.
+    // clock-ok: zero timers run in the order queued; this waits for no time.
     await new Promise((resolve) => setTimeout(resolve, 0));
     const fallbacks = w.log.filter((e) => e.event === "modeFallback");
     return { mode: w.client.mode, fallbacks: fallbacks.map((e) => e.payload) };
@@ -287,6 +288,7 @@ export async function expectWorkerAlive(
       const w = window as unknown as E2EWindow;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
+        // clock-ok: a hang guard that names the cause; a live worker answers in milliseconds.
         timer = setTimeout(() => {
           reject(
             new Error(
