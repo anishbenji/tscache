@@ -102,3 +102,7 @@ None.
 ## Round 4 — reviewer verdict: merge
 
 No findings; every accepted finding from rounds 1–3 confirmed fixed. `bun run ci` passed on the branch rebased onto `main` 15fa506. Settled. Scope SHAs above predate the director's rebases onto newer `main`; the commit subjects identify them.
+
+## After the pull request opened
+
+GitHub CI on #53 failed at Fallow: `site/.vitepress/config.ts` imports TypeDoc's generated `site/api/typedoc-sidebar.json`, which is gitignored and existed in every local checkout but not on the runner, where the API pages were only generated later by `docs:build`. `scripts/ci.sh` now runs `bun run --cwd site api` right after the package build, before Knip, Fallow and the site's type check. Fixed by the director.

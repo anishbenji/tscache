@@ -48,6 +48,9 @@ bun run typecheck
 # Built before Knip: the examples' Vite configs import tscache/vite from
 # dist/, and Knip loads them; a fresh checkout has no dist/ yet.
 bun run --filter tscache build   # includes publint + attw (esm-only profile)
+# Generated before Fallow and the site's type check: the site's config imports
+# TypeDoc's sidebar, site/api/ is gitignored, and a fresh checkout has none.
+bun run --cwd site api
 bunx knip
 bun run fallow
 bunx vitest run --passWithNoTests
