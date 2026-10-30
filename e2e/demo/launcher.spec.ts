@@ -132,11 +132,18 @@ function cleanUp(launched: Launch | undefined, appPorts: number[]): void {
   for (const port of appPorts) {
     let found = "";
     try {
-      found = execFileSync("pgrep", ["-f", `--port ${port} --strictPort`], {
-        encoding: "utf8",
-      });
-    } catch {
-      // pgrep exits 1 when nothing matches.
+      // "--" ends pgrep's options: the pattern itself starts with "--".
+      found = execFileSync(
+        "pgrep",
+        ["-f", "--", `--port ${port} --strictPort`],
+        {
+          encoding: "utf8",
+        },
+      );
+    } catch (error) {
+      // pgrep exits 1 when nothing matches; anything else is a failed lookup,
+      // which would leave the servers running unseen.
+      if ((error as { status?: unknown }).status !== 1) throw error;
     }
     for (const pid of found.split("\n").filter(Boolean)) kill(Number(pid));
   }
@@ -192,6 +199,38 @@ test("SIGTERM stops a running demo and every app server", async ({
     launched.child.kill("SIGTERM");
     expect(await launched.exit(30_000)).toBe(143);
     expect(await allFree([hub, ...apps])).toBe(true);
+  } finally {
+    cleanUp(launched, apps);
+  }
+});
+
+test("the tests' cleanup stops the app servers of a launcher killed outright", async ({
+  request,
+}) => {
+  test.setTimeout(90_000);
+  const hub = await freePorts();
+  const apps = appPortsAfter(hub);
+  let launched: Launch | undefined;
+  try {
+    launched = launch(hub, ["--reuse-builds"]);
+    await expect
+      .poll(
+        async () =>
+          (
+            await request
+              .get(`http://127.0.0.1:${hub}/healthz`)
+              .catch(() => null)
+          )?.ok() ?? false,
+        { timeout: 60_000 },
+      )
+      .toBe(true);
+    // SIGKILL to the launcher alone: its shutdown never runs, and the app
+    // servers, each in a group of its own, outlive it.
+    launched.child.kill("SIGKILL");
+    expect(await launched.exit(10_000)).toBe(null);
+    expect(await allFree(apps)).toBe(false);
+    cleanUp(launched, apps);
+    await expect.poll(() => allFree(apps), { timeout: 10_000 }).toBe(true);
   } finally {
     cleanUp(launched, apps);
   }
