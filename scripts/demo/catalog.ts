@@ -149,7 +149,7 @@ export const catalog: Entry[] = [
     lookFor: [
       "Open another tab: it draws three days at once and fetches only the forming bar; the mode reads shared.",
       "Expire access token (on the page or in the panel below): one tab refreshes it, every tab carries on, and the backend counts one refresh.",
-      "Close the tab that created the worker (see the README): the other tabs get workerLost, replace their client and carry on.",
+      "Crash the tab you opened first, which hosts the SharedWorker (chrome://crash in its address bar; see the README): the other tabs get workerLost, replace their client and carry on. Closing that tab instead loses nothing, since the worker runs on while any tab is connected.",
     ],
     auth: true,
     launches: [
