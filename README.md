@@ -11,6 +11,19 @@ what v1 leaves out. The questions deferred to the review after the build are
 in [`docs/architecture-review.md`](docs/architecture-review.md); their
 decisions are rows N34–N44 of the decision register.
 
+## Documentation
+
+The user documentation is a VitePress site in [`site/`](site/): getting
+started, the concepts, every public API with an example, guides, framework
+and chart wiring, performance, troubleshooting, and an API reference
+generated from the TSDoc. Build or serve it locally:
+
+```sh
+bun install
+bun run docs:dev     # serves it with live reload
+bun run docs:build   # builds it into site/.vitepress/dist
+```
+
 ## Guides
 
 - [`docs/guides/worker-setup.md`](docs/guides/worker-setup.md): serving the
