@@ -5,8 +5,10 @@ import {
   type EncodedSnapshot,
   encodeSnapshot,
   type Range,
+  TscacheError,
 } from "tscache";
 import workerUrl from "tscache/worker?worker&url";
+import fetcherModule from "./fetcher.ts?fetcher";
 
 const config: CacheConfig = {
   id: "candles/ACME",
@@ -42,12 +44,24 @@ console.log(html);
 // #region browser
 // In the browser, before the first live read.
 const text = document.getElementById("tscache-snapshot")?.textContent;
-const client = await createClient({ workerUrl });
+// The browser's client has a fetcher too: it loads what the snapshot lacks.
+const client = await createClient({
+  workerUrl,
+  fetcher: { module: fetcherModule },
+});
 const cache = await client.cache(config);
 if (text != null) {
   const seed = decodeSnapshot(JSON.parse(text) as EncodedSnapshot);
-  const { applied, skipped } = await cache.hydrate(seed);
-  console.log(applied, skipped); // skipped: "version-mismatch" when refused
+  try {
+    const { applied, skipped } = await cache.hydrate(seed);
+    console.log(applied, skipped); // skipped: "version-mismatch" when refused
+  } catch (error) {
+    // A worker from before hydrate (a stale cached script) refuses the op:
+    // nothing was applied, and the read below fetches instead.
+    const old =
+      error instanceof TscacheError && error.message === "unknown op hydrate";
+    if (!old) throw error;
+  }
 }
 // This read fetches only what the snapshot did not cover.
 await cache.get(range);
