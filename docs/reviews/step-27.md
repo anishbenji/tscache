@@ -1,6 +1,6 @@
 # Chore 27 — Narrow the project's permission ask rules
 
-Branch: `chore/27-narrow-ask-rules` · Reviewer: Codex (high) · Rounds: in progress · Status: under review
+Branch: `chore/27-narrow-ask-rules` · Reviewer: Codex (high) · Rounds: 2 · Status: escalated to the user (convergence check)
 
 Requested by the user on 2026-10-30: the thread should run unattended while the user is away, and approval prompts kept stopping it. In Claude Code an `ask` rule prompts even in full-access mode, so routine commands on step branches (`git rebase main`, `git merge`, `git push` of a feature branch, `bun install --frozen-lockfile` in a fresh worktree) raised prompts.
 
@@ -28,3 +28,12 @@ An automated security review of 83f9f6f flagged that the narrowed push patterns 
 | R1-2 | P1 | `git push origin feature:main` and `feature:refs/heads/main` match no ask rule | Accept. Valid: the rules listed fixed sources only | The four main-targeting rules became one, `Bash(git push *main*)`, which matches `main` anywhere in the arguments: a destination, `src:main`, `refs/heads/main`, `+main`, `:main`. A branch whose name contains `main` (for example `maintenance`) also prompts, which errs towards asking. No regression test: the matcher lives inside Claude Code and the repository has no way to run it; the cases were checked against the documented rules |
 
 The user-level `~/.claude/settings.json` carries `Bash(git push * main:*)` with the same trailing-`:*` defect. It is outside the repository and the user's own file, so it is left for the user (noted in the director's pending decisions).
+
+## Round 2 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | Re-raises R1-1: `git push origin :feature` matches no ask rule; a deleted branch is not recoverable if its commits were never fetched locally | Escalated | See below |
+| R2-2 | P1 | `git push origin` (and `git push origin HEAD`) with `main` checked out pushes to `main` implicitly and matches neither `*main*` nor the exact `git push` rule | Accept as valid; escalated | GitHub's branch protection rejects a direct push to `main`, so the gap loses the prompt, not the protection. See below |
+
+**Convergence check (docs/workflow.md, review loop step 7):** the push ask patterns drew findings in rounds 1 and 2. Permission patterns match command text, cannot express "a refspec with an empty source" (a trailing `:*` is a wildcard) or "the current branch's upstream is main", and the documentation recommends a hook for argument-level checks. Further pattern patches would not converge, so the area is escalated to the user instead of patched again. Options put to the user: accept the documented residual gaps and merge; add a small PreToolUse hook that parses `git push` arguments (new tooling; the frozen Bash guard stays untouched); or keep asking on every push. Recorded by the director while the user was away; the branch is parked unmerged until the user decides.
