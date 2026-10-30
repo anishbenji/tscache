@@ -141,11 +141,65 @@ export function acceptances(
   return accepted;
 }
 
-/** What a calibration run reports per runtime (.bench-results/*.json). */
+/**
+ * The runtimes whose cases may gate: Chromium (V8, what most users run) and
+ * Bun (JSC, the engine of Safari). Node is a second V8 and only reports.
+ */
+const GATEABLE: ReadonlySet<string> = new Set(["bun", "chromium"]);
+
+/** Per runtime, the cases whose confirmed regression fails the gate. */
+export type GatedCases = ReadonlyMap<string, readonly string[]>;
+
+/**
+ * The cases `bench/gated.json` gates, per runtime: those calibration on
+ * GitHub's runner showed the gate judges reliably (docs/benchmarking.md).
+ * Throws on anything but `{ "<bun|chromium>": ["<case>", …] }`.
+ */
+export function gatedCases(json: unknown): GatedCases {
+  if (typeof json !== "object" || json === null || Array.isArray(json)) {
+    throw new Error("gated.json must map runtimes to lists of case names");
+  }
+  const gated = new Map<string, readonly string[]>();
+  for (const [runtime, names] of Object.entries(json)) {
+    if (!GATEABLE.has(runtime)) {
+      throw new Error(
+        `gated.json: ${runtime} cannot gate, only bun and chromium`,
+      );
+    }
+    if (!Array.isArray(names) || names.some((n) => typeof n !== "string")) {
+      throw new Error(`gated.json: ${runtime} must list case names`);
+    }
+    if (new Set(names).size !== names.length) {
+      throw new Error(`gated.json: ${runtime} lists a case twice`);
+    }
+    gated.set(runtime, names as string[]);
+  }
+  return gated;
+}
+
+/** What one runtime reports per run (.bench-results/*.json). */
 export interface CalibrationReport {
   runtime: string;
   noisy: boolean;
   verdicts: Record<string, string>;
+}
+
+/**
+ * The cases whose regression fails the gate in `report`: confirmed
+ * regressions of the cases `gated` lists for its runtime, none when the
+ * A/A control was noisy. Every other regression only reports.
+ */
+export function failing(
+  report: CalibrationReport,
+  gated: GatedCases,
+): string[] {
+  if (report.noisy) return [];
+  const cases = gated.get(report.runtime) ?? [];
+  return Object.entries(report.verdicts)
+    .filter(
+      ([name, verdict]) => verdict === "regression" && cases.includes(name),
+    )
+    .map(([name]) => name);
 }
 
 export interface CalibrationTally {

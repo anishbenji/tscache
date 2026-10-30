@@ -73,10 +73,11 @@ jobs:
       - run: bun run ci
 
   # Timings: the head against its base, case by case, in Chromium and Bun
-  # (docs/benchmarking.md). It reports only, in the job summary and an
-  # artifact, until a calibration on this runner (bench-calibrate.yml)
-  # shows the gate catches a known regression and stays quiet without one;
-  # then `--gate` goes on and this check becomes required.
+  # (docs/benchmarking.md). With --gate, a confirmed regression fails this
+  # job only in the cases packages/tscache/bench/gated.json lists, the ones
+  # calibration on this runner (bench-calibrate.yml) showed the gate judges
+  # reliably; every other case reports, in the job summary and an artifact.
+  # The check is not required in branch protection yet: the user decides.
   bench:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -111,14 +112,16 @@ jobs:
       - name: Install Chromium for Playwright
         run: bunx playwright install --with-deps chromium
 
-      - run: bun scripts/bench.ts compare --base "$CI_BASE" --runtime chromium,bun
+      - run: bun scripts/bench.ts compare --base "$CI_BASE" --runtime chromium,bun --gate
 
       # End-to-end scenarios in Chromium, head against base. Report-only: a
-      # failure here never fails this job, which is to become a required
+      # failure here never fails this job, which may become a required
       # check. A wrong result fails the ci job's smoke run instead. The step
       # timeout (about ten times a normal run) keeps a hung read inside the
-      # job's budget, so continue-on-error still applies.
+      # job's budget, so continue-on-error still applies. It runs after a
+      # gated regression too, so the report stays complete.
       - run: bun scripts/bench.ts e2e --base "$CI_BASE"
+        if: ${{ !cancelled() }}
         continue-on-error: true
         timeout-minutes: 3
 
