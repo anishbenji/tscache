@@ -44,7 +44,9 @@ const fetcher: Fetcher = {
   async fetch(request): Promise<FetchResponse> {
     // The answer is authoritative for the whole range: collect every page.
     const timestamps: number[] = [];
-    const fields: Record<string, number[]> = {};
+    // No prototype: a field may be named like an Object.prototype member
+    // (`constructor`), which `??=` would otherwise find already set.
+    const fields: Record<string, number[]> = Object.create(null);
     let page = await fetchPage(request, request.range.start);
     const { version } = page;
     let finalizedUntil = page.finalizedUntil;
