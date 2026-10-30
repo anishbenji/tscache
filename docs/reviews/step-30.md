@@ -1,6 +1,6 @@
 # Chore 30 — Local demo hub
 
-Branch: `chore/30-demo-hub` · Reviewer: Codex (high) · Rounds: 2 · Status: fixes in, awaiting round 3 · Verdict after triage: merge after round 3
+Branch: `chore/30-demo-hub` · Reviewer: Codex (high) · Rounds: 3 · Status: fixes in, awaiting round 4 · Verdict after triage: merge after round 4
 
 One command that shows and launches every sample app: `bun run demo`. Requested by the director while the user was away, under the user's grant of 2026-10-30; built by a Claude Opus 5.5 subagent. Tooling, not a commit-plan step: no package, example or reference-client code changes.
 
@@ -17,6 +17,9 @@ One command that shows and launches every sample app: `bun run demo`. Requested 
 | 4b5b4cd | `test(e2e)`: the Expire token test waited until the page's next poll for `ok`; reverted by 5ad16b7 (D10) |
 | 5ad16b7 | `revert`: 4b5b4cd |
 | 313435a | `test(e2e)`: the tests on demo apps with shared backend state run one at a time in a `demo-shared` project (D10) |
+| 4356e7b | `test(e2e)`: R3-1 |
+| a74f64d | `docs(demo)`: R3-2 |
+| aa91fcc | `docs(site)`: a Demo hub page in the documentation site (`site/guide/demo.md`, in the Introduction sidebar), and the hub links the site (`bun run docs:dev`) |
 
 ## Decisions made in the step
 
@@ -59,6 +62,15 @@ Decisions in this round:
 | D9 | `DEMO_BUILD_SCRIPT`, a test-only environment variable that replaces every build command | A failed parallel build must be testable inside the Playwright suite without rewriting a `dist/` the example servers are serving | Failing a real build (rewrites shared `dist/`, slow) |
 | D10 | The tests on apps whose backend state every browser context shares run in a `demo-shared` Playwright project with `workers: 1` (`e2e/demo/shared.spec.ts`): the Expire token and Restate history tests, and the launch tests of those two apps (`react-lwcharts`, `solid-uplot`), whose open pages take part. Every other demo test stays parallel; the assertions and their waits are as before. Replaces a widened wait (4b5b4cd, reverted at the director's ruling, child-rules item 6) | The race is in shared state, not the assertion: `react-lwcharts`'s backend holds one token pair for every context, so when parallel runs expire it, the first context to refresh makes the others' refresh tokens stale (`reused`), and their sessions end (`auth` reads `pending`, which also stands for `lost`). An assertion on the page's own refresh (option b) would fail the same way, since that refresh is what gets refused. Shown with `--repeat-each 6 --workers 6` on the Expire token test: the old placement failed 5 of 6; `demo-shared` passed 6 of 6 on one worker | A session key in the mock backend (option a: its tokens are global across login, refresh, series and the socket path, all shared by the examples); a cross-worker file lock (tried: its wait counted against each test's timeout, and a fixture's teardown order released it before the page closed) |
 | D11 | `pgrep` in Knip's `ignoreBinaries` | The spec uses the system tool to find leftover servers | Listing processes by hand |
+
+## Round 3 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | The launcher spec's fallback cleanup calls `pgrep -f "--port N --strictPort"`; pgrep reads the pattern as an option and exits 2, and the catch hides it, so servers a launcher left behind keep their ports | Accept. Reproduced: `pgrep -f "--port 1 --strictPort"` prints `illegal option -- -` and exits 2. A new test failed before the fix with all nine servers still running (killed by hand afterwards) | 4356e7b: the pattern follows `--`, and any pgrep exit but 1 (no match) fails the test. New test: the launcher is killed with SIGKILL alone, so its shutdown never runs; the servers outlive it, and the cleanup must stop them and free every port. Passes after the fix |
+| R3-2 | P2 | The worker-loss guidance says to close the tab that created the worker; the SharedWorker survives a close, so no `workerLost` fires | Accept. Confirmed against `examples/react-lwcharts/README.md` ("Losing the worker") | a74f64d: crash that tab (`chrome://crash`), and closing it is described as losing nothing |
+
+The documentation site landed on `main` while this round was open: aa91fcc adds its Demo hub page and a link to it from the hub. `docs:check`, `docs:run` and `docs:build` pass.
 
 ## Verification
 
