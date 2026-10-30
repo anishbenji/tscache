@@ -4,7 +4,7 @@
 //       every case once on the working tree, its result checked; part of
 //       `bun run ci`, about a second
 //   bun scripts/bench.ts compare [--base <ref>] [--runtime bun,chromium,node]
-//                                [--only a,b] [--rounds 20] [--gate]
+//                                [--only a,b] [--rounds 30] [--gate]
 //                                [--slowdown 0.15] [--setup <name>]
 //       the working tree against a base revision, case by case, in each
 //       runtime; prints a table, writes .bench-results/, and with --gate
@@ -114,7 +114,11 @@ function parseArgs(argv: string[]): Args {
     base: value("--base") ?? process.env.CI_BASE ?? "origin/main",
     runtimes: (value("--runtime") ?? "bun,chromium").split(",") as Runtime[],
     only: value("--only")?.split(","),
-    rounds: roundsOf(value("--rounds") ?? setup.rounds?.toString()),
+    // The setup times `compare` only; the scenarios keep the sampler's.
+    rounds: roundsOf(
+      value("--rounds") ??
+        (command === "compare" ? setup.rounds?.toString() : undefined),
+    ),
     gate: rest.includes("--gate"),
     slowdown: slowdown === undefined ? undefined : Number(slowdown),
     setup,
@@ -204,10 +208,11 @@ function runProcess(
 }
 
 /**
- * Which Chromium binaries are running and how many processes each has, as
- * `name ×count`, read from /proc on Linux (empty elsewhere): shows whether
- * the bench runs Playwright's headless shell, and how many processes it
- * started.
+ * Which Chromium binaries are running and how many processes of each type,
+ * as `name type ×count`, read from /proc on Linux (empty elsewhere): shows
+ * whether the bench runs Playwright's headless shell, and how many
+ * processes it started. Chromium rewrites its command line into one
+ * space-separated string, so the name is the first word of it.
  */
 function chromiumProcesses(): string {
   if (process.platform !== "linux") return "";
@@ -221,7 +226,9 @@ function chromiumProcesses(): string {
       continue; // the process ended
     }
     if (!argv0.includes("ms-playwright")) continue;
-    const name = argv0.split("/").at(-1) ?? argv0;
+    const [path = "", ...switches] = argv0.split(" ");
+    const type = switches.find((s) => s.startsWith("--type="))?.slice(7);
+    const name = `${path.split("/").at(-1)} ${type ?? "browser"}`;
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   return [...counts].map(([name, count]) => `${name} ×${count}`).join(", ");

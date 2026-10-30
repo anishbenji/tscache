@@ -20,9 +20,9 @@ on:
         type: choice
         options:
           - default
+          - short-batches
           - unthrottled
           - one-renderer
-          - long-batches
           - combined
 
 permissions:

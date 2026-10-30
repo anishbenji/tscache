@@ -79,9 +79,9 @@ Times are from the Apple Silicon Mac, in two runs with base and head the same re
 
 **Paired rounds** (`bench/sample.ts`):
 1. Each side is warmed up for half a second.
-2. A batch is calibrated to last at least 40 ms. Chromium coarsens `performance.now()` to 100 µs without cross-origin isolation; 40 ms keeps that under 0.3 %.
-3. Twenty rounds time one batch of each side, in the order A B, B A, A B…, and each round gives a ratio, head over base.
-4. The result is the median ratio, with a distribution-free 95 % confidence interval: the 6th and 15th of the 20 sorted ratios, by the binomial distribution of the median. Nothing is assumed about how timings are distributed.
+2. A batch is calibrated to last at least 100 ms in `compare` (the sampler's own default, used by the end-to-end scenarios, is 40 ms). Chromium coarsens `performance.now()` to 100 µs without cross-origin isolation; 40 ms keeps that under 0.3 %. The longer batch is for the runner, not the timer: with 40 ms batches and 20 rounds, Chromium's A/A control left its bounds in 5 of 20 runs on GitHub's runner, and with 100 ms batches and 30 rounds in 1 of 20 (calibration log, chore 39).
+3. Thirty rounds (twenty for the end-to-end scenarios) time one batch of each side, in the order A B, B A, A B…, and each round gives a ratio, head over base.
+4. The result is the median ratio, with a distribution-free 95 % confidence interval: for 30 rounds the 10th and 21st of the sorted ratios (for 20, the 6th and 15th), by the binomial distribution of the median. Nothing is assumed about how timings are distributed.
 
 **The A/A control.** Before the comparison, each runtime times the head against the second copy of itself, in a fresh process (or page) of its own. These are two copies of the same code, as base and head are when a pull request leaves the engine alone. If the control's interval leaves [0.95, 1.05], the run is noisy and nothing fails.
 
@@ -150,14 +150,14 @@ bun scripts/bench.ts e2e --base main --only two-tabs-one-fetch --rounds 30
 bun run bench           # the working tree against origin/main, in Chromium and Bun
 bun scripts/bench.ts compare --base main --only read-viewport --runtime bun
 bun scripts/bench.ts compare --base HEAD --slowdown 0.25   # local calibration run
-bun scripts/bench.ts compare --base HEAD --setup unthrottled   # a setup of the Chromium noise experiment
+bun scripts/bench.ts compare --base HEAD --setup short-batches   # a setup of the Chromium noise experiment
 bunx vitest run packages/tscache/test/perf                 # the exact budgets
 bun scripts/size.ts --update                               # reseed the size budgets (review the diff)
 ```
 
-`compare` writes `.bench-results/<runtime>.json` (schema version, both SHAs, the gate, every round, verdicts) and `summary.md`, and appends the table to the job summary on GitHub. A local run against `origin/main` takes about a minute per runtime. `e2e` writes `.bench-results/e2e.json` and `e2e-summary.md` the same way, in about 10 s; it takes `--base`, `--only` and `--rounds`, and refuses `--runtime`, `--gate`, `--slowdown` and `--setup`.
+`compare` writes `.bench-results/<runtime>.json` (schema version, both SHAs, the gate, every round, verdicts) and `summary.md`, and appends the table to the job summary on GitHub. A local run against `origin/main` takes about two and a half minutes per runtime. `e2e` writes `.bench-results/e2e.json` and `e2e-summary.md` the same way, in about 10 s; it takes `--base`, `--only` and `--rounds`, and refuses `--runtime`, `--gate`, `--slowdown` and `--setup`.
 
-`--setup <name>` picks one of the setups in `packages/tscache/bench/setups.ts`: `default` (what every run uses), `unthrottled` (Chromium switches that stop it deprioritising a background page), `one-renderer` (`--renderer-process-limit=1`), `long-batches` (100 ms batches and 30 rounds, in every runtime; an explicit `--rounds` wins) and `combined` (all three). `bench-calibrate.yml` takes the same name as its `setup` input. The record in `.bench-results/<runtime>.json` names the setup it ran, and on Linux the Chromium run logs which browser binaries it started and how many processes each has.
+`--setup <name>` picks one of the setups in `packages/tscache/bench/setups.ts`, from the Chromium noise experiment: `default` (what every run uses: 100 ms batches and 30 rounds, in every runtime; an explicit `--rounds` wins), `short-batches` (the earlier 40 ms and 20 rounds), `unthrottled` (Chromium switches that stop it deprioritising a background page), `one-renderer` (`--renderer-process-limit=1`), and `combined` (the default's timing with both sets of switches). `unthrottled` and `one-renderer` time with 40 ms batches and 20 rounds, as the experiment ran them. `bench-calibrate.yml` takes the same name as its `setup` input. The record in `.bench-results/<runtime>.json` names the setup it ran, and on Linux the Chromium run logs which browser binaries it started and how many processes each has.
 
 ## Calibration log
 

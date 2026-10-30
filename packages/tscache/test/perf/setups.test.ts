@@ -2,11 +2,25 @@ import { describe, expect, it } from "vitest";
 import { SETUPS, setupOf } from "../../bench/setups";
 
 // The bench setups of the Chromium noise experiment (docs/benchmarking.md):
-// what each one changes, and that the default changes nothing.
+// what each one changes. The default times 30 rounds of 100 ms batches,
+// which kept Chromium's A/A control quiet in 19 of 20 runs on GitHub's
+// runner, against 15 of 20 with 40 ms batches and 20 rounds.
 
 describe("bench setups", () => {
-  it("leaves Chromium, batches and rounds alone by default", () => {
-    expect(setupOf("default")).toEqual({ chromiumArgs: [] });
+  it("times 30 rounds of 100 ms batches by default, Chromium as launched", () => {
+    expect(setupOf("default")).toEqual({
+      chromiumArgs: [],
+      batchMs: 100,
+      rounds: 30,
+    });
+  });
+
+  it("keeps the earlier 40 ms batches and 20 rounds for comparison", () => {
+    expect(setupOf("short-batches")).toEqual({
+      chromiumArgs: [],
+      batchMs: 40,
+      rounds: 20,
+    });
   });
 
   it("stops Chromium deprioritising the page", () => {
@@ -22,14 +36,6 @@ describe("bench setups", () => {
   it("limits Chromium to one renderer process", () => {
     expect(setupOf("one-renderer")).toEqual({
       chromiumArgs: ["--renderer-process-limit=1"],
-    });
-  });
-
-  it("times 30 rounds of 100 ms batches", () => {
-    expect(setupOf("long-batches")).toEqual({
-      chromiumArgs: [],
-      batchMs: 100,
-      rounds: 30,
     });
   });
 
