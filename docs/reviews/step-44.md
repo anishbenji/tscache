@@ -1,6 +1,6 @@
 # Step 44 — In-flight subtraction (N31)
 
-Branch: `feat/44-inflight-subtraction` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: design text, round 1 fixes applied, re-review pending · Verdict after triage: merge after fixes
+Branch: `feat/44-inflight-subtraction` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 (design) · Status: design settled; implemented against the contract tests, code review pending · Verdict after triage: design merge
 
 Design for subtracting the fetches already in flight from a `get`'s misses, so overlapping reads share fetches instead of each fetching its whole miss (`docs/roadmap.md` N31; item 7 of the performance plan). This branch carries design text only: `docs/architecture.md` §4.9.1 and decision rows N31 (resolved) and N62–N65. Codex reviews the design next, then writes the contract tests listed below from §4.9.1; the implementation follows, strict test-first. The user deferred N31 on 2026-10-08; the director's standing grant approved the plan's recommendation to build it.
 
@@ -10,7 +10,12 @@ Design for subtracting the fetches already in flight from a `get`'s misses, so o
 |---|---|
 | 56e9477 | `docs(architecture)`: §4.9.1 (the in-flight list, rounds and `planRound`, flanks, awaiting and the miss annotation, the version fence, auth, errors, abort and dispose, invalidate, `cacheOnly`, several tabs, bounds, budgets); §2.5 (dedup wording, the fetcher's request bound), the module layout line, §4.9 (pointers, the replaced dedup rule, `Orchestrator.invalidate`), §5; rows N31 and N62–N65. `docs/roadmap.md`: N31 leaves the deferred list |
 | 7777941 | `docs(review)`: this file: the implementation plan, the contract tests, the budgets, the adversarial pass and two decision concerns. `docs(architecture)`: the tie rule of §4.9.1 rule 4, found while checking T27 |
-| (this commit) | Round 1 triage: §4.9.1 rules 1, 3, 7 and 12 brought to `coalesce` as it is (two-slot bridges, covered blocked flanks, the fetch-count bound); T1, T4, T5, A5, A6 updated; every test re-walked |
+| 8bdb544 | Round 1 triage: §4.9.1 rules 1, 3, 7 and 12 brought to `coalesce` as it is (two-slot bridges, covered blocked flanks, the fetch-count bound); T1, T4, T5, A5, A6 updated; every test re-walked |
+| 7240b9d | Design round 2, settled |
+| 3183645 | `feat(orchestrator)`: the in-flight list, `planRound`, rounds, removal in the deciding step, `Orchestrator.invalidate` and its fence; the RPC server routes `invalidate` through it. Codex's contract tests T1–T36; the round 3 regression on T17's setup; T6's measured count |
+| e2f1b51 | `test(orchestrator)`: T14's invalid-response case asserts the documented error and miss label instead of message wording (director decision) |
+| 6c6717d | `docs`: the request bound (N65) in `docs/guides/worker-setup.md`, `docs/guides/patterns.md` and the site's fetcher page; the site's read path (`concepts/coverage.md`) without exact-range dedup; `fast-scroll` in `docs/benchmarking.md` |
+| (this commit) | This file: implementation notes, contract-test changes, bench results |
 
 ## Implementation plan
 
@@ -148,9 +153,40 @@ Every test was walked through the revised rules with a scratch model (outside th
 - **Cases with nothing in flight, run on today's coalescing:** T5's covered flank, T11's covered variant (`[103, 153]`), T12's flank (`[103, 153]`), T13's second get, T14's third get (now stated as `[53, 113]`, the flank included), T16's alternative split (`[53, 113]`, `[3, 43]`), T18's DC-1 alternative (`[53, 113]`), T25's next get (now stated as `[53, 113]`), T27's two plans (`[3, 53]`, `[53, 103]`), and T35's opening read and `main` figure. None contradicts today's planner.
 - **By reading, since they plan nothing new:** T2 (holds by construction of `planRound`), T6 (asserts against the model whatever the value), T9 (an existing test, unchanged), T22 (the gate path of T21), T26 (read count), T29 (the error path), T31 and T32 (lifecycle), T36 (the reads and numbers of T35).
 
+## Implementation
+
+Against Codex's contract tests, in `packages/tscache/src/orchestrator/orchestrator.ts`; `rpc/server.ts` dispatches `invalidate` to `Orchestrator.invalidate`. Architecture §4.9.1 needed no change.
+
+- **`planRound`.** `need` is the request minus `around` minus `blocked`, with the `without` sweep of step 36. One pass over the in-flight ranges, with a cursor over `need` that only moves forward because starts ascend, finds `join`; `fetch` is `coalesce` over `need` minus the union of the in-flight ranges (one more pass), so it extends into coverage only. T6 measured 53,246 element reads over 8,192 elements (6.5 each) without blocked ranges and 55,291 over 10,240 (5.4 each) with them, against the bound of 8; most are `coalesce`'s neighbour lookups, about five per piece of the need.
+- **A round** (`#round`) reads coverage, applies the auth gate, keeps the joinable entries in one pass, plans, issues its fetches and merges them into the list in one pass (equal starts keep issue order), all in one synchronous step. Under the gate it issues and joins nothing and labels the ranges `planFetches` gives `'auth'`, as the fetch path did before; only missing slots are labelled, and the flanks are covered.
+- **Removal (rule 1).** `#run` decides the outcome in the continuation of the fetcher's await: a rejection is classified (an auth refusal under the current generation flips the state there), or the fence is checked and the response put. The entry leaves the list in a `finally` of that same synchronous block, so it is gone before the outcome settles and before any get awaiting it resumes. This closes A1 by construction; T13 pins the observable part.
+- **The second round's `blocked`** is the union of the first round's ranges that came back `'failed'` or `'auth'`, sorted first, since joined ranges can overlap.
+- **The annotation** keeps the existing cut: each miss is split at the boundaries of the labelled fetches, sorted by start. The settled list is in round order, joined fetches (in list order) before the round's own, and the sort is stable, which gives rule 4's tie order.
+- **Adjacent equal labels are not merged** (Codex's ambiguity in rule 4). The existing annotation never merged pieces labelled by different fetches, and nothing in §2.3 promises maximal miss ranges, so it stays: in T24, b's misses are `[53, 103]` and `[113, 153]`, both `'auth-pending'`, two objects where the test list above writes one span. T24 compares per slot and accepts either.
+- **Not rebased.** The branch is 8 commits behind `origin/main` (the demo hub and the chore 43 bench gate). They touch no file under `src/`; `docs/benchmarking.md` changed on both sides.
+
+### Bench results
+
+All heavy runs under the machine's heavy-job lock, on the Apple Silicon Mac, 2026-10-30. Head `3183645`, base `9c0afdc` (`origin/main`); the scenario page is the working tree's on both sides, only the library differs.
+
+- **Smoke** (`bun scripts/bench.ts e2e --smoke --only fast-scroll`): passes; the head served exactly 7,501 bars in the checked run.
+- **Paired** (`bun scripts/bench.ts e2e --base origin/main --only fast-scroll,live-tail-get,two-tabs-one-fetch`, 20 rounds):
+
+| Scenario | Base | Head | Head/base | 95 % CI |
+|---|---:|---:|---:|---:|
+| `fast-scroll` | 2.50 ms | 2.25 ms | 0.882 | 0.840–0.917 |
+| `two-tabs-one-fetch` | 404.7 µs | 402.0 µs | 0.999 | 0.980–1.010 |
+| `live-tail-get` | 26.7 µs | 26.6 µs | 0.997 | 0.967–1.015 |
+
+Bars served by `fast-scroll`: checked run, base 18,003 and head 7,501; every one of the 22 timed runs (2 warm-up and 20 rounds per side), base 18,003 and head 7,501. Over loopback the backend answers fast, so the timed reduction is about 12 %; against a real backend each bar not fetched saves its share of the transfer. `two-tabs-one-fetch` and `live-tail-get` show no regression: both intervals hold 1. Timing is report-only (docs/benchmarking.md).
+
 ## Contract-test changes
 
-None yet. The implementer records here the change to the round 3 regression test named above.
+- **`orchestrator.test.ts`, "round 3 regressions".** The test asserted `expect(releases).toHaveLength(3)` after b's `get` over `[3, 73]`; with subtraction b's misses `[3, 13]` and `[63, 73]` lie inside a's in-flight `[3, 73]`, so b joins it (rule 2) and issues nothing: observed 1. Replaced with T17's setup, ported to the file's harness: a's `[3, 73]` in flight; a version clear; b's `[3, 73]` is a new request and resolves complete while a's fetch is stalled; a's fetch then lands, is dropped, and its get re-plans over covered slots with no third request. The title now says "a get after a clear" because b plans its first round after the clear. The intent stands: a plan after a clear never joins a fetch issued before it. Its waits are port round trips instead of sleeps. Evidence: with the joinable filter's generation comparison removed, the test fails (b's get issues no request: `[[3, 73]]` against `[[3, 73], [3, 73]]`), as do T17 and T19; restored, it passes.
+- **A variant not added.** The old title named the fence retry, the second round. A setup that keeps that path (a's fetch over `[23, 53]`, which a put then covers, so b's `[3, 73]` fetches its flanks itself and its retry after the clear finds a's stale entry still listed) was run outside the tree: it passes, and fails with the generation check removed. It was not added, since the instruction was to replace the test only with T17's version; adding it is the director's call.
+- **`orchestrator-subtraction-helpers.ts`.** `response` lost its `export`: only the helpers use it, and Knip fails on an unused export. Nothing else changed.
+- **`perf/counters.test.ts`, T6.** Comment only: the measured read count replaces "Measured count pending", as the test asked. The assertion is unchanged.
+- **T14, "invalid response": contract test adjusted (director decision).** T14 asserted unspecified message text; now asserts the documented class/code and miss label. It matched the `PutError` message against `/align/i`, a wording no document specifies; the engine's off-grid message ("timestamp 4 at index 0 is not on the grid t ≡ 3 (mod 10)", unchanged since step ⑤) is pinned elsewhere as `/not on the grid/` (`orchestrator.test.ts`, "a malformed fetcher response is fetch-failed with the PutError"). It now asserts that the error is exactly `{ name: 'PutError', message: <a string> }`, with the misses `'fetch-failed'` for a (`[3, 103]`) and b (`[53, 103]`) as before (rule 7). The documented code (`'misaligned'`, §2.6) cannot be asserted: a miss carries the error's name and message only (§4.9). Committed alone, as e2f1b51.
 
 ## Decision concerns
 
