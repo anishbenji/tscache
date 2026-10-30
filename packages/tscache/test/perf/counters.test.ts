@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { candleConfig, MINUTE, series } from "../../bench/fixtures";
 import { Engine } from "../../src/engine/engine";
 import { collect } from "../../src/engine/read";
-import { Orchestrator } from "../../src/orchestrator/orchestrator";
+import type { SlotRange } from "../../src/grid";
+import { Orchestrator, planFetches } from "../../src/orchestrator/orchestrator";
 import { PortClient } from "../../src/rpc/port-client";
 import type { MessagePortLike } from "../../src/rpc/protocol";
 import { RpcServer } from "../../src/rpc/server";
@@ -243,6 +244,56 @@ describe("an orchestrated get", () => {
     // Cache-only: no fetch, one read.
     expect((await readsOf({ cacheOnly: true })).reads).toBe(1);
     expect(served().requests).toHaveLength(2);
+  });
+});
+
+describe("planning fetches over fragmented coverage", () => {
+  // Step 36 R1-1: slots [0, 8191] covered, then every odd slot invalidated,
+  // leaves 4,096 single-slot ranges around 4,096 single-slot gaps.
+  const grid = { interval: 10, alignmentOffset: 0 };
+  const fragments = (): SlotRange[] =>
+    Array.from({ length: 4096 }, (_, i) => ({ start: 2 * i, end: 2 * i }));
+  /** `ranges`, with every element read counted in `count.reads`. */
+  function counted(ranges: SlotRange[], count: { reads: number }) {
+    return new Proxy(ranges, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^\d+$/.test(key)) count.reads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+  }
+
+  it("reads each covered range a few times, not once per gap", () => {
+    const count = { reads: 0 };
+    const wanted = planFetches(
+      { start: 0, end: 8191 },
+      counted(fragments(), count),
+      counted([], count),
+      grid,
+    );
+    // Every gap extended one slot into its neighbours: one fetch.
+    expect(wanted).toEqual([{ start: 0, end: 8191 }]);
+    // A sweep to find the gaps and one to extend them: a few reads per
+    // range (measured 28,671, 7 per range). Pairwise work read 16,789,503.
+    expect(count.reads).toBeLessThanOrEqual(8 * 4096);
+  });
+
+  it("subtracts the ranges already failed in one sweep too", () => {
+    const count = { reads: 0 };
+    // A second pass after a fence drop: the first half's gaps failed.
+    const blocked = Array.from({ length: 2048 }, (_, i) => ({
+      start: 2 * i + 1,
+      end: 2 * i + 1,
+    }));
+    const wanted = planFetches(
+      { start: 0, end: 8191 },
+      counted(fragments(), count),
+      counted(blocked, count),
+      grid,
+    );
+    expect(wanted).toEqual([{ start: 4096, end: 8191 }]);
+    // Measured 26,622; pairwise work read 20,979,711.
+    expect(count.reads).toBeLessThanOrEqual(8 * (4096 + 2048));
   });
 });
 

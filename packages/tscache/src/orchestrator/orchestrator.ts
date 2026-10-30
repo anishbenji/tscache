@@ -59,41 +59,74 @@ function safeSlot(slot: number, grid: Grid): boolean {
   return Number.isSafeInteger(slot) && Number.isSafeInteger(msOf(slot, grid));
 }
 
-/** `range` minus every range in `cuts`, as ascending pieces. */
-function subtract(range: SlotRange, cuts: SlotRange[]): SlotRange[] {
-  let pieces: SlotRange[] = [range];
-  for (const cut of cuts) {
-    pieces = pieces.flatMap((p) => {
-      if (!overlaps(p, cut)) return [p];
-      const out: SlotRange[] = [];
-      if (p.start < cut.start) out.push({ start: p.start, end: cut.start - 1 });
-      if (p.end > cut.end) out.push({ start: cut.end + 1, end: p.end });
-      return out;
-    });
+/**
+ * `pieces` (ascending, disjoint) minus `cuts` (ascending by start), as
+ * ascending pieces, in one sweep: a cut that ends before a piece starts
+ * cannot touch any later piece, so it is passed once.
+ */
+function without(
+  pieces: readonly SlotRange[],
+  cuts: readonly SlotRange[],
+): SlotRange[] {
+  const out: SlotRange[] = [];
+  let first = 0;
+  for (const piece of pieces) {
+    first = endingFrom(cuts, first, piece.start);
+    let start = piece.start;
+    for (let k = first; k < cuts.length; k++) {
+      const cut = cuts[k] as SlotRange;
+      if (cut.start > piece.end) break;
+      if (cut.start > start) out.push({ start, end: cut.start - 1 });
+      start = Math.max(start, cut.end + 1);
+    }
+    if (start <= piece.end) out.push({ start, end: piece.end });
   }
-  return pieces;
+  return out;
+}
+
+/** The first index from `from` on whose range ends at or after `slot`. */
+function endingFrom(
+  ranges: readonly SlotRange[],
+  from: number,
+  slot: number,
+): number {
+  let i = from;
+  while (i < ranges.length && (ranges[i] as SlotRange).end < slot) i++;
+  return i;
+}
+
+/** The first index from `from` on whose range starts after `slot`. */
+function startingAfter(
+  ranges: readonly SlotRange[],
+  from: number,
+  slot: number,
+): number {
+  let i = from;
+  while (i < ranges.length && (ranges[i] as SlotRange).start <= slot) i++;
+  return i;
 }
 
 /**
  * The slot ranges to fetch for the uncached misses: adjacent misses merge,
  * and a miss abutting a covered slot is extended one slot into it (locked:
  * the one-point overlap aids range merge), never beyond the safe domain.
+ * Both lists ascending: one cursor finds each miss's neighbours.
  */
 export function coalesce(
   misses: SlotRange[],
-  coverage: SlotRange[],
+  coverage: readonly SlotRange[],
   grid: Grid,
 ): SlotRange[] {
   const out: SlotRange[] = [];
+  let next = 0;
   for (const miss of misses) {
     let { start, end } = miss;
-    if (
-      safeSlot(start - 1, grid) &&
-      coverage.some((c) => c.end === start - 1)
-    ) {
+    next = endingFrom(coverage, next, start - 1);
+    if (safeSlot(start - 1, grid) && coverage[next]?.end === start - 1) {
       start -= 1;
     }
-    if (safeSlot(end + 1, grid) && coverage.some((c) => c.start === end + 1)) {
+    const after = startingAfter(coverage, next, end);
+    if (safeSlot(end + 1, grid) && coverage[after]?.start === end + 1) {
       end += 1;
     }
     const last = out.at(-1);
@@ -104,6 +137,24 @@ export function coalesce(
     }
   }
   return out;
+}
+
+/**
+ * The coalesced slot ranges to fetch for `request`: its slots outside the
+ * coverage `around` it (ascending, disjoint, and one slot beyond the
+ * request at each end), minus `blocked` (ascending), coalesced. Linear in
+ * the number of ranges: coverage can hold thousands of fragments (step 36
+ * R1-1).
+ */
+export function planFetches(
+  request: SlotRange,
+  around: readonly SlotRange[],
+  blocked: readonly SlotRange[],
+  grid: Grid,
+): SlotRange[] {
+  const open = without(without([request], around), blocked);
+  if (open.length === 0) return [];
+  return coalesce(open, around, grid);
 }
 
 export class Orchestrator {
@@ -321,9 +372,7 @@ export class Orchestrator {
     const around = this.#engine
       .coverage(cacheId, toMs(probe, grid))
       .map((r) => snapOut(r, grid));
-    const open = subtract(request, around).flatMap((m) => subtract(m, blocked));
-    if (open.length === 0) return [];
-    return coalesce(open, around, grid);
+    return planFetches(request, around, blocked, grid);
   }
 
   /**
