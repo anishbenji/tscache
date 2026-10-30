@@ -35,9 +35,18 @@ done
 if [[ ${#files[@]} -eq 0 ]] && $all; then
   while IFS= read -r file; do files+=("$file"); done < <(git ls-files -- '*.test.ts' '*.spec.ts')
 elif [[ ${#files[@]} -eq 0 ]]; then
+  # Resolved and listed by checked commands first: a failure inside the
+  # process substitution below would not stop the script, and a mistyped
+  # base would look like a branch with no test changes.
+  if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+    echo "flake-hunt: unknown base '$base'" >&2
+    exit 1
+  fi
+  fork=$(git merge-base "$base" HEAD)
+  changed=$(git diff --name-only "$fork" -- '*.test.ts' '*.spec.ts')
   while IFS= read -r file; do
-    [[ -f $file ]] && files+=("$file")
-  done < <(git diff --name-only "$(git merge-base "$base" HEAD)" -- '*.test.ts' '*.spec.ts')
+    [[ -n $file && -f $file ]] && files+=("$file")
+  done <<<"$changed"
 fi
 if [[ ${#files[@]} -eq 0 ]]; then
   echo "flake-hunt: no test files changed since $base"

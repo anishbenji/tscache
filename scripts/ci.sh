@@ -19,6 +19,7 @@ bun install --frozen-lockfile
 bash .claude/hooks/guard-bash.test.sh
 bash scripts/commitlint-config.test.sh
 bash scripts/review-watch.test.sh
+bash scripts/flake-hunt.test.sh
 # With no usable scratch directory the test must stop, never touch the
 # real review script (step 14 R9-1).
 before=$(git hash-object scripts/codex-review.sh)
