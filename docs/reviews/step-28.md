@@ -1,6 +1,6 @@
 # Chore 28 — Test reliability
 
-Branch: `chore/28-test-reliability` · Reviewer: Codex (high) · Rounds: 2 · Status: round 2 fixed · Verdict after triage: merge
+Branch: `chore/28-test-reliability` · Reviewer: Codex (high) · Rounds: 3 · Status: round 3 fixed · Verdict after triage: merge
 
 The user's priority request of 2026-10-30: fix every flaky test at its root and change how tests are written so flakes cannot come back. Two flakes have branches of their own, kept independent of this one: fix 31 (reads ending mid-bar in the reference clients) and fix 32 (the sampler's timing test). Done by a child agent while the user was away, under the user's grant of 2026-10-30.
 
@@ -34,6 +34,7 @@ Failures not tied to a diff, from `docs/reviews/` and from stress runs of the wh
 | ecfa841 | `test`: Vitest back to its default 5 s timeout (below) |
 | a260053, 64d5e61, 89eb6cb | Round 1 fixes (R1-1, R1-2, R1-3). The branch was rebased onto 15fa506; R1-1's fix sits before b6e0eb4 so that every commit passes the check |
 | ace8183, 312b698 | Round 2 fixes (R2-1, R2-2, and the clock-ok sweep). The branch was rebased onto 86122d1 |
+| 2a2d99d, 94887db | Round 3 fixes (R3-1; R3-2 and the restructured flake-hunt input handling) |
 
 ## Decisions
 
@@ -76,6 +77,16 @@ R1-1 to R1-3 confirmed fixed.
 | R2-1 | P1 | `flake-hunt.sh` given a mistyped test file selects nothing, and Vitest's `passWithNoTests` passes every run of nothing | accepted | Reproduced by two new cases in `scripts/flake-hunt.test.sh`: a missing file and an existing `.test.ts` outside Vitest's include globs both exited 0 with "0 failures". Fixed in 312b698: files given by hand must exist (exit 1 naming the file), and a Vitest run whose JSON report counts no test fails the hunt ("ran no tests"). Playwright already fails when it finds no test. All four cases of the script's test pass; a real file still hunts normally |
 | R2-2 | P1 | The abandoned-handshake test in `client.test.ts` relied on a 60 ms attach timer expiring after a 20 ms handshake timeout; a pause over 40 ms between scheduling them reverses the order, and its `clock-ok` reason said it could not | accepted | Reproduced: a 100 ms busy pause injected in the fake worker's constructor, after scheduling the attach, failed the old test (an init was sent). Fixed in ace8183: the fake worker attaches only when the test calls it, after `make()` has fallen back, so the hello is late by construction. With the same pause injected the new test passes; with the client no longer closing the abandoned port it still fails |
 | — | — | Sweep of every `clock-ok` reason for the same class (a reason resting on timer order, not on something the test controls) | done in ace8183 | `e2e/support.ts` `expectWorkerAlive` raced the worker's answer against a 5 s guard, which a slow enough machine could lose: the guard is now three quarters of the test's own time limit, so it fires no sooner than the test's timeout would. The fake worker's zero-delay error timer in `client.test.ts` is queued before the client's longer handshake timer, so no pause can reorder them: sound, its reason now says why. The rest hold: zero-delay turns that only drain microtasks (`lifetime`, `rpc`, `connection`, the refresh harness), equal zero timers that run in the order queued (`e2e/support.ts` mode fallback), absence checks a slow machine can only make pass, and elapsed time used as an upper bound in the polling spec |
+
+## Round 3 — reviewer verdict: merge after fixes
+
+R1-1 to R2-2 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P1 | `expectWorkerAlive`'s guard is three quarters of the test's limit measured from the call, so a call at 1 s of a 30 s test gives up at 23.5 s and a worker answering at 24 s fails; round 2's claim that it fires no sooner than the test timeout was wrong | accepted | Validated by the arithmetic: the guard starts at the call, the test's limit at the test's start. Fixed in 2a2d99d: no guard; the cache-only get runs in a named `test.step`, and a dead worker ends at the test's own timeout, which reports the step. Swept every e2e `clock-ok` line for a guard racing a deadline: none left (the rest are absence pauses, a zero-delay turn, equal zero timers in queue order, and an elapsed upper bound) |
+| R3-2 | P1 | `flake-hunt.sh -n 0` skips every run, prints "0 failures in 0 runs" and exits 0 | accepted | Reproduced on 312b698: counts of `0`, `-1` and `abc`, and a non-test file (`README.md`), all exited 0. Fixed in 94887db with the restructuring below |
+| — | — | **Convergence check (docs/workflow.md, step 7) fired on flake-hunt's input handling**: R1-3 (unknown base), R2-1 (mistyped file) and R3-2 (zero count) | restructured, not patched | 94887db: every input is parsed and validated before anything runs, exiting 1 with a message naming the bad input (run and worker counts are positive integers, every option has its value, unknown options are refused, the base resolves, files, `--base` and `--all` exclude each other, every file exists and is a `.test.ts` or `.spec.ts`), and a final invariant fails any hunt that executed no test, whatever path led there (Vitest reports and Playwright's summary are counted; "no changed test files" now fails too). `scripts/flake-hunt.test.sh` has 15 cases: zero, negative, non-numeric and missing counts; zero and non-numeric worker counts; an unknown base; base with files and with `--all`; a missing file; a non-test file; an unknown option; nothing to hunt in; a file that executes no test; and a real file that passes. All 15 pass |
 
 ## Contract-test changes
 
