@@ -56,7 +56,7 @@ Playwright retries stay at 0 and Vitest has none, so a flake fails the run it ha
 
 ## Finding flakes
 
-`scripts/flake-hunt.sh` runs test files many times: each Vitest run in a fresh process, as CI runs them, and each Playwright test with `--repeat-each`, one worker and no retries. `--load` keeps every core busy meanwhile. Without files it takes the test files the branch changed since `main`; `--all` takes every test file.
+`scripts/flake-hunt.sh` runs test files many times: each Vitest run in a fresh process, as CI runs them, and each Playwright test with `--repeat-each`, one worker and no retries. `--load` keeps every core busy meanwhile. Without files it takes the test files the branch changed since `main` (or `--base`); `--all` takes every test file. It checks every input before running anything and fails on a bad one, and it fails a hunt that executed no test, so a typo cannot pass as a clean result.
 
 ```bash
 scripts/flake-hunt.sh -n 20 --load packages/tscache/test/orchestrator.test.ts
