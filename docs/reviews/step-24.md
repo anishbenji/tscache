@@ -8,8 +8,8 @@ Records the two calibrations of the timing gate on GitHub's runner (`bench-calib
 
 | Commit | What |
 |---|---|
-| 2ed72ab | First calibration, main at `0797cb5`: Bun passes except `read-year` at 25 % (84 %); Chromium too noisy to judge. Verdict: the gate stays report-only, with the three steps before it can block |
-| (this commit) | Recalibration on main at `f2a6020`, after step 22: no false alarm in either runtime; Bun catches every 25 % slowdown in six cases, `append-bars` and `snapshot-roundtrip` 89 %, `read-year` 17 %; Chromium catches four cases fully. Verdict: still report-only; next, why the injected slowdown in `read-year` measures smaller than injected |
+| 22bbb8e | First calibration, main at `0797cb5`: Bun passes except `read-year` at 25 % (84 %); Chromium too noisy to judge. Verdict: the gate stays report-only, with the three steps before it can block |
+| 7b67216 | Recalibration on main at `f2a6020`, after step 22: no false alarm in either runtime; Bun catches every 25 % slowdown in six cases, `append-bars` and `snapshot-roundtrip` 89 %, `read-year` 17 %; Chromium catches four cases fully. Verdict: still report-only; next, why the injected slowdown in `read-year` measures smaller than injected |
 
 ## Evidence
 
