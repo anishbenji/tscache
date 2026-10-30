@@ -7,8 +7,11 @@ import {
   type ColumnsInput,
   decodeColumns,
   encodeColumns,
+  fromColumns,
+  fromJson,
   isColumnsType,
-  joinColumns,
+  joinPages,
+  type NormalPage,
 } from "../src/columns";
 
 const T0 = Date.UTC(2026, 5, 1);
@@ -362,97 +365,222 @@ describe("acceptsColumns", () => {
   });
 });
 
-describe("joinColumns", () => {
-  const page = (dtypes: Record<string, Dtype>, start: number, n: number) => {
-    const timestamps = Array.from(
-      { length: n },
-      (_, i) => T0 + (start + i) * MINUTE,
-    );
-    const fields = Object.fromEntries(
-      Object.keys(dtypes).map((name) => [
-        name,
-        timestamps.map((_, i) => (start + i) * 100),
-      ]),
-    );
-    return decodeColumns(body(encodeColumns({ timestamps, fields, dtypes })));
-  };
+/** A value each dtype holds exactly, other than the JSON page's. */
+const EXACT: Record<Dtype, number> = {
+  f64: 0.1,
+  f32: Math.fround(1.1),
+  i32: -2_000_000_000,
+  u32: 4_000_000_000,
+  i16: -30_000,
+  u16: 60_000,
+  i8: -100,
+  u8: 200,
+};
+/** A JSON value no integer dtype above holds: widening must keep it. */
+const JSON_VALUE = 70_000.25;
 
-  it("returns a single page's views as they are", () => {
-    const only = page({ close: "f64" }, 0, 3);
-    const joined = joinColumns([only]);
-    expect(joined.timestamps).toBe(only.timestamps);
-    expect(joined.fields.close).toBe(only.fields.close);
-  });
-
-  it("joins pages into one array of each column's dtype", () => {
-    const dtypes: Record<string, Dtype> = { close: "f64", volume: "u16" };
-    const joined = joinColumns([page(dtypes, 0, 2), page(dtypes, 2, 3)]);
-    expect([...joined.timestamps]).toEqual(
-      [0, 1, 2, 3, 4].map((i) => T0 + i * MINUTE),
-    );
-    expect(joined.fields.volume).toBeInstanceOf(Uint16Array);
-    expect([...(joined.fields.volume ?? [])]).toEqual([0, 100, 200, 300, 400]);
-    expect([...(joined.fields.close ?? [])]).toEqual([0, 100, 200, 300, 400]);
-  });
-
-  it("refuses pages whose columns differ in dtype, rather than convert", () => {
-    // A u16 value written into the first page's u8 array would wrap: 300
-    // becomes 44.
-    const pages = [page({ volume: "u8" }, 0, 1), page({ volume: "u16" }, 3, 1)];
-    expect(() => joinColumns(pages)).toThrow(ColumnsError);
-    expect(() => joinColumns(pages)).toThrow(/columns differ/);
-  });
-
-  it("refuses pages whose columns differ in name or order", () => {
-    const ab = page({ a: "f64", b: "f64" }, 0, 1);
-    for (const other of [
-      page({ a: "f64" }, 1, 1),
-      page({ b: "f64", a: "f64" }, 1, 1),
-      page({ a: "f64", c: "f64" }, 1, 1),
-      page({ a: "f64", b: "f64", c: "f64" }, 1, 1),
-    ]) {
-      expect(() => joinColumns([ab, other])).toThrow(ColumnsError);
-    }
-  });
-
-  it("refuses no pages at all", () => {
-    expect(() => joinColumns([])).toThrow(ColumnsError);
-  });
-
-  /** A one-point page of these columns, every value 1. */
-  const pageOf = (schema: readonly [string, Dtype][], t: number) =>
+/** A one-point page of these columns, through a columns body. */
+function binaryPage(
+  schema: readonly (readonly [string, Dtype, number])[],
+  t: number,
+): NormalPage {
+  return fromColumns(
     decodeColumns(
       body(
         encodeColumns({
           timestamps: [T0 + t * MINUTE],
-          fields: Object.fromEntries(schema.map(([name]) => [name, [1]])),
-          dtypes: Object.fromEntries(schema),
+          fields: Object.fromEntries(schema.map(([name, , v]) => [name, [v]])),
+          dtypes: Object.fromEntries(
+            schema.map(([name, dtype]) => [name, dtype]),
+          ),
         }),
       ),
+    ),
+  );
+}
+
+/** The same page shape as JSON delivers it, parsed from text. */
+function jsonPage(
+  schema: readonly (readonly [string, number])[],
+  t: number,
+): NormalPage {
+  const fields = `{${schema.map(([name, v]) => `${JSON.stringify(name)}:[${v}]`).join(",")}}`;
+  return fromJson(
+    JSON.parse(`{"timestamps":[${T0 + t * MINUTE}],"fields":${fields}}`),
+  );
+}
+
+describe("joinPages", () => {
+  it("returns a single page's columns as they are", () => {
+    const decoded = decodeColumns(
+      body(encodeColumns(input({ close: ["f64", [1, 2]] }))),
     );
+    const joined = joinPages([fromColumns(decoded)]);
+    expect(joined.timestamps).toBe(decoded.timestamps);
+    expect(joined.fields.close).toBe(decoded.fields.close);
+    const json = jsonPage([["close", 3]], 0);
+    expect(joinPages([json]).fields.close).toEqual([3]);
+  });
+
+  it("joins one dtype throughout as that dtype", () => {
+    for (const [dtype, value] of Object.entries(EXACT) as [Dtype, number][]) {
+      const joined = joinPages([
+        binaryPage([["x", dtype, value]], 0),
+        binaryPage([["x", dtype, value]], 1),
+      ]);
+      const kind = decodeColumns(
+        body(encodeColumns(input({ x: [dtype, [value]] }))),
+      ).fields.x?.constructor;
+      expect(joined.fields.x?.constructor, dtype).toBe(kind);
+      expect([...(joined.fields.x ?? [])]).toEqual([value, value]);
+      expect(joined.timestamps).toBeInstanceOf(Float64Array);
+    }
+  });
+
+  it("joins JSON numbers throughout as numbers", () => {
+    const joined = joinPages([
+      jsonPage([["x", 1.5]], 0),
+      jsonPage([["x", 2]], 1),
+    ]);
+    expect(joined.fields.x).toEqual([1.5, 2]);
+    expect(Array.isArray(joined.timestamps)).toBe(true);
+  });
+
+  it("widens a binary and a JSON page to float64, in either order, for every dtype (R3-1)", () => {
+    for (const [dtype, value] of Object.entries(EXACT) as [Dtype, number][]) {
+      const binary = binaryPage([["x", dtype, value]], 0);
+      const json = jsonPage([["x", JSON_VALUE]], 1);
+      for (const [order, pages, expected] of [
+        ["binary, JSON", [binary, json], [value, JSON_VALUE]],
+        ["JSON, binary", [json, binary], [JSON_VALUE, value]],
+      ] as const) {
+        const joined = joinPages(pages);
+        expect(joined.fields.x, `${dtype} ${order}`).toBeInstanceOf(
+          Float64Array,
+        );
+        expect([...(joined.fields.x ?? [])], `${dtype} ${order}`).toEqual(
+          expected,
+        );
+        expect(joined.timestamps).toBeInstanceOf(Float64Array);
+      }
+    }
+  });
+
+  it("widens two binary dtypes to float64 rather than narrow (R1-1)", () => {
+    // Joined into the first page's u8 array, the u16 300 would read as 44.
+    const joined = joinPages([
+      binaryPage([["volume", "u8", 1]], 0),
+      binaryPage([["volume", "u16", 300]], 1),
+    ]);
+    expect(joined.fields.volume).toBeInstanceOf(Float64Array);
+    expect([...(joined.fields.volume ?? [])]).toEqual([1, 300]);
+    // Every pair of dtypes, each value kept exactly.
+    for (const [a, va] of Object.entries(EXACT) as [Dtype, number][]) {
+      for (const [b, vb] of Object.entries(EXACT) as [Dtype, number][]) {
+        if (a === b) continue;
+        const pair = joinPages([
+          binaryPage([["x", a, va]], 0),
+          binaryPage([["x", b, vb]], 1),
+        ]);
+        expect([...(pair.fields.x ?? [])], `${a} + ${b}`).toEqual([va, vb]);
+      }
+    }
+  });
+
+  it("refuses a JSON column that holds anything but numbers", () => {
+    // JSON.stringify writes NaN as null; set() would store it as 0.
+    for (const text of [
+      '{"timestamps":[1],"fields":{"x":[null]}}',
+      '{"timestamps":[1],"fields":{"x":["1"]}}',
+      '{"timestamps":[1],"fields":{"x":1}}',
+      '{"timestamps":[null],"fields":{}}',
+      '{"timestamps":[1]}',
+      '{"fields":{}}',
+      "[]",
+    ]) {
+      expect(() => fromJson(JSON.parse(text)), text).toThrow(ColumnsError);
+    }
+  });
+
+  it("refuses pages whose columns differ in name or order", () => {
+    const ab = binaryPage(
+      [
+        ["a", "f64", 1],
+        ["b", "f64", 1],
+      ],
+      0,
+    );
+    for (const other of [
+      binaryPage([["a", "f64", 1]], 1),
+      binaryPage(
+        [
+          ["b", "f64", 1],
+          ["a", "f64", 1],
+        ],
+        1,
+      ),
+      jsonPage(
+        [
+          ["b", 1],
+          ["a", 1],
+        ],
+        1,
+      ),
+      jsonPage(
+        [
+          ["a", 1],
+          ["c", 1],
+        ],
+        1,
+      ),
+      jsonPage(
+        [
+          ["a", 1],
+          ["b", 1],
+          ["c", 1],
+        ],
+        1,
+      ),
+    ]) {
+      expect(() => joinPages([ab, other])).toThrow(/columns differ/);
+    }
+  });
+
+  it("refuses no pages at all", () => {
+    expect(() => joinPages([])).toThrow(ColumnsError);
+  });
 
   it("refuses names built to collide with a delimited signature (R2-1)", () => {
     // Joined as `name:dtype` with NUL between columns, both schemas read
     // "a:u8\0a:u8\0a:u16"; a u16 300 then narrowed to the u8 44.
     const odd = "a:u8\u0000a";
-    const first = pageOf(
+    const first = binaryPage(
       [
-        ["a", "u8"],
-        [odd, "u16"],
+        ["a", "u8", 1],
+        [odd, "u16", 2],
       ],
       0,
     );
-    const second = pageOf(
+    const second = binaryPage(
       [
-        [odd, "u8"],
-        ["a", "u16"],
+        [odd, "u8", 3],
+        ["a", "u16", 300],
       ],
       1,
     );
-    expect(() => joinColumns([first, second])).toThrow(ColumnsError);
+    expect(() => joinPages([first, second])).toThrow(ColumnsError);
+    // As JSON, the same names, so the same refusal.
+    const json = jsonPage(
+      [
+        [odd, 3],
+        ["a", 300],
+      ],
+      1,
+    );
+    expect(() => joinPages([first, json])).toThrow(ColumnsError);
   });
 
-  it("refuses every schema that differs, whatever its names hold (property)", () => {
+  it("joins exactly what its pages hold, or refuses them, whatever the names, dtypes and formats (property)", () => {
     type Schema = [string, Dtype][];
     // Names from characters that delimit, quote or escape in a signature
     // or in the JSON header; schemas of one to three columns.
@@ -468,7 +596,7 @@ describe("joinColumns", () => {
       "u8",
       "f64",
     ];
-    const dtypes: Dtype[] = ["u8", "u16", "f64"];
+    const dtypes = Object.keys(EXACT) as Dtype[];
     // mulberry32, seeded: the same 2,000 cases on every run.
     let seed = 42;
     const random = (n: number) => {
@@ -498,7 +626,7 @@ describe("joinColumns", () => {
       const column = next[random(next.length)] as [string, Dtype];
       switch (random(3)) {
         case 0:
-          column[1] = dtypes[(dtypes.indexOf(column[1]) + 1) % 3] as Dtype;
+          column[1] = dtypes[(dtypes.indexOf(column[1]) + 1) % 8] as Dtype;
           return next;
         case 1:
           return next.reverse();
@@ -509,8 +637,7 @@ describe("joinColumns", () => {
     /**
      * R2-1's construction from `of` (given a second column if it has one
      * only): a schema whose first name runs the first two columns together
-     * as a `name:dtype` signature joined with NUL writes them, so the two
-     * schemas' signatures are one string.
+     * as a `name:dtype` signature joined with NUL writes them.
      */
     const collision = (of: Schema): [Schema, Schema] => {
       const a: Schema = of.length > 1 ? of : [...of, [`${of[0]?.[0]}b`, "u16"]];
@@ -521,12 +648,20 @@ describe("joinColumns", () => {
       ];
       return [a, [[`${n1}:${d1}\u0000${n2}`, d2], ...rest]];
     };
-    const same = (a: Schema, b: Schema) =>
-      a.length === b.length &&
-      a.every(([n, d], i) => n === b[i]?.[0] && d === b[i]?.[1]);
-    let refused = 0;
-    let collisions = 0;
-    let joined = 0;
+    /** The page of `columns`, as a columns body or as JSON. */
+    const pageOf = (columns: Schema, t: number, json: boolean) =>
+      json
+        ? jsonPage(
+            columns.map(([n]) => [n, JSON_VALUE]),
+            t,
+          )
+        : binaryPage(
+            columns.map(([n, d]) => [n, d, EXACT[d]]),
+            t,
+          );
+    const sameNames = (a: Schema, b: Schema) =>
+      a.length === b.length && a.every(([n], i) => n === b[i]?.[0]);
+    const counts = { refused: 0, collisions: 0, joined: 0, mixed: 0 };
     for (let run = 0; run < 2000; run++) {
       const kind = random(4);
       const a = schema();
@@ -536,22 +671,46 @@ describe("joinColumns", () => {
           : kind === 1
             ? collision(a)
             : [a, kind === 2 ? a : near(a)];
-      const pages = [pageOf(first, 0), pageOf(second, 1)];
-      if (same(first, second)) {
-        expect(() => joinColumns(pages)).not.toThrow();
-        joined++;
-      } else {
-        expect(
-          () => joinColumns(pages),
-          JSON.stringify([first, second]),
-        ).toThrow(ColumnsError);
-        refused++;
-        if (kind === 1) collisions++;
+      const formats = [random(2) === 1, random(2) === 1] as const;
+      const pages = [
+        pageOf(first, 0, formats[0]),
+        pageOf(second, 1, formats[1]),
+      ];
+      const what = JSON.stringify([first, second, formats]);
+      if (!sameNames(first, second)) {
+        expect(() => joinPages(pages), what).toThrow(ColumnsError);
+        counts.refused++;
+        if (kind === 1) counts.collisions++;
+        continue;
       }
+      // Same names: joined, every value exactly as its page holds it, in
+      // the type the rule table gives.
+      const joined = joinPages(pages);
+      counts.joined++;
+      first.forEach(([column, dtype], i) => {
+        const other = second[i]?.[1] as Dtype;
+        const values = [
+          formats[0] ? JSON_VALUE : EXACT[dtype],
+          formats[1] ? JSON_VALUE : EXACT[other],
+        ];
+        const got = joined.fields[column];
+        expect([...(got ?? [])], what).toEqual(values);
+        if (formats[0] && formats[1])
+          expect(Array.isArray(got), what).toBe(true);
+        else if (!formats[0] && !formats[1] && dtype === other) {
+          expect(got?.constructor, what).toBe(
+            pages[0]?.fields[i]?.values.constructor,
+          );
+        } else {
+          expect(got, what).toBeInstanceOf(Float64Array);
+          counts.mixed++;
+        }
+      });
     }
     // Every outcome was exercised, not one of them only.
-    expect(refused).toBeGreaterThan(800);
-    expect(collisions).toBeGreaterThan(300);
-    expect(joined).toBeGreaterThan(300);
+    expect(counts.refused).toBeGreaterThan(800);
+    expect(counts.collisions).toBeGreaterThan(300);
+    expect(counts.joined).toBeGreaterThan(300);
+    expect(counts.mixed).toBeGreaterThan(300);
   });
 });

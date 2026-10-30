@@ -260,65 +260,108 @@ const RUNS: Record<string, Run> = {
       ),
     );
     check(buffers.size === 1, `one page decoded into ${buffers.size} buffers`);
-    // Pages whose columns differ are refused, not converted: a u16 300
-    // joined into the first page's u8 array would read as 44 (step 42
-    // R1-1), and so would names built to make a delimited signature of the
-    // two schemas alike (R2-1).
+    // The join's rule table (columns.ts), against the guide's fetcher with
+    // the pages served in hand: mixed dtypes and mixed formats widen to
+    // float64 and keep every value (a u16 300 never reads 44: step 42 R1-1;
+    // a range answered partly as JSON still joins: R3-1), and names built to
+    // collide in a delimited signature are refused (R2-1).
+    type Column = [string, Dtype, number];
+    /** A page as a columns body, or as JSON when `json` is set. */
+    const serve = (columns: Column[], t: number, json: boolean) => {
+      const meta = { version: "v1", finalizedUntil: now };
+      const members = t === now ? { meta } : { meta, next: now };
+      const fields = Object.fromEntries(columns.map(([n, , v]) => [n, [v]]));
+      return json
+        ? Response.json({ timestamps: [t], fields, ...members })
+        : new Response(
+            encodeColumns(
+              {
+                timestamps: [t],
+                fields,
+                dtypes: Object.fromEntries(columns.map(([n, d]) => [n, d])),
+              },
+              members,
+            ),
+            { headers: { "content-type": COLUMNS_TYPE } },
+          );
+    };
     const odd = "a:u8\u0000a";
-    const mixtures: [
+    /** What, both pages (columns, JSON?), and the volume or error expected. */
+    const cases: [
       string,
-      [string, Dtype, number][],
-      [string, Dtype, number][],
+      [Column[], boolean],
+      [Column[], boolean],
+      number[] | "refused",
     ][] = [
-      ["u8 then u16 volume", [["volume", "u8", 1]], [["volume", "u16", 300]]],
+      [
+        "u8 then u16",
+        [[["v", "u8", 1]], false],
+        [[["v", "u16", 300]], false],
+        [1, 300],
+      ],
+      [
+        "columns then JSON",
+        [[["v", "u8", 1]], false],
+        [[["v", "f64", 300.5]], true],
+        [1, 300.5],
+      ],
+      [
+        "JSON then columns",
+        [[["v", "f64", 300.5]], true],
+        [[["v", "u8", 1]], false],
+        [300.5, 1],
+      ],
       [
         "colliding names",
         [
-          ["a", "u8", 1],
-          [odd, "u16", 2],
+          [
+            ["a", "u8", 1],
+            [odd, "u16", 2],
+          ],
+          false,
         ],
         [
-          [odd, "u8", 3],
-          ["a", "u16", 300],
+          [
+            [odd, "u8", 3],
+            ["a", "u16", 300],
+          ],
+          false,
         ],
+        "refused",
       ],
     ];
     const pageFetch = globalThis.fetch;
     try {
-      for (const [what, first, second] of mixtures) {
-        const meta = { version: "v1", finalizedUntil: now };
-        const page = (columns: [string, Dtype, number][], t: number) =>
-          encodeColumns(
-            {
-              timestamps: [t],
-              fields: Object.fromEntries(columns.map(([n, , v]) => [n, [v]])),
-              dtypes: Object.fromEntries(columns.map(([n, d]) => [n, d])),
-            },
-            t === now ? { meta } : { meta, next: now },
-          );
-        const pages = [page(first, now - MINUTE), page(second, now)];
-        globalThis.fetch = Object.assign(
-          async () =>
-            new Response(pages.shift(), {
-              headers: { "content-type": COLUMNS_TYPE },
-            }),
-          pageFetch,
-        );
-        const mixed = await columns
+      for (const [
+        what,
+        [first, firstJson],
+        [second, secondJson],
+        expected,
+      ] of cases) {
+        const pages = [
+          serve(first, now - MINUTE, firstJson),
+          serve(second, now, secondJson),
+        ];
+        globalThis.fetch = Object.assign(async () => pages.shift(), pageFetch);
+        const got = await columns
           .fetch({ ...request, range: { start: now - MINUTE, end: now } })
           .then(
             (response: { fields: Record<string, ArrayLike<number>> }) =>
-              JSON.stringify(
-                Object.entries(response.fields).map(([n, v]) => [
-                  n,
-                  Array.from(v),
-                ]),
-              ),
+              response.fields,
             (error: unknown) => error,
           );
+        if (expected === "refused") {
+          check(
+            got instanceof ColumnsError,
+            `pages of ${what} gave ${String(got)}, not a ColumnsError`,
+          );
+          continue;
+        }
+        const volume = (got as Record<string, ArrayLike<number>>).v;
         check(
-          mixed instanceof ColumnsError,
-          `pages of ${what} gave ${String(mixed)}, not a ColumnsError`,
+          volume instanceof Float64Array &&
+            Array.from(volume).join() === expected.join(),
+          `pages of ${what} gave ${got instanceof Error ? got.message : Array.from(volume ?? []).join()}, not Float64Array ${expected.join()}`,
         );
       }
     } finally {

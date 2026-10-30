@@ -347,64 +347,166 @@ export function isColumnsType(contentType: string | null): boolean {
   return contentType !== null && mediaTypeOf(contentType) === COLUMNS_TYPE;
 }
 
-/** The columns of a range fetched in several pages. */
-export interface JoinedColumns {
-  timestamps: Float64Array;
-  fields: Record<string, NumericColumn>;
+// #endregion decode
+
+// #region join
+// A range fetched in pages is joined in two steps, whatever format each
+// page came in: every page is first normalized (fromColumns, fromJson),
+// then the normalized pages are joined (joinPages), one rule for all.
+//
+// How one column joins across pages:
+//
+//   | The pages hold                          | Joined as                  |
+//   |-----------------------------------------|----------------------------|
+//   | one dtype throughout (columns bodies)   | that dtype                 |
+//   | JSON numbers throughout                 | number[]                   |
+//   | anything else: columns and JSON, or     | Float64Array, when every   |
+//   | columns bodies of different dtypes      | dtype involved is exact in |
+//   |                                         | float64; else ColumnsError |
+//
+// Nothing is narrowed or rounded: a u16 300 never lands in a u8 array (it
+// would read 44). Every dtype of this format is exact in float64
+// (EXACT_IN_FLOAT64), and JSON numbers are float64 already, so mixed
+// columns always widen; a dtype added later that is not exact (a 64-bit
+// integer) must be marked false there, and is then refused. Names and their
+// order are compared one by one, never through a string built from them.
+
+/** One column of a page, as its format delivered it. */
+export type PageColumn =
+  | { kind: "typed"; dtype: Dtype; values: NumericColumn }
+  | { kind: "json"; values: number[] };
+
+/** A page's columns in one form, whatever its format: the join's input. */
+export interface NormalPage {
+  timestamps: PageColumn;
+  /** Field names, in the page's order. */
+  names: string[];
+  /** The fields' columns, in the order of `names`. */
+  fields: PageColumn[];
+}
+
+/** Whether each dtype's every value is a float64 exactly. */
+const EXACT_IN_FLOAT64: Readonly<Record<Dtype, boolean>> = {
+  f64: true,
+  f32: true,
+  i32: true,
+  u32: true,
+  i16: true,
+  u16: true,
+  i8: true,
+  u8: true,
+};
+
+/** A decoded columns body, normalized. */
+export function fromColumns(page: DecodedColumns): NormalPage {
+  return {
+    timestamps: { kind: "typed", dtype: "f64", values: page.timestamps },
+    names: page.header.fields.map(({ name }) => name),
+    fields: page.header.fields.map(({ name, dtype }) => ({
+      kind: "typed",
+      dtype,
+      values: page.fields[name] as NumericColumn,
+    })),
+  };
+}
+
+function jsonColumn(value: unknown, what: string): PageColumn {
+  if (!Array.isArray(value) || !value.every((v) => typeof v === "number")) {
+    // JSON writes NaN as null, which a typed array would store as 0.
+    throw new ColumnsError(`${what} is not a list of numbers`);
+  }
+  return { kind: "json", values: value };
 }
 
 /**
- * Whether two pages have the same columns: as many, each with the same name
- * and dtype in the same place. Compared value by value, never through a
- * string built from them, which names holding its delimiters could make
- * alike (step 42 R2-1).
+ * A parsed JSON page (`{ timestamps, fields }`), normalized. Throws
+ * ColumnsError for a column that is not a list of numbers.
  */
-function sameColumns(
-  a: readonly ColumnSpec[],
-  b: readonly ColumnSpec[],
-): boolean {
-  return (
-    a.length === b.length &&
-    a.every((spec, i) => spec.name === b[i]?.name && spec.dtype === b[i]?.dtype)
+export function fromJson(page: unknown): NormalPage {
+  const { timestamps, fields } = (page ?? {}) as Record<string, unknown>;
+  if (typeof fields !== "object" || fields === null || Array.isArray(fields)) {
+    throw new ColumnsError("the JSON page has no fields object");
+  }
+  const names = Object.keys(fields);
+  return {
+    timestamps: jsonColumn(timestamps, "the JSON page's timestamps"),
+    names,
+    fields: names.map((name) =>
+      jsonColumn((fields as Record<string, unknown>)[name], `field "${name}"`),
+    ),
+  };
+}
+
+/** The columns of a range fetched in one or more pages. */
+export interface JoinedPages {
+  timestamps: Float64Array | number[];
+  fields: Record<string, NumericColumn | number[]>;
+}
+
+function sameNames(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((name, i) => name === b[i]);
+}
+
+/** One column from a column of each page, by the rule table above. */
+function joinColumn(parts: readonly PageColumn[]): NumericColumn | number[] {
+  const [first] = parts;
+  if (first === undefined) throw new ColumnsError("no pages to join");
+  if (parts.length === 1) return first.values;
+  if (parts.every((part) => part.kind === "json")) {
+    const joined: number[] = [];
+    // A loop, not push(...values): spreading a long page overflows the stack.
+    for (const part of parts)
+      for (const value of part.values) joined.push(value);
+    return joined;
+  }
+  const dtypes = new Set(
+    parts.map((part) => (part.kind === "typed" ? part.dtype : undefined)),
   );
+  const [only] = dtypes;
+  let Column: ColumnConstructor;
+  if (dtypes.size === 1 && only !== undefined) {
+    Column = COLUMN_TYPES[only];
+  } else {
+    for (const dtype of dtypes) {
+      if (dtype !== undefined && !EXACT_IN_FLOAT64[dtype]) {
+        throw new ColumnsError(`a ${dtype} column cannot widen to f64 exactly`);
+      }
+    }
+    Column = Float64Array;
+  }
+  const joined = new Column(
+    parts.reduce((n, part) => n + part.values.length, 0),
+  );
+  let at = 0;
+  for (const { values } of parts) {
+    joined.set(values, at);
+    at += values.length;
+  }
+  return joined;
 }
 
 /**
- * The pages' columns joined, in page order: one page's views as they are,
- * else one new array per column. Throws ColumnsError when the pages'
- * columns differ in name, order or dtype (sameColumns): a value of one
- * dtype written into another's array would be converted silently (300 into
- * a u8 is 44).
+ * The normalized pages joined, in page order, by the rule table above: one
+ * page's columns as they are, else one new column per field. Throws
+ * ColumnsError when the pages' field names differ, in number, name or
+ * order, or when a column cannot be joined without loss.
  */
-export function joinColumns(pages: readonly DecodedColumns[]): JoinedColumns {
+export function joinPages(pages: readonly NormalPage[]): JoinedPages {
   const [first] = pages;
   if (first === undefined) throw new ColumnsError("no pages to join");
-  const columns = first.header.fields;
-  if (pages.some((page) => !sameColumns(page.header.fields, columns))) {
-    throw new ColumnsError("the pages' columns differ in name, order or dtype");
+  if (pages.some((page) => !sameNames(page.names, first.names))) {
+    throw new ColumnsError("the pages' columns differ in name or order");
   }
-  if (pages.length === 1) {
-    return { timestamps: first.timestamps, fields: first.fields };
-  }
-  const join = (Column: ColumnConstructor, parts: NumericColumn[]) => {
-    const joined = new Column(parts.reduce((n, part) => n + part.length, 0));
-    let at = 0;
-    for (const part of parts) {
-      joined.set(part, at);
-      at += part.length;
-    }
-    return joined;
-  };
   // No prototype, as in decodeColumns.
-  const fields: Record<string, NumericColumn> = Object.create(null);
-  for (const { name, dtype } of first.header.fields) {
-    const parts = pages.map((page) => page.fields[name] as NumericColumn);
-    fields[name] = join(COLUMN_TYPES[dtype], parts);
-  }
-  const timestamps = join(
-    Float64Array,
-    pages.map((page) => page.timestamps),
-  ) as Float64Array;
+  const fields: Record<string, NumericColumn | number[]> = Object.create(null);
+  first.names.forEach((name, i) => {
+    fields[name] = joinColumn(
+      pages.map((page) => page.fields[i] as PageColumn),
+    );
+  });
+  const timestamps = joinColumn(pages.map((page) => page.timestamps)) as
+    | Float64Array
+    | number[];
   return { timestamps, fields };
 }
-// #endregion decode
+// #endregion join

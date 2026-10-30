@@ -4,7 +4,9 @@
 // ids apart (`candles/ACME/30m`). The backend answers in pages; a fetcher
 // must return the whole requested range, so it loops over them. It asks for
 // pages as columns bodies (src/columns.ts), which decode without parsing a
-// number, and reads JSON from a backend that answers JSON anyway.
+// number, and reads JSON from a backend that answers JSON anyway, page by
+// page: each page is normalized as it arrives, and the pages are joined by
+// the one rule table in src/columns.ts, whatever mix of formats they came in.
 
 import {
   AuthInvalidError,
@@ -15,8 +17,11 @@ import {
 import {
   COLUMNS_TYPE,
   decodeColumns,
+  fromColumns,
+  fromJson,
   isColumnsType,
-  type NumericColumn,
+  joinPages,
+  type NormalPage,
 } from "./columns";
 import { type FetchNotice, postFetchNotice } from "./notices";
 
@@ -37,14 +42,15 @@ export interface ExampleContext {
   format?: "columns" | "json";
 }
 
-/** A column of a page: numbers from JSON, a typed array from a columns body. */
-type Column = number[] | NumericColumn;
-
-interface Page {
-  timestamps: number[] | Float64Array;
-  fields: Record<string, Column>;
+/** What the backend's pages carry besides their columns. */
+interface PageMembers {
   meta: { version: string; finalizedUntil: number };
   next?: number;
+}
+
+/** One page: its columns normalized, whatever its format, and its members. */
+interface Page extends PageMembers {
+  columns: NormalPage;
 }
 
 function stringIn(context: unknown, key: keyof ExampleContext) {
@@ -89,46 +95,21 @@ async function fetchPage(
   }
   if (!response.ok) throw new Error(`the backend answered ${response.status}`);
   if (!isColumnsType(response.headers.get("content-type"))) {
-    return (await response.json()) as Page;
+    const body = (await response.json()) as PageMembers;
+    return { columns: fromJson(body), meta: body.meta, ...nextOf(body) };
   }
   // Views over the body: no value is parsed or copied.
-  const { header, timestamps, fields } = decodeColumns(
-    await response.arrayBuffer(),
-  );
+  const decoded = decodeColumns(await response.arrayBuffer());
+  const members = decoded.header as unknown as PageMembers;
   return {
-    timestamps,
-    fields,
-    meta: header.meta as Page["meta"],
-    ...(header.next === undefined ? {} : { next: header.next as number }),
+    columns: fromColumns(decoded),
+    meta: members.meta,
+    ...nextOf(members),
   };
 }
 
-/**
- * One column from a column of each page: the page's own when there is one
- * page, else a new one of the same kind.
- */
-function join<T extends Column>(parts: readonly T[]): T {
-  const [first] = parts;
-  if (first === undefined) throw new Error("no pages to join");
-  if (parts.length === 1) return first;
-  if (parts.some((part) => part.constructor !== first.constructor)) {
-    throw new Error("the pages' columns differ in type");
-  }
-  if (Array.isArray(first)) {
-    const joined: number[] = [];
-    // A loop, not push(...part): spreading a long page overflows the stack.
-    for (const part of parts) for (const value of part) joined.push(value);
-    return joined as T;
-  }
-  const length = parts.reduce((sum, part) => sum + part.length, 0);
-  const Kind = first.constructor as new (length: number) => NumericColumn;
-  const joined = new Kind(length);
-  let at = 0;
-  for (const part of parts as readonly NumericColumn[]) {
-    joined.set(part, at);
-    at += part.length;
-  }
-  return joined as T;
+function nextOf({ next }: PageMembers): { next?: number } {
+  return next === undefined ? {} : { next };
 }
 
 /**
@@ -154,23 +135,11 @@ async function collect(
     if (page.next === undefined) break;
     page = await fetchPage(path, request, page.next);
   }
-  // No prototype, so a field named `constructor` or `__proto__` is a key
-  // like any other rather than an inherited member.
-  const fields: Record<string, Column> = Object.create(null);
-  const names = Object.keys(pages[0]?.fields ?? {});
-  for (const { fields: columns } of pages) {
-    // Name by name: a string joined from the names could make two lists
-    // alike, as ["a\0b"] and ["a", "b"] are once joined with NUL.
-    const own = Object.keys(columns);
-    if (own.length !== names.length || own.some((n, i) => n !== names[i])) {
-      throw new Error("the pages' columns differ in name");
-    }
-  }
-  for (const name of names) {
-    fields[name] = join(pages.map((p) => p.fields[name] as Column));
-  }
+  // One rule for every mix of formats, and names compared one by one
+  // (src/columns.ts, "join").
+  const { timestamps, fields } = joinPages(pages.map((p) => p.columns));
   return {
-    timestamps: join(pages.map((p) => p.timestamps)),
+    timestamps,
     fields,
     meta: { version, finalizedUntil },
   };

@@ -116,9 +116,31 @@ This fetcher is the one at the top of this page, asking for columns:
 <<< @/snippets/fetcher-columns.ts#fetcher{ts}
 
 A range that fits one page is returned as views over the body, with no copy at all; a longer one is
-joined into one array per column, which tscache copies into its segments either way. `joinColumns`
-refuses pages whose columns differ in name, order or dtype, since a value written into another dtype's
-array is converted without a word: a u16 300 joined into a u8 column reads as 44.
+joined into one array per column, which tscache copies into its segments either way.
+
+### Joining pages
+
+The pages of one range need not agree on their format: a backend in the middle of an upgrade can answer
+one page as columns and the next as JSON, and two columns pages can carry a field in different dtypes.
+The fetcher therefore joins in two steps. It normalizes each page as it arrives (`fromColumns`,
+`fromJson`), so that every column is either a typed array of a known dtype or a list of JSON numbers,
+then joins the normalized pages (`joinPages`) by one rule:
+
+| The pages hold | Joined as |
+|---|---|
+| one dtype throughout (columns bodies) | that dtype |
+| JSON numbers throughout | `number[]` |
+| anything else: columns and JSON, or columns of different dtypes | `Float64Array`, when every dtype involved is exact in float64; otherwise a `ColumnsError` |
+
+Nothing is narrowed or rounded. Joining into the first page's array instead would convert silently: a
+u16 300 written into a u8 array reads as 44. Every dtype of this format is exact in float64, and JSON
+numbers are float64 already, so a mixed column always widens; a 64-bit integer dtype, if one were added,
+would be refused rather than rounded. A JSON column holding anything but numbers is refused when the
+page is normalized, since JSON writes `NaN` as `null`, which a typed array would store as 0. Pages whose
+field names differ, in number, name or order, are refused; the names are compared one by one, never
+through a string built from them.
+
+<<< ../../examples/mock-backend/src/columns.ts#join{ts}
 
 ### The decoder
 

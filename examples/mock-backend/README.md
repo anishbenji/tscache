@@ -81,10 +81,13 @@ The body ends with the last column. Because every column starts on an
 8-byte boundary, `decodeColumns` returns typed-array views over the one
 `ArrayBuffer` that `response.arrayBuffer()` gives, with no copy. It throws
 `ColumnsError` for a body that is truncated, longer than its columns, or
-not this format. `joinColumns` joins a range's pages and refuses pages
-whose columns differ in name, order or dtype; `isColumnsType` and
-`acceptsColumns` compare media types without their parameters or case. Integer columns cannot carry `NaN`, so `encodeColumns`
-refuses a value its dtype cannot hold. The fetcher guide on the site
+not this format. `fromColumns` and `fromJson` normalize each page of a
+range, and `joinPages` joins them by one rule table (in the code and the
+guide): one dtype stays that dtype, JSON stays numbers, and any mix of
+formats or dtypes widens to float64, never narrows; pages whose field
+names differ are refused. `isColumnsType` and `acceptsColumns` compare
+media types without their parameters or case. Integer columns cannot
+carry `NaN`, so `encodeColumns` refuses a value its dtype cannot hold. The fetcher guide on the site
 explains the format and when to use it.
 
 ## Fetcher

@@ -1,3 +1,4 @@
+import type { Dtype } from "tscache";
 import { isAuthInvalidError } from "tscache";
 import type { FetchRequest } from "tscache/fetcher";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -160,25 +161,132 @@ describe("fetcher", () => {
     }
   });
 
-  it("refuses a u8 page followed by a u16 page rather than wrap 300 to 44", async () => {
-    const page = (dtype: "u8" | "u16", value: number, next?: number) =>
-      new Response(
-        encodeColumns(
-          {
-            timestamps: [next === undefined ? START + MINUTE : START],
-            fields: { volume: [value] },
-            dtypes: { volume: dtype },
-          },
-          {
-            meta: { version: "v1", finalizedUntil: NOW },
-            ...(next === undefined ? {} : { next }),
-          },
-        ),
-        { headers: { "content-type": COLUMNS_TYPE } },
-      );
-    const pages = [page("u8", 1, START + MINUTE), page("u16", 300)];
+  /** One page as a columns body: `fields` maps a name to its dtype and value. */
+  function columnsPage(
+    t: number,
+    fields: Record<string, [Dtype, number]>,
+    next?: number,
+  ): Response {
+    return new Response(
+      encodeColumns(
+        {
+          timestamps: [t],
+          fields: Object.fromEntries(
+            Object.entries(fields).map(([n, [, v]]) => [n, [v]]),
+          ),
+          dtypes: Object.fromEntries(
+            Object.entries(fields).map(([n, [d]]) => [n, d]),
+          ),
+        },
+        {
+          meta: { version: "v1", finalizedUntil: NOW },
+          ...(next === undefined ? {} : { next }),
+        },
+      ),
+      { headers: { "content-type": COLUMNS_TYPE } },
+    );
+  }
+
+  /** One page as JSON. */
+  function jsonPage(
+    t: number,
+    fields: Record<string, number>,
+    next?: number,
+  ): Response {
+    return Response.json({
+      timestamps: [t],
+      fields: Object.fromEntries(
+        Object.entries(fields).map(([n, v]) => [n, [v]]),
+      ),
+      meta: { version: "v1", finalizedUntil: NOW },
+      ...(next === undefined ? {} : { next }),
+    });
+  }
+
+  async function fetchPages(pages: Response[]) {
     vi.stubGlobal("fetch", async () => pages.shift());
-    await expect(fetcher.fetch(request())).rejects.toThrow(/columns differ/);
+    return fetcher.fetch(request());
+  }
+
+  it("joins a columns page and a JSON page in either order (R3-1)", async () => {
+    // A backend mid-upgrade answers one page in each format.
+    for (const pages of [
+      [
+        columnsPage(0, { close: ["f64", 1] }, 60_000),
+        jsonPage(60_000, { close: 2 }),
+      ],
+      [
+        jsonPage(0, { close: 1 }, 60_000),
+        columnsPage(60_000, { close: ["f64", 2] }),
+      ],
+    ]) {
+      const response = await fetchPages(pages);
+      expect(response.timestamps).toBeInstanceOf(Float64Array);
+      expect([...response.timestamps]).toEqual([0, 60_000]);
+      expect(response.fields.close).toBeInstanceOf(Float64Array);
+      expect([...(response.fields.close as Float64Array)]).toEqual([1, 2]);
+    }
+  });
+
+  it("widens every dtype joined with a JSON page to float64, keeping each value", async () => {
+    const exact: Record<Dtype, number> = {
+      f64: 0.1,
+      f32: Math.fround(1.1),
+      i32: -2_000_000_000,
+      u32: 4_000_000_000,
+      i16: -30_000,
+      u16: 60_000,
+      i8: -100,
+      u8: 200,
+    };
+    for (const [dtype, value] of Object.entries(exact) as [Dtype, number][]) {
+      const binaryFirst = await fetchPages([
+        columnsPage(START, { x: [dtype, value] }, START + MINUTE),
+        jsonPage(START + MINUTE, { x: 70_000.25 }),
+      ]);
+      expect([...(binaryFirst.fields.x as Float64Array)], dtype).toEqual([
+        value,
+        70_000.25,
+      ]);
+      const jsonFirst = await fetchPages([
+        jsonPage(START, { x: 70_000.25 }, START + MINUTE),
+        columnsPage(START + MINUTE, { x: [dtype, value] }),
+      ]);
+      expect([...(jsonFirst.fields.x as Float64Array)], dtype).toEqual([
+        70_000.25,
+        value,
+      ]);
+    }
+  });
+
+  it("widens a u8 page and a u16 page to float64 rather than wrap 300 to 44", async () => {
+    const response = await fetchPages([
+      columnsPage(START, { volume: ["u8", 1] }, START + MINUTE),
+      columnsPage(START + MINUTE, { volume: ["u16", 300] }),
+    ]);
+    expect(response.fields.volume).toBeInstanceOf(Float64Array);
+    expect([...(response.fields.volume as Float64Array)]).toEqual([1, 300]);
+  });
+
+  it("joins pages of one dtype as that dtype", async () => {
+    const response = await fetchPages([
+      columnsPage(START, { volume: ["u16", 1] }, START + MINUTE),
+      columnsPage(START + MINUTE, { volume: ["u16", 300] }),
+    ]);
+    expect(response.fields.volume).toBeInstanceOf(Uint16Array);
+    expect([...(response.fields.volume as Uint16Array)]).toEqual([1, 300]);
+  });
+
+  it("refuses a JSON page that holds anything but numbers", async () => {
+    // JSON writes NaN as null, which a float64 array would store as 0.
+    const page = new Response(
+      `{"timestamps":[${START + MINUTE}],"fields":{"x":[null]},"meta":{"version":"v1","finalizedUntil":${NOW}}}`,
+    );
+    const error = await fetchPages([
+      columnsPage(START, { x: ["f64", 1] }, START + MINUTE),
+      page,
+    ]).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ColumnsError);
   });
 
   it("refuses pages whose field names only join to the same text", async () => {
@@ -196,23 +304,6 @@ describe("fetcher", () => {
       page({ "a\u0000b": [1] }, START + MINUTE),
       page({ a: [2], b: [3] }),
     ];
-    vi.stubGlobal("fetch", async () => pages.shift());
-    await expect(fetcher.fetch(request())).rejects.toThrow(/columns differ/);
-  });
-
-  it("refuses pages whose columns disagree", async () => {
-    const page = (dtype: "f64" | "f32", next?: number) =>
-      new Response(
-        encodeColumns(
-          { timestamps: [START], fields: { cpu: [1] }, dtypes: { cpu: dtype } },
-          {
-            meta: { version: "v1", finalizedUntil: NOW },
-            ...(next === undefined ? {} : { next }),
-          },
-        ),
-        { headers: { "content-type": COLUMNS_TYPE } },
-      );
-    const pages = [page("f64", START + MINUTE), page("f32")];
     vi.stubGlobal("fetch", async () => pages.shift());
     await expect(fetcher.fetch(request())).rejects.toThrow(/columns differ/);
   });
