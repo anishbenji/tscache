@@ -104,9 +104,7 @@ test("the panel's Expire token makes an open page refresh its token", async ({
   await expect
     .poll(() => count(hub, app, "refreshes"), { timeout: 15_000 })
     .toBeGreaterThan(before);
-  // Back to ok by the page's next poll at the latest: another run of this
-  // test against the same backend may expire the token again meanwhile.
-  await expect(page.getByTestId("auth")).toHaveText("ok", { timeout: 15_000 });
+  await expect(page.getByTestId("auth")).toHaveText("ok");
 });
 
 test("the panel's Restate history moves the backend to a new data version", async ({
