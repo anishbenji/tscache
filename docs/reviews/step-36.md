@@ -1,6 +1,6 @@
 # Step 36 — One engine read per orchestrated `get`
 
-Branch: `feat/36-orchestrator-one-read` · Reviewer: Codex (high) · Rounds: 1 · Status: round 1 fixed, re-review pending · Verdict after triage: merge after fixes
+Branch: `feat/36-orchestrator-one-read` · Reviewer: Codex (high) · Rounds: 2 · Status: settled · Verdict after triage: merge
 
 Item 3 of the performance plan (`~/code/tscache-reports/perf-plan.md` §6), built by a child agent while the user was away. `Orchestrator.get` read the engine, computed the misses from that result, fetched, then read again, so every `get` that fetched read its range twice and threw the first read's columns away. A live chart's every `get` fetches, since its provisional newest bar is never covered (architecture §2.4, the volatile region), so a polling chart paid two full reads per tick.
 
@@ -74,3 +74,7 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 2 — reviewer verdict: merge
+
+No findings; R1-1 (linear `planFetches`) and R1-2 (smoke proves a refetch) confirmed fixed. `bun run ci` passed. Settled.
