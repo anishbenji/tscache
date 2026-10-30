@@ -172,3 +172,7 @@ Recommendation: (b). The design keeps (a) because N29 is locked; T18 pins (a) an
 | (c) Treat `invalidate` as a clear for the fence (bump the generation) | One line | Drops every fetch in flight for the cache, far beyond the range |
 
 Recommendation: (b) as a separate step if restatements matter for a consumer; (a) meanwhile, since the primary use case's data never changes once returned (N11).
+
+## Design round 2 — reviewer verdict: merge
+
+No findings; R1-1..R1-3 confirmed fixed, the four planner cases reproduce. Design settled. Next: Codex contract tests (prompt A), then implementation.
