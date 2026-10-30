@@ -9,6 +9,8 @@ import type { SlotRange } from "../grid";
 import { getOwn } from "./own";
 import type { Columns } from "./types";
 
+const isEnumerable = Object.prototype.propertyIsEnumerable;
+
 export function assertSlot(slot: number, what: string): void {
   if (!Number.isSafeInteger(slot)) {
     throw new RangeError(`${what} must be a safe integer, got ${slot}`);
@@ -25,7 +27,9 @@ export function assertSlotRange(r: SlotRange, what: string): void {
 
 function assertAscending(slots: Float64Array): void {
   let previous = Number.NEGATIVE_INFINITY;
-  for (const slot of slots) {
+  // Indexed: JSC iterates a typed array with for…of several times slower.
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i] as number;
     assertSlot(slot, "point slot");
     if (slot <= previous) {
       throw new RangeError(
@@ -40,13 +44,15 @@ function assertAscending(slots: Float64Array): void {
 function assertFields(points: Columns, names: readonly string[]): void {
   const { slots, fields } = points;
   // Enumerable own names only: the same set a spread or a structured
-  // clone of the batch would carry.
-  const given = new Set(Object.keys(fields));
-  if (given.size !== names.length) {
+  // clone of the batch would carry. As many names as the schema has, with
+  // every schema name among them, can only be the schema's names.
+  if (Object.keys(fields).length !== names.length) {
     throw new RangeError("point fields must be exactly the schema's fields");
   }
   for (const name of names) {
-    const values = given.has(name) ? getOwn(fields, name) : undefined;
+    const values = isEnumerable.call(fields, name)
+      ? getOwn(fields, name)
+      : undefined;
     if (values === undefined || values.length !== slots.length) {
       throw new RangeError(
         `point field "${name}" must hold ${slots.length} values`,
