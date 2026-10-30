@@ -57,6 +57,16 @@ export default defineConfig({
     {
       name: "demo",
       testMatch: ["demo/**/*.spec.ts"],
+      testIgnore: ["demo/shared.spec.ts"],
+      retries: 0,
+      use: { ...devices["Desktop Chrome"], baseURL: hub },
+    },
+    {
+      // Tests on demo apps whose backend state every browser context
+      // shares (e2e/demo/support.ts): one at a time, repeats included.
+      name: "demo-shared",
+      testMatch: ["demo/shared.spec.ts"],
+      workers: 1,
       retries: 0,
       use: { ...devices["Desktop Chrome"], baseURL: hub },
     },
