@@ -61,6 +61,10 @@ and settled their differences with experiments; method and reasoning in `docs/be
 
 ## Design sketch: IndexedDB persistence
 
+**Specified in `docs/architecture.md` §4.10 (step 38, decisions N45–N60); where this sketch and §4.10
+differ, §4.10 governs.** The main differences: coverage is stored in each page record rather than in
+the cache record (N55), and removals are written at once rather than debounced (N58).
+
 **Goal.** A reload or a new tab starts from what an earlier session fetched. Immutable history, the
 primary use (N11), is then fetched once per device rather than once per session.
 
