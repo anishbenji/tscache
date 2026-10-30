@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { NOTICE_CHANNEL } from "../../examples/mock-backend/src/notices";
 import { catalog, type Launch } from "../../scripts/demo/catalog";
 import { type App, apps } from "../examples/apps";
 
@@ -74,24 +75,92 @@ for (const entry of catalog) {
   }
 }
 
+/** The app's first launch in the catalog. */
+function firstLaunch(app: App): Launch {
+  const [launch] = catalog.find((entry) => entry.app === app)?.launches ?? [];
+  if (launch === undefined) throw new Error(`${app} has no launch`);
+  return launch;
+}
+
+async function press(hub: Page, app: App, control: string): Promise<void> {
+  await hub
+    .locator(`button[data-app="${app}"][data-control="${control}"]`)
+    .click();
+}
+
 test("the panel's Expire token makes an open page refresh its token", async ({
   page: hub,
 }) => {
   const app = "react-lwcharts";
-  const [launch] = catalog.find((entry) => entry.app === app)?.launches ?? [];
-  if (launch === undefined) throw new Error(`${app} has no launch`);
+  const launch = firstLaunch(app);
   await hub.goto("/");
   const page = await open(hub, app, launch);
   await expectData(page, launch);
   await expect(cell(hub, app, "refreshes")).toHaveText(/^\d+$/);
   const before = await count(hub, app, "refreshes");
-  await hub
-    .locator(`button[data-app="${app}"][data-control="expireAccess"]`)
-    .click();
+  await press(hub, app, "expireAccess");
   // The page polls every five seconds; its next fetch is refused, and it
   // rotates the tokens once.
   await expect
     .poll(() => count(hub, app, "refreshes"), { timeout: 15_000 })
     .toBeGreaterThan(before);
   await expect(page.getByTestId("auth")).toHaveText("ok");
+});
+
+test("the panel's Restate history moves the backend to a new data version", async ({
+  page: hub,
+}) => {
+  // No other test restates this app's history.
+  const app = "solid-uplot";
+  await hub.goto("/");
+  const version = cell(hub, app, "version");
+  await expect(version).toHaveText(/^v\d+$/);
+  const before = Number((await version.textContent())?.slice(1));
+  await press(hub, app, "bumpVersion");
+  await expect(version).toHaveText(`v${before + 1}`);
+});
+
+test("the panel's Drop streams makes an open page reopen its feed and mend it", async ({
+  page: hub,
+}) => {
+  const app = "reference-vanilla";
+  const launch = firstLaunch(app);
+  await hub.goto("/");
+  const page = await open(hub, app, launch);
+  await expectData(page, launch);
+  // Count this page's fetches from here on: notices reach only the tabs of
+  // its origin in this browser context.
+  await page.evaluate((channel) => {
+    const seen = { count: 0 };
+    Object.assign(window, { __seen: seen });
+    new BroadcastChannel(channel).onmessage = () => {
+      seen.count++;
+    };
+  }, NOTICE_CHANNEL);
+  const fetches = () =>
+    page.evaluate(
+      () => (window as unknown as { __seen: { count: number } }).__seen.count,
+    );
+  // A pushed bar: the feed is open.
+  const drawn = page.getByTestId("drawn");
+  await expect(drawn).not.toHaveText((await drawn.textContent()) ?? "", {
+    timeout: 5000,
+  });
+  const before = await fetches();
+  await press(hub, app, "dropStreams");
+  // The feed reconnects, and the page reads its newest bars with a fetch to
+  // mend what the broken stream missed.
+  await expect.poll(fetches).toBeGreaterThan(before);
+  await expect(page.getByTestId("connection")).toHaveText("live");
+});
+
+test("the hub refuses an unknown app or control", async ({ page: hub }) => {
+  const unknownApp = await hub.request.post("/control/no-such-app", {
+    data: "dropStreams",
+  });
+  expect(unknownApp.status()).toBe(400);
+  const unknownControl = await hub.request.post("/control/solid-uplot", {
+    data: "resetClock",
+  });
+  expect(unknownControl.status()).toBe(400);
 });
