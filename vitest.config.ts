@@ -27,6 +27,7 @@ export default defineConfig({
       "integrations/test/**/*.test.ts",
       "reference/*/test/**/*.test.ts",
       "e2e/examples/*.test.ts",
+      "scripts/**/*.test.ts",
     ],
     passWithNoTests: true,
     // On a loaded machine the heavy property tests ran 20-40x slower than
