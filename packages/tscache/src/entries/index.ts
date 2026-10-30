@@ -1,5 +1,12 @@
 // '.' entry — public client API (docs/architecture.md §2.1).
 
+/**
+ * The client API: `createClient`, the cache handle, snapshots, errors and
+ * the public types.
+ *
+ * @module tscache
+ */
+
 export type { CacheHandle } from "../client/cache";
 export type { TscacheClient } from "../client/client";
 export { createClient } from "../client/client";

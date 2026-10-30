@@ -102,8 +102,8 @@ export class Engine {
   /**
    * Every present point in the range, with the authoritative sub-ranges and
    * the uncovered ones as 'uncached' misses (§2.3, N16). Current state only:
-   * orchestration arrives at step ⑪. `snapshot: true` adds a Snapshot of
-   * the same state (§2.8).
+   * the engine never fetches (the worker's orchestrator does, §4.9).
+   * `snapshot: true` adds a Snapshot of the same state (§2.8).
    */
   get(
     cacheId: string,

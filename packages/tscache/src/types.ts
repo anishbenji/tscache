@@ -253,7 +253,7 @@ export interface ClientOptions {
   };
 }
 
-/** '<clientId>:<seq>' — unique across tabs (N5). */
+/** `'<clientId>:<seq>'`, unique across tabs (N5). */
 export type RequestId = string;
 
 /** Three scopes, one channel (N5, §2.7). */
