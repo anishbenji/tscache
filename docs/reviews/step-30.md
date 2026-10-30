@@ -14,7 +14,9 @@ One command that shows and launches every sample app: `bun run demo`. Requested 
 | cda83a7 | `test(e2e)`: R1-3 |
 | 43cc3d1 | `test(e2e)`: the launcher test spawns `scripts/demo.ts` by its absolute path; Knip read the relative argument as an import from `e2e/demo/` and failed `bun run ci` |
 | fc5c11b | `fix(demo)`: R2-1, R2-2 (the lifecycle redesign below) |
-| 4b5b4cd | `test(e2e)`: the Expire token test waits until the page's next poll for `ok` |
+| 4b5b4cd | `test(e2e)`: the Expire token test waited until the page's next poll for `ok`; reverted by 5ad16b7 (D10) |
+| 5ad16b7 | `revert`: 4b5b4cd |
+| 313435a | `test(e2e)`: the tests on demo apps with shared backend state run one at a time in a `demo-shared` project (D10) |
 
 ## Decisions made in the step
 
@@ -55,7 +57,7 @@ Decisions in this round:
 |---|---|---|---|
 | D8 | Playwright stops the demo with `gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 }` | Its default, SIGKILL to the launcher's process group, would miss the servers' own groups; on SIGTERM the launcher stops them and waits | Keeping the servers in the launcher's group (then a group kill from outside reaches them, but the launcher cannot kill a child's children without killing itself) |
 | D9 | `DEMO_BUILD_SCRIPT`, a test-only environment variable that replaces every build command | A failed parallel build must be testable inside the Playwright suite without rewriting a `dist/` the example servers are serving | Failing a real build (rewrites shared `dist/`, slow) |
-| D10 | The Expire token test waits up to 15 s for the page's `auth` to read `ok`, as the refresh poll before it does | Under `--repeat-each 3` the runs share the `react-lwcharts` backend, and another run can expire the token again after this one's refresh; the page recovers by its next five-second poll. The bound follows the page's poll interval; it does not cover a defect | Making the control tests exclusive (Playwright runs repeats on separate workers regardless) |
+| D10 | The tests on apps whose backend state every browser context shares run in a `demo-shared` Playwright project with `workers: 1` (`e2e/demo/shared.spec.ts`): the Expire token and Restate history tests, and the launch tests of those two apps (`react-lwcharts`, `solid-uplot`), whose open pages take part. Every other demo test stays parallel; the assertions and their waits are as before. Replaces a widened wait (4b5b4cd, reverted at the director's ruling, child-rules item 6) | The race is in shared state, not the assertion: `react-lwcharts`'s backend holds one token pair for every context, so when parallel runs expire it, the first context to refresh makes the others' refresh tokens stale (`reused`), and their sessions end (`auth` reads `pending`, which also stands for `lost`). An assertion on the page's own refresh (option b) would fail the same way, since that refresh is what gets refused. Shown with `--repeat-each 6 --workers 6` on the Expire token test: the old placement failed 5 of 6; `demo-shared` passed 6 of 6 on one worker | A session key in the mock backend (option a: its tokens are global across login, refresh, series and the socket path, all shared by the examples); a cross-worker file lock (tried: its wait counted against each test's timeout, and a fixture's teardown order released it before the page closed) |
 | D11 | `pgrep` in Knip's `ignoreBinaries` | The spec uses the system tool to find leftover servers | Listing processes by hand |
 
 ## Verification
@@ -65,3 +67,4 @@ Decisions in this round:
 - `bunx tsc -p .`, `bunx tsc -p e2e`, `bunx knip`, `bun run fallow`, `bunx biome check`: clean.
 - Round 1: `E2E_EXAMPLES=demo bunx playwright test --project=demo`: 28 passed in 18.4 s.
 - Round 2: `E2E_EXAMPLES=demo bunx playwright test --project=demo --repeat-each 3`: 90 passed in 32.8 s; the launcher spec `--repeat-each 5` under CPU load: 15 passed; no `vite preview` left afterwards. By hand: SIGINT to a running demo exits 130 with no listener or server left, each server leading its own process group.
+- D10: `--repeat-each 6 --workers 6` on the Expire token test: in the parallel project (the original placement and assertion) 5 failed with `auth` `pending`; in `demo-shared`, 6 passed on one worker.
