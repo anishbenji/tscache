@@ -8,9 +8,9 @@ Comprehensive documentation for library users, as a site in its own Bun workspac
 
 | Commit | What |
 |---|---|
-| 0ea1958 | `docs(api)`: a `@module` TSDoc block on the `tscache`, `tscache/engine`, `tscache/fetcher` and `tscache/vite` entries, so the reference names modules after their import paths; `RequestId`'s comment puts its pattern in backticks (raw `<clientId>` broke the VitePress build); `Engine.get`'s comment no longer says orchestration arrives at step ⑪ |
-| 8751e40 | `build(site)`: the `site/` workspace (VitePress, TypeDoc with typedoc-plugin-markdown and typedoc-vitepress-theme, TypeScript 6 under an alias for TypeDoc), its config with the repository-link check, `docs:dev`, `docs:build` and `docs:check` root scripts, `bun run ci` steps, Knip and Fallow configuration; the pages and the compiled code examples |
-| c4f230e | `docs`: the README links the site |
+| 67d4665 | `docs(api)`: a `@module` TSDoc block on the `tscache`, `tscache/engine`, `tscache/fetcher` and `tscache/vite` entries, so the reference names modules after their import paths; `RequestId`'s comment puts its pattern in backticks (raw `<clientId>` broke the VitePress build); `Engine.get`'s comment no longer says orchestration arrives at step ⑪ |
+| 9f47a2f | `build(site)`: the `site/` workspace (VitePress, TypeDoc with typedoc-plugin-markdown and typedoc-vitepress-theme, TypeScript 6 under an alias for TypeDoc), its config with the repository-link check, `docs:dev`, `docs:build` and `docs:check` root scripts, `bun run ci` steps, Knip and Fallow configuration; the pages and the compiled code examples |
+| feb2595 | `docs`: the README links the site |
 | (this commit) | `docs(review)`: this file |
 
 Pages: getting started; concepts (coverage and gaps, the grid and `alignmentOffset`, segments and slots, versions and watermarks, invalidation and clearing, events in three scopes); the API by example (client, cache, snapshots, fetcher module, engine, errors) beside the generated reference; guides (workers and fallback, writing a fetcher, the Vite plugin and its static-import rule, credentials and `tscache:auth-invalid`, server rendering, live feeds by SSE, WebSocket and polling, expiry and other patterns); vanilla, React, Solid and chart libraries; performance (a summary of `docs/benchmarking.md`); troubleshooting and FAQ; an architecture map for contributors. The internal documents (`docs/architecture.md`, `docs/workflow.md`, `docs/reviews/`, `docs/review-checklist.md`, `docs/guides/`) stay where they are; the site links to them on GitHub.
