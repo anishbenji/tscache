@@ -8,7 +8,7 @@ Requested by the user on 2026-10-30: the thread should run unattended while the 
 
 | Commit | What |
 |---|---|
-| 82dbabe, then the follow-up commit | `.claude/settings.json`: drop the ask rules for `git merge`, `git rebase` and `bun install`; narrow `git push*` to pushes that can reach `main` or destroy remote state: a destination of `main`, `HEAD:main` or `refs/heads/main`, a forced (`+`) or deleting (`:`, `-d`, `--delete`) refspec, `--mirror`, `--all`, `--prune`, and a bare `git push`. Kept: `bun add`, `bun remove`, `bun update`, `git reset`, `git restore`, `git checkout`, `git clean`, `git branch -D`, `rm -rf`, and the `bun test` and dotenv denies |
+| 83f9f6f, then the follow-up commit | `.claude/settings.json`: drop the ask rules for `git merge`, `git rebase` and `bun install`; narrow `git push*` to pushes that can reach `main` or destroy remote state: a destination of `main`, `HEAD:main` or `refs/heads/main`, a forced (`+`) or deleting (`:`, `-d`, `--delete`) refspec, `--mirror`, `--all`, `--prune`, and a bare `git push`. Kept: `bun add`, `bun remove`, `bun update`, `git reset`, `git restore`, `git checkout`, `git clean`, `git branch -D`, `rm -rf`, and the `bun test` and dotenv denies |
 
 ## What still guards the dropped rules
 
@@ -18,4 +18,4 @@ Requested by the user on 2026-10-30: the thread should run unattended while the 
 
 ## Security review note
 
-An automated security review of 82dbabe flagged that the narrowed push patterns missed forms such as `+refspec`, `-d` and `refs/heads/main`. The follow-up commit adds them. Pattern rules stay a convenience layer: GitHub's branch protection on `main` is the enforcing control, and the hook guard (`guard-bash.ts`) is frozen, so it was not extended.
+An automated security review of 83f9f6f flagged that the narrowed push patterns missed forms such as `+refspec`, `-d` and `refs/heads/main`. The follow-up commit adds them. Pattern rules stay a convenience layer: GitHub's branch protection on `main` is the enforcing control, and the hook guard (`guard-bash.ts`) is frozen, so it was not extended.
