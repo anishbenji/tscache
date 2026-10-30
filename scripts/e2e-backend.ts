@@ -3,7 +3,14 @@
 // test releases them, so a test keeps a fetch in flight without sleeping.
 // Tests run in parallel against one server, so state lives under
 // /backend/<ns>/ and is created on first use. Every request is decided when
-// it arrives; a hold delays only its answer.
+// it arrives; a hold delays only its answer. Candles come as JSON, or as a
+// columns body (examples/mock-backend/src/columns.ts) when the request's
+// Accept names that format.
+
+import {
+  COLUMNS_TYPE,
+  encodeColumns,
+} from "../examples/mock-backend/src/columns";
 
 export type Gate = "candles" | "refresh";
 
@@ -113,6 +120,13 @@ async function candles(
   await pass(state, "candles");
   if (!valid) return new Response("access token refused", { status: 401 });
   const timestamps = gridPoints(start, end, interval, offset);
+  if (request.headers.get("accept")?.includes(COLUMNS_TYPE)) {
+    const body = encodeColumns(
+      { timestamps, fields: {}, dtypes: {} },
+      { version, calls },
+    );
+    return new Response(body, { headers: { "content-type": COLUMNS_TYPE } });
+  }
   return Response.json({ timestamps, version, calls });
 }
 
@@ -180,6 +194,20 @@ const routes: Record<
   "POST control": control,
   "GET state": async (state) => Response.json(snapshot(state)),
 };
+
+/**
+ * The columns decoder as a browser module, for the fixture fetcher to
+ * import: the example's TypeScript with its types stripped.
+ */
+export async function columnsModule(): Promise<Response> {
+  const source = await Bun.file(
+    new URL("../examples/mock-backend/src/columns.ts", import.meta.url),
+  ).text();
+  const code = new Bun.Transpiler({ loader: "ts" }).transformSync(source);
+  return new Response(code, {
+    headers: { "content-type": "text/javascript; charset=utf-8" },
+  });
+}
 
 /** Answers a request under /backend/. */
 export function backend(request: Request, url: URL): Promise<Response> {

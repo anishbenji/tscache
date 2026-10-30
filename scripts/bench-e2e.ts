@@ -5,7 +5,9 @@
 // The package's client, worker and fetcher entries are bundled for each
 // revision and served beside the scenario page (packages/tscache/bench/
 // e2e.ts) and the Playwright suites' mock backend and fixture fetcher, so a
-// page talks to a real SharedWorker that fetches over HTTP. Each scenario
+// page talks to a real SharedWorker that fetches over HTTP. The fetcher asks
+// for columns bodies or JSON, named per side, so one revision can be timed
+// against itself with the two formats. Each scenario
 // gets a BrowserContext of its own, whose pages share its SharedWorkers.
 
 import { randomUUID } from "node:crypto";
@@ -15,13 +17,14 @@ import { type Browser, type BrowserContext, chromium } from "@playwright/test";
 import {
   BARS,
   type E2ePage,
+  type FetcherFormat,
   type Once,
   type PageScenario,
   type Side,
 } from "../packages/tscache/bench/e2e-api";
 import type { CaseResult } from "../packages/tscache/bench/run";
 import { type Sample, summarise } from "../packages/tscache/bench/sample";
-import { type BackendSnapshot, backend } from "./e2e-backend";
+import { type BackendSnapshot, backend, columnsModule } from "./e2e-backend";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PACKAGE = join(ROOT, "packages/tscache");
@@ -37,6 +40,8 @@ export interface E2eRun {
   work: string;
   rounds: number;
   only: string[] | undefined;
+  /** The fixture fetcher's format on each side. */
+  fetchers: Readonly<Record<Side, FetcherFormat>>;
 }
 
 type Scenario = "handshake-first-read" | PageScenario;
@@ -103,6 +108,7 @@ function serve(out: string) {
         return new Response(HTML, { headers: { "content-type": "text/html" } });
       }
       if (url.pathname.startsWith("/backend/")) return backend(request, url);
+      if (url.pathname === "/columns.js") return columnsModule();
       const path = files(url.pathname);
       const file = path === undefined ? undefined : Bun.file(path);
       if (file === undefined || !(await file.exists())) {
@@ -117,16 +123,19 @@ function serve(out: string) {
 
 interface Driver {
   browser: Browser;
+  /** The server's origin. */
   origin: string;
+  /** The scenario page's URL, naming each side's fetcher format. */
+  pageUrl: string;
   sides: Side[];
   rounds: number;
 }
 
 /** A new page of the context with the scenario page loaded. */
-async function open(context: BrowserContext, origin: string) {
+async function open(context: BrowserContext, pageUrl: string) {
   const page = await context.newPage();
   page.setDefaultTimeout(0);
-  await page.goto(`${origin}/`);
+  await page.goto(pageUrl);
   await page.waitForFunction(() => "tscacheE2e" in globalThis);
   return page;
 }
@@ -160,7 +169,7 @@ async function firstReads(d: Driver): Promise<E2eResult> {
   const context = await d.browser.newContext();
   const once = async (side: Side): Promise<Once> => {
     const ns = randomUUID();
-    const page = await open(context, d.origin);
+    const page = await open(context, d.pageUrl);
     try {
       const run = await page.evaluate(
         ([s, n]) =>
@@ -233,10 +242,10 @@ function checkFetches(
 async function inPage(d: Driver, scenario: PageScenario): Promise<E2eResult> {
   const context = await d.browser.newContext();
   try {
-    const leader = await open(context, d.origin);
+    const leader = await open(context, d.pageUrl);
     const follower =
       scenario === "two-tabs-one-fetch"
-        ? await open(context, d.origin)
+        ? await open(context, d.pageUrl)
         : undefined;
     const ns = { base: randomUUID(), head: randomUUID() };
     for (const side of d.sides) {
@@ -309,9 +318,12 @@ export async function runE2e(run: E2eRun): Promise<E2eResult[]> {
   const server = serve(out);
   const browser = await chromium.launch();
   try {
+    const origin = `http://127.0.0.1:${server.port}`;
+    const formats = new URLSearchParams(run.fetchers);
     const d: Driver = {
       browser,
-      origin: `http://127.0.0.1:${server.port}`,
+      origin,
+      pageUrl: `${origin}/?${formats}`,
       sides,
       rounds: run.rounds,
     };

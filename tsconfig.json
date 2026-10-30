@@ -6,7 +6,15 @@
   "compilerOptions": {
     "types": ["bun"],
     "isolatedDeclarations": false,
-    "declaration": false
+    "declaration": false,
+    // The Playwright backend encodes with the mock backend's columns module,
+    // which imports tscache's types and nothing else. They are checked
+    // against the source, since dist/ is built after the check, and against
+    // the import-free types module alone: the client's source needs the DOM
+    // library, which the Bun scripts here do not load.
+    "paths": {
+      "tscache": ["./packages/tscache/src/types.ts"]
+    }
   },
   "include": ["scripts", "*.config.ts", "packages/*/tsdown.config.ts"]
 }

@@ -15,11 +15,15 @@
 //       --setup picks one of the setups in bench/setups.ts (Chromium's
 //       switches, batch length, rounds) to calibrate it on the runner.
 //   bun scripts/bench.ts e2e [--base <ref>] [--only a,b] [--rounds 20]
+//                            [--fetchers columns,columns]
 //   bun scripts/bench.ts e2e --smoke
 //       the end-to-end scenarios in Chromium (scripts/bench-e2e.ts): a new
 //       tab's first read, a read through a SharedWorker, two tabs sharing a
 //       fetch; paired against the base and report-only, or with --smoke
-//       each once on the working tree, checked (part of `bun run ci`)
+//       each once on the working tree, checked (part of `bun run ci`).
+//       --fetchers names the fixture fetcher's format on the base and the
+//       head (columns or json); with --base HEAD and a clean tree,
+//       `--fetchers json,columns` times the two formats on one engine.
 //
 // One bundle carries both revisions of the engine: the base's source,
 // taken from git (`git archive`, nothing checked out), and the working
@@ -41,6 +45,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BunPlugin } from "bun";
+import type { FetcherFormat } from "../packages/tscache/bench/e2e-api";
 import {
   acceptances,
   flagged,
@@ -79,6 +84,21 @@ interface Args {
   setup: BenchSetup;
   /** e2e: each scenario once on the working tree, checked. */
   smoke: boolean;
+  /** e2e: the fixture fetcher's format on the base and on the head. */
+  fetchers: { base: FetcherFormat; head: FetcherFormat };
+}
+
+/** `--fetchers base,head`, each `columns` or `json`. */
+function fetchersOf(text: string | undefined): Args["fetchers"] {
+  const [base, head, ...rest] = (text ?? "columns,columns").split(",");
+  const format = (f: string | undefined): f is FetcherFormat =>
+    f === "columns" || f === "json";
+  if (!format(base) || !format(head) || rest.length > 0) {
+    throw new Error(
+      `--fetchers must be two of columns and json, as base,head; not ${text}`,
+    );
+  }
+  return { base, head };
 }
 
 /** 10 to 1000 rounds (medianRanks): fewer give no 95 % interval. */
@@ -103,6 +123,9 @@ function parseArgs(argv: string[]): Args {
   if (command === "e2e" && misplaced.length > 0) {
     throw new Error(`e2e takes no ${misplaced.join(", ")}`);
   }
+  if (command !== "e2e" && rest.includes("--fetchers")) {
+    throw new Error(`${command} takes no --fetchers`);
+  }
   const value = (flag: string) => {
     const i = rest.indexOf(flag);
     return i === -1 ? undefined : rest[i + 1];
@@ -123,6 +146,7 @@ function parseArgs(argv: string[]): Args {
     slowdown: slowdown === undefined ? undefined : Number(slowdown),
     setup,
     smoke: rest.includes("--smoke"),
+    fetchers: fetchersOf(value("--fetchers")),
   };
 }
 
@@ -470,14 +494,21 @@ function checks(results: (CaseResult & { ms?: number })[]): number {
 async function e2e(args: Args): Promise<number> {
   const work = mkdtempSync(join(tmpdir(), "tscache-bench-"));
   const headSrc = join(PACKAGE, "src");
-  const run = { headSrc, work, rounds: args.rounds, only: args.only };
+  const run = {
+    headSrc,
+    work,
+    rounds: args.rounds,
+    only: args.only,
+    fetchers: args.fetchers,
+  };
   if (args.smoke) return checks(await runE2e({ ...run, baseSrc: undefined }));
   const baseSha = extractBase(args.base, work);
   const headSha = git("rev-parse", "HEAD");
   const baseSrc = join(work, "packages/tscache/src");
   const results: E2eResult[] = await runE2e({ ...run, baseSrc });
   mkdirSync(RESULTS, { recursive: true });
-  const record = { schema: 1, base: baseSha, head: headSha, results };
+  const { fetchers } = args;
+  const record = { schema: 1, base: baseSha, head: headSha, fetchers, results };
   const file = join(RESULTS, "e2e.json");
   writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
   const rows = results.flatMap(({ name, sample }) =>
@@ -485,6 +516,8 @@ async function e2e(args: Args): Promise<number> {
   );
   const lines = [
     `### End-to-end scenarios, Chromium: \`${headSha.slice(0, 9)}\` against \`${baseSha.slice(0, 9)}\` (${args.base})`,
+    "",
+    `Fixture fetcher: ${fetchers.head} on the head, ${fetchers.base} on the base.`,
     "",
     "Report-only: no timing here fails a pull request (docs/benchmarking.md).",
     "",

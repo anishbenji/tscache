@@ -30,6 +30,8 @@ export const workerUrl = "/dist/worker.js";
 interface FetcherContext {
   ns: string;
   token: string;
+  /** How it asks for candles; default a columns body. */
+  format?: "columns" | "json";
 }
 
 interface Tokens {

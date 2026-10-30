@@ -3,7 +3,8 @@
 // package's client of each revision from the server (`/base/index.js`,
 // `/head/index.js`), whose SharedWorkers fetch from the Playwright suites'
 // mock backend through their fixture fetcher (e2e/pages/fetcher.js: price
-// is the timestamp, volume how often the backend was asked for the range).
+// is the timestamp, volume how often the backend was asked for the range),
+// which asks for each side's format named in the page's URL.
 // Every operation checks what it read and throws on a wrong result, so a
 // scenario cannot quietly stop doing its work.
 
@@ -19,6 +20,7 @@ import type {
 import {
   BARS,
   type E2ePage,
+  type FetcherFormat,
   type Once,
   type PageScenario,
   type Preparation,
@@ -59,6 +61,15 @@ function checked(got: GetResult, range: Range): number {
   return n;
 }
 
+/** The fixture fetcher's format on `side`, as the page's URL names it. */
+function formatOf(side: Side): FetcherFormat {
+  const format = new URLSearchParams(location.search).get(side) ?? "columns";
+  if (format !== "columns" && format !== "json") {
+    throw new Error(`unknown fetcher format ${format} for ${side}`);
+  }
+  return format;
+}
+
 /** The client entry of `side`'s revision, as the bench server serves it. */
 async function load(side: Side): Promise<typeof Client> {
   const url = `/${side}/index.js`;
@@ -72,7 +83,10 @@ async function load(side: Side): Promise<typeof Client> {
 function options(side: Side, ns: string, worker: string): ClientOptions {
   return {
     workerUrl: `/${side}/worker.js?${worker}`,
-    fetcher: { module: "/fetcher.js", context: { ns, token: "at-0" } },
+    fetcher: {
+      module: "/fetcher.js",
+      context: { ns, token: "at-0", format: formatOf(side) },
+    },
   };
 }
 

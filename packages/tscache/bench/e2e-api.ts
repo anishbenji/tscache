@@ -13,6 +13,13 @@ export type Side = "base" | "head";
  */
 export type PageScenario = "read-viewport-shared" | "two-tabs-one-fetch";
 
+/**
+ * How the fixture fetcher (e2e/pages/fetcher.js) asks for its bars: as a
+ * columns body or as JSON. The driver names one per side in the page's
+ * URL (`/?base=json&head=columns`); both default to columns.
+ */
+export type FetcherFormat = "columns" | "json";
+
 /** The bars every scenario reads: a chart's screen and one each side. */
 export const BARS = 1500;
 

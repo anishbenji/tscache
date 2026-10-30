@@ -180,6 +180,10 @@ for (const app of [
         await page.waitForTimeout(1500);
         const back = (await notices(page)).slice(settled);
         expect(back.filter(isHistory)).toEqual([]);
+        // Every page, the server's reads included, came as a columns body.
+        const { formats } = await stats(page);
+        expect(formats.columns).toBeGreaterThan(0);
+        expect(formats.json).toBe(0);
         await page.close();
       });
     }
