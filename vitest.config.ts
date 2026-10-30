@@ -30,8 +30,10 @@ export default defineConfig({
       "scripts/**/*.test.ts",
     ],
     passWithNoTests: true,
-    // On a loaded machine the heavy property tests ran 20-40x slower than
-    // idle (7.8 s against 373 ms) and crossed the 5 s default (chore/19).
-    testTimeout: 20_000,
+    // Vitest's default 5 s test timeout, which only catches a hang. Chore 19
+    // raised it to 20 s after two runs at load 20-28 crossed 5 s; with
+    // every core busy the slowest test now takes 1.6 s (chore 28), and
+    // heavy jobs on the shared machine run one at a time. A test that
+    // crosses 5 s again is a slowdown to investigate, not to raise.
   },
 });

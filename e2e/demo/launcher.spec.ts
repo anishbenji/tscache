@@ -93,8 +93,12 @@ function kill(pid: number, group = false): void {
 
 interface Launch {
   child: ChildProcess;
-  /** Resolves with the exit code, or "running" after `ms`. */
-  exit(ms: number): Promise<number | null | "running">;
+  /**
+   * Resolves with the exit code (null after a signal). No deadline of its
+   * own: a launcher that never exits ends at the test's timeout
+   * (docs/testing.md).
+   */
+  exit(): Promise<number | null>;
   stderr(): string;
 }
 
@@ -115,13 +119,7 @@ function launch(hub: number, args: string[], env = {}): Launch {
   );
   return {
     child,
-    exit: (ms) =>
-      Promise.race([
-        exited,
-        new Promise<"running">((resolve) =>
-          setTimeout(() => resolve("running"), ms),
-        ),
-      ]),
+    exit: () => exited,
     stderr: () => stderr,
   };
 }
@@ -165,7 +163,7 @@ test("a hub port in use stops the launcher and every app server it started", asy
   let launched: Launch | undefined;
   try {
     launched = launch(hub, ["--reuse-builds"]);
-    const code = await launched.exit(60_000);
+    const code = await launched.exit();
     expect(code).toBe(1);
     expect(launched.stderr()).toContain("EADDRINUSE");
     // The launcher exits only once every server's group is gone.
@@ -197,7 +195,7 @@ test("SIGTERM stops a running demo and every app server", async ({
       )
       .toBe(true);
     launched.child.kill("SIGTERM");
-    expect(await launched.exit(30_000)).toBe(143);
+    expect(await launched.exit()).toBe(143);
     expect(await allFree([hub, ...apps])).toBe(true);
   } finally {
     cleanUp(launched, apps);
@@ -227,7 +225,7 @@ test("the tests' cleanup stops the app servers of a launcher killed outright", a
     // SIGKILL to the launcher alone: its shutdown never runs, and the app
     // servers, each in a group of its own, outlive it.
     launched.child.kill("SIGKILL");
-    expect(await launched.exit(10_000)).toBe(null);
+    expect(await launched.exit()).toBe(null);
     expect(await allFree(apps)).toBe(false);
     cleanUp(launched, apps);
     await expect.poll(() => allFree(apps), { timeout: 10_000 }).toBe(true);
@@ -271,7 +269,7 @@ test("a failed build stops the other builds, with what they started", async () =
       DEMO_BUILD_SCRIPT: script,
       FAKE_BUILD_DIR: dir,
     });
-    const code = await launched.exit(60_000);
+    const code = await launched.exit();
     for (const file of await readdir(dir)) {
       if (!file.endsWith(".pids")) continue;
       const text = await readFile(join(dir, file), "utf8");
