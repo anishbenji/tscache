@@ -98,7 +98,7 @@ function testFiles(): string[] {
     "examples/*/test/**",
     "integrations/test/**",
     "reference/*/test/**",
-    "scripts/*.test.ts",
+    "scripts/**/*.test.ts",
     "e2e/**",
   ]);
   return (
