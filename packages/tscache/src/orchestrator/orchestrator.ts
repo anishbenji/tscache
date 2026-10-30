@@ -1,8 +1,10 @@
 /**
- * Fetch orchestration (docs/architecture.md §2.3, §2.5, §4.9): in front of
- * the Engine, turns a get's misses into deduplicated fetches, applies the
- * responses as authoritative puts, and reports what could not be fetched.
- * Range math runs on slots (N9); milliseconds appear only at the edges.
+ * Fetch orchestration (docs/architecture.md §2.3, §2.5, §4.9, §4.9.1): in
+ * front of the Engine, turns a get's misses into fetches, minus the fetches
+ * already in flight for the cache, which the get awaits instead; applies
+ * the responses as authoritative puts, and reports what could not be
+ * fetched. Range math runs on slots (N9); milliseconds appear only at the
+ * edges.
  */
 
 import type { Engine } from "../engine/engine";
@@ -20,23 +22,38 @@ import type {
 } from "../types";
 import { AuthState } from "./auth";
 
+/** How a fetch ended, as every get awaiting it sees it (§4.9). */
 type Outcome =
   | { kind: "applied"; warnings: MergeWarning[] }
   | { kind: "dropped" }
   | { kind: "auth" }
   | { kind: "failed"; error: { name: string; message: string } };
 
+/** A fetch a get awaited, with how it ended for that get (§4.9.1 rule 4). */
 interface Settled {
   range: SlotRange;
   outcome: Outcome;
 }
 
+/** A fetch in flight (§4.9.1 rule 1, N62). */
 interface Inflight {
-  promise: Promise<Outcome>;
-  /** Credentials this fetch started under; a later get must not join a stale one. */
-  authGeneration: number;
-  /** Cache generation it started under; a fence-dropped fetch is not joined. */
-  generation: number;
+  /** The coalesced slot range sent to the fetcher, and its put's authority (N3). */
+  readonly range: SlotRange;
+  /** The cache's clear count when the fetch was issued (N29). */
+  readonly generation: number;
+  /** The auth generation when the fetch was issued (§4.9 Auth). */
+  readonly authGeneration: number;
+  /** Set once, by an invalidate that meets `range` (N64). */
+  fenced: boolean;
+  readonly outcome: Promise<Outcome>;
+}
+
+/** What one round of a get does (§4.9.1 rule 2). */
+interface RoundPlan {
+  /** The ranges to fetch, ascending: coalesced, flanks included. */
+  fetch: SlotRange[];
+  /** Indices into `inflight`, ascending: the fetches to await. */
+  join: number[];
 }
 
 function describe(error: unknown): { name: string; message: string } {
@@ -157,18 +174,101 @@ export function planFetches(
   return coalesce(open, around, grid);
 }
 
+/**
+ * One round's plan (§4.9.1 rule 2, step 4). The request's slots outside
+ * the coverage `around` it and outside `blocked` (both ascending, disjoint)
+ * are its need; `join` is the in-flight ranges that meet the need, and
+ * `fetch` is the need outside every in-flight range, coalesced, which
+ * extends into coverage only (rule 3). `inflight` is ascending by start but
+ * may overlap and nest, so its ends are unordered: binary search does not
+ * apply, and a cursor over the need finds `join` in one pass (rule 12).
+ */
+export function planRound(
+  request: SlotRange,
+  around: readonly SlotRange[],
+  inflight: readonly SlotRange[],
+  blocked: readonly SlotRange[],
+  grid: Grid,
+): RoundPlan {
+  const need = without(without([request], around), blocked);
+  if (need.length === 0) return { fetch: [], join: [] };
+  const join: number[] = [];
+  let piece = 0;
+  for (let i = 0; i < inflight.length; i++) {
+    const busy = inflight[i] as SlotRange;
+    // Starts ascend, so the first need piece ending at or after this start
+    // only moves forward.
+    piece = endingFrom(need, piece, busy.start);
+    if ((need[piece]?.start ?? Number.POSITIVE_INFINITY) <= busy.end) {
+      join.push(i);
+    }
+  }
+  const open = without(need, union(inflight));
+  return { fetch: open.length === 0 ? [] : coalesce(open, around, grid), join };
+}
+
+/**
+ * A second round's `blocked`: the ranges of the fetches the first awaited
+ * that came back failed or auth, ascending and disjoint (§4.9.1 rule 5).
+ * Joined ranges can overlap, hence the sort and the union.
+ */
+function blockedBy(settled: readonly Settled[]): SlotRange[] {
+  return union(
+    settled
+      .filter((s) => s.outcome.kind === "failed" || s.outcome.kind === "auth")
+      .map((s) => s.range)
+      .sort((a, b) => a.start - b.start),
+  );
+}
+
+/** Ranges ascending by start, merged where they overlap or touch. */
+function union(ranges: readonly SlotRange[]): SlotRange[] {
+  const out: SlotRange[] = [];
+  for (const { start, end } of ranges) {
+    const last = out.at(-1);
+    if (last !== undefined && start <= last.end + 1) {
+      last.end = Math.max(last.end, end);
+    } else {
+      out.push({ start, end });
+    }
+  }
+  return out;
+}
+
+/**
+ * The in-flight list with `added` merged in, both ascending by start, in
+ * one pass; on equal starts the earlier entries stay first, so equal starts
+ * keep issue order (§4.9.1 rule 1).
+ */
+function enlist(list: readonly Inflight[], added: readonly Inflight[]) {
+  const out: Inflight[] = [];
+  let next = 0;
+  for (const entry of list) {
+    while (
+      next < added.length &&
+      (added[next] as Inflight).range.start < entry.range.start
+    ) {
+      out.push(added[next++] as Inflight);
+    }
+    out.push(entry);
+  }
+  while (next < added.length) out.push(added[next++] as Inflight);
+  return out;
+}
+
 export class Orchestrator {
   readonly #engine: Engine;
   readonly #auth: AuthState;
   readonly #broadcast: (evt: Evt) => void;
-  readonly #inflight = new Map<string, Inflight>();
+  /** Per cache, its fetches in flight, ascending by start (§4.9.1 rule 1). */
+  readonly #inflight = new Map<string, Inflight[]>();
   /** cacheCleared count per cache: the version fence (N29). */
   readonly #generation = new Map<string, number>();
   /** Bumped when an updateAuth has taken effect: failures under older credentials are stale. */
   #authGeneration = 0;
   /** Serializes updateAuth calls. */
   #authUpdate: Promise<void> = Promise.resolve();
-  /** True while a fetcher hook is replacing credentials (see #fetch). */
+  /** True while a fetcher hook is replacing credentials (see #round). */
   #transitioning = false;
   #fetcher: Fetcher | undefined;
   /** Reserved on the first load so a concurrent, different module conflicts. */
@@ -276,10 +376,13 @@ export class Orchestrator {
   }
 
   /**
-   * §4.9: coverage → coalesced fetches (deduplicated) → one engine read.
-   * The fetches are planned from coverage, so the engine is read once:
-   * after the fetches, or at once when nothing is missing. The `requestId`
-   * names the get on request-scoped mergeWarning events.
+   * §4.9, §4.9.1: rounds of coverage → subtraction of the fetches in flight
+   * → coalesced fetches, then one engine read. A round plans and registers
+   * its fetches in one synchronous step, so two rounds never interleave,
+   * whichever tabs they serve; the engine is read once, after the fetches
+   * the get awaited, or at once when it awaits none. The `requestId` names
+   * the get on the request-scoped mergeWarning events of the fetches it
+   * issues.
    */
   async get(
     cacheId: string,
@@ -291,24 +394,11 @@ export class Orchestrator {
       return this.#engine.get(cacheId, range, options);
     }
     const grid = this.#engine.configOf(cacheId);
-    const request = snapOut(range, grid);
-    const settled: Settled[] = [];
-    let wanted = this.#plan(cacheId, request, []);
-    // Two passes at most: the second re-requests only what is still
-    // uncached after a version-fence drop, minus what already failed (N29).
-    for (let attempt = 0; attempt < 2 && wanted.length > 0; attempt++) {
-      const outcomes = await this.#awaitFetches(
-        wanted.map((r) => this.#fetch(cacheId, toMs(r, grid), requestId)),
-      );
-      for (const [i, r] of wanted.entries()) {
-        settled.push({ range: r, outcome: outcomes[i] as Outcome });
-      }
-      if (attempt === 1 || !outcomes.some((o) => o.kind === "dropped")) break;
-      const blocked = settled
-        .filter((s) => s.outcome.kind === "failed" || s.outcome.kind === "auth")
-        .map((s) => s.range);
-      wanted = this.#plan(cacheId, request, blocked);
-    }
+    const settled = await this.#rounds(
+      cacheId,
+      snapOut(range, grid),
+      requestId,
+    );
     // The only read: its result and `options.snapshot` come from one state
     // (§2.8, N36), with no await between the last fetch and it.
     const result = this.#engine.get(cacheId, range, options);
@@ -316,6 +406,54 @@ export class Orchestrator {
       ...result,
       misses: result.misses.flatMap((m) => annotate(m, settled, grid)),
     };
+  }
+
+  /**
+   * A get's rounds: every fetch it awaited, with its outcome, in round
+   * order. Two rounds at most: the second runs after a fence drop and asks
+   * for what is still missing, minus what already failed (N29, rule 5).
+   * Nothing is awaited when a round has nothing to await.
+   */
+  async #rounds(
+    cacheId: string,
+    request: SlotRange,
+    requestId: string | undefined,
+  ): Promise<Settled[]> {
+    const settled: Settled[] = [];
+    let blocked: SlotRange[] = [];
+    for (let round = 0; round < 2; round++) {
+      const awaited = this.#round(cacheId, request, blocked, requestId);
+      if ("gated" in awaited) {
+        for (const r of awaited.gated) {
+          settled.push({ range: r, outcome: { kind: "auth" } });
+        }
+        break;
+      }
+      if (awaited.length === 0) break;
+      const outcomes = await this.#awaitFetches(awaited.map((f) => f.outcome));
+      for (const [i, f] of awaited.entries()) {
+        settled.push({ range: f.range, outcome: outcomes[i] as Outcome });
+      }
+      if (round === 1 || !outcomes.some((o) => o.kind === "dropped")) break;
+      blocked = blockedBy(settled);
+    }
+    return settled;
+  }
+
+  /**
+   * engine.invalidate, then fences the fetches in flight that meet the
+   * range snapped outward, so no later get joins them (§4.9.1 rule 9, N64).
+   * They are still applied when they land. An invalid range throws before
+   * anything is fenced.
+   */
+  invalidate(cacheId: string, range: Range): void {
+    this.#engine.invalidate(cacheId, range);
+    const list = this.#inflight.get(cacheId);
+    if (list === undefined) return;
+    const slots = snapOut(range, this.#engine.configOf(cacheId));
+    for (const entry of list) {
+      if (overlaps(entry.range, slots)) entry.fenced = true;
+    }
   }
 
   /** Gets currently subscribed to auth invalidation (diagnostics and tests). */
@@ -352,14 +490,17 @@ export class Orchestrator {
   }
 
   /**
-   * The coalesced slot ranges to fetch: the request's uncovered slots, as
-   * the engine would report them uncached now, minus `blocked`.
+   * One round (§4.9.1 rule 2), synchronous from the coverage read to the
+   * registration of its fetches: the fetches to await, joined ones first
+   * (in list order) and then its own, or, while auth is invalid or a hook
+   * is swapping credentials, the ranges that come back auth-pending at once.
    */
-  #plan(
+  #round(
     cacheId: string,
     request: SlotRange,
-    blocked: SlotRange[],
-  ): SlotRange[] {
+    blocked: readonly SlotRange[],
+    requestId: string | undefined,
+  ): Inflight[] | { gated: SlotRange[] } {
     const grid = this.#engine.configOf(cacheId);
     // Coverage one slot beyond the request too: a miss at the edge may abut
     // covered slots the request itself cannot show. Only safe grid points.
@@ -372,91 +513,128 @@ export class Orchestrator {
     const around = this.#engine
       .coverage(cacheId, toMs(probe, grid))
       .map((r) => snapOut(r, grid));
-    return planFetches(request, around, blocked, grid);
+    // While a hook is swapping credentials the module's state and our stamp
+    // can disagree, so nothing is fetched or joined: the misses come back
+    // auth-pending at once (design y) and the consumer re-gets after the
+    // switch. The same holds while auth is invalid.
+    if (!this.#auth.valid || this.#transitioning) {
+      return { gated: planFetches(request, around, blocked, grid) };
+    }
+    const list = this.#inflight.get(cacheId) ?? [];
+    const generation = this.#generation.get(cacheId) ?? 0;
+    const joinable = list.filter(
+      (e) =>
+        !e.fenced &&
+        e.generation === generation &&
+        e.authGeneration === this.#authGeneration,
+    );
+    const plan = planRound(
+      request,
+      around,
+      joinable.map((e) => e.range),
+      blocked,
+      grid,
+    );
+    const joined = plan.join.map((i) => joinable[i] as Inflight);
+    const own = plan.fetch.map((r) =>
+      this.#issue(cacheId, r, generation, requestId),
+    );
+    if (own.length > 0) this.#inflight.set(cacheId, enlist(list, own));
+    return [...joined, ...own];
   }
 
   /**
-   * One fetch per (cacheId, range) in flight; every waiter shares it (N31),
-   * unless it started under credentials that updateAuth has since replaced.
-   * The get that starts a fetch owns its mergeWarning events.
+   * Starts a fetch and returns its entry, which the caller lists. The get
+   * that issues a fetch owns its mergeWarning events.
    */
-  async #fetch(
+  #issue(
     cacheId: string,
-    range: Range,
+    range: SlotRange,
+    generation: number,
     requestId: string | undefined,
-  ): Promise<Outcome> {
-    // While a hook is swapping credentials the module's state and our stamp
-    // can disagree, so nothing is fetched: the range comes back auth-pending
-    // at once (design y) and the consumer re-gets after the switch.
-    if (!this.#auth.valid || this.#transitioning) return { kind: "auth" };
-    const key = `${cacheId}\u0000${range.start}\u0000${range.end}`;
-    const generation = this.#generation.get(cacheId) ?? 0;
-    const current = this.#inflight.get(key);
-    if (
-      current !== undefined &&
-      current.authGeneration === this.#authGeneration &&
-      current.generation === generation
-    ) {
-      return current.promise;
-    }
+  ): Inflight {
     const entry: Inflight = {
-      authGeneration: this.#authGeneration,
+      range,
       generation,
-      promise: this.#run(cacheId, range, requestId).finally(() => {
-        if (this.#inflight.get(key) === entry) this.#inflight.delete(key);
-      }),
+      authGeneration: this.#authGeneration,
+      fenced: false,
+      outcome: this.#run(cacheId, range, generation, requestId, () =>
+        this.#leave(cacheId, entry),
+      ),
     };
-    this.#inflight.set(key, entry);
-    return entry.promise;
+    return entry;
   }
 
+  /** Removes a decided fetch from its cache's list, by identity. */
+  #leave(cacheId: string, entry: Inflight): void {
+    const list = this.#inflight.get(cacheId);
+    if (list === undefined) return;
+    const at = list.indexOf(entry);
+    if (at !== -1) list.splice(at, 1);
+    if (list.length === 0) this.#inflight.delete(cacheId);
+  }
+
+  /**
+   * One fetch, from the fetcher's call to its outcome. Once the fetcher
+   * settles, the outcome is decided in one synchronous step (the rejection
+   * classified, or the fence checked and the response put), and the entry
+   * leaves the list in that step, before the outcome settles: no plan sees
+   * a decided fetch (§4.9.1 rule 1).
+   */
   async #run(
     cacheId: string,
-    range: Range,
+    slots: SlotRange,
+    generation: number,
     requestId: string | undefined,
+    leave: () => void,
   ): Promise<Outcome> {
-    const generation = this.#generation.get(cacheId) ?? 0;
-    const fetched = await this.#callFetcher(cacheId, range);
-    if ("outcome" in fetched) return fetched.outcome;
-    // Cleared by a newer version while in flight: this answer is stale.
-    if ((this.#generation.get(cacheId) ?? 0) !== generation) {
-      return { kind: "dropped" };
-    }
-    return this.#apply(cacheId, range, fetched.response, requestId);
-  }
-
-  /** The fetcher's answer, or the outcome its failure amounts to. */
-  async #callFetcher(
-    cacheId: string,
-    range: Range,
-  ): Promise<{ response: FetchResponse } | { outcome: Outcome }> {
     const fetcher = this.#fetcher as Fetcher;
-    const { interval, alignmentOffset } = this.#engine.configOf(cacheId);
+    const grid = this.#engine.configOf(cacheId);
+    const range = toMs(slots, grid);
     const authGeneration = this.#authGeneration;
     // Switches with the generation: the context this fetch is refused with.
     const context = this.#context;
+    let fetched: { response: FetchResponse } | { error: unknown };
     try {
-      const response = await fetcher.fetch({
-        cacheId,
-        // Copies: the fetcher may mutate its request; neither the put nor
-        // the authInvalid event (N33) nor later fetches must see it.
-        range: { start: range.start, end: range.end },
-        interval,
-        alignmentOffset,
-        context: structuredClone(context),
-      });
-      return { response };
+      fetched = {
+        response: await fetcher.fetch({
+          cacheId,
+          // Copies: the fetcher may mutate its request; neither the put nor
+          // the authInvalid event (N33) nor later fetches must see it.
+          range: { start: range.start, end: range.end },
+          interval: grid.interval,
+          alignmentOffset: grid.alignmentOffset,
+          context: structuredClone(context),
+        }),
+      };
     } catch (error) {
-      if (!isAuthInvalidError(error)) {
-        return { outcome: { kind: "failed", error: describe(error) } };
-      }
-      // A failure under credentials that updateAuth has since replaced
-      // says nothing about the new ones.
-      if (authGeneration === this.#authGeneration) {
-        this.#auth.invalidate(describe(error), context);
-      }
-      return { outcome: { kind: "auth" } };
+      fetched = { error };
     }
+    try {
+      if ("error" in fetched) {
+        return this.#refused(fetched.error, authGeneration, context);
+      }
+      // Cleared by a newer version while in flight: this answer is stale.
+      if ((this.#generation.get(cacheId) ?? 0) !== generation) {
+        return { kind: "dropped" };
+      }
+      return this.#apply(cacheId, range, fetched.response, requestId);
+    } finally {
+      leave();
+    }
+  }
+
+  /** The outcome a fetcher's rejection amounts to. */
+  #refused(error: unknown, authGeneration: number, context: unknown): Outcome {
+    if (!isAuthInvalidError(error)) {
+      return { kind: "failed", error: describe(error) };
+    }
+    // A failure under credentials that updateAuth has since replaced says
+    // nothing about the new ones.
+    if (authGeneration === this.#authGeneration) {
+      this.#auth.invalidate(describe(error), context);
+    }
+    return { kind: "auth" };
   }
 
   /** Applies a response as authoritative and announces its warnings. */
@@ -489,9 +667,13 @@ export class Orchestrator {
 }
 
 /**
- * A remaining miss is cut at the boundaries of the fetches that covered it:
- * each piece takes the reason of its fetch (failed, auth-pending) and the
- * rest stays uncached.
+ * A remaining miss is cut at the boundaries of the fetches the get awaited
+ * over it, its own and joined ones: each piece takes the reason of its
+ * fetch (failed, auth-pending) and the rest stays uncached. Pieces are not
+ * merged across fetches, even when their labels are equal. Where fetches
+ * overlap, the one starting first labels a slot; on equal starts the one
+ * awaited first, since `settled` is in round order, joined fetches (in
+ * list order) before own ones, and the sort is stable (§4.9.1 rule 4).
  */
 function annotate(miss: Miss, settled: Settled[], grid: Grid): Miss[] {
   const slots = snapOut(miss.range, grid);

@@ -3,7 +3,11 @@ import { candleConfig, MINUTE, series } from "../../bench/fixtures";
 import { Engine } from "../../src/engine/engine";
 import { collect } from "../../src/engine/read";
 import type { SlotRange } from "../../src/grid";
-import { Orchestrator, planFetches } from "../../src/orchestrator/orchestrator";
+import {
+  Orchestrator,
+  planFetches,
+  planRound,
+} from "../../src/orchestrator/orchestrator";
 import { PortClient } from "../../src/rpc/port-client";
 import type { MessagePortLike } from "../../src/rpc/protocol";
 import { RpcServer } from "../../src/rpc/server";
@@ -15,6 +19,7 @@ import type {
   GetResult,
   Range,
 } from "../../src/types";
+import { roundModel } from "../inflight-plan-model";
 import { points, schema, store } from "../merge-test-helpers";
 
 // Performance budgets (docs/benchmarking.md) that count instead of time,
@@ -28,6 +33,7 @@ const year = series("allDay", 365);
 /** What the fetcher was asked, read by the tests. */
 interface Served {
   requests: FetchRequest[];
+  answer(range: Range): unknown;
 }
 const served = (): Served =>
   (globalThis as unknown as { __perf: Served }).__perf;
@@ -133,7 +139,8 @@ async function connect() {
     kept: 0,
   };
   const channel = new MessageChannel();
-  const server = new RpcServer(new Engine(), "0.0.0");
+  const engine = new Engine();
+  const server = new RpcServer(engine, "0.0.0");
   server.attach(counting(channel.port1, down));
   const client = await PortClient.connect(counting(channel.port2, up), {
     fetcher: { module: fetcherModule },
@@ -143,7 +150,7 @@ async function connect() {
   await client.request("cache", config);
   const get = (range: Range) =>
     client.request("get", { cacheId: config.id, range }) as Promise<GetResult>;
-  return { get, up, down };
+  return { get, up, down, engine, client };
 }
 
 const SCREEN = 500 * MINUTE;
@@ -358,4 +365,119 @@ describe("a segment growing one point at a time", () => {
     expect(masks).toBeLessThanOrEqual(12);
     expect(maskBytes).toBeLessThanOrEqual(12_288);
   });
+});
+
+// Step 44 exact budgets: neither elapsed time nor scheduler speed gates these.
+describe("N31 round and fast-scroll budgets", () => {
+  it.each([false, true])(
+    "T6: one round scans 4,096 coverage and in-flight fragments linearly (blocked=%s)",
+    (withBlocked) => {
+      const grid = { interval: 10, alignmentOffset: 3 };
+      const request = { start: 0, end: 16383 };
+      const around = Array.from({ length: 4096 }, (_, i) => ({
+        start: 4 * i,
+        end: 4 * i,
+      }));
+      const inflight = Array.from({ length: 4096 }, (_, i) => ({
+        start: 4 * i + 2,
+        end: 4 * i + 2,
+      }));
+      const blocked = withBlocked
+        ? Array.from({ length: 2048 }, (_, i) => ({
+            start: 8 * i + 1,
+            end: 8 * i + 1,
+          }))
+        : [];
+      const counts = [0, 0, 0];
+      const counted = (ranges: SlotRange[], index: number) =>
+        new Proxy(ranges, {
+          get(target, key, receiver) {
+            if (typeof key === "string" && /^\d+$/.test(key))
+              counts[index] = (counts[index] ?? 0) + 1;
+            return Reflect.get(target, key, receiver);
+          },
+        });
+      const got = planRound(
+        request,
+        counted(around, 0),
+        counted(inflight, 1),
+        counted(blocked, 2),
+        grid,
+      );
+      expect(got).toEqual(roundModel(request, around, inflight, blocked));
+      // Measured when this contract first turned green: 53,246 element reads
+      // over 8,192 elements (6.5 each) without blocked ranges, 55,291 over
+      // 10,240 (5.4 each) with them; most are coalesce's neighbour lookups,
+      // about five per piece of the need.
+      expect(counts.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(
+        8 * (around.length + inflight.length + blocked.length),
+      );
+    },
+  );
+
+  it.each(["newest request first", "request order"])(
+    "T35: fast scroll fetches exactly 7,501 bars in 13 requests (%s)",
+    async (order) => {
+      const { get, engine, client } = await connect();
+      const newest = year.range.end - SCREEN;
+      const first = await get(around(newest));
+      expect(first.timestamps).toHaveLength(1500);
+      expect(first.coverage).toEqual([around(newest)]);
+      expect(first.misses).toEqual([]);
+      const releases: (() => void)[] = [];
+      served().answer = (range) =>
+        new Promise((resolve) => {
+          releases.push(() => resolve(answer(range)));
+        });
+      const reads = vi.spyOn(engine, "get");
+      const pending: Promise<GetResult>[] = [];
+      try {
+        for (let k = 1; k <= 12; k++) {
+          const waiting = get(around(newest - k * SCREEN));
+          waiting.catch(() => {});
+          pending.push(waiting);
+          // A non-get round trip confirms the preceding get was planned,
+          // without adding an engine read to the exact budget.
+          await client.request("cache", candleConfig("perf"));
+          expect(served().requests).toHaveLength(k + 1);
+          expect(releases).toHaveLength(k);
+        }
+        expect(reads).toHaveBeenCalledTimes(0);
+        const requests = served().requests;
+        const fetched = requests.reduce(
+          (sum, { range }) => sum + (range.end - range.start) / MINUTE + 1,
+          0,
+        );
+        expect(fetched).toBe(7501);
+        expect(requests[1]?.range).toEqual({
+          start: newest - 3 * SCREEN,
+          end: newest - 2 * SCREEN,
+        });
+        for (let k = 2; k <= 12; k++)
+          expect(requests[k]?.range).toEqual({
+            start: newest - (k + 2) * SCREEN,
+            end: newest - (k + 1) * SCREEN - MINUTE,
+          });
+        for (const release of order === "request order"
+          ? releases
+          : releases.toReversed())
+          release();
+        const results = await Promise.all(pending);
+        for (const [i, got] of results.entries()) {
+          const range = around(newest - (i + 1) * SCREEN);
+          expect(got.timestamps).toHaveLength(1500);
+          expect(got.timestamps[0]).toBe(range.start);
+          expect(got.timestamps[1499]).toBe(range.end);
+          expect(got.coverage).toEqual([range]);
+          expect(got.misses).toEqual([]);
+        }
+        expect(reads).toHaveBeenCalledTimes(12);
+        expect(served().requests).toHaveLength(13);
+      } finally {
+        for (const release of releases) release();
+        await Promise.allSettled(pending);
+        reads.mockRestore();
+      }
+    },
+  );
 });

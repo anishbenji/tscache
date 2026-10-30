@@ -43,6 +43,10 @@ export interface Preparation {
 export interface E2ePage {
   /** handshake-first-read: a new client, its first read, timed once. */
   firstRead(side: Side, ns: string): Promise<Once>;
+  /** T36: a new cache and its opening 1,500-bar read, outside the timer. */
+  scrollOpen(side: Side, ns: string): Promise<void>;
+  /** T36: post twelve scroll reads together and check every result. */
+  scrollRun(side: Side): Promise<Once>;
   /** Connects this page's client of `side` and readies the scenario. */
   prepare(preparation: Preparation): Promise<void>;
   /** The scenario's operation once, on one side. */

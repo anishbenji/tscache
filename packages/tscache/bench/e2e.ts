@@ -285,7 +285,54 @@ async function once(scenario: PageScenario, side: Side): Promise<Once> {
   return { ms, value };
 }
 
+// T36 (§4.9.1 rule 13): one client per side, a fresh cache and disjoint
+// history per operation. The driver gates HTTP responses in the checked run.
+const SCROLL_SCREEN = 500 * INTERVAL;
+const scrolling = new Map<
+  Side,
+  { client: TscacheClient; seq: number; cache?: CacheHandle; newest?: number }
+>();
+const scrollRange = (end: number): Range => ({
+  start: end - 2 * SCROLL_SCREEN,
+  end: end + SCROLL_SCREEN - INTERVAL,
+});
+
 const page: E2ePage = {
+  async scrollOpen(side, ns) {
+    let state = scrolling.get(side);
+    if (state === undefined) {
+      const { createClient } = await load(side);
+      state = {
+        client: shared(
+          await createClient(
+            options(side, ns, crypto.randomUUID(), "/scroll-fetcher.js"),
+          ),
+        ),
+        seq: 0,
+      };
+      scrolling.set(side, state);
+    }
+    state.newest = T0 - state.seq++ * 16 * SCROLL_SCREEN;
+    state.cache = await state.client.cache(config(crypto.randomUUID()));
+    const range = scrollRange(state.newest);
+    checked(await state.cache.get(range), range);
+  },
+  async scrollRun(side) {
+    const state = scrolling.get(side);
+    if (state?.cache === undefined || state.newest === undefined)
+      throw new Error("fast-scroll is not open");
+    const { cache, newest } = state;
+    const ranges = Array.from({ length: 12 }, (_, i) =>
+      scrollRange(newest - (i + 1) * SCROLL_SCREEN),
+    );
+    const start = performance.now();
+    const results = await Promise.all(ranges.map((range) => cache.get(range)));
+    const ms = performance.now() - start;
+    let value = 0;
+    for (const [i, got] of results.entries())
+      value += checked(got, ranges[i] as Range);
+    return { ms, value };
+  },
   async firstRead(side, ns) {
     const { createClient } = await load(side);
     const range = rangeOf(0);

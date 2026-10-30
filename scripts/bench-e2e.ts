@@ -11,7 +11,13 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Browser, type BrowserContext, chromium } from "@playwright/test";
+import {
+  type Browser,
+  type BrowserContext,
+  chromium,
+  expect,
+  type Page,
+} from "@playwright/test";
 import {
   BARS,
   type E2ePage,
@@ -39,10 +45,12 @@ export interface E2eRun {
   only: string[] | undefined;
 }
 
-type Scenario = "handshake-first-read" | PageScenario;
+type Scenario = "handshake-first-read" | "fast-scroll" | PageScenario;
 
 /** The scenarios, in the order run, with what each times. */
 const SCENARIOS: Readonly<Record<Scenario, string>> = {
+  "fast-scroll":
+    "T36: twelve overlapping reads with responses held, exactly 7,501 bars served; timing report-only",
   "handshake-first-read":
     "a new tab creates a client, connects to a new SharedWorker and reads 1,500 bars it fetches",
   "read-viewport-shared":
@@ -75,8 +83,34 @@ const TAIL_FETCHER = `
     },
   };`;
 
+/**
+ * The fast-scroll backend is HTTP/1: Chromium permits six connections per
+ * host. Alternate two loopback hostnames so all twelve held answers reach
+ * the same mock backend before release; the cache still has one worker.
+ */
+const SCROLL_FETCHER = `
+  let seq = 0;
+  export default {
+    async fetch({ range, interval, alignmentOffset, context }) {
+      const url = new URL("/backend/" + context.ns + "/candles", import.meta.url);
+      if (seq++ % 2 === 1) url.hostname = "localhost";
+      url.search = new URLSearchParams({ start: String(range.start), end: String(range.end), interval: String(interval), offset: String(alignmentOffset) });
+      const response = await fetch(url, { headers: { authorization: "Bearer " + context.token } });
+      if (response.status === 401) throw Object.assign(new Error("candles refused access"), { code: "tscache:auth-invalid" });
+      if (!response.ok) throw new Error("candles answered " + response.status);
+      const { timestamps, version, calls } = await response.json();
+      return { timestamps, fields: { price: timestamps, volume: timestamps.map(() => calls) }, meta: { version } };
+    }
+  };`;
+
 /** A scenario's result; the smoke's carries its one run's time. */
-export type E2eResult = CaseResult & { ms?: number };
+export type E2eResult = CaseResult & {
+  ms?: number;
+  bars?: {
+    checked: Partial<Record<Side, number>>;
+    timed: Partial<Record<Side, number[]>>;
+  };
+};
 
 async function build(options: Bun.BuildConfig): Promise<void> {
   const result = await Bun.build(options);
@@ -126,7 +160,20 @@ function serve(out: string) {
       if (url.pathname === "/") {
         return new Response(HTML, { headers: { "content-type": "text/html" } });
       }
-      if (url.pathname.startsWith("/backend/")) return backend(request, url);
+      if (url.pathname.startsWith("/backend/")) {
+        const response =
+          request.method === "OPTIONS"
+            ? new Response(null, { status: 204 })
+            : await backend(request, url);
+        response.headers.set("access-control-allow-origin", "*");
+        response.headers.set("access-control-allow-headers", "authorization");
+        return response;
+      }
+      if (url.pathname === "/scroll-fetcher.js") {
+        return new Response(SCROLL_FETCHER, {
+          headers: { "content-type": "text/javascript" },
+        });
+      }
       if (url.pathname === "/tail-fetcher.js") {
         return new Response(TAIL_FETCHER, {
           headers: { "content-type": "text/javascript" },
@@ -324,6 +371,123 @@ async function inPage(d: Driver, scenario: PageScenario): Promise<E2eResult> {
   }
 }
 
+/** T36: the same held fast scroll as the counter budget, over real HTTP. */
+async function fastScroll(d: Driver): Promise<E2eResult> {
+  const context = await d.browser.newContext();
+  const pages = new Map<Side, Page>();
+  const namespaces = { base: randomUUID(), head: randomUUID() };
+  const bars: NonNullable<E2eResult["bars"]> = { checked: {}, timed: {} };
+  const control = async (side: Side, body: unknown) => {
+    const response = await fetch(
+      `${d.origin}/backend/${namespaces[side]}/control`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!response.ok)
+      throw new Error(`fast-scroll control: ${response.status}`);
+  };
+  const once = async (side: Side, held: boolean): Promise<Once> => {
+    const page = pages.get(side) as Page;
+    const before = await fetches(d.origin, namespaces[side]);
+    await page.evaluate(
+      ([s, ns]) =>
+        (
+          globalThis as unknown as { tscacheE2e: E2ePage }
+        ).tscacheE2e.scrollOpen(s, ns),
+      [side, namespaces[side]] as const,
+    );
+    if (held) await control(side, { hold: { candles: 12 } });
+    const pending = page.evaluate(
+      (s) =>
+        (globalThis as unknown as { tscacheE2e: E2ePage }).tscacheE2e.scrollRun(
+          s,
+        ),
+      side,
+    );
+    pending.catch(() => {});
+    if (held) {
+      try {
+        await expect
+          .poll(async () => {
+            const response = await fetch(
+              `${d.origin}/backend/${namespaces[side]}/state`,
+            );
+            return ((await response.json()) as BackendSnapshot).held.candles;
+          })
+          .toBe(12);
+      } finally {
+        await control(side, { release: "candles" });
+      }
+    }
+    const run = await pending;
+    const seen = await fetches(d.origin, namespaces[side]);
+    let served = 0;
+    let requests = 0;
+    for (const [key, count] of Object.entries(seen)) {
+      const delta = count - (before[key] ?? 0);
+      const match = /^(-?\d+)-(-?\d+)$/.exec(key);
+      if (match === null) throw new Error(`invalid backend range ${key}`);
+      served += delta * ((Number(match[2]) - Number(match[1])) / 60_000 + 1);
+      requests += delta;
+    }
+    if (held) {
+      bars.checked[side] = served;
+      if (requests !== 13)
+        throw new Error(
+          `T36 fast-scroll ${side}: ${requests} requests, expected 13`,
+        );
+      console.log(`fast-scroll checked bars: ${JSON.stringify(bars.checked)}`);
+      if (side === "head" && served !== 7501)
+        throw new Error(
+          `T36 fast-scroll head served ${served} bars; expected exactly 7501`,
+        );
+    } else {
+      const timed = bars.timed[side] ?? [];
+      timed.push(served);
+      bars.timed[side] = timed;
+    }
+    return run;
+  };
+  try {
+    for (const side of d.sides) pages.set(side, await open(context, d.origin));
+    let checked: Once | undefined;
+    for (const side of d.sides) checked = await once(side, true);
+    if (d.sides.length === 1)
+      return {
+        name: "fast-scroll",
+        what: SCENARIOS["fast-scroll"],
+        ...(checked as Once),
+        expected: 12 * BARS,
+        bars,
+      };
+    for (let i = 0; i < 2; i++) {
+      await once("base", false);
+      await once("head", false);
+    }
+    const times = { base: [] as number[], head: [] as number[] };
+    for (let round = 0; round < d.rounds; round++) {
+      for (const side of round % 2 === 0
+        ? (["base", "head"] as const)
+        : (["head", "base"] as const))
+        times[side].push((await once(side, false)).ms);
+    }
+    console.log(
+      `fast-scroll timed bars (report-only): ${JSON.stringify(bars.timed)}`,
+    );
+    return {
+      name: "fast-scroll",
+      what: SCENARIOS["fast-scroll"],
+      sample: summarise(times.base, times.head, 1),
+      bars,
+    };
+  } finally {
+    await context.close();
+  }
+}
+
 /** Runs the scenarios in Chromium: paired with a base, or the smoke. */
 export async function runE2e(run: E2eRun): Promise<E2eResult[]> {
   const out = join(run.work, "e2e");
@@ -356,7 +520,9 @@ export async function runE2e(run: E2eRun): Promise<E2eResult[]> {
       results.push(
         scenario === "handshake-first-read"
           ? await firstReads(d)
-          : await inPage(d, scenario),
+          : scenario === "fast-scroll"
+            ? await fastScroll(d)
+            : await inPage(d, scenario),
       );
     }
     return results;
