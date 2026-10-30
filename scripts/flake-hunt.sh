@@ -11,7 +11,8 @@
 # since REF (default main), or with --all every test file. --load keeps one
 # busy loop per core running throughout, as a loaded machine or runner
 # would. Prints each failing test with its count and exits 1 if any test
-# failed. Logs go to FLAKE_HUNT_LOGS, or a new temporary directory.
+# failed, a given file does not exist, or a Vitest run executed no test.
+# Logs go to FLAKE_HUNT_LOGS, or a new temporary directory.
 #
 # Playwright needs the package built first (bun run build). On a shared
 # machine, run this as a heavy job (one at a time).
@@ -30,6 +31,15 @@ while [[ $# -gt 0 ]]; do
     --all) all=true; shift ;;
     *) files+=("$1"); shift ;;
   esac
+done
+
+# A file given by hand must exist: a mistyped one selects no test, and
+# Vitest (passWithNoTests) would pass every run of nothing.
+for file in ${files[@]+"${files[@]}"}; do
+  if [[ ! -f $file ]]; then
+    echo "flake-hunt: no such test file '$file'" >&2
+    exit 1
+  fi
 done
 
 if [[ ${#files[@]} -eq 0 ]] && $all; then
@@ -55,7 +65,7 @@ fi
 
 vitest=()
 playwright=()
-for file in "${files[@]}"; do
+for file in ${files[@]+"${files[@]}"}; do
   case $file in
     *.test.ts) vitest+=("$file") ;;
     *.spec.ts) playwright+=("$file") ;;
@@ -85,15 +95,19 @@ if [[ ${#vitest[@]} -gt 0 ]]; then
     bunx vitest run --reporter=json --outputFile="$out/vitest-$i.json" "${vitest[@]}" >"$out/vitest-$i.log" 2>&1 || status=1
   done
   # Failing tests across the runs, with their counts; a run that wrote no
-  # report (a crash) counts as a failure of the whole run.
+  # report (a crash) counts as a failure of the whole run, and so does one
+  # that ran no test (a file outside Vitest's include globs).
   bun -e '
     const [dir, runs] = [process.argv[1], Number(process.argv[2])];
     const counts = new Map();
     let lost = 0;
+    let empty = 0;
     for (let i = 1; i <= runs; i++) {
       const file = Bun.file(`${dir}/vitest-${i}.json`);
       if (!(await file.exists())) { lost++; continue; }
-      for (const suite of (await file.json()).testResults) {
+      const report = await file.json();
+      if (report.numTotalTests === 0) empty++;
+      for (const suite of report.testResults) {
         for (const t of suite.assertionResults) {
           if (t.status !== "failed") continue;
           const name = `${suite.name.replace(process.cwd() + "/", "")} > ${t.fullName}`;
@@ -103,8 +117,10 @@ if [[ ${#vitest[@]} -gt 0 ]]; then
     }
     for (const [name, n] of counts) console.log(`  ${n}/${runs} failed: ${name}`);
     if (lost > 0) console.log(`  ${lost}/${runs} runs wrote no report (see the logs)`);
-    if (counts.size === 0 && lost === 0) console.log(`  0 failures in ${runs} runs`);
-  ' "$out" "$runs"
+    if (empty > 0) console.log(`  ${empty}/${runs} runs ran no tests: is each file in Vitest\x27s include globs?`);
+    if (counts.size === 0 && lost === 0 && empty === 0) console.log(`  0 failures in ${runs} runs`);
+    process.exit(lost > 0 || empty > 0 ? 1 : 0);
+  ' "$out" "$runs" || status=1
 fi
 
 if [[ ${#playwright[@]} -gt 0 ]]; then
