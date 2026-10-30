@@ -13,20 +13,23 @@ The page then carries the server's answer twice:
 
 ## The server
 
-<<< @/snippets/snapshots.ts#server{ts}
+<<< @/snippets/snapshots-server.ts#server{ts}
 
 - **One client per server process**, created at startup and shared by every render, so a render reads
   what earlier renders fetched. Every visitor then reads the same cache: use it for public data only.
 - **The fetcher URL must be one the server can `import()`.** With Vite, `?fetcher` gives server code a
   file URL in a build and a path the module runner resolves in dev ([The Vite plugin](/guides/vite)).
 - **A server has no page origin**, so a fetcher that requests relative paths needs the backend's origin
-  from its context. The examples' fetcher reads `context.origin`; the browser's client omits it.
+  from its context, as the server half above passes it. This site's fetcher and the examples' read
+  `context.origin` and resolve each request URL against it; the browser's client omits it.
 - The server's own credential, if the backend needs one, goes in the server client's context, never a
   visitor's.
 
 ## The browser
 
-<<< @/snippets/snapshots.ts#browser{ts}
+<<< @/snippets/snapshots-browser.ts#browser{ts}
+
+<<< @/snippets/snapshots-page.ts#page{ts}
 
 Apply the snapshot before the first live read. `hydrate` writes only where the browser's cache neither
 covers anything nor holds a provisional point, in one call inside the worker, so another tab's newer

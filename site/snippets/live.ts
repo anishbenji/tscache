@@ -10,26 +10,17 @@ const client = await createClient({
 const cache = await client.cache({
   id: "candles/ACME",
   interval: MINUTE,
-  fields: { close: "f64" },
+  fields: { open: "f64", high: "f64", low: "f64", close: "f64", volume: "u32" },
 });
 
 // #region push
-// Server-Sent Events: each message is a bar, as a put batch.
-const events = new EventSource("/api/stream/candles/ACME");
+// Server-Sent Events: each message is a put batch, the bar forming now
+// (and the bar that just closed, when one did). Its meta.finalizedUntil
+// keeps the forming bar provisional, so a fetching read asks for it again.
+const events = new EventSource(`/api/stream/candles/ACME?interval=${MINUTE}`);
 events.onmessage = ({ data }) => {
-  const bar = JSON.parse(data as string) as {
-    t: number;
-    close: number;
-    finalizedUntil: number;
-  };
-  const batch: PutBatch = {
-    timestamps: [bar.t],
-    fields: { close: [bar.close] },
-    // The forming bar is not final: it stays provisional, so a fetching
-    // read asks the backend for it again.
-    meta: { finalizedUntil: bar.finalizedUntil },
-  };
-  // No range: adds or overwrites this bar and removes nothing.
+  const batch = JSON.parse(data as string) as PutBatch;
+  // No range: adds or overwrites these bars and removes nothing.
   void cache.put(batch).then(() => redraw());
 };
 // #endregion push

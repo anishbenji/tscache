@@ -18,7 +18,7 @@ A snapshot holds binary buffers. `encodeSnapshot(snapshot)` returns it with each
 as base64 text: a plain JSON value. `decodeSnapshot(encoded)` restores it. `NaN`, which `JSON` would
 turn into `null`, survives. Both use `btoa`/`atob`, so they run in browsers and Node alike.
 
-<<< @/snippets/snapshots.ts#server{ts}
+<<< @/snippets/snapshots-server.ts#server{ts}
 
 Escaping for a `<script>` element is yours: replace every `<` in the JSON, as above. `decodeSnapshot`
 checks the shape only and throws `TscacheError` for anything that is not an encoded snapshot; whether the
@@ -26,7 +26,9 @@ snapshot fits the cache is `hydrate`'s to check.
 
 ## Applying one: hydrate
 
-<<< @/snippets/snapshots.ts#browser{ts}
+<<< @/snippets/snapshots-browser.ts#browser{ts}
+
+<<< @/snippets/snapshots-page.ts#page{ts}
 
 `cache.hydrate(snapshot)` runs as one call inside the worker, so no other tab's write lands in the
 middle. Its rules:
