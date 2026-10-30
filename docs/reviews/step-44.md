@@ -15,7 +15,9 @@ Design for subtracting the fetches already in flight from a `get`'s misses, so o
 | 3183645 | `feat(orchestrator)`: the in-flight list, `planRound`, rounds, removal in the deciding step, `Orchestrator.invalidate` and its fence; the RPC server routes `invalidate` through it. Codex's contract tests T1–T36; the round 3 regression on T17's setup; T6's measured count |
 | e2f1b51 | `test(orchestrator)`: T14's invalid-response case asserts the documented error and miss label instead of message wording (director decision) |
 | 6c6717d | `docs`: the request bound (N65) in `docs/guides/worker-setup.md`, `docs/guides/patterns.md` and the site's fetcher page; the site's read path (`concepts/coverage.md`) without exact-range dedup; `fast-scroll` in `docs/benchmarking.md` |
-| (this commit) | This file: implementation notes, contract-test changes, bench results |
+| 08a95d0 | This file: implementation notes, contract-test changes, bench results |
+| e2ab6df | `chore(size)`: the worker entry's brotli budget raised to 12,576 B (measured 12,063 B + 512 B, docs/benchmarking.md); the step adds about 320 B and main had 125 B of headroom |
+| (this commit) | This file: the scope rows above |
 
 ## Implementation plan
 
