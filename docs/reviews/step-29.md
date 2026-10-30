@@ -1,6 +1,6 @@
 # Docs 29 — User documentation site
 
-Branch: `docs/29-docs-site` · Reviewer: Codex (high) · Rounds: 1 · Status: re-review pending (round 1 raised P1s) · Verdict after triage: merge after re-review
+Branch: `docs/29-docs-site` · Reviewer: Codex (high) · Rounds: 2 · Status: re-review pending (round 2 raised a P1; the area was redesigned) · Verdict after triage: merge after re-review
 
 Comprehensive documentation for library users, as a site in its own Bun workspace (`site/`), with an API reference generated from the TSDoc and a build check in `bun run ci`. Built by a Claude Opus 5.5 subagent while the user was away, under the user's grant of 2026-10-30; not a commit-plan step. No engine behaviour changes: the only edits under `packages/tscache/src` are TSDoc comments.
 
@@ -15,6 +15,8 @@ Comprehensive documentation for library users, as a site in its own Bun workspac
 | 27ca5ea | `docs(site)`: R1-1, R1-2 |
 | 431e556 | `docs(site)`: R1-3 |
 | 2af0c3f | `docs(site)`: the grid example says why its client has no fetcher (round 1 sweep) |
+| 220681e | `docs(site)`: R2-1: the server half of the snapshot example is a renderer created with the fetcher module and the backend's origin, which the fetcher resolves requests against; the example is split into `snapshots-server.ts`, `snapshots-browser.ts` (`startCache`) and `snapshots-page.ts`; the fetcher example speaks the mock backend's protocol; the live example's schema matches its candles |
+| 93a9081 | `build(site)`: `bun run docs:run` (`site/scripts/run-snippets.ts`), in `bun run ci` after `docs:check`: the snippets run against the examples' mock backend and are checked for their data (below); `@examples/mock-backend` exports `./backend`; the miss-reason table corrected (the provisional tail stays `'uncached'`) |
 
 Pages: getting started; concepts (coverage and gaps, the grid and `alignmentOffset`, segments and slots, versions and watermarks, invalidation and clearing, events in three scopes); the API by example (client, cache, snapshots, fetcher module, engine, errors) beside the generated reference; guides (workers and fallback, writing a fetcher, the Vite plugin and its static-import rule, credentials and `tscache:auth-invalid`, server rendering, live feeds by SSE, WebSocket and polling, expiry and other patterns); vanilla, React, Solid and chart libraries; performance (a summary of `docs/benchmarking.md`); troubleshooting and FAQ; an architecture map for contributors. The internal documents (`docs/architecture.md`, `docs/workflow.md`, `docs/reviews/`, `docs/review-checklist.md`, `docs/guides/`) stay where they are; the site links to them on GitHub.
 
@@ -57,6 +59,18 @@ All dev dependencies of the private `site/` workspace, pre-approved: `vitepress`
 | R1-3 | P1 | The fetcher example accumulates fields in an object that inherits from `Object.prototype`, so a field named `constructor` breaks `??=` and `push()` | accepted | Reproduced under Bun: the snippet's accumulation throws "push is not a function" for `constructor`, while an `Object.create(null)` dictionary works and `Engine.put` accepts it. Fixed in 431e556 |
 
 Sweep for the same patterns on other pages: every other client without a fetcher is deliberate. `cache.ts` writes with `put` and reads `cacheOnly`; `errors.ts`, the webpack and no-bundler blocks only connect; `client.ts`'s in-process client is only disposed; `engine.ts` has no worker. `grid.ts` reads without a fetcher to show the snapped miss, and now says so (2af0c3f). The other `hydrate` calls are the integrations' `hydrateRead`, which has the fallback, and `Engine.hydrate`, which has no older worker. The examples' fetcher (`examples/mock-backend/src/fetcher.ts`), which the fetcher guide shows in full, accumulates fields the same way as R1-3; its datasets name no such field, and it is left for a branch that touches the examples.
+
+## Round 2 — reviewer verdict: merge after fixes
+
+The reviewer confirmed R1-1, R1-2 and R1-3 fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | The server snapshot example reads through the fetcher's relative `fetch("/api/series/…")`, which a server cannot resolve without an origin: no points, `'fetch-failed'` misses, empty snapshot coverage | accepted | Reproduced with the new check: with the server's fetcher context lacking an origin, `bun run docs:run` failed with "✗ snapshots-server.ts, snapshots-browser.ts: the server read no points" (exit 1). 220681e passes the origin in the server's fetcher context, as `integrations/shared/server.ts` and the SSR examples do, and the fetcher resolves each request against it; the check then passed |
+
+**Convergence check fired.** `site/snippets/snapshots.ts` drew P1s in rounds 1 and 2 (docs/workflow.md, review loop step 7). Their common cause was that the snippets were only type-checked, so code that compiled but did not work passed CI. The area was redesigned rather than patched: the snippets are now executed in CI (93a9081). `bun run docs:run` starts the examples' mock backend on a free port in the Bun process, runs `fetcher.ts` (five days of bars, so more than one page), `cache.ts`, `engine.ts`, `grid.ts`, and the server and browser halves of server rendering (the browser half in-process against the same backend, with the server's snapshot), and asserts the data each produced: point counts, coverage, columns, the snapped range, and that only the provisional tail is missing. `client.ts`, `errors.ts`, `getting-started.ts`, `live.ts`, `snapshots-page.ts` and `vite-config.ts` need a bundler's `?worker&url`/`?fetcher` imports, `document`, or a stream that never ends, and are listed with that reason; `patterns.ts` defines functions only and `env.d.ts` declarations only. A snippet in neither list fails the check. No Playwright, so it is not a heavy job; it takes about a second.
+
+The first run of the check found a documentation error the reviews had not: the provisional tail is reported as an `'uncached'` miss even right after its fetch returned its points (`orchestrator.ts`, the rest of a fetched range stays uncached while it is uncovered), but the miss-reason table said `'uncached'` meant nobody had asked the backend. The table now says so (93a9081).
 
 ## Found while writing
 
