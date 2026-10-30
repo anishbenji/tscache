@@ -11,7 +11,10 @@ export type Side = "base" | "head";
  * The scenarios timed inside one page; handshake-first-read takes a new
  * page per run (scripts/bench-e2e.ts).
  */
-export type PageScenario = "read-viewport-shared" | "two-tabs-one-fetch";
+export type PageScenario =
+  | "read-viewport-shared"
+  | "two-tabs-one-fetch"
+  | "live-tail-get";
 
 /** The bars every scenario reads: a chart's screen and one each side. */
 export const BARS = 1500;

@@ -2,10 +2,10 @@
  * A Snapshot as a plain JSON value and back (docs/architecture.md §2.8,
  * N38). Buffers travel as base64 of their bytes, so NaN, a legal field
  * value that JSON would turn into null, survives. Imports types and errors
- * only: the '.' entry carries no engine code. No DOM: btoa/atob exist in
- * browsers and Node.
+ * only: the '.' entry carries no engine code. No DOM (base64.ts).
  */
 
+import { fromBase64 as decodeBase64, toBase64 } from "./base64";
 import { show, TscacheError } from "./errors";
 import type {
   DenseSegmentPayload,
@@ -14,32 +14,17 @@ import type {
   Snapshot,
 } from "./types";
 
-/** btoa takes a binary string; String.fromCharCode takes bounded arguments. */
-const CHUNK = 0x8000;
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
-}
-
 function fail(message: string): never {
   throw new TscacheError(`invalid encoded snapshot: ${message}`);
 }
 
 function fromBase64(text: unknown, what: string): Uint8Array<ArrayBuffer> {
   if (typeof text !== "string") fail(`${what} must be a base64 string`);
-  let binary: string;
   try {
-    binary = atob(text);
+    return decodeBase64(text);
   } catch {
     return fail(`${what} is not valid base64`);
   }
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
