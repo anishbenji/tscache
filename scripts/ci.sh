@@ -44,6 +44,9 @@ if [ "$(git rev-parse "$base")" != "$(git rev-parse HEAD)" ]; then
   bunx commitlint --from "$base" --to HEAD
 fi
 bunx biome ci .
+# Tests read no wall clock, time nothing and sleep for nothing, and
+# Playwright never retries (docs/testing.md).
+bun scripts/test-clocks.ts
 bun run typecheck
 # Built before Knip: the examples' Vite configs import tscache/vite from
 # dist/, and Knip loads them; a fresh checkout has no dist/ yet.
