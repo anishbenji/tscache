@@ -1,6 +1,6 @@
 # Chore 30 — Local demo hub
 
-Branch: `chore/30-demo-hub` · Reviewer: Codex (high) · Rounds: 1 · Status: fixes in, awaiting round 2 · Verdict after triage: merge after round 2
+Branch: `chore/30-demo-hub` · Reviewer: Codex (high) · Rounds: 2 · Status: fixes in, awaiting round 3 · Verdict after triage: merge after round 3
 
 One command that shows and launches every sample app: `bun run demo`. Requested by the director while the user was away, under the user's grant of 2026-10-30; built by a Claude Opus 5.5 subagent. Tooling, not a commit-plan step: no package, example or reference-client code changes.
 
@@ -13,6 +13,8 @@ One command that shows and launches every sample app: `bun run demo`. Requested 
 | 3e3f897 | `fix(demo)`: R1-1, R1-2 |
 | cda83a7 | `test(e2e)`: R1-3 |
 | 43cc3d1 | `test(e2e)`: the launcher test spawns `scripts/demo.ts` by its absolute path; Knip read the relative argument as an import from `e2e/demo/` and failed `bun run ci` |
+| fc5c11b | `fix(demo)`: R2-1, R2-2 (the lifecycle redesign below) |
+| 4b5b4cd | `test(e2e)`: the Expire token test waits until the page's next poll for `ok` |
 
 ## Decisions made in the step
 
@@ -36,9 +38,30 @@ Taken by the subagent under the grant (logged for the user).
 | R1-2 | P1 | Subprocess `cwd` comes from a URL's `pathname`, so a checkout path with a space reaches the subprocess percent-encoded | Accept. Confirmed by reading: `new URL("file:///a b/").pathname` is `/a%20b/` | 3e3f897: `fileURLToPath(root)` for both subprocess directories. No test: it would need a checkout under a path with a space |
 | R1-3 | P1 | Only `expireAccess` is tested; broken forwarding of `dropStreams` or `bumpVersion`, or acceptance of an unknown app or control, would pass | Accept. Confirmed by reading the spec | cda83a7: Restate history moves `solid-uplot`'s backend from `vN` to `vN+1` in the panel; Drop streams makes an open `reference-vanilla` page reopen its feed and fetch to mend it, counted from that page's own fetch notices; `POST /control/no-such-app` and an unknown control (`resetClock`) answer 400 |
 
+## Round 2 — reviewer verdict: merge after fixes
+
+The convergence check (`docs/workflow.md`, step 7) fired: process cleanup in the launcher drew P1s in rounds 1 and 2, so the lifecycle was redesigned instead of patching another exit path. `scripts/demo/processes.ts` registers every subprocess, builds and app servers alike, each in a process group of its own. One `shutdown()` in `scripts/demo.ts`, which every way out takes (a failed build or server, the hub's port in use, SIGINT, SIGTERM, SIGHUP), sends SIGTERM to every group, then SIGKILL to what remains after 3 s, and exits only once every group is gone.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | In the reviewer's host `bun run ci` the launcher test exceeded 120 s; cause unknown | Accept. Reproduced in the full suite under CPU load (one `yes` per core): the same 2.0 m timeout. Instrumented, the launcher had exited with code 1 after 1.2 s and every app port was free; the test then hung in `finally` on `close(taken)`. `lsof` showed an established connection to the held hub port from the T3 Code app (it probes new local listeners and keeps the connection), and `net.Server.close()` waits for every connection to end. The test's failed assertion never surfaced because that wait came first. Not the launcher | fc5c11b: the spec's listeners destroy their open sockets on close. A second cause turned up in the repeat runs: ports picked by asking the system for port 0 come from the ephemeral range, where outgoing connections take their local ports, so a run found free was taken a moment later. Ports now come in a block per worker above the suite's own demo port (which carries the checkout's offset) and below the ephemeral range, each run checked free |
+| R2-2 | P1 | Parallel builds are not tracked, so a failed build leaves its siblings writing `dist/` after the launcher exits | Accept. Confirmed by reading: `build()` spawned untracked processes, and `stop()` killed only the servers | fc5c11b: builds go through the same registry and shutdown. New test: `DEMO_BUILD_SCRIPT` (a test-only stand-in for every build) fails `solid-uplot`'s build once the eight other builds run, each with a child process of its own; the launcher exits 1, none of the 18 processes survives, and every port is free. With the group kill disabled (signalling the leader only), the test fails with 11 processes still running |
+
+New tests besides R2-2's: SIGTERM to a running demo exits 143 and frees the hub's and every app's port. Every launcher test kills whatever it leaves (the launcher's group, recorded pids, any server on its ports) however it ends.
+
+Decisions in this round:
+
+| # | Decision | Why | Alternatives |
+|---|---|---|---|
+| D8 | Playwright stops the demo with `gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 }` | Its default, SIGKILL to the launcher's process group, would miss the servers' own groups; on SIGTERM the launcher stops them and waits | Keeping the servers in the launcher's group (then a group kill from outside reaches them, but the launcher cannot kill a child's children without killing itself) |
+| D9 | `DEMO_BUILD_SCRIPT`, a test-only environment variable that replaces every build command | A failed parallel build must be testable inside the Playwright suite without rewriting a `dist/` the example servers are serving | Failing a real build (rewrites shared `dist/`, slow) |
+| D10 | The Expire token test waits up to 15 s for the page's `auth` to read `ok`, as the refresh poll before it does | Under `--repeat-each 3` the runs share the `react-lwcharts` backend, and another run can expire the token again after this one's refresh; the page recovers by its next five-second poll. The bound follows the page's poll interval; it does not cover a defect | Making the control tests exclusive (Playwright runs repeats on separate workers regardless) |
+| D11 | `pgrep` in Knip's `ignoreBinaries` | The spec uses the system tool to find leftover servers | Listing processes by hand |
+
 ## Verification
 
 - `bun run demo` by hand: all builds succeeded, the hub answered 200 at `http://127.0.0.1:5400/`, every app page (`5401/`, `5401/events.html`, `5402/`–`5406/`, `5407/`, `5407/ssr`, `5408/ssr`, `5409/ssr`) answered 200, and `/stats` streamed every app's counters (the SSR apps already showed the server's fetches). SIGINT to the demo process left no listener on 5400–5409.
 - `E2E_EXAMPLES=demo bunx playwright test --project=demo`: 24 passed in 18.2 s.
 - `bunx tsc -p .`, `bunx tsc -p e2e`, `bunx knip`, `bun run fallow`, `bunx biome check`: clean.
 - Round 1: `E2E_EXAMPLES=demo bunx playwright test --project=demo`: 28 passed in 18.4 s.
+- Round 2: `E2E_EXAMPLES=demo bunx playwright test --project=demo --repeat-each 3`: 90 passed in 32.8 s; the launcher spec `--repeat-each 5` under CPU load: 15 passed; no `vite preview` left afterwards. By hand: SIGINT to a running demo exits 130 with no listener or server left, each server leading its own process group.
