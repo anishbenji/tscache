@@ -1,6 +1,6 @@
 # Fix 35 — Merge warnings printed in development builds
 
-Branch: `fix/35-dev-merge-warning` · Reviewer: not yet reviewed · Rounds: 0 · Status: implemented, awaiting review · Verdict after triage: —
+Branch: `fix/35-dev-merge-warning` · Reviewer: Codex (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 Resolved decision #8 (architecture §7) says overlap warnings are emitted as `mergeWarning` events **and** printed with `console.warn` in development builds (§2.7). The event and the `put()` result existed; nothing in `src/` printed. Chosen by the director while the user was away, under the user's grant of 2026-10-30; built by a Claude Opus 5.5 subagent. The meaning of decision #8 is unchanged: this fix implements it and records where and when the line prints.
 
@@ -35,3 +35,7 @@ Taken by the subagent under the grant (logged for the user). D1 and D2 are the o
 ## Decision concerns
 
 None.
+
+## Round 1 — reviewer verdict: merge
+
+No findings; `bun run ci` passed. Settled. Reviewed and settled by the director while the user was away.
