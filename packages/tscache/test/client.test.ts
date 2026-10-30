@@ -236,7 +236,7 @@ describe("fallback chain", () => {
     vi.stubGlobal("Worker", function FakeWorker() {
       const channel = new MessageChannel();
       const w = workerLike(channel.port2, () => {});
-      // clock-ok: the fake worker's error event comes after its constructor returns, as a browser's does.
+      // clock-ok: the fake worker's error comes after its constructor returns, as a browser's does. Its zero timer is queued before the client's handshake timer, which is longer, so no pause can put that timer first.
       setTimeout(() => w.fail("script 404"), 0);
       return w;
     });
@@ -337,6 +337,8 @@ describe("lifecycle (round 1)", () => {
   it("a SharedWorker that answers after the timeout completes nothing: this side's port is closed", async () => {
     let closed = 0;
     let messages = 0;
+    /** Attaches the worker's server, which then says hello: the test's call. */
+    let answer = () => {};
     vi.stubGlobal("Worker", undefined);
     vi.stubGlobal(
       "SharedWorker",
@@ -345,11 +347,9 @@ describe("lifecycle (round 1)", () => {
         constructor() {
           const channel = new MessageChannel();
           const server = new RpcServer(new Engine(), "0.0.0");
-          // Attach late: hello arrives after the client gave up. Timers
-          // fire in expiry order, so the 20 ms handshake timeout always
-          // comes first, however busy the machine.
-          // clock-ok: the late answer is the scenario under test.
-          setTimeout(() => server.attach(channel.port1 as MessagePortLike), 60);
+          // Nothing answers until the test says so, after the client gave
+          // up: the hello is late by construction, not by a timer.
+          answer = () => server.attach(channel.port1 as MessagePortLike);
           const port = channel.port2;
           this.port = {
             postMessage: (m: unknown, t?: Transferable[]) => {
@@ -373,6 +373,8 @@ describe("lifecycle (round 1)", () => {
     );
     const client = await make({ workerUrl: url, handshakeTimeoutMs: 20 });
     expect(client.mode).toBe("in-process");
+    // The hello arrives now, after the timeout.
+    answer();
     // clock-ok: an absence check after the late hello; a slow machine can only hide an init, not fail the test.
     await new Promise((r) => setTimeout(r, 120));
     // Abandoned on timeout: the port was closed and no init was ever sent.
