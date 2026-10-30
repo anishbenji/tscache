@@ -1,6 +1,6 @@
 # Step 41 — Reference clients draw a live bar by its newest bars
 
-Branch: `feat/41-reference-live-update` · Reviewer: Codex (high) · Rounds: 1 · Status: fixes applied after round 1
+Branch: `feat/41-reference-live-update` · Reviewer: Codex (high) · Rounds: 2 · Status: settled
 
 Item 8 of the performance plan of 2026-10-30: each live tick handed the chart a new answer, and the Lightweight Charts view drew it with a `setData` of every bar (about 720 on the opening range). A view now remembers the answer it drew; when the next one differs from it only in its newest bars, the Lightweight Charts view passes just those to `series.update()`. Any other change still takes `setData`. Built by an implementation child while the user was away, under the user's grant of 2026-10-30. Reference code only: nothing in `packages/tscache` changed.
 
@@ -277,3 +277,7 @@ None. No existing test's assertions changed; `appended.test.ts` now imports its 
 ## Decision concerns
 
 None.
+
+## Round 2 — reviewer verdict: merge
+
+No findings; R1-1 fixed: the new tests verify the calls and bar contents both chart series receive. `bun run ci` passed. Settled.
