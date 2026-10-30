@@ -53,6 +53,18 @@ bun install && bun run build
 bun run --cwd examples/vanilla-uplot dev
 ```
 
+### Demo hub
+
+`bun run demo` builds the package, every example and every reference client,
+serves each on its own local port with its own mock backend, and opens a hub
+at <http://127.0.0.1:5400/> (`DEMO_PORT` moves it; the apps take the next nine
+ports). The hub links every page, client-only and server-rendered, both chart
+libraries and all three live feeds, says what each one shows, and has a live
+panel of every backend's counters (fetches, refused requests, token refreshes,
+open streams) with buttons to expire a token, drop the live streams or restate
+history. Open a page twice to watch two tabs share one SharedWorker: the second
+tab draws at once and adds at most the newest bars to the fetch count. Ctrl-C stops everything.
+
 ## Framework integrations
 
 Type-checked snippets under [`integrations/`](integrations/) for vanilla
