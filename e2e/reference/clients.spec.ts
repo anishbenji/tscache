@@ -76,6 +76,18 @@ async function barCount(page: Page): Promise<number> {
   return Number(/^(\d+) bars/.exec(text)?.[1] ?? Number.NaN);
 }
 
+/**
+ * How many answers the chart drew in full and how many by their newest
+ * bars alone, as the views count them on their element
+ * (reference/shared/src/chart/view.ts, countDraw).
+ */
+async function draws(page: Page): Promise<{ full: number; appended: number }> {
+  return page.locator("#chart").evaluate((chart) => ({
+    full: Number(chart.dataset.drawsFull ?? 0),
+    appended: Number(chart.dataset.drawsAppended ?? 0),
+  }));
+}
+
 /** The start of the range on screen, in ms (shown as `MM-DD HH:MM`). */
 async function showingStart(page: Page): Promise<number> {
   const text = (await page.getByTestId("showing").textContent()) ?? "";
@@ -136,6 +148,39 @@ for (const app of [
       await expect.poll(async () => (await stats(b)).streams).toBe(1);
       await nextDraw(b);
       await nextDraw(b);
+    });
+
+    for (const chart of ["lightweight", "uplot"] as const) {
+      test(`a live bar draws only the newest bars, not every bar (${chart}, step 41)`, async ({
+        context,
+      }) => {
+        const page = await openTab(context, `/?chart=${chart}`);
+        // The opening answer draws every bar.
+        await expect
+          .poll(async () => (await draws(page)).full)
+          .toBeGreaterThan(0);
+        await nextDraw(page);
+        const before = await draws(page);
+        await nextDraw(page);
+        await nextDraw(page);
+        const after = await draws(page);
+        expect(after.appended).toBeGreaterThanOrEqual(before.appended + 2);
+        expect(after.full).toBe(before.full);
+      });
+    }
+
+    test("a dataset version pushed with a bar draws every bar again (step 41)", async ({
+      context,
+    }) => {
+      const page = await openTab(context);
+      await waitNotices(page, 1);
+      await nextDraw(page);
+      const before = await draws(page);
+      await control(page, { bumpVersion: true });
+      await expect
+        .poll(async () => (await draws(page)).full)
+        .toBeGreaterThan(before.full);
+      await expect.poll(() => barCount(page)).toBeGreaterThan(600);
     });
 
     test("choosing a feed in one tab switches every tab", async ({
