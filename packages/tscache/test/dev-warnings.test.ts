@@ -23,6 +23,17 @@ const batch = (timestamps: number[], prices = timestamps): PutBatch => ({
   fields: { price: prices },
 });
 
+/** Answers every aligned slot of the range with price = t. */
+const fetcherModule = `data:text/javascript,${encodeURIComponent(`
+  export default {
+    async fetch(req) {
+      const ts = [];
+      for (let t = Math.ceil((req.range.start - req.alignmentOffset) / req.interval) * req.interval + req.alignmentOffset; t <= req.range.end; t += req.interval) ts.push(t);
+      return { timestamps: ts, fields: { price: ts } };
+    },
+  };
+`)}`;
+
 /** Two tabs on one SharedWorker: every client connects to the same server. */
 function installSharedWorker(): void {
   const server = new RpcServer(new Engine(), "0.0.0");
@@ -144,6 +155,41 @@ describe("put in a production build", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("orchestrated fetches", () => {
+  it("print in the tab whose get started the fetch, once per warned range", async () => {
+    installSharedWorker();
+    const fetcher = { module: fetcherModule };
+    const a = await make({ workerUrl: "/worker.js", fetcher });
+    const b = await make({ workerUrl: "/worker.js", fetcher });
+    const cacheA = await a.cache(config);
+    const cacheB = await b.cache(config);
+    const heardB: ClientEvents["mergeWarning"][] = [];
+    cacheB.on("mergeWarning", (e) => heardB.push(e));
+    await cacheA.put(batch([3], [999]));
+    // The fetch for slot 13 extends into covered slot 3 and returns price 3.
+    await cacheA.get({ start: 13, end: 13 });
+    await settled();
+    expect(heardB).toHaveLength(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'tscache: a fetch for cache "w" overwrote cached values that differed: [3, 3] price. Reported because warnOnOverlapDiff is on, also as mergeWarning events; printed in development builds only.',
+    );
+  });
+
+  it("print nothing in a production build", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const client = await make({
+      mode: "in-process",
+      fetcher: { module: fetcherModule },
+    });
+    const cache = await client.cache(config);
+    await cache.put(batch([3], [999]));
+    await cache.get({ start: 13, end: 13 });
+    await settled();
     expect(warn).not.toHaveBeenCalled();
   });
 });

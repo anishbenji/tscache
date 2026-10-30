@@ -20,6 +20,7 @@ import {
 } from "./protocol";
 
 interface Pending {
+  op: Op;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
 }
@@ -178,7 +179,7 @@ export class PortClient {
     const id = ++this.#seq;
     const req: Req = { t: "req", id, op, params };
     return new Promise((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject });
+      this.#pending.set(id, { op, resolve, reject });
       try {
         this.#port.postMessage(req, transfer);
       } catch (error) {
@@ -186,6 +187,11 @@ export class PortClient {
         reject(error);
       }
     });
+  }
+
+  /** The op of this client's request `id` while it awaits its response. */
+  pendingOp(id: number): Op | undefined {
+    return this.#pending.get(id)?.op;
   }
 
   /** Receives every evt message as sent; returns the unsubscribe. */
