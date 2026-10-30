@@ -1,0 +1,24 @@
+{
+  "name": "@tscache/site",
+  "private": true,
+  "type": "module",
+  "description": "The tscache documentation site (never published)",
+  "scripts": {
+    "api": "typedoc",
+    "dev": "typedoc && vitepress dev",
+    "build": "typedoc && vitepress build",
+    "preview": "vitepress preview"
+  },
+  "dependencies": {
+    "tscache": "workspace:*"
+  },
+  "devDependencies": {
+    "@examples/mock-backend": "workspace:*",
+    "typedoc": "0.28.20",
+    "typedoc-plugin-markdown": "4.14.1",
+    "typedoc-vitepress-theme": "1.1.4",
+    "typescript": "npm:typescript@6.0.3",
+    "vite": "^8.3.4",
+    "vitepress": "2.0.0-alpha.21"
+  }
+}

@@ -48,6 +48,9 @@ bun run typecheck
 # Built before Knip: the examples' Vite configs import tscache/vite from
 # dist/, and Knip loads them; a fresh checkout has no dist/ yet.
 bun run --filter tscache build   # includes publint + attw (esm-only profile)
+# Generated before Fallow and the site's type check: the site's config imports
+# TypeDoc's sidebar, site/api/ is gitignored, and a fresh checkout has none.
+bun run --cwd site api
 bunx knip
 bun run fallow
 bunx vitest run --passWithNoTests
@@ -55,6 +58,12 @@ bunx vitest run --passWithNoTests
 # The integration snippets type-check against the built package, as an
 # app would see it (starter §5, §7).
 bun run check:integrations
+# The documentation site: its code examples type-check against the built
+# package and run against the mock backend, each checked for the data it
+# produces, and the build fails on a dead link or a missing code include.
+bun run docs:check
+bun run docs:run
+bun run docs:build
 bunx playwright test --pass-with-no-tests
 # Performance (docs/benchmarking.md): the package entries' sizes against
 # their budgets, and every benchmark and end-to-end scenario once, its

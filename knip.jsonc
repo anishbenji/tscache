@@ -34,6 +34,9 @@
     "reference/solid": {
       "entry": ["src/entry-server.tsx", "src/entry-client.tsx"]
     },
+    // The site's code examples: the pages include them as text, nothing
+    // imports them; the snippet runner, which Bun runs.
+    "site": { "entry": ["snippets/*.ts", "scripts/*.ts"] },
     // Every snippet is an entry: an app copies it, nothing imports it.
     "integrations": {
       "entry": ["*/*.{ts,tsx}", "test/**/*.test.ts"],

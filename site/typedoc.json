@@ -1,0 +1,35 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  // The API reference, generated from the package's TSDoc into api/
+  // (gitignored), which VitePress renders. tscache/worker is left out: it
+  // is a worker script, and its one export serves the package's tests.
+  "entryPoints": [
+    "../packages/tscache/src/entries/index.ts",
+    "../packages/tscache/src/entries/engine.ts",
+    "../packages/tscache/src/entries/fetcher.ts",
+    "../packages/tscache/src/entries/vite.ts"
+  ],
+  "tsconfig": "../packages/tscache/tsconfig.json",
+  "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],
+  "out": "api",
+  "docsRoot": ".",
+  "readme": "none",
+  "disableSources": true,
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "sort": ["kind", "alphabetical"],
+  "hidePageHeader": true,
+  "hideBreadcrumbs": true,
+  "useCodeBlocks": true,
+  "parametersFormat": "table",
+  "interfacePropertiesFormat": "table",
+  // Internal shapes the public signatures name: CacheHandle.on's event
+  // union, and the parts of Vite's plugin context the plugin declares.
+  "intentionallyNotExported": ["CacheEvent", "Context", "OutputChunkLike"],
+  "treatWarningsAsErrors": true,
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "notDocumented": false
+  }
+}

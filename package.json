@@ -6,7 +6,8 @@
     "packages/*",
     "examples/*",
     "integrations",
-    "reference/*"
+    "reference/*",
+    "site"
   ],
   "engines": {
     "node": ">=22.12"
@@ -15,6 +16,10 @@
     "check": "biome check .",
     "typecheck": "tsc -p packages/tscache && tsc -p . && tsc -p e2e && tsc -p examples/mock-backend && tsc -p reference/shared",
     "check:integrations": "bun run --cwd integrations check",
+    "docs:dev": "bun run --cwd site dev",
+    "docs:build": "bun run --cwd site build",
+    "docs:check": "tsc -p site && tsc -p site/scripts",
+    "docs:run": "bun site/scripts/run-snippets.ts",
     "test": "vitest run --passWithNoTests",
     "build": "bun run --filter tscache build",
     "knip": "knip",

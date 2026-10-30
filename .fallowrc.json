@@ -16,19 +16,33 @@
     "reference/*/*.html",
     "reference/*/src/entry-server.{ts,tsx}",
     // The integration snippets, which an app copies and nothing imports.
-    "integrations/*/*.{ts,tsx}"
+    "integrations/*/*.{ts,tsx}",
+    // The site's config, read by VitePress, its code examples, which the
+    // pages include as text, and the snippet runner, which Bun runs.
+    "site/.vitepress/config.ts",
+    "site/snippets/*.ts",
+    "site/scripts/*.ts"
   ],
   // The examples import the built package (its exports point into dist/),
   // which does not exist yet when `bun run ci` runs Fallow before the build.
   "ignoreUnresolvedImports": ["tscache", "tscache/**"],
   "workspaces": {
-    "packages": ["packages/*", "examples/*", "integrations", "reference/*"]
+    "packages": [
+      "packages/*",
+      "examples/*",
+      "integrations",
+      "reference/*",
+      "site"
+    ]
   },
   // Consumed by tsdown's publint/attw integration, not imported anywhere.
-  // The bench bundle's revisions, resolved by scripts/bench.ts.
+  // The bench bundle's revisions, resolved by scripts/bench.ts. TypeDoc's
+  // plugins, named by site/typedoc.json.
   "ignoreDependencies": [
     "@arethetypeswrong/cli",
     "publint",
+    "typedoc-plugin-markdown",
+    "typedoc-vitepress-theme",
     "tscache-bench:base",
     "tscache-bench:control",
     "tscache-bench:head"
@@ -43,6 +57,8 @@
     // The benchmark drivers and the size check run in every `bun run ci`
     // (smokes and budgets), which the estimate cannot see either; what the
     // gate decides is in bench/gate.ts, which stays gated and is tested.
+    // The site's code examples are type-checked and built into the pages,
+    // not run, as the framework snippets are.
     "ignore": [
       "packages/*/test/**",
       "packages/tscache/bench/run.ts",
@@ -57,7 +73,8 @@
       "integrations/solid/**",
       "integrations/vue/**",
       "integrations/svelte/**",
-      "integrations/angular/**"
+      "integrations/angular/**",
+      "site/**"
     ]
   },
   "duplicates": {
