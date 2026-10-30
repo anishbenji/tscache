@@ -1,6 +1,6 @@
 # Fix 32 — The sampler's tests measure no time
 
-Branch: `fix/32-gate-sampler-flake` · Reviewer: Codex (high) · Rounds: 1 · Status: round 1 fixed · Verdict after triage: merge
+Branch: `fix/32-gate-sampler-flake` · Reviewer: Codex (high) · Rounds: 2 · Status: settled · Verdict after triage: merge
 
 `packages/tscache/test/perf/gate.test.ts` checked the bench sampler by timing a synthetic loop and asserting that the same operation against itself measured a median ratio between 0.7 and 1.4. It failed at 1.655 in step 22 (R3-1) and again in fix 26's pre-push, both times while other jobs ran on the machine. Done by a child agent while the user was away, under the user's grant of 2026-10-30.
 
@@ -54,3 +54,7 @@ None. The replaced tests were implementer tests of the bench, not contract tests
 ## Decision concerns
 
 None. The sampler's API gains an optional `clock`; the bench is internal and not part of the published package.
+
+## Round 2 — reviewer verdict: merge
+
+No findings; R1-1's fix confirmed in both the sync and async tests, and the reviewer's mutation checks confirm they catch both faulty calibration variants. `bun run ci` passed. Settled.
