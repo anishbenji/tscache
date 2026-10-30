@@ -125,6 +125,39 @@ export class DenseSegment implements Segment {
       : this.#gather(start, end, count);
   }
 
+  countIn(range: SlotRange): number {
+    assertSlotRange(range, "range");
+    const extent = this.#extent;
+    if (extent === undefined) return 0;
+    const start = Math.max(range.start, extent.start);
+    const end = Math.min(range.end, extent.end);
+    return start > end ? 0 : this.#countIn(start, end);
+  }
+
+  sliceInto(range: SlotRange, out: Columns, at: number): number {
+    assertSlotRange(range, "range");
+    if (!Number.isSafeInteger(at) || at < 0) {
+      throw new RangeError(
+        `offset must be a non-negative safe integer, got ${at}`,
+      );
+    }
+    const extent = this.#extent;
+    if (extent === undefined) return 0;
+    const start = Math.max(range.start, extent.start);
+    const end = Math.min(range.end, extent.end);
+    if (start > end) return 0;
+    const count = this.#countIn(start, end);
+    // Every field array of `out` has as many elements as its slots.
+    if (at + count > out.slots.length) {
+      throw new RangeError(
+        `${count} points do not fit from index ${at} into ${out.slots.length}`,
+      );
+    }
+    if (count === end - start + 1) this.#copySpanInto(start, count, out, at);
+    else this.#gatherInto(start, end, out, at);
+    return count;
+  }
+
   /** `count` slots from `start`, all present: one copy per column. */
   #copySpan(start: number, count: number): Columns {
     const slots = new Float64Array(count);
@@ -137,22 +170,42 @@ export class DenseSegment implements Segment {
     return { slots, fields };
   }
 
+  /** As `#copySpan`, into `out` from index `at`. */
+  #copySpanInto(start: number, count: number, out: Columns, at: number): void {
+    const { slots } = out;
+    for (let k = 0; k < count; k++) slots[at + k] = start + k;
+    const from = start - this.#base;
+    for (const column of this.#columns) {
+      (getOwn(out.fields, column.name) as FieldArray).set(
+        column.data.subarray(from, from + count),
+        at,
+      );
+    }
+  }
+
   /** The `count` present slots in `[start, end]`, which has gaps. */
   #gather(start: number, end: number, count: number): Columns {
-    const slots = new Float64Array(count);
-    let k = 0;
+    const out: Columns = { slots: new Float64Array(count), fields: {} };
+    for (const column of this.#columns) {
+      setOwn(out.fields, column.name, new column.ctor(count));
+    }
+    this.#gatherInto(start, end, out, 0);
+    return out;
+  }
+
+  /** As `#gather`, into `out` from index `at`. */
+  #gatherInto(start: number, end: number, out: Columns, at: number): void {
+    const { slots } = out;
+    let k = at;
     for (let slot = start; slot <= end; slot++) {
       if (this.#has(slot)) slots[k++] = slot;
     }
-    const fields: Record<string, FieldArray> = {};
     for (const column of this.#columns) {
-      const out = new column.ctor(count);
-      for (let i = 0; i < count; i++) {
-        out[i] = column.data[(slots[i] as number) - this.#base] as number;
+      const values = getOwn(out.fields, column.name) as FieldArray;
+      for (let i = at; i < k; i++) {
+        values[i] = column.data[(slots[i] as number) - this.#base] as number;
       }
-      setOwn(fields, column.name, out);
     }
-    return { slots, fields };
   }
 
   mergeFrom(points: Columns, authority?: SlotRange): void {

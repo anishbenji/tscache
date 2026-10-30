@@ -61,7 +61,11 @@ export interface CacheConfig {
   version?: string;
   /** Initial finalized-watermark; points at t >= watermark are provisional. */
   finalizedUntil?: number;
-  /** Opt-in differs-on-overlap warning (O(overlap) cost). Default false. */
+  /**
+   * Opt-in differs-on-overlap warning (O(overlap) cost). Default false.
+   * Reported in `put()` results and `mergeWarning` events, and printed with
+   * console.warn in development builds by the page that made the write.
+   */
   warnOnOverlapDiff?: boolean;
 }
 
@@ -215,7 +219,11 @@ export interface MergeWarning {
 }
 
 export interface PutResult {
-  /** Non-empty only when warnOnOverlapDiff is on and overlapping values differed. */
+  /**
+   * Non-empty only when warnOnOverlapDiff is on and overlapping values
+   * differed. A client's `put()` also prints them in one console.warn in
+   * development builds; an Engine called directly only returns them.
+   */
   warnings: MergeWarning[];
 }
 
@@ -269,7 +277,11 @@ export interface ClientEvents {
     cacheId: string;
     reason: "manual" | "clear-all" | "version-mismatch";
   };
-  /** Opt-in (warnOnOverlapDiff): an overlapping put differed. */
+  /**
+   * Opt-in (warnOnOverlapDiff): an overlapping put differed. Every tab hears
+   * it; in development builds only the tab that made the request prints it
+   * with console.warn (decision #8).
+   */
   mergeWarning: {
     cacheId: string;
     requestId: RequestId;

@@ -16,6 +16,7 @@ import type {
   Range,
   Snapshot,
 } from "../types";
+import { warnMerges } from "./dev";
 import type { ClientEmitter } from "./events";
 
 /** The cache-scoped and request-scoped events, filterable by cacheId. */
@@ -48,13 +49,18 @@ export class CacheHandle {
   /**
    * Writes a batch (§2.4). The batch's typed arrays are TRANSFERRED to the
    * worker and are detached afterwards: pass copies if you still need them.
+   * With `warnOnOverlapDiff` on, the result lists where the batch replaced
+   * differing values; in development builds this page also prints them in
+   * one console.warn (decision #8), and other tabs only get the event.
    */
-  put(batch: PutBatch, options?: PutOptions): Promise<PutResult> {
-    return this.#port.request(
+  async put(batch: PutBatch, options?: PutOptions): Promise<PutResult> {
+    const result = (await this.#port.request(
       "put",
       { cacheId: this.id, batch, options },
       transferablesOf(batch),
-    ) as Promise<PutResult>;
+    )) as PutResult;
+    warnMerges(this.id, result.warnings);
+    return result;
   }
 
   /**

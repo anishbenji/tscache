@@ -315,12 +315,15 @@ interface ClientEvents {
 
   // ── request-scoped (carries originating request's id) ──
   /** Opt-in (warnOnOverlapDiff): overlapping put differed outside volatile region.
-      Also console.warn in dev builds (resolved decision #8). */
+      Also console.warn in dev builds (resolved decision #8), by the
+      requesting tab only (below). */
   mergeWarning: { cacheId: string; requestId: RequestId; range: Range; fields: string[] };
 }
 ```
 
-The initiating call additionally receives request-scoped results directly — `put()` resolves with its own `warnings` (§2.4) — so the common case needs no event wiring; the event channel serves telemetry and cross-tab observability. Roadmap events slot into existing scopes: dirty-notifications → cache-scoped, fetch lifecycle → request-scoped.
+The initiating call additionally receives request-scoped results directly — `put()` resolves with its own `warnings` (§2.4) — so the common case needs no event wiring; the event channel serves telemetry and cross-tab observability.
+
+**Where the development warning prints (decision #8, clarified at fix 35).** In the page that made the write, so it appears once, in the console of the tab that caused it. A client's `put()` prints its result's warnings in one `console.warn` naming the cache and every range with its fields. A client whose `get` started an orchestrated fetch prints that fetch's warnings from the request-scoped events carrying its own request ids, one line per warned range, since a `get` result carries no warnings. Other tabs hear the events and print nothing, the worker never prints, and an `Engine` called directly (server rendering, tests) only returns the warnings. A development build is one where `process.env.NODE_ENV` is not `'production'`, as the application's bundler replaces it (Vite, webpack, Bun); the package's own build leaves the expression in place for that. A page that no bundler prepared, where `process` does not exist, counts as production. Roadmap events slot into existing scopes: dirty-notifications → cache-scoped, fetch lifecycle → request-scoped.
 
 `modeFallback` is an addition beyond the starter's event list — observability for the documented Chrome-Android path (accepted under N5). `workerLost` is another such addition (N32).
 
@@ -612,7 +615,7 @@ Ownership: `CoverageIndex` never shares range objects with its callers. It does 
 
 ### 4.2 Internal contracts — `segment/` (N10, N11, approved 2026-10-04)
 
-Internal modules: not exported from any package entry. Contract tests (step ④) pin this surface. Code outside `segment/` depends only on the `Segment` interface. Segments work in slot terms and do no ms arithmetic of their own; the payload's `start` goes through `grid.ts`.
+Internal modules: not exported from any package entry. Contract tests (step ④) pin this surface; `countIn` and `sliceInto` were added for the read path in step 33 (2026-10-30), with their own tests. Code outside `segment/` depends only on the `Segment` interface. Segments work in slot terms and do no ms arithmetic of their own; the payload's `start` goes through `grid.ts`.
 
 ```ts
 // segment/types.ts
@@ -639,6 +642,16 @@ interface Segment {
    *  segment): one array per schema field, of that field's dtype. The range
    *  may reach beyond the extent; an empty result has zero-length arrays. */
   slice(range: SlotRange): Columns;
+
+  /** How many points slice(range) would return, without copying any. */
+  countIn(range: SlotRange): number;
+
+  /** Writes the points slice(range) would return into `out` from index
+   *  `at`, ascending, and returns how many. `out` holds the schema's fields,
+   *  of their dtypes; nothing outside those indices is written. Lets a read
+   *  across segments (§4.4) count first, allocate each result array once,
+   *  and copy every point once, straight into it. */
+  sliceInto(range: SlotRange, out: Columns, at: number): number;
 
   /** Write points in; new values win over old ones at the same slot.
    *  - Without authority (upsert): each point becomes present with its
@@ -673,7 +686,7 @@ Rules:
 
 - **Slot cap.** `slotCap` is a positive integer up to 2^31 − 1 (N12); the constructor throws `RangeError` otherwise. `mergeFrom` throws `RangeError` if the extent after the merge would span more than `slotCap` slots. Where to split (gap-split K, segment selection) is merge-path policy (step ⑤); the segment only refuses to exceed its own limit. A segment grows in either direction.
 - **Atomic.** `mergeFrom` validates, and allocates any buffers it needs, before it mutates; when it throws, including on an allocation failure, the segment is unchanged.
-- **Programming errors** throw `RangeError`: a slot or range that is not made of safe integers or has start > end; `points` whose slots are not strictly ascending safe integers, whose field names are not exactly the schema's, or whose field arrays differ in length from `slots`; a point outside `authority`; `transferPayload()` on an empty segment. None is reachable from consumer input, which put validation rejects first.
+- **Programming errors** throw `RangeError`: a slot or range that is not made of safe integers or has start > end; a `sliceInto` offset that is not a non-negative safe integer, or an `out` too short to hold the points from it (checked before anything is written); `points` whose slots are not strictly ascending safe integers, whose field names are not exactly the schema's, or whose field arrays differ in length from `slots`; a point outside `authority`; `transferPayload()` on an empty segment. None is reachable from consumer input, which put validation rejects first.
 - **Payload layout.** `start` is the timestamp of `extent.start`; `count` is the extent's slot count; `mask` is a `Uint8Array` of exactly `ceil(count / 8)` bytes in which slot `i` of the extent is bit `i & 7` of byte `i >> 3`, with unused trailing bits zero; `fields` follows the schema's declaration order, each `data` an `ArrayBuffer` of exactly `count × bytes-per-element`, with the values of absent slots zero. Equal segments therefore produce equal payloads. Field data is little-endian, which is the native order of every supported platform; no byte swapping is done. The payload is a plain structured-cloneable object.
 - **Decoding.** `segmentFromPayload` throws `TscacheError` with a descriptive message for an invalid payload: `format` other than 1, `layout` other than `'dense'`, `interval` or `alignmentOffset` differing from the grid, `start` not aligned, `count` not a positive safe integer or greater than `slotCap`, a mask of the wrong type or length or with trailing bits set, fields that do not match the schema's names and dtypes with correctly sized buffers, or a `start` and `count` whose last slot has no safe-integer timestamp. Field entries may come in any order (a schema declared in a different key order names the same fields); re-encoding restores schema order. Values stored under absent mask bits are ignored, since presence is decided by the mask alone; re-encoding writes zeros. The decoded segment's extent is the tight bounds of the present points, and `segmentFromPayload(s.transferPayload(), …)` is equal to `s` in every observable way.
 
