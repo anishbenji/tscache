@@ -1,6 +1,6 @@
 # Docs 29 — User documentation site
 
-Branch: `docs/29-docs-site` · Reviewer: Codex (high) · Rounds: 3 · Status: re-review pending (round 3 raised a P1; the skip list was closed) · Verdict after triage: merge after re-review
+Branch: `docs/29-docs-site` · Reviewer: Codex (high) · Rounds: 4 · Status: settled · Verdict after triage: merge
 
 Comprehensive documentation for library users, as a site in its own Bun workspace (`site/`), with an API reference generated from the TSDoc and a build check in `bun run ci`. Built by a Claude Opus 5.5 subagent while the user was away, under the user's grant of 2026-10-30; not a commit-plan step. No engine behaviour changes: the only edits under `packages/tscache/src` are TSDoc comments.
 
@@ -98,3 +98,7 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 4 — reviewer verdict: merge
+
+No findings; every accepted finding from rounds 1–3 confirmed fixed. `bun run ci` passed on the branch rebased onto `main` 15fa506. Settled. Scope SHAs above predate the director's rebases onto newer `main`; the commit subjects identify them.
