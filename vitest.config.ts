@@ -27,7 +27,7 @@ export default defineConfig({
       "integrations/test/**/*.test.ts",
       "reference/*/test/**/*.test.ts",
       "e2e/examples/*.test.ts",
-      "scripts/*.test.ts",
+      "scripts/**/*.test.ts",
     ],
     passWithNoTests: true,
     // Vitest's default 5 s test timeout, which only catches a hang. Chore 19
