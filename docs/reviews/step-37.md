@@ -59,3 +59,7 @@ None.
 ## Decision concerns
 
 - **N38's wording.** The locked row names `btoa`/`atob`. This step treats that as the mechanism of its day rather than the decision (the decision being: the helpers ship from `.`, base64 for the buffers, no DOM, `NaN` survives), keeps `btoa`/`atob` as the fallback with byte-identical output, and leaves the row unchanged. If the user reads N38 as requiring `btoa`/`atob` everywhere, the fallback-only build is this commit without the native branch in `src/base64.ts`.
+
+## User decision (2026-10-30)
+
+The decision concern on N38 is settled by the user: keep the native path. The user reads N38's `btoa`/`atob` as naming the mechanism, not the decision, so N38's row stays unchanged.
