@@ -5,8 +5,10 @@ import {
   appPort,
   apps,
   appUrl,
+  offset,
   serverPort,
 } from "./e2e/examples/apps";
+import { hubPort } from "./scripts/demo/catalog";
 
 // Multi-tab SharedWorker suites (step ⑫): one BrowserContext, multiple
 // context.newPage() calls — pages share the SharedWorker; separate contexts
@@ -22,9 +24,19 @@ import {
 //
 // Every port carries a per-checkout offset (e2e/examples/apps.ts), so two
 // checkouts can run the suite at once without sharing a server.
-const selected = (
-  process.env.E2E_EXAMPLES?.split(",") ?? Object.keys(apps)
-).filter((name): name is App => Object.hasOwn(apps, name));
+//
+// The demo project (e2e/demo/) runs the demo hub, `bun run demo`, on ports
+// of its own, offset like the others unless DEMO_PORT is set. Its server
+// comes last: Playwright starts the servers in order, so the examples'
+// servers have built every app it can reuse. It runs when E2E_EXAMPLES is
+// unset or names `demo`.
+const requested = process.env.E2E_EXAMPLES?.split(",");
+const selected = (requested ?? Object.keys(apps)).filter((name): name is App =>
+  Object.hasOwn(apps, name),
+);
+const demo = requested === undefined || requested.includes("demo");
+const demoPort = hubPort(process.env) + (process.env.DEMO_PORT ? 0 : offset);
+const hub = `http://127.0.0.1:${demoPort}/`;
 
 export default defineConfig({
   testDir: "e2e",
@@ -34,13 +46,19 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: ["examples/**", "reference/**"],
+      testIgnore: ["examples/**", "reference/**", "demo/**"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "examples",
       testMatch: ["examples/**/*.spec.ts", "reference/**/*.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "demo",
+      testMatch: ["demo/**/*.spec.ts"],
+      retries: 0,
+      use: { ...devices["Desktop Chrome"], baseURL: hub },
     },
   ],
   webServer: [
@@ -57,5 +75,17 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     })),
+    ...(demo
+      ? [
+          {
+            command: "bun scripts/demo.ts --reuse-builds",
+            env: { DEMO_PORT: String(demoPort) },
+            url: `${hub}healthz`,
+            reuseExistingServer: !process.env.CI,
+            // Builds what the examples' servers did not, then starts nine.
+            timeout: 300_000,
+          },
+        ]
+      : []),
   ],
 });
