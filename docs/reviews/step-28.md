@@ -1,6 +1,6 @@
 # Chore 28 — Test reliability
 
-Branch: `chore/28-test-reliability` · Reviewer: pending (the director runs the review) · Status: implemented, not yet reviewed
+Branch: `chore/28-test-reliability` · Reviewer: Codex (high) · Rounds: 1 · Status: round 1 fixed · Verdict after triage: merge
 
 The user's priority request of 2026-10-30: fix every flaky test at its root and change how tests are written so flakes cannot come back. Two flakes have branches of their own, kept independent of this one: fix 31 (reads ending mid-bar in the reference clients) and fix 32 (the sampler's timing test). Done by a child agent while the user was away, under the user's grant of 2026-10-30.
 
@@ -26,12 +26,13 @@ Failures not tied to a diff, from `docs/reviews/` and from stress runs of the wh
 
 | Commit | What |
 |---|---|
-| 0c8e231 | `test`: the unit tests wait for conditions, not time. `vi.waitFor` on the observable effect (a fetch started, an event heard, a retry issued); a round trip on the same port as a barrier, with the fetcher counting settled fetches; a promise gate instead of a 60 ms timer for the slow module import, and an init listener so the joining tab is known to have arrived; a plain `await` instead of racing a get against a timer (a get that waited fails at the test's timeout); fake timers for the mock backend's latency instead of `performance.now()`. Absence checks and zero-delay turns stay, marked |
-| 51e564f | `chore(test)`: `scripts/flake-hunt.sh` and `.github/workflows/flake-hunt.yml` (manual on a branch's changed or named files, weekly over every test under load; not a required check) |
-| 3b0eb96 | `test(e2e)`: the year nearest the backend's clock, with a test across New Year; the server-rendered test has the server render once first and checks at least the forming bar's fetch; the scrolling and uPlot tests wait for the answer (the bar count moving) instead of sleeping; R3-1 sets the page's clock from the backend's; `retries: 0` explicit; the remaining pauses marked with their reasons |
-| 596d160 | `chore(test)`: `scripts/test-clocks.ts` in `bun run ci`: no `Date.now()`, `new Date()`, `performance.now()`, `setTimeout` or `waitForTimeout` in test files without `// clock-ok: <reason>`, and Playwright retries at 0. Its tests run under Vitest |
-| 0c8f9f0 | `docs`: `docs/testing.md` (clocks, timing, waiting, shared state, retries, finding flakes), four review-checklist items under Tests, pointers in `AGENTS.md` and `docs/workflow.md` |
-| 9110667 | `test`: Vitest back to its default 5 s timeout (below) |
+| fac4cfb | `test`: the unit tests wait for conditions, not time. `vi.waitFor` on the observable effect (a fetch started, an event heard, a retry issued); a round trip on the same port as a barrier, with the fetcher counting settled fetches; a promise gate instead of a 60 ms timer for the slow module import, and an init listener so the joining tab is known to have arrived; a plain `await` instead of racing a get against a timer (a get that waited fails at the test's timeout); fake timers for the mock backend's latency instead of `performance.now()`. Absence checks and zero-delay turns stay, marked |
+| 74c97c5 | `chore(test)`: `scripts/flake-hunt.sh` and `.github/workflows/flake-hunt.yml` (manual on a branch's changed or named files, weekly over every test under load; not a required check) |
+| 711c8cc | `test(e2e)`: the year nearest the backend's clock, with a test across New Year; the server-rendered test has the server render once first and checks at least the forming bar's fetch; the scrolling and uPlot tests wait for the answer (the bar count moving) instead of sleeping; R3-1 sets the page's clock from the backend's; `retries: 0` explicit; the remaining pauses marked with their reasons |
+| 28fc166 | `chore(test)`: `scripts/test-clocks.ts` in `bun run ci`: no `Date.now()`, `new Date()`, `performance.now()`, `setTimeout` or `waitForTimeout` in test files without `// clock-ok: <reason>`, and Playwright retries at 0. Its tests run under Vitest |
+| 2580fe1 | `docs`: `docs/testing.md` (clocks, timing, waiting, shared state, retries, finding flakes), four review-checklist items under Tests, pointers in `AGENTS.md` and `docs/workflow.md` |
+| 16b6a88 | `test`: Vitest back to its default 5 s timeout (below) |
+| 14e719a, 261f3fc, 2ae3e6f | Round 1 fixes (R1-1, R1-2, R1-3). The branch was rebased onto 15fa506; R1-1's fix sits before 28fc166 so that every commit passes the check |
 
 ## Decisions
 
@@ -52,12 +53,18 @@ All runs on the shared machine under the heavy-job lock; "load" is a `yes` per c
 | Playwright, every spec, 3 runs each, load | `bun run build && scripts/flake-hunt.sh -n 3 --load $(git ls-files '*.spec.ts')` | 265 passed, 3 failed (the server-rendered test, each client), 35 did not run (serial mode after a failure) | 306 of 306 passed |
 | Playwright, the changed specs, 5 runs each, load | `scripts/flake-hunt.sh -n 5 --load e2e/reference/clients.spec.ts e2e/examples/vanilla-uplot.spec.ts e2e/auth.spec.ts e2e/client.spec.ts` | — | 355 of 355 passed, the server-rendered test on every repeat |
 | Playwright, full suite once | `bunx playwright test` | — | 102 passed |
-| `bun run ci` | `~/code/tscache-reports/bin/heavy-run.sh … bun run ci` | — | the first run failed in the new check: it read its own test file, whose fixtures hold the patterns (the file was untracked when the check was tried by hand, so `git ls-files` did not list it). The check now skips that one file, folded into 596d160 so every commit stays green; passed on this file's commit (see the report) |
+| `bun run ci` | `~/code/tscache-reports/bin/heavy-run.sh … bun run ci` | — | the first run failed in the new check: it read its own test file, whose fixtures hold the patterns (the file was untracked when the check was tried by hand, so `git ls-files` did not list it). The check now skips that one file, folded into the check's commit so every commit stays green; passed on this file's commit (see the report) |
 | Slowest Vitest test over 20 loaded runs | from the JSON reports | 1589 ms (`merge-failures`, "keeps the points outside the authority") | 1553 ms |
 
 Mutation checks: with the orchestrator's joining-context update removed, five orchestrator tests fail, the gated-import test among them; with its wait for the first import removed, the first-import test fails. With the 20 s timeout gone, a test that never settles fails at 5 s.
 
-## Round 1 — reviewer verdict: pending
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | The clock check fails every CI run: `dev-warnings.test.ts` (#49, merged after this branch was built) sleeps 10 ms for an event | accepted | Reproduced: `bun scripts/test-clocks.ts` exited 1 on the rebased tree with that one finding. Fixed in 14e719a: the four waits for a `mergeWarning` event wait for the event (`vi.waitFor`), and the production-build fetch test listens for its event too, so "nothing printed" is checked once the warning was reported. The check is clean over all 100 test files. The commit sits before 28fc166, which turns the check on, so no commit fails it |
+| R1-2 | P1 | The dedup test passes with deduplication broken: nothing kept b's get from arriving after a's released fetch had filled the cache | accepted | Validated: with the orchestrator's in-flight join disabled, the test passed. Fixed in 261f3fc: `barrier(b)` before the release, so the server has taken b's get while a's fetch is stalled, and the test checks that one fetch is out at that point. With the join disabled it now fails ("got 2"); unmutated, the file passes 3 of 3. It was the one sleep replaced by nothing in fac4cfb; the others became waits on an observable effect |
+| R1-3 | P1 | `flake-hunt.sh` with a mistyped base reports "no test files changed" and exits 0 | accepted | Reproduced by the new `scripts/flake-hunt.test.sh` (exit 0, "no test files changed since no-such-branch-x"). Fixed in 2ae3e6f: the base is verified with `git rev-parse --verify` and the changed files listed by checked commands before the loop; an unknown base exits 1 naming it. The test covers that and the no-changes case, and runs in `scripts/ci.sh` |
 
 ## Contract-test changes
 
