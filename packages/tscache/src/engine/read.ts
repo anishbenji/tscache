@@ -9,9 +9,9 @@ import type { CoverageIndex } from "../coverage";
 import { type Grid, msOf, type SlotRange, toMs } from "../grid";
 import { assertSlotRange } from "../segment/assert";
 import { FIELD_ARRAYS } from "../segment/dtype";
-import { getOwn, setOwn } from "../segment/own";
+import { setOwn } from "../segment/own";
 import type { Columns, Segment } from "../segment/types";
-import type { Dtype, FieldArray, GetResult } from "../types";
+import type { Dtype, GetResult } from "../types";
 
 type Schema = Readonly<Record<string, Dtype>>;
 
@@ -28,31 +28,13 @@ function firstEndingFrom(segments: readonly Segment[], slot: number): number {
   return lo;
 }
 
-/** Slices of every segment that overlaps `range`, ascending. */
-function slicesIn(segments: readonly Segment[], range: SlotRange): Columns[] {
-  const parts: Columns[] = [];
-  for (
-    let i = firstEndingFrom(segments, range.start);
-    i < segments.length;
-    i++
-  ) {
-    const segment = segments[i] as Segment;
-    const extent = segment.extent as SlotRange;
-    if (extent.start > range.end) break;
-    parts.push(
-      segment.slice({
-        start: Math.max(range.start, extent.start),
-        end: Math.min(range.end, extent.end),
-      }),
-    );
-  }
-  return parts;
-}
-
 /**
  * The present points of `segments` (ascending, disjoint) inside `range`,
  * concatenated ascending, as fresh arrays: one per schema field, of that
  * field's dtype. Throws RangeError for a malformed range.
+ *
+ * The overlapping segments are counted first, so each result array is
+ * allocated once and every point is copied once, straight into it.
  */
 export function collect(
   segments: readonly Segment[],
@@ -60,26 +42,23 @@ export function collect(
   fields: Schema,
 ): Columns {
   assertSlotRange(range, "range");
-  const parts = slicesIn(segments, range);
+  const first = firstEndingFrom(segments, range.start);
+  let last = first;
   let total = 0;
-  for (const part of parts) total += part.slots.length;
-  const slots = new Float64Array(total);
-  const out: Record<string, FieldArray> = {};
+  for (; last < segments.length; last++) {
+    const segment = segments[last] as Segment;
+    if ((segment.extent as SlotRange).start > range.end) break;
+    total += segment.countIn(range);
+  }
+  const out: Columns = { slots: new Float64Array(total), fields: {} };
   for (const name of Object.keys(fields)) {
-    setOwn(out, name, new FIELD_ARRAYS[fields[name] as Dtype](total));
+    setOwn(out.fields, name, new FIELD_ARRAYS[fields[name] as Dtype](total));
   }
   let at = 0;
-  for (const part of parts) {
-    slots.set(part.slots, at);
-    for (const name of Object.keys(fields)) {
-      (getOwn(out, name) as FieldArray).set(
-        getOwn(part.fields, name) as FieldArray,
-        at,
-      );
-    }
-    at += part.slots.length;
+  for (let i = first; i < last; i++) {
+    at += (segments[i] as Segment).sliceInto(range, out, at);
   }
-  return { slots, fields: out };
+  return out;
 }
 
 /**

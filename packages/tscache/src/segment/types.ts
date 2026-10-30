@@ -50,6 +50,20 @@ export interface Segment {
   /** The present points inside `range`, as fresh arrays (never views). */
   slice(range: SlotRange): Columns;
 
+  /** How many points `slice(range)` would return, without copying any. */
+  countIn(range: SlotRange): number;
+
+  /**
+   * Writes the points `slice(range)` would return into `out`, from index
+   * `at`, and returns how many: a read across segments copies each point
+   * once, into arrays its caller allocated from their counts. Writes nothing
+   * outside those indices, and nothing at all when it throws: for a
+   * malformed range, an `at` that is not a non-negative safe integer, or an
+   * `out` too short to hold the points from `at`. `out` holds the schema's
+   * fields, of their dtypes.
+   */
+  sliceInto(range: SlotRange, out: Columns, at: number): number;
+
   /**
    * Writes points in; new values win. Without `authority` it only adds or
    * overwrites. With `authority` the present points inside that range end up
