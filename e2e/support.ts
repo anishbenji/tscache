@@ -274,42 +274,28 @@ export async function clear(page: Page, config: CacheConfig): Promise<void> {
 }
 
 /**
- * Fails, naming the cause, unless the page's worker answers a cache-only
- * get. A hang detector, not a timing assumption: the guard is most of the
- * test's own time limit, so only a dead worker trips it, a slow machine
- * no sooner than the test's timeout would; without it a dead worker would
- * leave the caller hanging until that timeout, with no reason given.
+ * Waits until the page's worker answers a cache-only get, in a named step:
+ * a dead worker leaves the step hanging, and the test's own timeout ends
+ * it, reporting the step. No guard of its own, which would race the
+ * worker against a deadline (docs/testing.md).
  */
 export async function expectWorkerAlive(
   page: Page,
   config: CacheConfig,
   range: Range,
 ): Promise<void> {
-  const guardMs = Math.floor((base.info().timeout * 3) / 4);
-  await page.evaluate(
-    async ({ cfg, range, guardMs }) => {
-      const w = window as unknown as E2EWindow;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        // clock-ok: a hang guard of most of the test's own time limit; it fires no sooner than the test's timeout would.
-        timer = setTimeout(() => {
-          reject(
-            new Error(
-              `the SharedWorker did not answer within ${guardMs} ms; it dies with the renderer of the tab that created it (N32)`,
-            ),
-          );
-        }, guardMs);
-      });
-      const answer = w.client
-        .cache(cfg)
-        .then((cache) => cache.get(range, { cacheOnly: true }));
-      try {
-        await Promise.race([answer, timeout]);
-      } finally {
-        clearTimeout(timer);
-      }
+  await base.step(
+    "the SharedWorker answers a cache-only get (it dies with the renderer of the tab that created it, N32)",
+    async () => {
+      await page.evaluate(
+        async ({ cfg, range }) => {
+          const w = window as unknown as E2EWindow;
+          const cache = await w.client.cache(cfg);
+          await cache.get(range, { cacheOnly: true });
+        },
+        { cfg: config, range },
+      );
     },
-    { cfg: config, range, guardMs },
   );
 }
 
