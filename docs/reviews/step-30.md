@@ -1,6 +1,6 @@
 # Chore 30 — Local demo hub
 
-Branch: `chore/30-demo-hub` · Reviewer: Codex (high) · Rounds: 3 · Status: fixes in, awaiting round 4 · Verdict after triage: merge after round 4
+Branch: `chore/30-demo-hub` · Reviewer: Codex (high) · Rounds: 4 · Status: fixes in, awaiting round 5 · Verdict after triage: merge after round 5
 
 One command that shows and launches every sample app: `bun run demo`. Requested by the director while the user was away, under the user's grant of 2026-10-30; built by a Claude Opus 5.5 subagent. Tooling, not a commit-plan step: no package, example or reference-client code changes.
 
@@ -20,6 +20,7 @@ One command that shows and launches every sample app: `bun run demo`. Requested 
 | 4356e7b | `test(e2e)`: R3-1 |
 | a74f64d | `docs(demo)`: R3-2 |
 | aa91fcc | `docs(site)`: a Demo hub page in the documentation site (`site/guide/demo.md`, in the Introduction sidebar), and the hub links the site (`bun run docs:dev`) |
+| eab3eb7 | `fix(demo)`: R4-1 |
 
 ## Decisions made in the step
 
@@ -71,6 +72,27 @@ Decisions in this round:
 | R3-2 | P2 | The worker-loss guidance says to close the tab that created the worker; the SharedWorker survives a close, so no `workerLost` fires | Accept. Confirmed against `examples/react-lwcharts/README.md` ("Losing the worker") | a74f64d: crash that tab (`chrome://crash`), and closing it is described as losing nothing |
 
 The documentation site landed on `main` while this round was open: aa91fcc adds its Demo hub page and a link to it from the hub. `docs:check`, `docs:run` and `docs:build` pass.
+
+## Round 4 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P1 | A build's process group stays registered after the build exits, so stopping the demo could signal that id after an unrelated group has taken it | Accept. Confirmed by reading: `#groups` only ever grew. With retirement disabled, the new unit tests for it fail (2 of 6) | eab3eb7: a group is registered only while it has a member. The leader's exit probes the group (`kill(-pgid, 0)`) and retires it at once if empty; a group whose leader left children behind is probed every 250 ms until empty. Stopping signals only registered groups that still have members and retires each as soon as it empties. Unit tests (`scripts/demo/processes.test.ts`, Vitest, now in its `include`) with a recording `kill` |
+
+Launcher cleanup has drawn a finding in every round (R1-1, R2-1, R2-2, R3-1, R4-1), so the whole of `scripts/demo/processes.ts` was re-read for any other way a stale id could be signalled or a group missed:
+
+| Path | What happens now |
+|---|---|
+| A spawn that fails (no pid) | Never registered, so never signalled |
+| A leader that exits, with or without a signal, while its group is empty | Retired in the exit handler, before anything else can run; never signalled |
+| A leader that exits while children remain | A pid is never handed to a new process while a process group with that id exists, so the id still names our group; probed every 250 ms and retired once empty. Residual window: between the last member's exit and the next probe (at most 250 ms; 50 ms during a stop) the id is free but registered, so a reuse would need the pid counter to wrap within that window |
+| Shutdown | Probes every registered group before each signal and signals only those with members; an error from the signal (the group emptied in between) retires it |
+| The SIGKILL pass | Goes only to groups still registered after the grace period, each probed again first; groups that emptied after SIGTERM were retired during the wait |
+| A probe answering EPERM | The id now names another user's process: retired, never signalled (previously counted as alive) |
+| `start()` during or after a stop | Throws, so no group appears that the stop did not see |
+| `stop()` called twice | Returns the same promise; one SIGTERM and at most one SIGKILL pass |
+| The sweep timer | Unreferenced, so it never keeps the launcher alive; cleared once no group awaits its children |
+| The launcher killed with SIGKILL | Nothing in the process can run; Playwright stops it with SIGTERM (D8), and the launcher spec's fallback cleanup covers its own runs (R3-1) |
 
 ## Verification
 
