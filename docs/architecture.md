@@ -315,12 +315,15 @@ interface ClientEvents {
 
   // ── request-scoped (carries originating request's id) ──
   /** Opt-in (warnOnOverlapDiff): overlapping put differed outside volatile region.
-      Also console.warn in dev builds (resolved decision #8). */
+      Also console.warn in dev builds (resolved decision #8), by the
+      requesting tab only (below). */
   mergeWarning: { cacheId: string; requestId: RequestId; range: Range; fields: string[] };
 }
 ```
 
-The initiating call additionally receives request-scoped results directly — `put()` resolves with its own `warnings` (§2.4) — so the common case needs no event wiring; the event channel serves telemetry and cross-tab observability. Roadmap events slot into existing scopes: dirty-notifications → cache-scoped, fetch lifecycle → request-scoped.
+The initiating call additionally receives request-scoped results directly — `put()` resolves with its own `warnings` (§2.4) — so the common case needs no event wiring; the event channel serves telemetry and cross-tab observability.
+
+**Where the development warning prints (decision #8, clarified at fix 35).** In the page that made the write, so it appears once, in the console of the tab that caused it. A client's `put()` prints its result's warnings in one `console.warn` naming the cache and every range with its fields. A client whose `get` started an orchestrated fetch prints that fetch's warnings from the request-scoped events carrying its own request ids, one line per warned range, since a `get` result carries no warnings. Other tabs hear the events and print nothing, the worker never prints, and an `Engine` called directly (server rendering, tests) only returns the warnings. A development build is one where `process.env.NODE_ENV` is not `'production'`, as the application's bundler replaces it (Vite, webpack, Bun); the package's own build leaves the expression in place for that. A page that no bundler prepared, where `process` does not exist, counts as production. Roadmap events slot into existing scopes: dirty-notifications → cache-scoped, fetch lifecycle → request-scoped.
 
 `modeFallback` is an addition beyond the starter's event list — observability for the documented Chrome-Android path (accepted under N5). `workerLost` is another such addition (N32).
 
