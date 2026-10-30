@@ -2,7 +2,8 @@
 # runs of the head against itself, with no slowdown (every flagged case is
 # a false alarm) or with a known one injected (every case should be
 # caught). Started by hand; it never runs on its own. One dispatch per
-# slowdown: 0, then 0.15 and 0.25.
+# slowdown: 0, then 0.15 and 0.25. `setup` picks a bench setup
+# (packages/tscache/bench/setups.ts) for the Chromium noise experiment.
 name: Bench calibration
 
 on:
@@ -12,6 +13,17 @@ on:
         description: "Injected slowdown of the head: 0, 0.15 or 0.25"
         required: true
         default: "0"
+      setup:
+        description: "Bench setup (packages/tscache/bench/setups.ts)"
+        required: true
+        default: default
+        type: choice
+        options:
+          - default
+          - unthrottled
+          - one-renderer
+          - long-batches
+          - combined
 
 permissions:
   contents: read
@@ -45,7 +57,8 @@ jobs:
       - name: Head against itself
         env:
           SLOWDOWN: ${{ inputs.slowdown }}
-        run: bun scripts/bench.ts compare --base HEAD --runtime chromium,bun --slowdown "$SLOWDOWN"
+          SETUP: ${{ inputs.setup }}
+        run: bun scripts/bench.ts compare --base HEAD --runtime chromium,bun --slowdown "$SLOWDOWN" --setup "$SETUP"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

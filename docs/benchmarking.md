@@ -150,11 +150,14 @@ bun scripts/bench.ts e2e --base main --only two-tabs-one-fetch --rounds 30
 bun run bench           # the working tree against origin/main, in Chromium and Bun
 bun scripts/bench.ts compare --base main --only read-viewport --runtime bun
 bun scripts/bench.ts compare --base HEAD --slowdown 0.25   # local calibration run
+bun scripts/bench.ts compare --base HEAD --setup unthrottled   # a setup of the Chromium noise experiment
 bunx vitest run packages/tscache/test/perf                 # the exact budgets
 bun scripts/size.ts --update                               # reseed the size budgets (review the diff)
 ```
 
-`compare` writes `.bench-results/<runtime>.json` (schema version, both SHAs, the gate, every round, verdicts) and `summary.md`, and appends the table to the job summary on GitHub. A local run against `origin/main` takes about a minute per runtime. `e2e` writes `.bench-results/e2e.json` and `e2e-summary.md` the same way, in about 10 s; it takes `--base`, `--only` and `--rounds`, and refuses `--runtime`, `--gate` and `--slowdown`.
+`compare` writes `.bench-results/<runtime>.json` (schema version, both SHAs, the gate, every round, verdicts) and `summary.md`, and appends the table to the job summary on GitHub. A local run against `origin/main` takes about a minute per runtime. `e2e` writes `.bench-results/e2e.json` and `e2e-summary.md` the same way, in about 10 s; it takes `--base`, `--only` and `--rounds`, and refuses `--runtime`, `--gate`, `--slowdown` and `--setup`.
+
+`--setup <name>` picks one of the setups in `packages/tscache/bench/setups.ts`: `default` (what every run uses), `unthrottled` (Chromium switches that stop it deprioritising a background page), `one-renderer` (`--renderer-process-limit=1`), `long-batches` (100 ms batches and 30 rounds, in every runtime; an explicit `--rounds` wins) and `combined` (all three). `bench-calibrate.yml` takes the same name as its `setup` input. The record in `.bench-results/<runtime>.json` names the setup it ran, and on Linux the Chromium run logs which browser binaries it started and how many processes each has.
 
 ## Calibration log
 

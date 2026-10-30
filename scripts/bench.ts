@@ -5,13 +5,15 @@
 //       `bun run ci`, about a second
 //   bun scripts/bench.ts compare [--base <ref>] [--runtime bun,chromium,node]
 //                                [--only a,b] [--rounds 20] [--gate]
-//                                [--slowdown 0.15]
+//                                [--slowdown 0.15] [--setup <name>]
 //       the working tree against a base revision, case by case, in each
 //       runtime; prints a table, writes .bench-results/, and with --gate
 //       fails on a confirmed regression in Chromium or Bun that no
 //       Perf-Accepted trailer allows (Node only reports). --slowdown makes
 //       the head that much slower, to calibrate the gate on a known
 //       regression; with --base HEAD it measures a same-revision run.
+//       --setup picks one of the setups in bench/setups.ts (Chromium's
+//       switches, batch length, rounds) to calibrate it on the runner.
 //   bun scripts/bench.ts e2e [--base <ref>] [--only a,b] [--rounds 20]
 //   bun scripts/bench.ts e2e --smoke
 //       the end-to-end scenarios in Chromium (scripts/bench-e2e.ts): a new
@@ -31,6 +33,8 @@ import {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  readFileSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,6 +52,7 @@ import {
 } from "../packages/tscache/bench/gate";
 import type { CaseResult, RunOptions } from "../packages/tscache/bench/run";
 import type { Sample } from "../packages/tscache/bench/sample";
+import { type BenchSetup, setupOf } from "../packages/tscache/bench/setups";
 import { type E2eResult, runE2e } from "./bench-e2e";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -71,6 +76,7 @@ interface Args {
   rounds: number;
   gate: boolean;
   slowdown: number | undefined;
+  setup: BenchSetup;
   /** e2e: each scenario once on the working tree, checked. */
   smoke: boolean;
 }
@@ -92,7 +98,7 @@ function parseArgs(argv: string[]): Args {
     );
   }
   // The scenarios run in Chromium only and never gate.
-  const timingOnly = ["--runtime", "--gate", "--slowdown"];
+  const timingOnly = ["--runtime", "--gate", "--slowdown", "--setup"];
   const misplaced = timingOnly.filter((flag) => rest.includes(flag));
   if (command === "e2e" && misplaced.length > 0) {
     throw new Error(`e2e takes no ${misplaced.join(", ")}`);
@@ -102,14 +108,16 @@ function parseArgs(argv: string[]): Args {
     return i === -1 ? undefined : rest[i + 1];
   };
   const slowdown = value("--slowdown");
+  const setup = setupOf(value("--setup") ?? "default");
   return {
     command,
     base: value("--base") ?? process.env.CI_BASE ?? "origin/main",
     runtimes: (value("--runtime") ?? "bun,chromium").split(",") as Runtime[],
     only: value("--only")?.split(","),
-    rounds: roundsOf(value("--rounds")),
+    rounds: roundsOf(value("--rounds") ?? setup.rounds?.toString()),
     gate: rest.includes("--gate"),
     slowdown: slowdown === undefined ? undefined : Number(slowdown),
+    setup,
     smoke: rest.includes("--smoke"),
   };
 }
@@ -195,16 +203,45 @@ function runProcess(
   return (JSON.parse(result.stdout) as { results: CaseResult[] }).results;
 }
 
+/**
+ * Which Chromium binaries are running and how many processes each has, as
+ * `name ×count`, read from /proc on Linux (empty elsewhere): shows whether
+ * the bench runs Playwright's headless shell, and how many processes it
+ * started.
+ */
+function chromiumProcesses(): string {
+  if (process.platform !== "linux") return "";
+  const counts = new Map<string, number>();
+  for (const pid of readdirSync("/proc")) {
+    if (!/^\d+$/.test(pid)) continue;
+    let argv0: string;
+    try {
+      argv0 = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")[0] ?? "";
+    } catch {
+      continue; // the process ended
+    }
+    if (!argv0.includes("ms-playwright")) continue;
+    const name = argv0.split("/").at(-1) ?? argv0;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts].map(([name, count]) => `${name} ×${count}`).join(", ");
+}
+
 /** Loads the bundle in a fresh Chromium page and runs `options`. */
 async function runChromium(
   bundlePath: string,
   options: RunOptions,
+  chromiumArgs: readonly string[],
 ): Promise<CaseResult[]> {
   const { chromium } = await import("@playwright/test");
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: [...chromiumArgs] });
   try {
     const page = await (await browser.newContext()).newPage();
     page.setDefaultTimeout(0);
+    const processes = chromiumProcesses();
+    console.warn(
+      `Chromium ${browser.version()}${processes === "" ? "" : `: ${processes}`}${chromiumArgs.length === 0 ? "" : `, with ${chromiumArgs.join(" ")}`}`,
+    );
     await page.addScriptTag({ path: bundlePath });
     const out = await page.evaluate(
       (o) =>
@@ -225,9 +262,10 @@ async function run(
   runtime: Runtime,
   bundlePath: string,
   options: RunOptions,
+  setup: BenchSetup,
 ): Promise<CaseResult[]> {
   return runtime === "chromium"
-    ? runChromium(bundlePath, options)
+    ? runChromium(bundlePath, options, setup.chromiumArgs)
     : runProcess(runtime, bundlePath, options);
 }
 
@@ -254,26 +292,40 @@ async function measure(
   runtime: Runtime,
   { args, bundlePath, accepted }: Comparison,
 ): Promise<RuntimeReport> {
+  const { setup } = args;
+  const batch = setup.batchMs === undefined ? {} : { batchMs: setup.batchMs };
   const options = (rounds: number, only?: string[]): RunOptions => ({
     mode: "compare",
     rounds,
+    ...batch,
     ...(only === undefined ? {} : { only }),
     ...(args.slowdown === undefined ? {} : { slowdown: args.slowdown }),
   });
   const control = (
-    await run(runtime, bundlePath, { mode: "control", rounds: args.rounds })
+    await run(
+      runtime,
+      bundlePath,
+      { mode: "control", rounds: args.rounds, ...batch },
+      setup,
+    )
   )[0];
   const results = await run(
     runtime,
     bundlePath,
     options(args.rounds, args.only),
+    setup,
   );
   // Each flagged case again, in a fresh process, with more rounds.
   const suspects = results.filter((r) => flagged(r.sample)).map((r) => r.name);
   const confirmed =
     suspects.length === 0
       ? []
-      : await run(runtime, bundlePath, options(GATE.confirmRounds, suspects));
+      : await run(
+          runtime,
+          bundlePath,
+          options(GATE.confirmRounds, suspects),
+          setup,
+        );
   const again = new Map(confirmed.map((r) => [r.name, r.sample]));
   const quiet = !noisy(control?.sample);
   const gated = quiet && GATED.has(runtime);
@@ -370,6 +422,7 @@ async function compare(args: Args): Promise<number> {
       base: baseSha,
       head: headSha,
       gate: GATE,
+      setup: args.setup,
       ...report,
     };
     const file = join(RESULTS, `${runtime}.json`);
