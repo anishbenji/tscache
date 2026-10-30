@@ -1,6 +1,6 @@
 # Chore 28 — Test reliability
 
-Branch: `chore/28-test-reliability` · Reviewer: Codex (high) · Rounds: 1 · Status: round 1 fixed · Verdict after triage: merge
+Branch: `chore/28-test-reliability` · Reviewer: Codex (high) · Rounds: 2 · Status: round 2 fixed · Verdict after triage: merge
 
 The user's priority request of 2026-10-30: fix every flaky test at its root and change how tests are written so flakes cannot come back. Two flakes have branches of their own, kept independent of this one: fix 31 (reads ending mid-bar in the reference clients) and fix 32 (the sampler's timing test). Done by a child agent while the user was away, under the user's grant of 2026-10-30.
 
@@ -26,13 +26,14 @@ Failures not tied to a diff, from `docs/reviews/` and from stress runs of the wh
 
 | Commit | What |
 |---|---|
-| fac4cfb | `test`: the unit tests wait for conditions, not time. `vi.waitFor` on the observable effect (a fetch started, an event heard, a retry issued); a round trip on the same port as a barrier, with the fetcher counting settled fetches; a promise gate instead of a 60 ms timer for the slow module import, and an init listener so the joining tab is known to have arrived; a plain `await` instead of racing a get against a timer (a get that waited fails at the test's timeout); fake timers for the mock backend's latency instead of `performance.now()`. Absence checks and zero-delay turns stay, marked |
-| 74c97c5 | `chore(test)`: `scripts/flake-hunt.sh` and `.github/workflows/flake-hunt.yml` (manual on a branch's changed or named files, weekly over every test under load; not a required check) |
-| 711c8cc | `test(e2e)`: the year nearest the backend's clock, with a test across New Year; the server-rendered test has the server render once first and checks at least the forming bar's fetch; the scrolling and uPlot tests wait for the answer (the bar count moving) instead of sleeping; R3-1 sets the page's clock from the backend's; `retries: 0` explicit; the remaining pauses marked with their reasons |
-| 28fc166 | `chore(test)`: `scripts/test-clocks.ts` in `bun run ci`: no `Date.now()`, `new Date()`, `performance.now()`, `setTimeout` or `waitForTimeout` in test files without `// clock-ok: <reason>`, and Playwright retries at 0. Its tests run under Vitest |
-| 2580fe1 | `docs`: `docs/testing.md` (clocks, timing, waiting, shared state, retries, finding flakes), four review-checklist items under Tests, pointers in `AGENTS.md` and `docs/workflow.md` |
-| 16b6a88 | `test`: Vitest back to its default 5 s timeout (below) |
-| 14e719a, 261f3fc, 2ae3e6f | Round 1 fixes (R1-1, R1-2, R1-3). The branch was rebased onto 15fa506; R1-1's fix sits before 28fc166 so that every commit passes the check |
+| 907587c | `test`: the unit tests wait for conditions, not time. `vi.waitFor` on the observable effect (a fetch started, an event heard, a retry issued); a round trip on the same port as a barrier, with the fetcher counting settled fetches; a promise gate instead of a 60 ms timer for the slow module import, and an init listener so the joining tab is known to have arrived; a plain `await` instead of racing a get against a timer (a get that waited fails at the test's timeout); fake timers for the mock backend's latency instead of `performance.now()`. Absence checks and zero-delay turns stay, marked |
+| 80a8a33 | `chore(test)`: `scripts/flake-hunt.sh` and `.github/workflows/flake-hunt.yml` (manual on a branch's changed or named files, weekly over every test under load; not a required check) |
+| 6996ddf | `test(e2e)`: the year nearest the backend's clock, with a test across New Year; the server-rendered test has the server render once first and checks at least the forming bar's fetch; the scrolling and uPlot tests wait for the answer (the bar count moving) instead of sleeping; R3-1 sets the page's clock from the backend's; `retries: 0` explicit; the remaining pauses marked with their reasons |
+| b6e0eb4 | `chore(test)`: `scripts/test-clocks.ts` in `bun run ci`: no `Date.now()`, `new Date()`, `performance.now()`, `setTimeout` or `waitForTimeout` in test files without `// clock-ok: <reason>`, and Playwright retries at 0. Its tests run under Vitest |
+| 1186866 | `docs`: `docs/testing.md` (clocks, timing, waiting, shared state, retries, finding flakes), four review-checklist items under Tests, pointers in `AGENTS.md` and `docs/workflow.md` |
+| ecfa841 | `test`: Vitest back to its default 5 s timeout (below) |
+| a260053, 64d5e61, 89eb6cb | Round 1 fixes (R1-1, R1-2, R1-3). The branch was rebased onto 15fa506; R1-1's fix sits before b6e0eb4 so that every commit passes the check |
+| ace8183, 312b698 | Round 2 fixes (R2-1, R2-2, and the clock-ok sweep). The branch was rebased onto 86122d1 |
 
 ## Decisions
 
@@ -62,9 +63,19 @@ Mutation checks: with the orchestrator's joining-context update removed, five or
 
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
-| R1-1 | P1 | The clock check fails every CI run: `dev-warnings.test.ts` (#49, merged after this branch was built) sleeps 10 ms for an event | accepted | Reproduced: `bun scripts/test-clocks.ts` exited 1 on the rebased tree with that one finding. Fixed in 14e719a: the four waits for a `mergeWarning` event wait for the event (`vi.waitFor`), and the production-build fetch test listens for its event too, so "nothing printed" is checked once the warning was reported. The check is clean over all 100 test files. The commit sits before 28fc166, which turns the check on, so no commit fails it |
-| R1-2 | P1 | The dedup test passes with deduplication broken: nothing kept b's get from arriving after a's released fetch had filled the cache | accepted | Validated: with the orchestrator's in-flight join disabled, the test passed. Fixed in 261f3fc: `barrier(b)` before the release, so the server has taken b's get while a's fetch is stalled, and the test checks that one fetch is out at that point. With the join disabled it now fails ("got 2"); unmutated, the file passes 3 of 3. It was the one sleep replaced by nothing in fac4cfb; the others became waits on an observable effect |
-| R1-3 | P1 | `flake-hunt.sh` with a mistyped base reports "no test files changed" and exits 0 | accepted | Reproduced by the new `scripts/flake-hunt.test.sh` (exit 0, "no test files changed since no-such-branch-x"). Fixed in 2ae3e6f: the base is verified with `git rev-parse --verify` and the changed files listed by checked commands before the loop; an unknown base exits 1 naming it. The test covers that and the no-changes case, and runs in `scripts/ci.sh` |
+| R1-1 | P1 | The clock check fails every CI run: `dev-warnings.test.ts` (#49, merged after this branch was built) sleeps 10 ms for an event | accepted | Reproduced: `bun scripts/test-clocks.ts` exited 1 on the rebased tree with that one finding. Fixed in a260053: the four waits for a `mergeWarning` event wait for the event (`vi.waitFor`), and the production-build fetch test listens for its event too, so "nothing printed" is checked once the warning was reported. The check is clean over all 100 test files. The commit sits before b6e0eb4, which turns the check on, so no commit fails it |
+| R1-2 | P1 | The dedup test passes with deduplication broken: nothing kept b's get from arriving after a's released fetch had filled the cache | accepted | Validated: with the orchestrator's in-flight join disabled, the test passed. Fixed in 64d5e61: `barrier(b)` before the release, so the server has taken b's get while a's fetch is stalled, and the test checks that one fetch is out at that point. With the join disabled it now fails ("got 2"); unmutated, the file passes 3 of 3. It was the one sleep replaced by nothing in 907587c; the others became waits on an observable effect |
+| R1-3 | P1 | `flake-hunt.sh` with a mistyped base reports "no test files changed" and exits 0 | accepted | Reproduced by the new `scripts/flake-hunt.test.sh` (exit 0, "no test files changed since no-such-branch-x"). Fixed in 89eb6cb: the base is verified with `git rev-parse --verify` and the changed files listed by checked commands before the loop; an unknown base exits 1 naming it. The test covers that and the no-changes case, and runs in `scripts/ci.sh` |
+
+## Round 2 — reviewer verdict: merge after fixes
+
+R1-1 to R1-3 confirmed fixed.
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | `flake-hunt.sh` given a mistyped test file selects nothing, and Vitest's `passWithNoTests` passes every run of nothing | accepted | Reproduced by two new cases in `scripts/flake-hunt.test.sh`: a missing file and an existing `.test.ts` outside Vitest's include globs both exited 0 with "0 failures". Fixed in 312b698: files given by hand must exist (exit 1 naming the file), and a Vitest run whose JSON report counts no test fails the hunt ("ran no tests"). Playwright already fails when it finds no test. All four cases of the script's test pass; a real file still hunts normally |
+| R2-2 | P1 | The abandoned-handshake test in `client.test.ts` relied on a 60 ms attach timer expiring after a 20 ms handshake timeout; a pause over 40 ms between scheduling them reverses the order, and its `clock-ok` reason said it could not | accepted | Reproduced: a 100 ms busy pause injected in the fake worker's constructor, after scheduling the attach, failed the old test (an init was sent). Fixed in ace8183: the fake worker attaches only when the test calls it, after `make()` has fallen back, so the hello is late by construction. With the same pause injected the new test passes; with the client no longer closing the abandoned port it still fails |
+| — | — | Sweep of every `clock-ok` reason for the same class (a reason resting on timer order, not on something the test controls) | done in ace8183 | `e2e/support.ts` `expectWorkerAlive` raced the worker's answer against a 5 s guard, which a slow enough machine could lose: the guard is now three quarters of the test's own time limit, so it fires no sooner than the test's timeout would. The fake worker's zero-delay error timer in `client.test.ts` is queued before the client's longer handshake timer, so no pause can reorder them: sound, its reason now says why. The rest hold: zero-delay turns that only drain microtasks (`lifetime`, `rpc`, `connection`, the refresh harness), equal zero timers that run in the order queued (`e2e/support.ts` mode fallback), absence checks a slow machine can only make pass, and elapsed time used as an upper bound in the polling spec |
 
 ## Contract-test changes
 
