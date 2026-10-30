@@ -15,6 +15,8 @@ export interface RunOptions {
   /** Only the cases whose name is in this list. */
   only?: string[];
   rounds?: number;
+  /** Milliseconds a batch should take, at least (the sampler's default when absent). */
+  batchMs?: number;
   /**
    * Calibration: makes the head this fraction slower (0.15 = 15 %), so the
    * gate's detection can be measured on a known regression.
@@ -100,11 +102,14 @@ export function runBench(
       slowdown === undefined || slowdown === 0
         ? prepared
         : slowed(prepared, slowdown);
-    const rounds = options.rounds;
+    const { rounds, batchMs } = options;
     results.push({
       name: c.name,
       what: c.what,
-      sample: sample(base, head, rounds === undefined ? {} : { rounds }),
+      sample: sample(base, head, {
+        ...(rounds === undefined ? {} : { rounds }),
+        ...(batchMs === undefined ? {} : { batchMs }),
+      }),
     });
   }
   return { results, checksum: checksum() };

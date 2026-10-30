@@ -79,9 +79,9 @@ Times are from the Apple Silicon Mac, in two runs with base and head the same re
 
 **Paired rounds** (`bench/sample.ts`):
 1. Each side is warmed up for half a second.
-2. A batch is calibrated to last at least 40 ms. Chromium coarsens `performance.now()` to 100 µs without cross-origin isolation; 40 ms keeps that under 0.3 %.
-3. Twenty rounds time one batch of each side, in the order A B, B A, A B…, and each round gives a ratio, head over base.
-4. The result is the median ratio, with a distribution-free 95 % confidence interval: the 6th and 15th of the 20 sorted ratios, by the binomial distribution of the median. Nothing is assumed about how timings are distributed.
+2. A batch is calibrated to last at least 100 ms in `compare` (the sampler's own default, used by the end-to-end scenarios, is 40 ms). Chromium coarsens `performance.now()` to 100 µs without cross-origin isolation; 40 ms keeps that under 0.3 %. The longer batch is for the runner, not the timer: with 40 ms batches and 20 rounds, Chromium's A/A control left its bounds in 5 of 20 runs on GitHub's runner, and with 100 ms batches and 30 rounds in 1 of 20 (calibration log, chore 39).
+3. Thirty rounds (twenty for the end-to-end scenarios) time one batch of each side, in the order A B, B A, A B…, and each round gives a ratio, head over base.
+4. The result is the median ratio, with a distribution-free 95 % confidence interval: for 30 rounds the 10th and 21st of the sorted ratios (for 20, the 6th and 15th), by the binomial distribution of the median. Nothing is assumed about how timings are distributed.
 
 **The A/A control.** Before the comparison, each runtime times the head against the second copy of itself, in a fresh process (or page) of its own. These are two copies of the same code, as base and head are when a pull request leaves the engine alone. If the control's interval leaves [0.95, 1.05], the run is noisy and nothing fails.
 
@@ -150,11 +150,14 @@ bun scripts/bench.ts e2e --base main --only two-tabs-one-fetch --rounds 30
 bun run bench           # the working tree against origin/main, in Chromium and Bun
 bun scripts/bench.ts compare --base main --only read-viewport --runtime bun
 bun scripts/bench.ts compare --base HEAD --slowdown 0.25   # local calibration run
+bun scripts/bench.ts compare --base HEAD --setup short-batches   # a setup of the Chromium noise experiment
 bunx vitest run packages/tscache/test/perf                 # the exact budgets
 bun scripts/size.ts --update                               # reseed the size budgets (review the diff)
 ```
 
-`compare` writes `.bench-results/<runtime>.json` (schema version, both SHAs, the gate, every round, verdicts) and `summary.md`, and appends the table to the job summary on GitHub. A local run against `origin/main` takes about a minute per runtime. `e2e` writes `.bench-results/e2e.json` and `e2e-summary.md` the same way, in about 10 s; it takes `--base`, `--only` and `--rounds`, and refuses `--runtime`, `--gate` and `--slowdown`.
+`compare` writes `.bench-results/<runtime>.json` (schema version, both SHAs, the gate, every round, verdicts) and `summary.md`, and appends the table to the job summary on GitHub. A local run against `origin/main` takes about two and a half minutes per runtime. `e2e` writes `.bench-results/e2e.json` and `e2e-summary.md` the same way, in about 10 s; it takes `--base`, `--only` and `--rounds`, and refuses `--runtime`, `--gate`, `--slowdown` and `--setup`.
+
+`--setup <name>` picks one of the setups in `packages/tscache/bench/setups.ts`, from the Chromium noise experiment: `default` (what every run uses: 100 ms batches and 30 rounds, in every runtime; an explicit `--rounds` wins), `short-batches` (the earlier 40 ms and 20 rounds), `unthrottled` (Chromium switches that stop it deprioritising a background page), `one-renderer` (`--renderer-process-limit=1`), and `combined` (the default's timing with both sets of switches). `unthrottled` and `one-renderer` time with 40 ms batches and 20 rounds, as the experiment ran them. `bench-calibrate.yml` takes the same name as its `setup` input. The record in `.bench-results/<runtime>.json` names the setup it ran, and on Linux the Chromium run logs which browser binaries it started and how many processes each has.
 
 ## Calibration log
 
@@ -169,6 +172,13 @@ bun scripts/size.ts --update                               # reseed the size bud
 | 2026-10-30 | GitHub runner, main at `f2a6020` (after step 22), runs 40974332908, 40974342113, 40974350981 | 0 | Bun: no case fired in 20 quiet runs. Chromium: no case fired in 16 quiet runs (4 noisy) |
 | 2026-10-30 | the same | 0.15 | Bun, 20 quiet runs: 20 in four cases, 18 in `put-live-bar` and `read-transfer`, 12 in `snapshot-roundtrip`, 11 in `append-bars`, 1 in `read-year`. Chromium, 10 quiet runs: 10 in four cases, 8 in `put-page`, 5 in `read-viewport`, `read-viewport-sessions` and `read-transfer`, 0 in `fill-month` |
 | 2026-10-30 | the same | 0.25 | Bun, 18 quiet runs (2 noisy): 18 in six cases, 16 (89 %) in `append-bars` and `snapshot-roundtrip`, 3 (17 %) in `read-year`. Chromium, 15 quiet runs: 15 in `read-year`, `put-live-bar`, `append-bars` and `snapshot-roundtrip`, 11 in `put-page`, 9 in `read-transfer`, 7 in `read-viewport` and `read-viewport-sessions`, 3 in `fill-month` |
+| 2026-10-30 | GitHub runner, chore 39 at `364810c` (main `59b8da5` plus the `--setup` switch), setup `default` as it then was (40 ms batches, 20 rounds), run 40995973064 | 0 | Chromium control quiet in 15 of 20 runs; Bun in 19. No case fired in either runtime |
+| 2026-10-30 | the same, setup `unthrottled` (`--disable-renderer-backgrounding`, `--disable-background-timer-throttling`, `--disable-backgrounding-occluded-windows`), run 40995975915 | 0 | Chromium quiet in 12 of 20; Bun in 19. No case fired |
+| 2026-10-30 | the same, setup `one-renderer` (`--renderer-process-limit=1`), run 40995979086 | 0 | Chromium quiet in 10 of 20; Bun in 20. No case fired |
+| 2026-10-30 | the same, setup `long-batches` (100 ms batches, 30 rounds; now `default`), run 40995981693 | 0 | Chromium quiet in 19 of 20; Bun in 20. No case fired |
+| 2026-10-30 | the same, setup `combined` (both sets of switches, 100 ms batches, 30 rounds), run 40995984942 | 0 | Chromium quiet in 20 of 20; Bun in 20. No case fired |
+| 2026-10-30 | GitHub runner, chore 39 at `b0345b1` (100 ms batches and 30 rounds the default), run 40999175509 | 0.15 | Chromium, 20 quiet runs: 20 in six cases, 19 in `fill-month`, 13 in `read-viewport-sessions`, 10 in `put-page`. Bun, 20 quiet runs: 20 in six cases, 19 in `snapshot-roundtrip`, 6 in `append-bars`, 5 in `read-year` |
+| 2026-10-30 | the same, run 40999178404 | 0.25 | Chromium, 19 quiet runs (1 noisy): 19 in seven cases, 18 (95 %) in `read-viewport-sessions`, 16 (84 %) in `put-page`. Bun, 19 quiet runs (1 noisy): 19 in eight cases, 9 (47 %) in `read-year` |
 
 **Verdict of the 2026-10-30 calibration: the timing gate stays report-only.** Bun met both conditions except `read-year` at 25 % (84 %, below 90 %). Chromium could not be judged: its A/A control left [0.95, 1.05] in 17 to 20 of the 20 runs per dispatch. The batches were long enough (512 calls of about 0.11 ms, some 56 ms, against the 40 ms the timer needs), and the control's round ratios split into groups near 0.7, 1.0 and 1.4, so the noise comes from the runner (two shared vCPUs for Chromium's processes), not from the timer. Before the gate can block:
 1. Done: recalibrate on a main that includes step 22 (#43), which made the reads several times faster and so changes what each case measures.
@@ -180,6 +190,10 @@ bun scripts/size.ts --update                               # reseed the size bud
 - Chromium caught every 25 % slowdown in four cases and missed the others often, including the viewport reads.
 
 Next: find out why an injected slowdown in `read-year` measures smaller than injected, then decide whether the six Bun cases that pass gate on their own while the rest stay report-only. Item 2 above (a quieter Chromium setup) stands.
+
+**Verdict of the Chromium noise experiment (chore 39): `compare` now times 100 ms batches and 30 rounds, and Chromium can be judged.** Each setup was dispatched once at slowdown 0 on the same branch within a few minutes, with `default` as that day's control. Only the longer batches moved Chromium's quiet count to 19 of 20 or more: 19 alone, 20 with the switches added. The anti-backgrounding switches alone (12 of 20) and the renderer limit alone (10 of 20) did no better than the control (15 of 20). The bench already ran Playwright's headless shell (`chrome-headless-shell`, one renderer process, as the run's process log shows), so the renderer limit had nothing to limit; Playwright already passes `--disable-background-timer-throttling` to the renderer. The default takes the longer batches alone, the one change the evidence supports; 19 and 20 of 20 cannot be told apart in one dispatch. No case fired at slowdown 0 in any setup. Of the 23 noisy runs with 40 ms batches across the three setups that used them, 19 had calibrated half the usual batch (256 calls of `read-viewport` instead of 512, so the operation ran at about half speed while the batch was sized) and an interval as wide as [0.5, 1.9]; every quiet run had 512 calls or more. That points to slow phases of the runner, which a 40 ms batch can fall inside and a 100 ms batch spans; this is an interpretation of these runs, not tested further. The cost is time: a calibration job takes about four minutes instead of two, and the `bench` job of `ci.yml` grows by about as much.
+
+With the new timing, both runtimes meet the gate's conditions except in one case each: at 25 %, Chromium caught `put-page` in 84 % of quiet runs and Bun caught `read-year` in 47 %; every other case reached 95 % or more, and no case fired at 0. The gate stays report-only: turning it on, in either runtime or per case, is the separate step planned for it (the Bun-only per-case gate), which should now consider Chromium too, without `put-page`. Detection at 15 % is uneven (`put-page` 10 and `read-viewport-sessions` 13 of 20 in Chromium; `append-bars` 6 and `read-year` 5 of 20 in Bun). A larger runner was not needed.
 
 ## How this setup was chosen
 
