@@ -1,6 +1,6 @@
 # Docs 29 — User documentation site
 
-Branch: `docs/29-docs-site` · Reviewer: not yet reviewed · Rounds: 0 · Status: awaiting review · Verdict after triage: pending
+Branch: `docs/29-docs-site` · Reviewer: Codex (high) · Rounds: 1 · Status: re-review pending (round 1 raised P1s) · Verdict after triage: merge after re-review
 
 Comprehensive documentation for library users, as a site in its own Bun workspace (`site/`), with an API reference generated from the TSDoc and a build check in `bun run ci`. Built by a Claude Opus 5.5 subagent while the user was away, under the user's grant of 2026-10-30; not a commit-plan step. No engine behaviour changes: the only edits under `packages/tscache/src` are TSDoc comments.
 
@@ -11,7 +11,10 @@ Comprehensive documentation for library users, as a site in its own Bun workspac
 | 67d4665 | `docs(api)`: a `@module` TSDoc block on the `tscache`, `tscache/engine`, `tscache/fetcher` and `tscache/vite` entries, so the reference names modules after their import paths; `RequestId`'s comment puts its pattern in backticks (raw `<clientId>` broke the VitePress build); `Engine.get`'s comment no longer says orchestration arrives at step ⑪ |
 | 9f47a2f | `build(site)`: the `site/` workspace (VitePress, TypeDoc with typedoc-plugin-markdown and typedoc-vitepress-theme, TypeScript 6 under an alias for TypeDoc), its config with the repository-link check, `docs:dev`, `docs:build` and `docs:check` root scripts, `bun run ci` steps, Knip and Fallow configuration; the pages and the compiled code examples |
 | feb2595 | `docs`: the README links the site |
-| (this commit) | `docs(review)`: this file |
+| 5db28fc | `docs(review)`: this file |
+| 27ca5ea | `docs(site)`: R1-1, R1-2 |
+| 431e556 | `docs(site)`: R1-3 |
+| 2af0c3f | `docs(site)`: the grid example says why its client has no fetcher (round 1 sweep) |
 
 Pages: getting started; concepts (coverage and gaps, the grid and `alignmentOffset`, segments and slots, versions and watermarks, invalidation and clearing, events in three scopes); the API by example (client, cache, snapshots, fetcher module, engine, errors) beside the generated reference; guides (workers and fallback, writing a fetcher, the Vite plugin and its static-import rule, credentials and `tscache:auth-invalid`, server rendering, live feeds by SSE, WebSocket and polling, expiry and other patterns); vanilla, React, Solid and chart libraries; performance (a summary of `docs/benchmarking.md`); troubleshooting and FAQ; an architecture map for contributors. The internal documents (`docs/architecture.md`, `docs/workflow.md`, `docs/reviews/`, `docs/review-checklist.md`, `docs/guides/`) stay where they are; the site links to them on GitHub.
 
@@ -44,6 +47,16 @@ Taken by the subagent under the grant (logged for the user).
 ## Dependencies added
 
 All dev dependencies of the private `site/` workspace, pre-approved: `vitepress` (the site), `typedoc`, `typedoc-plugin-markdown`, `typedoc-vitepress-theme` (the reference), `typescript` as `npm:typescript@6.0.3` (TypeDoc's compiler), and `vite` `^8.3.4` (the Vite config snippet imports `defineConfig`; the same version the examples use). `tscache` is a `workspace:*` dependency for the snippets. Nothing changes for the published package.
+
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | The browser snapshot example (`site/snippets/snapshots.ts`) creates its client without a fetcher, so the provisional tail and later bars never load | accepted | Confirmed against architecture §4.9: without a fetcher, `get` stays cache-only and the tail the snapshot leaves out comes back `'uncached'`. 27ca5ea gives the browser client the fetcher module |
+| R1-2 | P1 | An older worker rejects `hydrate` with "unknown op hydrate", and the uncaught rejection skips the live read the pages promise as the fallback | accepted | Confirmed against N37 and `integrations/shared/hydration.ts`: the example awaited `hydrate` outside any `try`. 27ca5ea catches exactly that `TscacheError` and goes on to the read; any other error still throws |
+| R1-3 | P1 | The fetcher example accumulates fields in an object that inherits from `Object.prototype`, so a field named `constructor` breaks `??=` and `push()` | accepted | Reproduced under Bun: the snippet's accumulation throws "push is not a function" for `constructor`, while an `Object.create(null)` dictionary works and `Engine.put` accepts it. Fixed in 431e556 |
+
+Sweep for the same patterns on other pages: every other client without a fetcher is deliberate. `cache.ts` writes with `put` and reads `cacheOnly`; `errors.ts`, the webpack and no-bundler blocks only connect; `client.ts`'s in-process client is only disposed; `engine.ts` has no worker. `grid.ts` reads without a fetcher to show the snapped miss, and now says so (2af0c3f). The other `hydrate` calls are the integrations' `hydrateRead`, which has the fallback, and `Engine.hydrate`, which has no older worker. The examples' fetcher (`examples/mock-backend/src/fetcher.ts`), which the fetcher guide shows in full, accumulates fields the same way as R1-3; its datasets name no such field, and it is left for a branch that touches the examples.
 
 ## Found while writing
 
