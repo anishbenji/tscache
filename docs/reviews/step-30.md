@@ -12,6 +12,7 @@ One command that shows and launches every sample app: `bun run demo`. Requested 
 | daca034 | `test(e2e)`: `e2e/demo/hub.spec.ts` in a new `demo` Playwright project (`retries: 0`): the hub links exactly the catalog's pages and the catalog covers every app in `apps`; each of the 23 pages opens from its hub link and shows its ready status, a positive data count and a chart canvas, and the panel shows a positive fetch count for its backend; the panel's Expire token makes an open `react-lwcharts` page rotate its token once. The demo's web server comes last in `playwright.config.ts`. After rebasing onto chore 25 (#47), the demo's server gets `DEMO_PORT = 5400 + offset` (the checkout's offset, exported from `e2e/examples/apps.ts`) unless `DEMO_PORT` is set |
 | 3e3f897 | `fix(demo)`: R1-1, R1-2 |
 | cda83a7 | `test(e2e)`: R1-3 |
+| 43cc3d1 | `test(e2e)`: the launcher test spawns `scripts/demo.ts` by its absolute path; Knip read the relative argument as an import from `e2e/demo/` and failed `bun run ci` |
 
 ## Decisions made in the step
 
