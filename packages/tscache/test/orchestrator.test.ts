@@ -309,9 +309,12 @@ describe("orchestrated get", () => {
     const pa = get(a, { start: 3, end: 23 });
     await eventually(() => expect(log().requests).toHaveLength(1));
     const pb = get(b, { start: 3, end: 23 });
+    // The server has taken b's get while a's fetch is still stalled, so the
+    // two overlap: b joins the fetch in flight instead of starting one.
+    await barrier(b);
+    expect(log().requests).toHaveLength(1);
     log().release?.();
     const [ra, rb] = await Promise.all([pa, pb]);
-    // A second fetch would have stalled both gets, and shown here.
     expect(log().requests).toHaveLength(1);
     expect(ra).toEqual(rb);
     expect(Array.from(ra.fields.volume as Int16Array)).toEqual([1, 1, 1]);
