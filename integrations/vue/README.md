@@ -62,8 +62,8 @@ server alone.
   briefly.
 - A read that a newer one overtakes is dropped, not cancelled. `get` takes
   no abort signal, and its fetch still fills the cache.
-- A seed carries no dataset version (see `examples/react-ssr/README.md`,
-  "Known limits").
+- A seed is checked against the dataset version only when the dataset has
+  one (`../README.md`, "Checks and limits"; architecture §2.8).
 - `open` runs per client, so it can read current credentials. For
   `authInvalid` misses and `updateAuth`, see
   `examples/react-lwcharts/src/auth-refresh.ts`; `inject(CONNECTION)` gives

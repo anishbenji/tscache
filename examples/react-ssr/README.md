@@ -142,11 +142,10 @@ provisional day.
 
 ## Known limits
 
-- The mock backend reports no dataset version, so the snapshot carries
-  none. A backend that reports one gets the protection for free: a snapshot
-  of another version is refused by `hydrate` (architecture §2.8). Without
-  one, a restatement between the server's read and the browser's hydrate is
-  undetectable (§2.4).
+- The snapshot carries the dataset version the mock backend reports, so
+  `hydrate` refuses a snapshot of another version (architecture §2.8). A
+  backend that reports no version gets no such check: a restatement between
+  the server's read and the browser's hydrate is undetectable (§2.4).
 
 ## What else is in here
 

@@ -62,8 +62,8 @@ server alone.
 - After hydration, `status()` is `"loading"` until the live answer lands.
 - `get` takes no abort signal, so an overtaken read is dropped, not
   cancelled. Its fetch still fills the cache.
-- A seed carries no dataset version (see `examples/react-ssr/README.md`,
-  "Known limits").
+- A seed is checked against the dataset version only when the dataset has
+  one (`../README.md`, "Checks and limits"; architecture §2.8).
 - `open` runs once per client, so it can read current credentials. For
   `authInvalid` and `updateAuth`, see
   `examples/react-lwcharts/src/auth-refresh.ts`. The client is

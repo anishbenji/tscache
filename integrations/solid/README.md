@@ -64,7 +64,8 @@ worker answered. SSR-only is `ssr-server.tsx` without the browser half.
 - Teardown does not wait for the client's `dispose()`, since a cleanup
   cannot be async; a rejection from it goes unhandled.
 - The JSX needs Solid's compiler (`vite-plugin-solid` with Vite); `tsc` only
-  type-checks it. A seed carries no dataset version
-  (`examples/solid-ssr/README.md`).
+  type-checks it.
+- A seed is checked against the dataset version only when the dataset has
+  one (`../README.md`, "Checks and limits"; architecture §2.8).
 - `open` runs once per client, so it can read current credentials. For
   `authInvalid`, see `examples/react-lwcharts/src/auth-refresh.ts`.
