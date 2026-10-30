@@ -1,6 +1,6 @@
 # Step 41 — Reference clients draw a live bar by its newest bars
 
-Branch: `feat/41-reference-live-update` · Reviewer: none yet (implementation child; the director runs the review) · Status: implemented
+Branch: `feat/41-reference-live-update` · Reviewer: Codex (high) · Rounds: 1 · Status: fixes applied after round 1
 
 Item 8 of the performance plan of 2026-10-30: each live tick handed the chart a new answer, and the Lightweight Charts view drew it with a `setData` of every bar (about 720 on the opening range). A view now remembers the answer it drew; when the next one differs from it only in its newest bars, the Lightweight Charts view passes just those to `series.update()`. Any other change still takes `setData`. Built by an implementation child while the user was away, under the user's grant of 2026-10-30. Reference code only: nothing in `packages/tscache` changed.
 
@@ -8,9 +8,13 @@ Item 8 of the performance plan of 2026-10-30: each live tick handed the chart a 
 
 | Commit | What |
 |---|---|
-| e0bcf85 | `feat(reference)`: `appendedFrom(before, after)` in `reference/shared/src/chart/view.ts`, the pure decision. It returns the index of the first bar to draw (the last drawn bar when that bar, the forming one, changed; the drawn count when only new bars did), or `undefined` when every bar must be drawn again. Tests: `reference/shared/test/appended.test.ts` (15), written first |
-| fcfc1be | `perf(reference)`: the Lightweight Charts view draws by `update()` when `appendedFrom` allows it; the uPlot view keeps its one `setData` (below). Both count their draws of each kind on their element (`countDraw`: `data-draws-full`, `data-draws-appended`). E2E: three tests per client in `e2e/reference/clients.spec.ts` |
-| (this commit) | `reference/README.md` (the chart bullet), and this file |
+| b60c568 | `feat(reference)`: `appendedFrom(before, after)` in `reference/shared/src/chart/view.ts`, the pure decision. It returns the index of the first bar to draw (the last drawn bar when that bar, the forming one, changed; the drawn count when only new bars did), or `undefined` when every bar must be drawn again. Tests: `reference/shared/test/appended.test.ts` (15), written first |
+| 6d3de70 | `perf(reference)`: the Lightweight Charts view draws by `update()` when `appendedFrom` allows it; the uPlot view keeps its one `setData` (below). Both count their draws of each kind on their element (`countDraw`: `data-draws-full`, `data-draws-appended`). E2E: three tests per client in `e2e/reference/clients.spec.ts` |
+| 3ad5b92 | `reference/README.md` (the chart bullet), and this file |
+| e3d81c1 | `test(reference)`, R1-1: each chart view against a stand-in for its library, `reference/shared/test/lightweight-view.test.ts` (7) and `uplot-view.test.ts` (4); the test answers move to `test/answers.ts` |
+| (this commit) | Round 1 triage |
+
+The branch was rebased onto `main` at `15fa506` after the first three commits; their measurements below name the hashes they were taken at, before the rebase (`e0bcf85`, `fcfc1be`, `22d381c`).
 
 ## Decisions
 
@@ -240,15 +244,35 @@ try {
 
 </details>
 
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | The new e2e tests do not show that the series get the bars: removing both `series.update()` loops leaves them passing, since the draw counters record `appendedFrom`'s verdict and `nextDraw` watches the answer's time | accepted | fixed in e3d81c1 |
+
+**R1-1, validated.** With both loops deleted from `lightweight.ts`, `~/code/tscache-reports/bin/heavy-run.sh "live child: r1 validate" env E2E_EXAMPLES=reference-vanilla,reference-react,reference-solid bunx playwright test e2e/reference --project examples -g "step 41"` passed 9 of 9. The finding holds: the counters prove the decision is wired, not the drawing.
+
+**Fix.** Unit tests of each view against a stand-in for its library (`vi.mock`), which observe what the library receives:
+- `lightweight-view.test.ts` (7). The stand-in series keep their bars as Lightweight Charts documents `setData()` (replace all) and `update()` (replace the last bar at the same time, add one after it, refuse an earlier time). After each draw the test checks the calls each series got and that both the candle and the volume series hold every bar of the answer, values and volume colour included: the first answer and an earlier correction or a moved range through `setData()`; an appended bar, the updated forming bar, and the forming bar with bars after it through `update()`; and six live answers in a row, alternately moving the forming bar and opening a new one, after a single `setData()`.
+- `uplot-view.test.ts` (4). For an appended bar, the forming bar, an earlier correction and a moved range, the draw hands uPlot `setData([timestamps, open, high, low, close, volume], false)` with the answer's own arrays.
+
+**Mutation checks**, `bunx vitest run reference/shared/test`:
+- both `update()` loops deleted: 4 of the 7 Lightweight tests fail (every `update()` case; the three `setData()` cases pass);
+- only the volume loop deleted: the same 4 fail;
+- uPlot skipping `setData` for an answer `appendedFrom` accepts: 2 of 4 fail (the appended and forming-bar cases).
+
+Each mutation was undone; the suite then passed 37 of 37. The e2e tests are unchanged: they still show, in the browser, that a live bar under the SSE feed takes the incremental path and a new version the full one.
+
 ## What was not verified
 
 - That every e2e test would fail with the hook present but every draw full: the assertion `after.full === before.full` would catch it, but that mutation was not run in the browser.
+- What Lightweight Charts itself paints after `update()`: the unit tests use a stand-in that follows its documented semantics, and the e2e tests read the draw counters, not the library's series.
 - Firefox and WebKit: the reference suite runs on Chromium only.
 - The trace on a slower machine or with more bars on screen; the numbers above are from one machine.
 
 ## Contract-test changes
 
-None. No existing test was changed.
+None. No existing test's assertions changed; `appended.test.ts` now imports its answers from `test/answers.ts`.
 
 ## Decision concerns
 
