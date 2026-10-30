@@ -78,8 +78,9 @@ function checked(got: GetResult, range: Range): number {
 
 /**
  * The bars of a live-tail read, once checked: the screen, its newest bar
- * still a miss (provisional), and that bar fetched for the `fetches`th
- * time (the tail fetcher's volume counts the fetches of a range).
+ * still a miss (provisional), and that bar written by the cache's
+ * `fetches`th fetch (the tail fetcher's volume counts the fetches made
+ * for a cache, setup's included).
  */
 function checkedTail(got: GetResult, range: Range, fetches: number): number {
   const n = got.timestamps.length;
@@ -171,7 +172,9 @@ function readViewport(cache: CacheHandle, entry: Prepared): AsyncOp {
  */
 function liveTail(cache: CacheHandle, entry: Prepared): AsyncOp {
   const range = rangeOf(0);
-  let fetches = 0;
+  // The setup's opening read was the cache's first fetch, so each
+  // operation must see the next count: a get that did not fetch fails.
+  let fetches = 1;
   return async () => {
     entry.calls++;
     fetches++;
@@ -254,7 +257,7 @@ async function prepare(p: Preparation): Promise<void> {
   const cache = await client.cache(tail ? tailConfig(p.id) : config(p.id));
   const state: Prepared = { reset: async () => {}, calls: 0 };
   if (tail) {
-    // The opening read fetches the screen; volume 1 is that fetch's.
+    // The opening read is the cache's first fetch: volume 1.
     const range = rangeOf(0);
     checkedTail(await cache.get(range), range, 1);
     state.op = liveTail(cache, state);

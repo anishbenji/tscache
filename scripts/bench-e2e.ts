@@ -56,16 +56,15 @@ const SCENARIOS: Readonly<Record<Scenario, string>> = {
 /**
  * live-tail-get's fetcher: answers every grid point of the range at once,
  * from memory, so the scenario times the worker's work rather than a
- * server's. price is the timestamp; volume counts the fetches of the
- * range, so the page sees that each get fetched.
+ * server's. price is the timestamp; volume counts the fetches made for
+ * the cache so far, so the page sees that each get fetched once more.
  */
 const TAIL_FETCHER = `
   const fetches = new Map();
   export default {
     async fetch({ cacheId, range, interval, alignmentOffset }) {
-      const key = cacheId + ":" + range.start + "-" + range.end;
-      const calls = (fetches.get(key) ?? 0) + 1;
-      fetches.set(key, calls);
+      const calls = (fetches.get(cacheId) ?? 0) + 1;
+      fetches.set(cacheId, calls);
       const timestamps = [];
       const first = Math.ceil((range.start - alignmentOffset) / interval) * interval + alignmentOffset;
       for (let t = first; t <= range.end; t += interval) timestamps.push(t);
