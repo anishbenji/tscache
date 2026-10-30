@@ -19,6 +19,10 @@ with `import()`, and calls its default export's `fetch` for every range a `get` 
   backend.
 - **Never closes its worker** (`self.close()`): a dedicated worker that does fires no `error`, and the
   calls of its tab hang.
+- **Bounds each request**, for example with `AbortSignal.timeout()` on its `fetch`, and throws when the
+  bound passes. The worker never cancels a fetch, and one fetch serves every `get` that needs one of its
+  slots, from every tab, so a request that never settles holds them all. The thrown error is an ordinary
+  failure: a `'fetch-failed'` miss, and the next `get` tries again.
 
 ## What a response must contain
 
