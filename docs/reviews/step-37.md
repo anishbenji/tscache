@@ -1,6 +1,6 @@
 # Step 37 — Native base64 for snapshots
 
-Branch: `feat/37-native-base64` · Reviewer: not yet run (the director reviews) · Rounds: 0 · Status: implemented · Verdict after triage: pending review
+Branch: `feat/37-native-base64` · Reviewer: Codex (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 Item 4 of the performance plan (`~/code/tscache-reports/perf-plan.md` §6), built by a child agent while the user was away. `encodeSnapshot` built a binary string with `String.fromCharCode` and passed it to `btoa`; `decodeSnapshot` copied `atob`'s characters into bytes one by one. Runtimes that ship `Uint8Array.prototype.toBase64` and `Uint8Array.fromBase64` (Chrome 140, Firefox 133, Safari 18.2, Bun, Node 25) do both natively.
 
@@ -63,3 +63,7 @@ None.
 ## User decision (2026-10-30)
 
 The decision concern on N38 is settled by the user: keep the native path. The user reads N38's `btoa`/`atob` as naming the mechanism, not the decision, so N38's row stays unchanged.
+
+## Round 1 — reviewer verdict: merge
+
+No findings, on the branch rebased onto `main` 86122d1; the reviewer re-checked byte compatibility, snapshot round trips and malformed-input errors in Bun. `bun run ci` passed. Settled.
