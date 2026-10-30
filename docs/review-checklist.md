@@ -34,7 +34,7 @@ Every review of a step branch checks the diff against this list. Section referen
 
 ## 4. Segments (S§3.2)
 
-- [ ] Code outside `segment/` depends only on the `Segment` interface (`lookup`, `slice`, `mergeFrom`, `transferPayload`), never on `DenseSegment` internals.
+- [ ] Code outside `segment/` depends only on the `Segment` interface (`extent`, `size`, `lookup`, `slice`, `countIn`, `sliceInto`, `mergeFrom`, `transferPayload`), never on `DenseSegment` internals.
 - [ ] Mask is 1 bit per slot, `ceil(count / 8)` bytes; bit order is consistent between write, read and payload.
 - [ ] Gap split triggers at more than K intervals; the slot cap (32 768 default) is respected on every growth path.
 - [ ] New data wins on overlap; the overlap-difference warning is off by default and costs nothing when off.

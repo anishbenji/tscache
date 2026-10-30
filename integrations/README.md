@@ -64,10 +64,11 @@ not type-checked.
 
 Limits every variant shares:
 
-- A seed carries no dataset version, and checking what the browser's cache covers and putting the
-  seed are two requests: another tab's fetch landing between them is replaced by the seed. Either
-  matters only if the backend changed covered history after the server's read. Closing both needs a
-  library-level snapshot API (`docs/roadmap.md`, post-build architecture review).
+- A seed's snapshot carries the dataset version the server's cache held, and `hydrate` applies it
+  in one engine call: it refuses a snapshot of another version and fills only what the browser's
+  cache does not cover, so another tab's fetch is never replaced (architecture §2.8, N35). A
+  dataset without a version gets no such check: if the backend changed covered history after the
+  server's read, the seed still carries the old points, as the server's render did.
 - `get` takes no abort signal: an overtaken read is dropped, not cancelled, and its fetch still fills
   the cache.
 - Reading a range again (after `updateAuth`, say) means asking for it again: the vanilla series reads

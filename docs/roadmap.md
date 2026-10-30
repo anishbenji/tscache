@@ -102,8 +102,9 @@ flush; `invalidate` reaches disk through the cache record's coverage. Logging ou
 field under N20, so per-user caches can stay in memory) or per client; loading every page when a cache
 opens or pages lazily on first read (lazy keeps start-up flat but puts an asynchronous step inside the
 read path); what happens when the quota is exceeded (proposed: stop persisting that cache and emit an
-event); whether to request `navigator.storage.persist()`. The SSR snapshot API below would serialise the
-same page records, so the two should be designed together.
+event); whether to request `navigator.storage.persist()`. The snapshot API, built in step ⑮, was designed
+with this sketch: its envelope is the cache record above and its segments the page content (architecture
+§2.8, N34).
 
 ## Design sketch: subscriptions (dirty notifications)
 

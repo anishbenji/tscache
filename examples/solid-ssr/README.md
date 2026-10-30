@@ -123,9 +123,9 @@ format, encoded as JSON.
 
 ## Known limits
 
-- The mock backend reports no dataset version, so the snapshot carries
-  none. A backend that reports one gets the protection for free: a snapshot
-  of another version is refused by `hydrate` (§2.8).
+- The snapshot carries the dataset version the mock backend reports, so
+  `hydrate` refuses a snapshot of another version (§2.8). A backend that
+  reports no version gets no such check.
 - Every `get` up to now fetches again. A `get` snaps its end outward to the
   minute after now, which the backend's watermark keeps provisional, so it
   stays outside coverage (§2.4); and its miss, which abuts the coverage, is

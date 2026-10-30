@@ -65,6 +65,7 @@ that scrolls would set `chart.range` to its visible range.
   child component inside the boundary, whose `reset` then creates it again.
 - `loading` stays false while a new client reads the same range again, since
   the answer shown is for that range.
-- A seed carries no dataset version (see `examples/solid-ssr`).
+- A seed is checked against the dataset version only when the dataset has
+  one (`../README.md`, "Checks and limits"; architecture §2.8).
 - `open` runs per client, so it can read current credentials;
   `examples/react-lwcharts/src/auth-refresh.ts` handles `authInvalid`.
