@@ -53,6 +53,27 @@ async function drag(page: Page, toward: "back" | "forward"): Promise<void> {
   await page.mouse.up();
 }
 
+/** The start of the one-minute bar holding `t`. */
+function barStart(t: number): number {
+  return t - (t % MINUTE);
+}
+
+/**
+ * Holds the page's event stream back until `release`, so the feed opens,
+ * and the page catches up, only when the test lets it.
+ */
+async function holdStream(page: Page): Promise<{ release(): void }> {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/stream/**", async (route) => {
+    await held;
+    await route.continue();
+  });
+  return { release };
+}
+
 function isHistory(notice: FetchNotice): boolean {
   return span(notice) > HOUR;
 }
@@ -221,6 +242,61 @@ for (const app of [
       await expect(page.locator("#chart canvas").first()).toBeVisible();
       await page.waitForTimeout(1000);
       for (const notice of await notices(page)) {
+        expect(span(notice)).toBeLessThanOrEqual(2 * MINUTE);
+      }
+    });
+
+    // The page catches up with a fetch when its feed opens. A minute
+    // boundary passing between the read before it and the catch-up must
+    // not widen that fetch past the forming bar and the one before (fix 31).
+    // Both tests hold the stream back, pin the page's clock in the next bar,
+    // then let the stream open: the boundary passes every run.
+
+    test("the server-rendered page fetches only the newest bars when a minute passes before its feed opens", async ({
+      context,
+    }) => {
+      const page = await context.newPage();
+      await recordNotices(page);
+      const opening = await holdStream(page);
+      await page.goto("/ssr");
+      await expect(page.getByTestId("connection")).toHaveText("live");
+      const served = await page
+        .locator("#tscache-read")
+        .evaluate((script) => JSON.parse(script.textContent ?? "{}"));
+      const rendered: number = served.range.end;
+      // Halfway through the bar after the one the server rendered in.
+      await page.clock.setFixedTime(barStart(rendered) + MINUTE + MINUTE / 2);
+      await waitNotices(page, 1);
+      const before = (await notices(page)).length;
+      opening.release();
+      await waitNotices(page, before + 1);
+      for (const notice of await notices(page)) {
+        expect(span(notice)).toBeLessThanOrEqual(2 * MINUTE);
+      }
+    });
+
+    test("a page whose feed opens a minute after its first read fetches only the newest bars", async ({
+      context,
+    }) => {
+      const page = await context.newPage();
+      // The backend's clock a second into a bar, so its forming bar stays
+      // the same while the page reads (resetClock in afterEach undoes it).
+      const backendNow = (await stats(page)).now;
+      await control(page, {
+        advanceMs: MINUTE - (backendNow % MINUTE) + 1000,
+      });
+      const forming = barStart((await stats(page)).now);
+      await page.clock.setFixedTime(forming + MINUTE / 2);
+      await recordNotices(page);
+      const opening = await holdStream(page);
+      await page.goto("/");
+      await expect(page.getByTestId("connection")).toHaveText("live");
+      await waitNotices(page, 1);
+      const before = (await notices(page)).length;
+      await page.clock.setFixedTime(forming + MINUTE + MINUTE / 2);
+      opening.release();
+      await waitNotices(page, before + 1);
+      for (const notice of (await notices(page)).slice(before)) {
         expect(span(notice)).toBeLessThanOrEqual(2 * MINUTE);
       }
     });
