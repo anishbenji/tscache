@@ -1,6 +1,6 @@
 # Chore 24 — Calibration log for the GitHub runner
 
-Branch: `chore/24-calibration-log` · Reviewer: Codex (high) · Rounds: in progress · Status: under review
+Branch: `chore/24-calibration-log` · Reviewer: Codex (high) · Rounds: 1 · Status: settled
 
 Records the two calibrations of the timing gate on GitHub's runner (`bench-calibrate.yml`, dispatched three times each with slowdowns 0, 0.15 and 0.25) in `docs/benchmarking.md`, "Calibration log". Dispatched and judged by Claude while the user was away, under the user's grant of 2026-10-30 (runner minutes are free on a public repository). Documentation only: no code or workflow change.
 
@@ -14,3 +14,7 @@ Records the two calibrations of the timing gate on GitHub's runner (`bench-calib
 ## Evidence
 
 Tallies from `bun scripts/bench-calibration.ts <artifacts> <slowdown>` over the downloaded `calibration-*` artifacts of each run (run ids in the log).
+
+## Round 1 — reviewer verdict: merge
+
+No findings, on the branch rebased onto `main` a3926ca; `bun run ci` passed. The reviewer could not retally the raw calibration artifacts (not in the repository); the tallies rest on the commands listed under Evidence. Settled.
