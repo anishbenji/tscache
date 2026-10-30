@@ -1,6 +1,6 @@
 # Fix 32 — The sampler's tests measure no time
 
-Branch: `fix/32-gate-sampler-flake` · Reviewer: pending (the director runs the review) · Status: implemented, not yet reviewed
+Branch: `fix/32-gate-sampler-flake` · Reviewer: Codex (high) · Rounds: 1 · Status: round 1 fixed · Verdict after triage: merge
 
 `packages/tscache/test/perf/gate.test.ts` checked the bench sampler by timing a synthetic loop and asserting that the same operation against itself measured a median ratio between 0.7 and 1.4. It failed at 1.655 in step 22 (R3-1) and again in fix 26's pre-push, both times while other jobs ran on the machine. Done by a child agent while the user was away, under the user's grant of 2026-10-30.
 
@@ -15,7 +15,8 @@ Two causes, one in the test and one in the sampler.
 
 | Commit | What |
 |---|---|
-| f3dc1f8 | `fix(bench)`: the sampler takes an optional `clock` (default `performance.now`; its type stays internal), and calibration takes the fastest of three timings per side at each batch size. The two timing tests are replaced by six tests on a virtual clock that the operations advance: exact ratios of 1 and 2 and the batch size, the A B, B A order of the rounds, a stall during calibration, a stalled round leaving the median and its interval unchanged, and, for `sampleAsync`, the same plus resets that take far longer than a batch moving no timing. `docs/benchmarking.md` describes the calibration and where the sampler's real-hardware behaviour is measured |
+| 7b7f5d2 | `fix(bench)`: the sampler takes an optional `clock` (default `performance.now`; its type stays internal), and calibration takes the fastest of three timings per side at each batch size. The two timing tests are replaced by six tests on a virtual clock that the operations advance: exact ratios of 1 and 2 and the batch size, the A B, B A order of the rounds, a stall during calibration, a stalled round leaving the median and its interval unchanged, and, for `sampleAsync`, the same plus resets that take far longer than a batch moving no timing. `docs/benchmarking.md` describes the calibration and where the sampler's real-hardware behaviour is measured (rebased onto 15fa506; the documentation conflict with #50 kept #50's batches and rounds and added the calibration sentence) |
+| d0f05e4 | `test(bench)`: R1-1 |
 
 ## Where the timing check went
 
@@ -38,9 +39,13 @@ The before runs used the old `sample.ts` and the old test from a3926ca, copied b
 
 A real-clock sanity run of the new sampler (`bun` on the old test's loop, 20 rounds, 40 ms batches, idle machine): same operation 0.999, doubled operation 1.819.
 
-`tsc -p packages/tscache`, `tsc -p .`, Knip and Biome clean. The first `bun run ci` failed at Knip on an exported `Clock` type nothing imported; it is module-local now, folded into f3dc1f8 so every commit stays green. `bun run ci` on this file's commit: see the report.
+`tsc -p packages/tscache`, `tsc -p .`, Knip and Biome clean. The first `bun run ci` failed at Knip on an exported `Clock` type nothing imported; it is module-local now, folded into the fix commit so every commit stays green. `bun run ci` on this file's commit: see the report.
 
-## Round 1 — reviewer verdict: pending
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | The calibration-stall tests never inject their stall: the virtual clock counts calls across both operations, calibration times base three times before head, so a stall on call 2 never fires, and calibrating from the slowest timing passes too | accepted | Validated: with calibration taking the slowest of three timings, all 20 tests passed. Fixed in d0f05e4: each operation counts its own calls, the stall is on the head's first call, and every stall test asserts `stalls() === 1`. The stalled-round test counted globally too and now counts the head's own calls (its stall did fire before, as its ratio check showed). The alternation test reads the global call log on purpose. Now both the slowest-of-three and the one-timing mutations fail the two calibration-stall tests (sync and async); 20 of 20 pass unmutated |
 
 ## Contract-test changes
 
