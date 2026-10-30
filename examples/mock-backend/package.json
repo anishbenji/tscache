@@ -5,6 +5,7 @@
   "description": "Synthetic time-series backend and fetcher shared by the tscache examples",
   "exports": {
     "./backend": "./src/backend.ts",
+    "./columns": "./src/columns.ts",
     "./datasets": "./src/datasets.ts",
     "./fetcher": "./src/fetcher.ts",
     "./hydration": "./src/hydration.ts",

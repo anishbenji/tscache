@@ -31,7 +31,10 @@ All routes live under `/api/`; the `mockBackend()` Vite plugin mounts them on
 - `GET /api/series/<dataset>/<symbol>?start&end&interval&offset` answers
   `{ timestamps, fields, meta: { version, finalizedUntil }, next? }` for the
   inclusive range, at most 5,000 slots per page and never past now. `next`
-  is where the following page starts.
+  is where the following page starts. A request whose `Accept` names
+  `application/vnd.tscache.columns` gets the same page as a binary columns
+  body instead (below); any other request gets JSON. Both answers carry
+  `Vary: Accept`.
 - `GET /api/stream/<dataset>/<symbol>?interval&offset` is a Server-Sent
   Events stream: a `bar` event every second carrying a put batch
   `{ timestamps, fields, meta }`, the bar forming now and, once a bar has
@@ -51,13 +54,35 @@ All routes live under `/api/`; the `mockBackend()` Vite plugin mounts them on
   a new version, replaces the access token, fails the next series requests,
   ends every live stream and socket, or moves the backend's clock on and
   back.
-- `GET /api/stats` counts series pages per dataset, refused requests and
-  subscriptions, rotations, reused refresh tokens and open live streams,
-  and reports the backend's clock.
+- `GET /api/stats` counts series pages per dataset and per format, refused
+  requests and subscriptions, rotations, reused refresh tokens and open
+  live streams, and reports the backend's clock.
 
 Series requests and socket subscriptions need a token only when the plugin
 is created with `mockBackend({ auth: true })`. The socket upgrade is served
 by `ws` on the dev and preview servers' HTTP server.
+
+## Columns bodies
+
+`src/columns.ts` defines a binary page format and its encoder and decoder,
+for a fetcher that should not parse JSON. Every number is little-endian:
+
+| Bytes | Holds |
+|---|---|
+| 4 | the magic `TSC` and the format version, 1 (`54 53 43 01`) |
+| 4 | `H`, the header's length, as a u32 |
+| `H` | the header, UTF-8 JSON: `{ count, fields: [{ name, dtype }], ...members }`, where the members are the JSON answer's other members (`meta`, `next`) |
+| to a multiple of 8 | zero padding |
+| `count` × 8 | the timestamps, as f64 |
+| per field | zero padding to a multiple of 8, then `count` values of the field's dtype |
+
+The body ends with the last column. Because every column starts on an
+8-byte boundary, `decodeColumns` returns typed-array views over the one
+`ArrayBuffer` that `response.arrayBuffer()` gives, with no copy. It throws
+`ColumnsError` for a body that is truncated, longer than its columns, or
+not this format. Integer columns cannot carry `NaN`, so `encodeColumns`
+refuses a value its dtype cannot hold. The fetcher guide on the site
+explains the format and when to use it.
 
 ## Fetcher
 
@@ -66,7 +91,9 @@ The cache id names the series as `<dataset>/<symbol>`, optionally followed
 by more segments that keep ids apart (`candles/ACME/30m`). It loops over
 pages until it holds the whole requested range, restarts if the dataset
 version changes between two pages, reports the earliest watermark of all
-pages, and throws `AuthInvalidError` on a 401. It announces each fetch on a
+pages, and throws `AuthInvalidError` on a 401. It asks for columns bodies
+and reads JSON when the backend answers JSON; a context with
+`format: "json"` makes it ask for JSON. It announces each fetch on a
 `BroadcastChannel` (`src/notices.ts`), which the examples use for their
 fetch counters.
 

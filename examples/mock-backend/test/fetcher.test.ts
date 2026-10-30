@@ -2,6 +2,7 @@ import { isAuthInvalidError } from "tscache";
 import type { FetchRequest } from "tscache/fetcher";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type Backend, createBackend } from "../src/backend";
+import { COLUMNS_TYPE, ColumnsError, encodeColumns } from "../src/columns";
 import fetcher from "../src/fetcher";
 import { type FetchNotice, onFetchNotice } from "../src/notices";
 import { PAGE_SLOTS } from "../src/series";
@@ -55,6 +56,106 @@ describe("fetcher", () => {
     expect((response.fields.cpu as number[]).length).toBe(timestamps.length);
     expect(response.meta).toEqual({ version: "v1", finalizedUntil: NOW });
     expect(await noticed).toMatchObject({ pages: 3, outcome: "ok" });
+  });
+
+  it("asks for columns bodies and returns typed arrays", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const accepted: (string | null)[] = [];
+    serve(async (req) => {
+      accepted.push(req.headers.get("accept"));
+      return backend(req);
+    });
+    const response = await fetcher.fetch(request({ cacheId: "candles/ACME" }));
+    expect(accepted).toHaveLength(3);
+    for (const accept of accepted) expect(accept).toContain(COLUMNS_TYPE);
+    expect(response.timestamps).toBeInstanceOf(Float64Array);
+    expect(response.fields.open).toBeInstanceOf(Float64Array);
+    expect(response.fields.volume).toBeInstanceOf(Uint32Array);
+    // The same data as the JSON pages, joined across the three pages.
+    const json = await fetcher.fetch(
+      request({ cacheId: "candles/ACME", context: { format: "json" } }),
+    );
+    expect(Array.isArray(json.timestamps)).toBe(true);
+    expect(json.timestamps.length).toBeGreaterThan(1000);
+    expect([...response.timestamps]).toEqual(json.timestamps);
+    expect(Object.keys(response.fields)).toEqual(Object.keys(json.fields));
+    for (const [name, values] of Object.entries(response.fields)) {
+      expect([...(values as ArrayLike<number> & Iterable<number>)]).toEqual(
+        json.fields[name],
+      );
+    }
+    expect(response.meta).toEqual(json.meta);
+  });
+
+  it("asks for JSON when its context says so", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const accepted: (string | null)[] = [];
+    serve(async (req) => {
+      accepted.push(req.headers.get("accept"));
+      return backend(req);
+    });
+    await fetcher.fetch(request({ context: { format: "json" } }));
+    expect(accepted.length).toBeGreaterThan(0);
+    for (const accept of accepted)
+      expect(accept ?? "").not.toContain(COLUMNS_TYPE);
+  });
+
+  it("returns a one-page range as views over the body it fetched", async () => {
+    serve(createBackend({ latencyMs: 0, now: () => NOW }));
+    const response = await fetcher.fetch(
+      request({ range: { start: START, end: START + 59 * MINUTE } }),
+    );
+    const timestamps = response.timestamps as Float64Array;
+    expect(timestamps).toBeInstanceOf(Float64Array);
+    expect(timestamps).toHaveLength(60);
+    for (const values of Object.values(response.fields)) {
+      expect((values as Float32Array).buffer).toBe(timestamps.buffer);
+    }
+  });
+
+  it("reads JSON from a backend that ignores Accept", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    serve(async (req) => {
+      const headers = new Headers(req.headers);
+      headers.delete("accept");
+      return backend(new Request(req.url, { headers }));
+    });
+    const response = await fetcher.fetch(request());
+    expect(Array.isArray(response.timestamps)).toBe(true);
+    expect(response.timestamps).toHaveLength(2 * PAGE_SLOTS + 11);
+  });
+
+  it("rejects a truncated columns body as a failed fetch", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    serve(async (req) => {
+      const response = (await backend(req)) as Response;
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return new Response(bytes.subarray(0, bytes.byteLength - 1), {
+        headers: response.headers,
+      });
+    });
+    const noticed = nextNotice();
+    const error = await fetcher.fetch(request()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ColumnsError);
+    expect(isAuthInvalidError(error)).toBe(false);
+    expect(await noticed).toMatchObject({ outcome: "failed" });
+  });
+
+  it("refuses pages whose columns disagree", async () => {
+    const page = (dtype: "f64" | "f32", next?: number) =>
+      new Response(
+        encodeColumns(
+          { timestamps: [START], fields: { cpu: [1] }, dtypes: { cpu: dtype } },
+          {
+            meta: { version: "v1", finalizedUntil: NOW },
+            ...(next === undefined ? {} : { next }),
+          },
+        ),
+        { headers: { "content-type": COLUMNS_TYPE } },
+      );
+    const pages = [page("f64", START + MINUTE), page("f32")];
+    vi.stubGlobal("fetch", async () => pages.shift());
+    await expect(fetcher.fetch(request())).rejects.toThrow(/columns differ/);
   });
 
   it("keeps the earliest watermark of its pages", async () => {
