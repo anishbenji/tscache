@@ -41,6 +41,9 @@
       "Bash(git push --prune*)",
       "Bash(git push * --prune*)",
       "Bash(git push)",
+      "Bash(git push origin)",
+      "Bash(git push -u origin)",
+      "Bash(git push * HEAD)",
       "Bash(rm -rf *)"
     ],
     "deny": [

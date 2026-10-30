@@ -1,6 +1,6 @@
 # Chore 27 — Narrow the project's permission ask rules
 
-Branch: `chore/27-narrow-ask-rules` · Reviewer: Codex (high) · Rounds: 2 · Status: escalated to the user (convergence check)
+Branch: `chore/27-narrow-ask-rules` · Reviewer: Codex (high) · Rounds: 2 + confirmation · Status: user decided (Option A, 2026-10-30)
 
 Requested by the user on 2026-10-30: the thread should run unattended while the user is away, and approval prompts kept stopping it. In Claude Code an `ask` rule prompts even in full-access mode, so routine commands on step branches (`git rebase main`, `git merge`, `git push` of a feature branch, `bun install --frozen-lockfile` in a fresh worktree) raised prompts.
 
@@ -37,3 +37,13 @@ The user-level `~/.claude/settings.json` carries `Bash(git push * main:*)` with 
 | R2-2 | P1 | `git push origin` (and `git push origin HEAD`) with `main` checked out pushes to `main` implicitly and matches neither `*main*` nor the exact `git push` rule | Accept as valid; escalated | GitHub's branch protection rejects a direct push to `main`, so the gap loses the prompt, not the protection. See below |
 
 **Convergence check (docs/workflow.md, review loop step 7):** the push ask patterns drew findings in rounds 1 and 2. Permission patterns match command text, cannot express "a refspec with an empty source" (a trailing `:*` is a wildcard) or "the current branch's upstream is main", and the documentation recommends a hook for argument-level checks. Further pattern patches would not converge, so the area is escalated to the user instead of patched again. Options put to the user: accept the documented residual gaps and merge; add a small PreToolUse hook that parses `git push` arguments (new tooling; the frozen Bash guard stays untouched); or keep asking on every push. Recorded by the director while the user was away; the branch is parked unmerged until the user decides.
+
+## User decision (2026-10-30): Option A
+
+The user chose Option A for the escalated push rules: accept the documented gaps, add fixed-form rules, merge. This is the user's decision, not one taken under the away grant.
+
+- Added ask rules: `Bash(git push origin)`, `Bash(git push -u origin)` and `Bash(git push * HEAD)`. A push that names no refspec, or pushes `HEAD`, now prompts, which covers the usual implicit pushes to the current branch's upstream (R2-2).
+- **Residual gaps, accepted:**
+  - A colon-delete of a branch other than `main` (`git push origin :feature`) does not prompt. No permission pattern can match a leading colon, since a trailing `:*` is a wildcard. `-d` and `--delete` still prompt (R1-1, R2-1).
+  - An implicit push to `main` in a form outside the fixed rules, for example `git push origin some-local-branch` whose upstream is `main`, does not prompt. GitHub's branch protection rejects any direct push to `main`, since a pull request and the `ci` check are required.
+- One confirmation round follows. Per the user's instruction, findings that fall inside the accepted gaps are settled by this decision and do not reopen the loop.
