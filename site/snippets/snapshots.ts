@@ -1,0 +1,54 @@
+import {
+  type CacheConfig,
+  createClient,
+  decodeSnapshot,
+  type EncodedSnapshot,
+  encodeSnapshot,
+  type Range,
+} from "tscache";
+import workerUrl from "tscache/worker?worker&url";
+
+const config: CacheConfig = {
+  id: "candles/ACME",
+  interval: 60_000,
+  fields: { close: "f64" },
+};
+const range: Range = { start: Date.now() - 3_600_000, end: Date.now() };
+
+// #region server
+// On the server: an in-process client (no worker), with a fetcher module
+// the server can import().
+const server = await createClient({
+  mode: "in-process",
+  fetcher: { module: new URL("./fetcher.js", import.meta.url) },
+});
+const serverCache = await server.cache(config);
+
+// One read gives the page's columns and the cache's snapshot (same state).
+const { snapshot, ...result } = await serverCache.get(range, {
+  snapshot: true,
+});
+if (snapshot === undefined) throw new Error("the read carries no snapshot");
+// Escape every "<" so no string can close the script element.
+const json = JSON.stringify(encodeSnapshot(snapshot)).replaceAll(
+  "<",
+  "\\u003c",
+);
+const html = `<p>${result.timestamps.length} candles</p>
+<script id="tscache-snapshot" type="application/json">${json}</script>`;
+// #endregion server
+console.log(html);
+
+// #region browser
+// In the browser, before the first live read.
+const text = document.getElementById("tscache-snapshot")?.textContent;
+const client = await createClient({ workerUrl });
+const cache = await client.cache(config);
+if (text != null) {
+  const seed = decodeSnapshot(JSON.parse(text) as EncodedSnapshot);
+  const { applied, skipped } = await cache.hydrate(seed);
+  console.log(applied, skipped); // skipped: "version-mismatch" when refused
+}
+// This read fetches only what the snapshot did not cover.
+await cache.get(range);
+// #endregion browser

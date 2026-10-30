@@ -55,6 +55,10 @@ bunx vitest run --passWithNoTests
 # The integration snippets type-check against the built package, as an
 # app would see it (starter §5, §7).
 bun run check:integrations
+# The documentation site: its code examples type-check against the built
+# package, and the build fails on a dead link or a missing code include.
+bun run docs:check
+bun run docs:build
 bunx playwright test --pass-with-no-tests
 # Performance (docs/benchmarking.md): the package entries' sizes against
 # their budgets, and every benchmark and end-to-end scenario once, its

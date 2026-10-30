@@ -1,0 +1,13 @@
+{
+  // The site's code examples: application code, type-checked against the
+  // built package (`bun run build` first) as an app would see it, by
+  // `bun run docs:check` with the repository's TypeScript 7. The site's own
+  // TypeScript 6 is TypeDoc's (TypeScript 7 has no JS API).
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "isolatedDeclarations": false,
+    "declaration": false
+  },
+  "include": ["snippets"]
+}
