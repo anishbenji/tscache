@@ -50,6 +50,50 @@ export function moved(a: Range | undefined, b: Range, interval: number) {
   );
 }
 
+/** Equal, taking NaN (a value the answer lacks) for equal to NaN. */
+function same(a: number | undefined, b: number | undefined): boolean {
+  return a === b || (Number.isNaN(a) && Number.isNaN(b));
+}
+
+/**
+ * Where a chart that drew `before` starts to redraw for `after`, when
+ * `after` differs from it only in its newest bars: the index in `after` of
+ * the first bar to draw, which is `before`'s last bar when that bar (the
+ * one forming) changed, and `before`'s length when nothing but new bars
+ * did. Undefined when every bar must be drawn again: nothing drawn yet, an
+ * answer without bars, other fields, or a change before the last bar
+ * (a range that moved, a gap filled or opened, an earlier bar's values).
+ *
+ * It goes by the bars alone, so a new dataset version is caught by what it
+ * changes: its cleared cache answers fewer bars, and its history other
+ * values.
+ */
+export function appendedFrom(
+  before: GetResult | undefined,
+  after: GetResult,
+): number | undefined {
+  const count = before?.timestamps.length ?? 0;
+  if (before === undefined || count === 0) return undefined;
+  if (after.timestamps.length < count) return undefined;
+  const names = Object.keys(after.fields);
+  if (names.length !== Object.keys(before.fields).length) return undefined;
+  const last = count - 1;
+  for (let i = 0; i < count; i++) {
+    if (before.timestamps[i] !== after.timestamps[i]) return undefined;
+  }
+  let from = count;
+  for (const name of names) {
+    const was = before.fields[name];
+    const now = after.fields[name];
+    if (was === undefined || now === undefined) return undefined;
+    for (let i = 0; i < last; i++) {
+      if (!same(was[i], now[i])) return undefined;
+    }
+    if (!same(was[last], now[last])) from = last;
+  }
+  return from;
+}
+
 /**
  * The range to show after a redraw: where it was, or moved on with the
  * newest bar when the view showed that bar, so a live chart follows the
