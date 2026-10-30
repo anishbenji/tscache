@@ -17,6 +17,11 @@ export default defineConfig([
       fetcher: "src/entries/fetcher.ts",
     },
     platform: "browser",
+    // Rolldown replaces process.env.NODE_ENV on the browser platform; the
+    // identity keeps it for the application's bundler to decide, so the
+    // development-only merge warning (client/dev.ts) is dropped from
+    // production builds instead of being fixed here.
+    define: { "process.env.NODE_ENV": "process.env.NODE_ENV" },
   },
   {
     // './vite' runs in Vite's Node process (N40): its own build, sharing no
