@@ -1,6 +1,6 @@
 # Chore 43 — Per-case timing gate in Bun
 
-Branch: `chore/43-bench-gate-bun` · Reviewer: none yet (the director reviews) · Status: implemented, not reviewed
+Branch: `chore/43-bench-gate-bun` · Reviewer: Codex (high) · Rounds: 1 · Status: settled
 
 Turns the paired timing gate on for the Bun cases that calibration on GitHub's runner shows reliable, as the performance plan recommends (§7.3, the Bun-only per-case gate). The user approved it after items 1–4 of the plan landed (#51, #52, #56, #57). Built and calibrated by a child agent while the user was away; calibration dispatches ran on standard runners only (public repository, no cost).
 
@@ -52,3 +52,7 @@ None. `test/perf/gated.test.ts` is new. `test/perf/slowed.test.ts` was added and
 
 - Whether to gate Chromium's cases, which met the bar in this calibration only.
 - Whether to make the `bench` check required in branch protection.
+
+## Round 1 — reviewer verdict: merge
+
+No findings; `bun run ci` passed. Settled.
