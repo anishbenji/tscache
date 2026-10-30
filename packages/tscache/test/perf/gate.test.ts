@@ -99,23 +99,36 @@ describe("the sampler", () => {
    * A clock the operations move, so the sampler's logic runs the same on
    * any machine at any load: each call of an operation takes exactly its
    * cost, and `stall` adds a pause to one call, as a busy machine does.
+   * `stall.call` counts that operation's own calls, from 1; `stalls()`
+   * says how many stalls happened, so a test can show its stall fired.
    */
   function virtualTime() {
     let now = 0;
+    let stalls = 0;
     const calls: string[] = [];
-    const op =
-      (side: string, cost: number, stall?: { call: number; ms: number }) =>
-      () => {
+    const op = (
+      side: string,
+      cost: number,
+      stall?: { call: number; ms: number },
+    ) => {
+      let own = 0;
+      return () => {
         calls.push(side);
+        own++;
         now += cost;
-        if (stall?.call === calls.length) now += stall.ms;
+        if (stall?.call === own) {
+          now += stall.ms;
+          stalls++;
+        }
         return 1;
       };
+    };
     return {
       clock: () => now,
       calls,
       op,
       advance: (ms: number) => (now += ms),
+      stalls: () => stalls,
     };
   }
 
@@ -165,9 +178,10 @@ describe("the sampler", () => {
     const t = virtualTime();
     const s = sample(
       t.op("base", 0.25),
-      t.op("head", 0.5, { call: 2, ms: 100 }),
+      t.op("head", 0.5, { call: 1, ms: 100 }),
       { rounds: 10, batchMs: 5, warmupMs: 0, clock: t.clock },
     );
+    expect(t.stalls()).toBe(1);
     expect(s.batch * 0.5).toBeGreaterThanOrEqual(5);
     expect(s.ratio).toBe(2);
   });
@@ -175,15 +189,15 @@ describe("the sampler", () => {
   it("keeps the median and its interval when one round stalls", () => {
     const t = virtualTime();
     const rounds = 10;
-    // Calibration takes 3 timings per side at 1, 8 and 16 calls; the head's
-    // calls in its fourth round batch come after those and three rounds.
-    const calibration = 3 * (1 + 8 + 16) * 2;
-    const stallAt = calibration + 3 * 2 * 16 + 1;
+    // Calibration times the head three times at 1, 8 and 16 calls; its
+    // batch in the fourth round starts after those and three batches of 16.
+    const stallAt = 3 * (1 + 8 + 16) + 3 * 16 + 1;
     const s = sample(
       t.op("base", 0.25),
       t.op("head", 0.5, { call: stallAt, ms: 50 }),
       { rounds, batchMs: 5, warmupMs: 0, clock: t.clock },
     );
+    expect(t.stalls()).toBe(1);
     expect(Math.max(...s.ratios)).toBeGreaterThan(2);
     expect([s.ratio, s.low, s.high]).toEqual([2, 2, 2]);
   });
@@ -240,9 +254,10 @@ describe("the sampler", () => {
     const asynchronous = (op: () => number) => async () => op();
     const s = await sampleAsync(
       asynchronous(t.op("base", 0.25)),
-      asynchronous(t.op("head", 0.5, { call: 2, ms: 100 })),
+      asynchronous(t.op("head", 0.5, { call: 1, ms: 100 })),
       { rounds: 10, batchMs: 5, warmupMs: 0, clock: t.clock },
     );
+    expect(t.stalls()).toBe(1);
     expect(s.batch * 0.5).toBeGreaterThanOrEqual(5);
     expect(s.ratio).toBe(2);
   });
