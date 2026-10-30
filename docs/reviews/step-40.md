@@ -1,6 +1,6 @@
 # Chore 40 — Documentation truth sweep
 
-Branch: `chore/40-docs-truth-sweep` · Reviewer: not yet run (the director reviews) · Rounds: 0 · Status: implemented
+Branch: `chore/40-docs-truth-sweep` · Reviewer: Codex (high) · Rounds: 1 · Status: settled
 
 Brings the READMEs and contributor documents back in line with the code merged since 2026-10-23. A truth sweep: each change corrects a statement the code contradicts, and nothing else is reworded. Implemented by a Claude Opus 5.5 subagent while the user was away, under the user's grant of 2026-10-30.
 
@@ -48,3 +48,7 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 1 — reviewer verdict: merge
+
+No findings; `bun run ci` passed on the branch rebased onto `main` 15fa506. Settled. Reviewed and settled by the director while the user was away.
