@@ -8,11 +8,14 @@
 // apps, so it never rebuilds an app another server is serving.
 
 import { stat } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { type App, appDir, apps } from "../e2e/examples/apps";
 import { demoPorts, hubPort } from "./demo/catalog";
 import { hub } from "./demo/hub";
 
 const root = new URL("..", import.meta.url);
+/** The checkout as a path, decoded (a space stays a space), for subprocesses. */
+const rootDir = fileURLToPath(root);
 const reuseBuilds = process.argv.includes("--reuse-builds");
 const port = hubPort(process.env);
 const ports = demoPorts(port);
@@ -44,7 +47,7 @@ async function needsBuild(dir: string): Promise<boolean> {
 /** Runs a build, printing its output only if it fails. */
 async function build(label: string, cmd: string[]): Promise<void> {
   const child = Bun.spawn(cmd, {
-    cwd: root.pathname,
+    cwd: rootDir,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -74,7 +77,7 @@ function serve(app: App): void {
       String(ports[app]),
       "--strictPort",
     ],
-    { cwd: root.pathname, stdout: "ignore", stderr: "inherit" },
+    { cwd: rootDir, stdout: "ignore", stderr: "inherit" },
   );
   children.push(child);
   void child.exited.then((code) => {
@@ -100,19 +103,27 @@ async function ready(app: App): Promise<void> {
   stop(1);
 }
 
-if (await needsBuild("packages/tscache")) {
-  await build("tscache", ["bun", "run", "build"]);
+async function start(): Promise<void> {
+  if (await needsBuild("packages/tscache")) {
+    await build("tscache", ["bun", "run", "build"]);
+  }
+  await Promise.all(
+    names.map(async (app) => {
+      if (await needsBuild(appDir(app))) {
+        await build(app, ["bun", "run", "--cwd", appDir(app), "build"]);
+      }
+    }),
+  );
+  for (const app of names) serve(app);
+  await Promise.all(names.map(ready));
+  Bun.serve({ port, hostname: "127.0.0.1", fetch: hub(origins) });
 }
-await Promise.all(
-  names.map(async (app) => {
-    if (await needsBuild(appDir(app))) {
-      await build(app, ["bun", "run", "--cwd", appDir(app), "build"]);
-    }
-  }),
-);
-for (const app of names) serve(app);
-await Promise.all(names.map(ready));
 
-Bun.serve({ port, hostname: "127.0.0.1", fetch: hub(origins) });
+// Any failure to start, the hub's port in use included, stops the app
+// servers started so far; left running, they would hold their ports.
+await start().catch((error: unknown) => {
+  console.error(`demo hub on port ${port} failed to start:`, error);
+  stop(1);
+});
 console.log(`\ntscache demo hub: http://127.0.0.1:${port}/`);
 for (const app of names) console.log(`  ${app.padEnd(18)} ${origins[app]}`);
