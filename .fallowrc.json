@@ -17,10 +17,11 @@
     "reference/*/src/entry-server.{ts,tsx}",
     // The integration snippets, which an app copies and nothing imports.
     "integrations/*/*.{ts,tsx}",
-    // The site's config, read by VitePress, and its code examples, which
-    // the pages include as text.
+    // The site's config, read by VitePress, its code examples, which the
+    // pages include as text, and the snippet runner, which Bun runs.
     "site/.vitepress/config.ts",
-    "site/snippets/*.ts"
+    "site/snippets/*.ts",
+    "site/scripts/*.ts"
   ],
   // The examples import the built package (its exports point into dist/),
   // which does not exist yet when `bun run ci` runs Fallow before the build.

@@ -1,0 +1,6 @@
+{
+  // The snippet runner, a Bun script (`bun run docs:run`).
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "types": ["bun"] },
+  "include": ["."]
+}

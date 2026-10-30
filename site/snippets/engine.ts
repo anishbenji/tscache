@@ -33,4 +33,8 @@ try {
 } catch (error) {
   if (error instanceof PutError) console.log(error.code); // "misaligned"
 }
+
 // #endregion engine
+
+// Read by `bun run docs:run`, which checks what the example produced.
+export { other, week };

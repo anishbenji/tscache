@@ -211,6 +211,7 @@
         "tscache": "workspace:*",
       },
       "devDependencies": {
+        "@examples/mock-backend": "workspace:*",
         "typedoc": "0.28.20",
         "typedoc-plugin-markdown": "4.14.1",
         "typedoc-vitepress-theme": "1.1.4",

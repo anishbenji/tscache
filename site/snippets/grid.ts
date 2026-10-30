@@ -20,4 +20,8 @@ const week = await daily.get({
   end: Date.UTC(2026, 9, 30, 9, 0),
 });
 console.log(week.misses[0]?.range); // 25 Oct 14:30 UTC to 30 Oct 14:30 UTC
+
 // #endregion snap
+
+// Read by `bun run docs:run`, which checks what the example produced.
+export { week };

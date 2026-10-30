@@ -56,8 +56,10 @@ bunx vitest run --passWithNoTests
 # app would see it (starter §5, §7).
 bun run check:integrations
 # The documentation site: its code examples type-check against the built
-# package, and the build fails on a dead link or a missing code include.
+# package and run against the mock backend, each checked for the data it
+# produces, and the build fails on a dead link or a missing code include.
 bun run docs:check
+bun run docs:run
 bun run docs:build
 bunx playwright test --pass-with-no-tests
 # Performance (docs/benchmarking.md): the package entries' sizes against

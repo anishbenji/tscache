@@ -77,4 +77,8 @@ const unsubscribe = cache.on("cacheCleared", ({ reason }) => {
 });
 await cache.clear(); // with a SharedWorker, every tab's view of this cache
 unsubscribe();
+
 // #endregion events
+
+// Read by `bun run docs:run`, which checks what the example produced.
+export { result };
