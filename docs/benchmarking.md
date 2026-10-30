@@ -24,7 +24,7 @@ tscache is meant to be fast at what a chart does: read the screen it shows, take
 
 | Budget | Measured (2026-10-26) | Fails when | Where |
 |---|---|---|---|
-| Brotli bytes per package entry (each entry bundled with its shared chunks, minified) | `index` 14.30 kB, `worker` 11.12, `engine` 8.76, `fetcher` 0.14, `vite` 0.95 | over `packages/tscache/bench/budgets.json` (measured + max(512 B, 3 %)) | `bun scripts/size.ts`, in `bun run ci` |
+| Brotli bytes per package entry (each entry bundled with its shared chunks, minified) | `index` 14.30 kB, `worker` 11.78, `engine` 8.76, `fetcher` 0.14, `vite` 0.95 | over `packages/tscache/bench/budgets.json` (measured + max(512 B, 3 %)) | `bun scripts/size.ts`, in `bun run ci` |
 | ArrayBuffer bytes per cached bar, a year put day by day (Node, after a full collection, engine held alive) | 24/7: 36.233 B, sessions: 36.000, with dropouts: 36.745, against 36 B of fields | below 36 B (the engine was collected: the reading is wrong) or above 36.75 / 36.75 / 37.25 | `memory.test.ts` |
 | Fetches for a chart's opening read and twelve screens back, then forward again | 13 fetches; what they cover is at most 0.2 % more than what was read; none on the way forward | another count, more overfetch, or any repeat | `counters.test.ts` |
 | A cached read of 1,500 bars through the port | one message each way; 66,000 bytes moved (8 B timestamp and 36 B of fields per bar); no buffer copied; the sender keeps none | anything else | `counters.test.ts` |
