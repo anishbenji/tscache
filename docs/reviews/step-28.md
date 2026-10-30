@@ -1,6 +1,6 @@
 # Chore 28 — Test reliability
 
-Branch: `chore/28-test-reliability` · Reviewer: Codex (high) · Rounds: 3 · Status: round 3 fixed · Verdict after triage: merge
+Branch: `chore/28-test-reliability` · Reviewer: Codex (high) · Rounds: 4 · Status: settled · Verdict after triage: merge
 
 The user's priority request of 2026-10-30: fix every flaky test at its root and change how tests are written so flakes cannot come back. Two flakes have branches of their own, kept independent of this one: fix 31 (reads ending mid-bar in the reference clients) and fix 32 (the sampler's timing test). Done by a child agent while the user was away, under the user's grant of 2026-10-30.
 
@@ -99,3 +99,7 @@ None from a reviewer yet. For the user: the removal of chore 19's 20 s timeout a
 ## User decision (2026-10-30)
 
 The user approved returning Vitest to its 5 s default timeout, replacing chore 19's 20 s mask (the user's decision of 2026-10-23).
+
+## Round 4 — reviewer verdict: merge
+
+No findings; all seven accepted findings from rounds 1–3 confirmed fixed; clock check 100 files clean. `bun run ci` passed. Settled.
