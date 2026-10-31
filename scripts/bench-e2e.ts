@@ -130,7 +130,12 @@ async function build(options: Bun.BuildConfig): Promise<void> {
   }
 }
 
-/** The client, worker and fetcher entries of one revision, unminified ESM. */
+/**
+ * The client, worker and fetcher entries of one revision, unminified ESM
+ * split into chunks as `tsdown` emits them: code the entries share is a
+ * chunk of its own, and an `import()` (the worker's persistence, §4.10.8)
+ * stays a chunk that loads only when it runs.
+ */
 function buildRevision(src: string, out: string): Promise<void> {
   const entries = join(src, "entries");
   return build({
@@ -141,6 +146,7 @@ function buildRevision(src: string, out: string): Promise<void> {
     outdir: out,
     target: "browser",
     format: "esm",
+    splitting: true,
   });
 }
 
@@ -155,8 +161,10 @@ function serve(out: string) {
   const files = (path: string): string | undefined => {
     if (path === "/page.js") return join(out, "page.js");
     if (path === "/fetcher.js") return join(ROOT, "e2e/pages/fetcher.js");
-    // The fixture fetcher imports its error class from the built package.
-    if (path === "/dist/fetcher.js") return join(out, "head/fetcher.js");
+    // The fixture fetcher imports its error class from the built package,
+    // and that entry imports a chunk the head's entries share.
+    const dist = /^\/dist\/([\w-]+\.js)$/.exec(path);
+    if (dist !== null) return join(out, "head", dist[1] as string);
     const match = /^\/(base|head)\/([\w-]+\.js)$/.exec(path);
     return match === null
       ? undefined
