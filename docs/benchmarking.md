@@ -193,6 +193,8 @@ bun scripts/size.ts --update                               # reseed the size bud
 | 2026-10-30 | the same, run 41077588416 | 0.25 | Bun, 20 quiet runs: 20 in eight cases, 17 (85 %) in `read-year`. Chromium, 20 quiet runs: 20 in all nine cases |
 | 2026-10-30 | the `read-year` injection experiment: chore 43 at `2b38ca9`, `read-year` slowed by repeating the call instead of waiting, run 41078306816 | 0.15 | Bun, 18 quiet runs (2 noisy): 5 in `read-year` (4 of 19 with the wait, above) |
 | 2026-10-30 | the same, run 41078312567 | 0.25 | Bun, 20 quiet runs: 20 in `read-year` (17 with the wait, above), 20 in every other case. Chromium: 20 of 20 in every case |
+| 2026-10-30 | GitHub runner, chore 45 at `cd4f892` (main after #61), run 41126635817 | 0 | Bun: no case fired in 19 quiet runs (1 noisy). Chromium: no case fired in 18 quiet runs (2 noisy, controls [0.937, 1.017] and [0.992, 1.055]) |
+| 2026-10-30 | the same, run 41126649937 | 0.25 | Bun, 20 quiet runs: 20 in eight cases, 14 (70 %) in `read-year`. Chromium, 20 quiet runs: 20 in all nine cases |
 
 **Verdict of the 2026-10-30 calibration: the timing gate stays report-only.** Bun met both conditions except `read-year` at 25 % (84 %, below 90 %). Chromium could not be judged: its A/A control left [0.95, 1.05] in 17 to 20 of the 20 runs per dispatch. The batches were long enough (512 calls of about 0.11 ms, some 56 ms, against the 40 ms the timer needs), and the control's round ratios split into groups near 0.7, 1.0 and 1.4, so the noise comes from the runner (two shared vCPUs for Chromium's processes), not from the timer. Before the gate can block:
 1. Done: recalibrate on a main that includes step 22 (#43), which made the reads several times faster and so changes what each case measures.
@@ -215,6 +217,8 @@ With the new timing, both runtimes meet the gate's conditions except in one case
 
 **Chromium meets the conditions in this calibration** (no false alarm in 19 quiet runs, every case caught in 20 of 20 at 25 %, `put-page` included, which reached 84 % in chore 39). One dispatch at each slowdown is all the evidence so far, against two earlier calibrations it failed, so Chromium stays report-only until the user decides; adding it is an edit of `gated.json`.
 
+**Verdict of the confirming calibration (chore 45): Chromium stays report-only.** On main at `cd4f892`, Chromium again caught every 25 % slowdown in all nine cases (20 of 20) and fired in no same-revision run, but its A/A control was noisy in 2 of the 20 runs at slowdown 0, so only 18 were quiet, below the bar of 19. Both noisy controls missed [0.95, 1.05] narrowly (intervals [0.937, 1.017] and [0.992, 1.055]); none of the 18 quiet runs fired. A case gates only if it meets the bar in this calibration and in chore 43's, so no Chromium case is added to `gated.json`. In the three dispatches at slowdown 0 with the current default setup (chore 39's `long-batches`, chore 43, chore 45), Chromium's quiet count has been 19, 19 and 18 of 20, so the bar of 19 sits at the edge of what the runner gives; whether to change the bar or the number of runs is for the user. Bun agrees with its gated set: no case fired in 19 quiet runs and the eight gated cases caught 20 of 20 at 25 %. `read-year` caught 14 of 20 (70 %), after 17 in chore 43, and stays report-only.
+
 ## How this setup was chosen
 
 Three designers worked from one brief and the repository, each without seeing the others' first proposal: Claude Opus 5.5, Claude Fable 5.1 and GPT-6.1 Sol. Each then critiqued the other two and revised, and a third round settled the remaining disagreements with experiments under `/tmp`:
@@ -235,5 +239,5 @@ Fable then reviewed the implementation against the converged design. It found a 
 
 ## Next
 
-1. **Calibrate on GitHub's runner** (above) and turn the gate on. Done for eight Bun cases (chore 43). Open: `read-year` in Bun, Chromium (which met the conditions once, in chore 43), and whether the `bench` check becomes required.
+1. **Calibrate on GitHub's runner** (above) and turn the gate on. Done for eight Bun cases (chore 43). Open: `read-year` in Bun, Chromium (which met the conditions in chore 43 and missed the quiet-run bar by one run in chore 45), and whether the `bench` check becomes required.
 2. **Done (step 22): the first optimisation the benches pointed at.** `DenseSegment.slice` built each read point by point (a per-slot presence check, a `number[]`, then `Float64Array.from`). It now counts the present slots first (free when the segment has no gap), allocates each result once, and copies a fully present span with one `TypedArray.prototype.slice` per column. Measured locally against `main` (`bun scripts/bench.ts compare --base main --runtime bun,chromium`, head/base median): `read-viewport` 0.150 in Bun and 0.590 in Chromium, `read-viewport-sessions` 0.151 and 0.716, `read-year` 0.097 and 0.526, `snapshot-roundtrip` 0.748 and 0.972.

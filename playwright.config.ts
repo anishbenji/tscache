@@ -41,6 +41,9 @@ const hub = `http://127.0.0.1:${demoPort}/`;
 export default defineConfig({
   testDir: "e2e",
   fullyParallel: true,
+  // A flake fails the run it happens in; a retry would hide it
+  // (docs/testing.md). scripts/test-clocks.ts keeps this at 0.
+  retries: 0,
   reporter: process.env.CI ? "github" : "list",
   use: { baseURL: `http://127.0.0.1:${serverPort}/` },
   projects: [
