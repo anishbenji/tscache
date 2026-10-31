@@ -1,6 +1,6 @@
 # Step 44 — In-flight subtraction (N31)
 
-Branch: `feat/44-inflight-subtraction` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 (design) · Status: design settled; implemented against the contract tests, code review pending · Verdict after triage: design merge
+Branch: `feat/44-inflight-subtraction` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 (design) + 1 (implementation) · Status: implementation round 1 triaged, awaiting round 2 · Verdict after triage: design merge
 
 Design for subtracting the fetches already in flight from a `get`'s misses, so overlapping reads share fetches instead of each fetching its whole miss (`docs/roadmap.md` N31; item 7 of the performance plan). This branch carries design text only: `docs/architecture.md` §4.9.1 and decision rows N31 (resolved) and N62–N65. Codex reviews the design next, then writes the contract tests listed below from §4.9.1; the implementation follows, strict test-first. The user deferred N31 on 2026-10-08; the director's standing grant approved the plan's recommendation to build it.
 
@@ -17,7 +17,9 @@ Design for subtracting the fetches already in flight from a `get`'s misses, so o
 | 6c6717d | `docs`: the request bound (N65) in `docs/guides/worker-setup.md`, `docs/guides/patterns.md` and the site's fetcher page; the site's read path (`concepts/coverage.md`) without exact-range dedup; `fast-scroll` in `docs/benchmarking.md` |
 | 08a95d0 | This file: implementation notes, contract-test changes, bench results |
 | e2ab6df | `chore(size)`: the worker entry's brotli budget raised to 12,576 B (measured 12,063 B + 512 B, docs/benchmarking.md); the step adds about 320 B and main had 125 B of headroom |
-| (this commit) | This file: the scope rows above |
+| d70ce3b | This file: the scope rows above |
+| 9b75621 | Merge of `origin/main` (the demo hub, chore 28 and the chore 43 bench gate); clean, and `bun run ci` passed on the merge |
+| (this commit) | Implementation round 1 (review round 3): a fetcher that throws synchronously is decided after a turn; two regression tests |
 
 ## Implementation plan
 
@@ -161,7 +163,7 @@ Against Codex's contract tests, in `packages/tscache/src/orchestrator/orchestrat
 
 - **`planRound`.** `need` is the request minus `around` minus `blocked`, with the `without` sweep of step 36. One pass over the in-flight ranges, with a cursor over `need` that only moves forward because starts ascend, finds `join`; `fetch` is `coalesce` over `need` minus the union of the in-flight ranges (one more pass), so it extends into coverage only. T6 measured 53,246 element reads over 8,192 elements (6.5 each) without blocked ranges and 55,291 over 10,240 (5.4 each) with them, against the bound of 8; most are `coalesce`'s neighbour lookups, about five per piece of the need.
 - **A round** (`#round`) reads coverage, applies the auth gate, keeps the joinable entries in one pass, plans, issues its fetches and merges them into the list in one pass (equal starts keep issue order), all in one synchronous step. Under the gate it issues and joins nothing and labels the ranges `planFetches` gives `'auth'`, as the fetch path did before; only missing slots are labelled, and the flanks are covered.
-- **Removal (rule 1).** `#run` decides the outcome in the continuation of the fetcher's await: a rejection is classified (an auth refusal under the current generation flips the state there), or the fence is checked and the response put. The entry leaves the list in a `finally` of that same synchronous block, so it is gone before the outcome settles and before any get awaiting it resumes. This closes A1 by construction; T13 pins the observable part.
+- **Removal (rule 1).** `#run` decides the outcome in the continuation of the fetcher's await: a rejection is classified (an auth refusal under the current generation flips the state there), or the fence is checked and the response put. The entry leaves the list in a `finally` of that same synchronous block, so it is gone before the outcome settles and before any get awaiting it resumes. This closes A1 by construction; T13 pins the observable part. A fetcher that throws instead of rejecting becomes a rejected promise first, so its outcome too is decided only after a turn, once `#issue` has returned the entry and the round has listed it (R3-1).
 - **The second round's `blocked`** is the union of the first round's ranges that came back `'failed'` or `'auth'`, sorted first, since joined ranges can overlap.
 - **The annotation** keeps the existing cut: each miss is split at the boundaries of the labelled fetches, sorted by start. The settled list is in round order, joined fetches (in list order) before the round's own, and the sort is stable, which gives rule 4's tie order.
 - **Adjacent equal labels are not merged** (Codex's ambiguity in rule 4). The existing annotation never merged pieces labelled by different fetches, and nothing in §2.3 promises maximal miss ranges, so it stays: in T24, b's misses are `[53, 103]` and `[113, 153]`, both `'auth-pending'`, two objects where the test list above writes one span. T24 compares per slot and accepts either.
@@ -181,6 +183,12 @@ All heavy runs under the machine's heavy-job lock, on the Apple Silicon Mac, 202
 | `live-tail-get` | 26.7 µs | 26.6 µs | 0.997 | 0.967–1.015 |
 
 Bars served by `fast-scroll`: checked run, base 18,003 and head 7,501; every one of the 22 timed runs (2 warm-up and 20 rounds per side), base 18,003 and head 7,501. Over loopback the backend answers fast, so the timed reduction is about 12 %; against a real backend each bar not fetched saves its share of the transfer. `two-tabs-one-fetch` and `live-tail-get` show no regression: both intervals hold 1. Timing is report-only (docs/benchmarking.md).
+
+## Implementation round 1 (review round 3) — reviewer verdict: block
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R3-1 | P0 | A fetcher whose `fetch` throws synchronously (`fetch() { throw new Error("offline") }`) makes `get()` reject with `ReferenceError: Cannot access 'entry' before initialization`: `#run` catches the throw and runs `leave()` in its `finally` before its first await, while `#issue` is still initializing the entry. A `get` must never reject for data availability (checklist §6) | accepted | Reproduced. Fixed by the director: `#run` turns a synchronous throw from the fetcher (or from cloning its context) into a rejected promise and awaits it, so the outcome is decided after a turn, like any rejection: the entry is initialized and listed first, and leaves the list in the deciding step as rule 1 says. The fetcher is still called synchronously within the round. Before the fix, an entry decided this way would also have been listed after it had left, stranding it for later gets to join. Tests first (`orchestrator-subtraction.test.ts`, two "R3-1 regression" cases): an ordinary throw fails its range with `'fetch-failed'` and the next `get` issues a new fetch and completes; a throw carrying the auth marker leaves the get `'auth-pending'`. The first failed with the reviewer's `ReferenceError` before the fix; both pass after it, with the 81 orchestrator tests |
 
 ## Contract-test changes
 

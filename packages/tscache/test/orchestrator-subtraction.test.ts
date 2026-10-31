@@ -667,4 +667,33 @@ describe("N31 in-flight subtraction", () => {
       expect(got.misses).toEqual([miss(103, 103, "uncached")]);
     }
   });
+
+  it("R3-1 regression: a fetcher that throws instead of rejecting fails its range, and a later get fetches again", async () => {
+    const h = harness();
+    const o = await h.direct();
+    const gate = (globalThis as unknown as { __n31: { fetch: unknown } }).__n31;
+    const gated = gate.fetch;
+    gate.fetch = () => {
+      throw new Error("offline");
+    };
+    const failed = await o.get(config.id, r(3, 43));
+    expect(failed.misses).toEqual([miss(3, 43, "fetch-failed", "offline")]);
+    // No decided entry is left listed for the next get to join.
+    gate.fetch = gated;
+    const retry = o.get(config.id, r(3, 43));
+    expect(h.calls).toHaveLength(1);
+    h.call(0).answer();
+    complete(await retry, r(3, 43));
+  });
+
+  it("R3-1 regression: a fetcher that throws the auth marker leaves the get pending auth, not rejected", async () => {
+    const h = harness();
+    const o = await h.direct();
+    const gate = (globalThis as unknown as { __n31: { fetch: unknown } }).__n31;
+    gate.fetch = () => {
+      throw authError();
+    };
+    const got = await o.get(config.id, r(3, 43));
+    expect(got.misses).toEqual([miss(3, 43, "auth-pending")]);
+  });
 });

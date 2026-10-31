@@ -594,10 +594,10 @@ export class Orchestrator {
     const authGeneration = this.#authGeneration;
     // Switches with the generation: the context this fetch is refused with.
     const context = this.#context;
-    let fetched: { response: FetchResponse } | { error: unknown };
+    let answer: Promise<FetchResponse>;
     try {
-      fetched = {
-        response: await fetcher.fetch({
+      answer = Promise.resolve(
+        fetcher.fetch({
           cacheId,
           // Copies: the fetcher may mutate its request; neither the put nor
           // the authInvalid event (N33) nor later fetches must see it.
@@ -606,7 +606,16 @@ export class Orchestrator {
           alignmentOffset: grid.alignmentOffset,
           context: structuredClone(context),
         }),
-      };
+      );
+    } catch (error) {
+      // A fetcher that throws instead of rejecting is decided after a turn
+      // like any other, so never before #issue has returned its entry and
+      // the entry is listed.
+      answer = Promise.reject(error);
+    }
+    let fetched: { response: FetchResponse } | { error: unknown };
+    try {
+      fetched = { response: await answer };
     } catch (error) {
       fetched = { error };
     }
