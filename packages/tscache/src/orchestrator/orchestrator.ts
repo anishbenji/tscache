@@ -410,9 +410,10 @@ export class Orchestrator {
    * A get's rounds, then its read: `read` gets every fetch the get awaited,
    * with its outcome, in round order, and runs in the same synchronous step
    * as the last round's end, so no other fetch lands between them. Two
-   * rounds at most: the second runs after a fence drop and asks for what is
-   * still missing, minus what already failed (N29, rule 5). Nothing is
-   * awaited when a round has nothing to await.
+   * rounds at most: the second runs when the cache was cleared while the
+   * first waited, and asks for what is still missing, minus what already
+   * failed (N29 as amended, rule 5). Nothing is awaited when a round has
+   * nothing to await.
    */
   async #rounds(
     cacheId: string,
@@ -423,6 +424,8 @@ export class Orchestrator {
     const settled: Settled[] = [];
     let blocked: SlotRange[] = [];
     for (let round = 0; round < 2; round++) {
+      // Read in the round's own synchronous step: the generation it plans under.
+      const planned = this.#generation.get(cacheId) ?? 0;
       const awaited = this.#round(cacheId, request, blocked, requestId);
       if ("gated" in awaited) {
         for (const r of awaited.gated) {
@@ -435,7 +438,12 @@ export class Orchestrator {
       for (const [i, f] of awaited.entries()) {
         settled.push({ range: f.range, outcome: outcomes[i] as Outcome });
       }
-      if (round === 1 || !outcomes.some((o) => o.kind === "dropped")) break;
+      // Every fetch a round awaits carries the generation it planned under,
+      // so a dropped one implies a clear: this one comparison covers it, and
+      // a clear that wiped fetches already applied too.
+      if (round === 1 || (this.#generation.get(cacheId) ?? 0) === planned) {
+        break;
+      }
       blocked = blockedBy(settled);
     }
     return read(settled);
