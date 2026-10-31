@@ -78,6 +78,14 @@ session survives; the cost is one redundant refresh per extra tab. While credent
 does not wait: the affected ranges come back as misses with reason `'auth-pending'`, and a `get` after
 `updateAuth` fills them.
 
+## Bound every request
+
+The worker never cancels a fetch. A `get` whose range overlaps fetches already in flight for the cache,
+from any tab, waits for them and fetches only the rest, so a request that never settles holds every `get`
+that needs one of its slots (architecture §4.9.1, N65). Bound each request in the fetcher and throw when the
+bound passes, for example with `fetch(url, { signal: AbortSignal.timeout(10_000) })`. The error comes back
+as a `'fetch-failed'` miss for the gets that waited on it, and the next `get` tries again.
+
 ## A lost worker
 
 Chromium runs a SharedWorker in the process of the tab that created it; if that tab crashes, the worker

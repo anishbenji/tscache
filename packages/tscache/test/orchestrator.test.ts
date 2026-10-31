@@ -770,7 +770,12 @@ describe("round 2 regressions", () => {
 });
 
 describe("round 3 regressions", () => {
-  it("a fence retry does not join a fetch that the same clear already made stale", async () => {
+  // Step 44 changed this test's setup to T17's (docs/reviews/step-44.md,
+  // contract-test changes): with in-flight subtraction, b's get over a
+  // range whose misses lie inside a's fetch now joins it (§4.9.1 rule 2)
+  // instead of fetching the flanks the old setup relied on. The intent
+  // stands: a plan after a clear never joins a fetch issued before it.
+  it("a get after a clear does not join a fetch that the same clear already made stale", async () => {
     resetLog("slow");
     const { a, b } = await pair();
     await a.request("put", {
@@ -783,19 +788,10 @@ describe("round 3 regressions", () => {
     });
     const releases = captureReleases();
     const wide = get(a, { start: 3, end: 73 });
-    await eventually(() => expect(releases).toHaveLength(1));
-    await a.request("put", {
-      cacheId: "o",
-      batch: {
-        timestamps: [23, 33, 43, 53],
-        fields: { price: [23, 33, 43, 53], volume: [0, 0, 0, 0] },
-      },
-      options: { range: { start: 23, end: 53 } },
-    });
-    const flanked = get(b, { start: 3, end: 73 });
-    await eventually(() => expect(releases).toHaveLength(3));
-    expect(releases).toHaveLength(3);
-    // A version clear fences all three; the flanks finish first.
+    // Port order: the server has planned the get before it answers this.
+    await get(a, { start: 3, end: 3 }, { cacheOnly: true });
+    expect(releases).toHaveLength(1);
+    // A version clear makes the stalled [3,73] stale.
     await a.request("put", {
       cacheId: "o",
       batch: {
@@ -804,16 +800,20 @@ describe("round 3 regressions", () => {
         meta: { version: "v2" },
       },
     });
+    const fresh = get(b, { start: 3, end: 73 });
+    await get(b, { start: 3, end: 3 }, { cacheOnly: true });
+    // b's get must be a fresh fetch, not the stale [3,73] still in flight.
+    expect(log().requests.map((q) => q.range)).toEqual([
+      { start: 3, end: 73 },
+      { start: 3, end: 73 },
+    ]);
     releases[1]?.();
-    releases[2]?.();
-    await eventually(() => expect(releases.length).toBeGreaterThanOrEqual(4));
-    // b's retry must be a fresh fetch, not the stale [3,73] still in flight.
-    expect(releases.length).toBeGreaterThanOrEqual(4);
+    expect((await fresh).misses).toEqual([]);
+    // The stale fetch lands after it, is dropped, and its get re-plans
+    // over what is now covered: no further fetch.
     releases[0]?.();
-    for (const r of releases.slice(3)) r();
-    const got = await flanked;
-    expect(got.misses).toEqual([]);
-    await wide;
+    expect((await wide).misses).toEqual([]);
+    expect(log().requests).toHaveLength(2);
   });
 
   it("a get during a slow updateAuth answers auth-pending at once instead of fetching with half-swapped credentials", async () => {

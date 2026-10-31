@@ -137,7 +137,9 @@ evicted page stays on disk and is loaded again on demand, which needs the lazy l
 
 - **N28.** A heartbeat so the SharedWorker can drop a tab that died without `pagehide`, if real tab churn
   shows the bounded leak matters.
-- **N31.** Subtracting in-flight ranges from new fetch requests, instead of sharing only identical ranges.
+
+N31, subtracting in-flight ranges from new fetch requests, left this list at step 44: it is designed in
+architecture §4.9.1 (rows N31, N62–N65).
 
 ## Decided at the post-build architecture review
 
