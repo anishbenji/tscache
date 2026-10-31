@@ -11,7 +11,6 @@
         "@commitlint/config-conventional": "^21.2.3",
         "@playwright/test": "^1.63.0",
         "@types/bun": "^1.4.4",
-        "fake-indexeddb": "^6.2.7",
         "fallow": "^3.31.0",
         "git-cliff": "^2.14.2",
         "knip": "^6.39.0",
@@ -140,6 +139,7 @@
       "name": "tscache",
       "version": "0.0.0",
       "devDependencies": {
+        "fake-indexeddb": "^6.2.7",
         "vite": "^8.3.4",
       },
       "peerDependencies": {
