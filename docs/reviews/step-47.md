@@ -1,6 +1,6 @@
 # Step 47 — The version fence re-plans after a clear (N29 amended)
 
-Branch: `feat/47-fence-replan` · Reviewer: GPT-6.1 Sol (high), run by the director · Rounds: none yet · Status: settled after round 1 
+Branch: `feat/47-fence-replan` · Reviewer: GPT-6.1 Sol (high), run by the director · Rounds: 1 · Status: settled after round 1 
 
 The user's answer to pending decision #10 (2026-10-31): option B of DC-1 in `docs/reviews/step-44.md`. "The version fence also re-plans once when the cache was cleared while a `get` waited, still at most two rounds." Before this step a `get` planned its second round only when a fetch it awaited came back dropped. With in-flight subtraction (N31, step 44) a `get` awaits fetches that other gets issued; such a fetch can land, be applied, and then be wiped by another response's version clear before the `get` reads, and the `get` returned the wiped slots `'uncached'` with nothing dropped (race A9, pinned by T18; the narrow window after R4-1). Now a round that ends under another clear generation than it was planned under triggers the one re-plan, for joined and own fetches alike. DC-2 (a fetch in flight across an `invalidate`) is unchanged and stays documented only. Implemented by a child agent of the director while the user was away; strict test-first as for step 44, with the tests written by the implementer from the amended rule, since the user decision named the behaviour and T18 already listed the assertions option B changes.
 
