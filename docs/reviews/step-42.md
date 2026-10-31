@@ -1,6 +1,6 @@
 # Step 42 — Binary fetch format in the examples, reference backends and guide
 
-Branch: `docs/42-binary-fetcher` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: round 4 triaged, awaiting round 5
+Branch: `docs/42-binary-fetcher` · Reviewer: GPT-6.1 Sol (high) · Rounds: 5 · Status: settled after round 5
 
 Item 5 of the performance plan (§6): a binary columnar response format for the examples' mock backend (which the reference clients also use), its fetchers and the Playwright fixture, documented in the site's fetcher guide. The library does not change. Implemented by Claude while the user was away, under the director's child rules of 2026-10-30.
 
@@ -153,6 +153,10 @@ Nothing is narrowed or rounded. Names and their order are still compared one by 
 | R4-1 | P0 | `fromJson` does not check a field's length against its own page's timestamps, so across joined pages a long page and a short one cancel out: JSON `timestamps:[0], v:[10,20]`, columns `timestamps:[60000], v:[30]`, JSON `timestamps:[120000], v:[]` join to three timestamps and three values, the engine accepts them and stores 20 at 60000 | accepted | Fixed by the director: `fromJson` now refuses a field whose length differs from the page's timestamp count, with the same message as `decodeColumns`, so every normalized page holds equal-length columns before any join. The gap also covered JSON-only ranges (two JSON pages cancel out the same way), which predate this step's mixed joins. Test first: the reviewer's pages refuse, alone and in the join (`columns.test.ts`, R4-1); with the check disabled for one run that test failed, restored it passes |
 
 **Convergence check, director's call.** Page joining has drawn a finding in all four rounds. This one is not in the join rule: it is a missing per-page invariant at the normalize boundary (every column of a normal page has the timestamps' length), which `decodeColumns` already enforced for columns bodies and `fromJson` did not. The invariant is now enforced at both entry points of `NormalPage`, so no further special case is added to the join. One more round confirms. If round 5 finds page joining or normalizing again, the director escalates instead of patching; the fallback is to refuse mixed formats within one range and document one format per range.
+
+## Round 5 — reviewer verdict: merge
+
+No findings; every accepted finding of rounds 1–4 confirmed fixed. Settled.
 
 ## Contract-test changes
 
