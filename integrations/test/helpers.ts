@@ -4,6 +4,7 @@ import {
   createClient,
   type TscacheClient,
 } from "tscache";
+import { vi } from "vitest";
 
 export const config: CacheConfig = {
   id: "h",
@@ -57,11 +58,15 @@ export async function lossy(): Promise<Lossy> {
   };
 }
 
-/** Resolves once `check` holds, polling each macrotask. */
+/**
+ * Resolves once `check` holds. A fixed number of polls can run out on a
+ * busy machine (docs/testing.md); this fails only at the test's timeout.
+ */
 export async function until(check: () => boolean): Promise<void> {
-  for (let i = 0; i < 200; i++) {
-    if (check()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  throw new Error("condition never held");
+  await vi.waitFor(
+    () => {
+      if (!check()) throw new Error("condition never held");
+    },
+    { timeout: 4000, interval: 1 },
+  );
 }

@@ -53,7 +53,8 @@ export function portOffset(
   return (1 + (hash % (STEPS - 1))) * STEP;
 }
 
-const offset = portOffset(
+/** This checkout's port offset (see `portOffset`). */
+export const offset: number = portOffset(
   process.env,
   fileURLToPath(new URL("../..", import.meta.url)),
 );

@@ -1,16 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { chartKindOf } from "../src/chart/load";
 import { keptRange, moved } from "../src/chart/view";
-import { MINUTE, openingRange, readRange } from "../src/market";
+import {
+  formingBar,
+  MINUTE,
+  market,
+  openingRange,
+  readRange,
+} from "../src/market";
 
 const NOW = Date.UTC(2026, 9, 26, 12, 0, 30);
 
 describe("readRange", () => {
-  it("reads a screen more on each side, never past now", () => {
+  // NOW lies 30 s into the bar that opened at FORMING.
+  const FORMING = NOW - 30_000;
+
+  it("reads a screen more on each side, never past the bar forming now", () => {
     const visible = { start: NOW - 60 * MINUTE, end: NOW - 30 * MINUTE };
     expect(readRange(visible, NOW)).toEqual({
       start: NOW - 90 * MINUTE,
-      end: NOW,
+      end: FORMING,
     });
     const history = { start: NOW - 600 * MINUTE, end: NOW - 500 * MINUTE };
     expect(readRange(history, NOW)).toEqual({
@@ -19,15 +28,40 @@ describe("readRange", () => {
     });
   });
 
+  it("ends on the grid whenever it reaches now", () => {
+    // An end between grid points snaps outward to the next one, a bar that
+    // cannot exist yet; a read crossing a minute boundary then fetches
+    // three minutes (fix 26). Every end that reaches now is a bar's start.
+    for (const now of [FORMING, FORMING + 1, NOW, FORMING + MINUTE - 1]) {
+      const range = readRange(openingRange(now), now);
+      expect(range.end).toBe(FORMING);
+    }
+  });
+
   it("stays a valid range when the view is past now", () => {
     const future = { start: NOW + 60 * MINUTE, end: NOW + 120 * MINUTE };
     const range = readRange(future, NOW);
     expect(range.start).toBeLessThanOrEqual(range.end);
-    expect(range.end).toBe(NOW);
+    expect(range.end).toBe(FORMING);
   });
 
   it("opens on the last six hours", () => {
     expect(openingRange(NOW)).toEqual({ start: NOW - 360 * MINUTE, end: NOW });
+  });
+});
+
+describe("formingBar", () => {
+  it("is the start of the bar forming at a time, on the market's grid", () => {
+    expect(formingBar(NOW)).toBe(NOW - 30_000);
+    expect(formingBar(NOW - 30_000)).toBe(NOW - 30_000);
+    expect(formingBar(NOW + 29_999)).toBe(NOW - 30_000);
+    expect(formingBar(NOW + 30_000)).toBe(NOW + 30_000);
+  });
+
+  it("honours the grid's alignment offset", () => {
+    const config = { ...market, alignmentOffset: 15_000 };
+    expect(formingBar(NOW, config)).toBe(NOW - 15_000);
+    expect(formingBar(NOW - 16_000, config)).toBe(NOW - 75_000);
   });
 });
 

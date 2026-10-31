@@ -5,6 +5,7 @@
 // what tscache does about latency, a dataset version change or an expired
 // token. All state lives in memory, one backend per dev or preview server.
 
+import { acceptsColumns, COLUMNS_TYPE, encodeColumns } from "./columns";
 import { datasets, isDatasetName } from "./datasets";
 import { seedOf } from "./noise";
 import { alignDown, type SeriesQuery, seriesPage } from "./series";
@@ -38,6 +39,8 @@ export interface BackendStats {
   latencyMs: number;
   /** Series pages answered, per dataset. */
   pages: Record<string, number>;
+  /** Series pages answered, per format: JSON or a columns body. */
+  formats: { json: number; columns: number };
   /**
    * Series requests and socket subscriptions refused for a missing or
    * stale access token.
@@ -156,8 +159,10 @@ function text(status: number, body: string): Response {
   return new Response(body, { status });
 }
 
-function json(body: unknown): Response {
-  return Response.json(body, { headers: { "cache-control": "no-store" } });
+function json(body: unknown, headers: Record<string, string> = {}): Response {
+  return Response.json(body, {
+    headers: { "cache-control": "no-store", ...headers },
+  });
 }
 
 function parseQuery(url: URL): SeriesQuery | undefined {
@@ -217,6 +222,7 @@ export function createBackend(options: BackendOptions = {}): Backend {
   let tokens: Tokens = { access: newToken("at"), refresh: newToken("rt") };
   const stats = {
     pages: {} as Record<string, number>,
+    formats: { json: 0, columns: 0 },
     refused: 0,
     refreshes: 0,
     reused: 0,
@@ -249,6 +255,7 @@ export function createBackend(options: BackendOptions = {}): Backend {
     const authorized = accepts(
       presented?.startsWith("Bearer ") ? presented.slice(7) : null,
     );
+    const columns = acceptsColumns(request.headers.get("accept"));
     const tag = `v${version}`;
     const seed = seedFor(dataset, symbol);
     const page = authorized
@@ -265,9 +272,21 @@ export function createBackend(options: BackendOptions = {}): Backend {
     stats.pages[dataset] = (stats.pages[dataset] ?? 0) + 1;
     const { next, finalizedUntil, ...data } = page;
     const meta = { version: tag, finalizedUntil };
-    return json(
-      next === undefined ? { ...data, meta } : { ...data, meta, next },
-    );
+    const members = next === undefined ? { meta } : { meta, next };
+    // The two formats are one URL: a cache between must keep them apart.
+    const headers = { "cache-control": "no-store", vary: "accept" };
+    if (columns) {
+      stats.formats.columns++;
+      const body = encodeColumns(
+        { ...data, dtypes: datasets[dataset].fields },
+        members,
+      );
+      return new Response(body, {
+        headers: { ...headers, "content-type": COLUMNS_TYPE },
+      });
+    }
+    stats.formats.json++;
+    return json({ ...data, ...members }, headers);
   }
 
   /** What a live stream pushes, from either transport. */
@@ -516,6 +535,7 @@ export function createBackend(options: BackendOptions = {}): Backend {
       version: `v${version}`,
       latencyMs,
       pages: { ...stats.pages },
+      formats: { ...stats.formats },
     };
   }
 

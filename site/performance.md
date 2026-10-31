@@ -60,6 +60,9 @@ bun run bench         # the working tree against origin/main, Chromium and Bun
 ## Tips
 
 - Read the screen plus a screen on each side: short scrolls are then answered from the cache.
+- Have the backend send pages as binary columns rather than JSON ([Binary pages](/guides/fetcher#binary-pages)):
+  a 5,000-bar page decodes in about 93 µs instead of 443 µs as columnar JSON, in the worker, for every
+  tab.
 - Pick the smallest dtype that holds the data: `f32` halves a field's memory and port traffic against
   `f64`.
 - Leave `warnOnOverlapDiff` off unless you need it: it compares every overlapping write.

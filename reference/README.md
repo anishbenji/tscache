@@ -40,7 +40,10 @@ depends on nothing but the server's read, so the browser's hydration render matc
 - **Draws with either chart library.** Lightweight Charts and uPlot implement one small interface
   (`shared/src/chart/view.ts`). The page switches between them with a menu or `?chart=uplot`, and
   loads only the library it shows. While the newest bar is on screen, the chart follows the market;
-  while the user reads history, it stays put.
+  while the user reads history, it stays put. An answer that differs from the last one only in its
+  newest bars, as a live bar does, is drawn by those bars alone where the library can
+  (`appendedFrom` in `view.ts`): Lightweight Charts takes them with `series.update()`; uPlot, which
+  has no such call, redraws from the cache's arrays as it always does.
 - **Takes new bars from a live feed**, one of three, chosen with a menu or `?feed=`; every tab of
   the origin takes the latest choice (`shared/src/feed.ts`):
   - **Server-Sent Events** (`sse`, the default): the backend streams the bar forming now.

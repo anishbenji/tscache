@@ -4,11 +4,24 @@
 //
 // uPlot has no candle series and no panning of its own: a draw hook paints
 // the candles, and the wheel zooms and a drag pans the time axis.
+//
+// Nor has it a call that adds bars: it draws its canvas again from the
+// arrays on any change, and its own streaming demos call setData on each
+// one. So a live bar takes the same setData as any answer, on the cache's
+// arrays as they are, and only the count of draws (countDraw) tells it
+// from a change of history.
 
 import type { GetResult, Range } from "tscache";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
-import { type ChartOptions, type ChartView, keptRange, moved } from "./view";
+import {
+  appendedFrom,
+  type ChartOptions,
+  type ChartView,
+  countDraw,
+  keptRange,
+  moved,
+} from "./view";
 
 const UP = "#2a78d6";
 const DOWN = "#eb6834";
@@ -94,6 +107,8 @@ export function createUplotChart(
   /** Set while draw() moves the scale, which is not the user scrolling. */
   let drawing = false;
   let times: ArrayLike<number> = [];
+  /** The answer drawn last. */
+  let drawn: GetResult | undefined;
 
   function onScale(u: uPlot, key: string): void {
     if (key !== "x" || drawing) return;
@@ -163,9 +178,12 @@ export function createUplotChart(
   resize.observe(element);
 
   return {
-    draw({ timestamps, fields }: GetResult) {
+    draw(result) {
+      const { timestamps, fields } = result;
       const columns = COLUMNS.map((name) => fields[name]);
       if (columns.some((column) => column === undefined)) return;
+      countDraw(element, appendedFrom(drawn, result) !== undefined);
+      drawn = result;
       const before = times.length > 0 ? times[times.length - 1] : undefined;
       times = timestamps;
       // An answer without bars clears the chart and keeps the time on

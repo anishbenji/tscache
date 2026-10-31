@@ -61,6 +61,13 @@ its default export (`docs/architecture.md` §2.5). Serve it as an ES module
 from your origin, with that export intact. The worker resolves a relative
 URL against its own script, not the page, so pass an absolute URL or path.
 
+Bound how long each request may take, for example with
+`AbortSignal.timeout()` on the fetcher's `fetch`, and throw when the bound
+passes. The worker never cancels a fetch, and one fetch serves every `get`
+that needs one of its slots, from every tab, so a request that never
+settles holds all of them (`docs/architecture.md` §4.9.1, N65). The thrown
+error comes back as a `'fetch-failed'` miss, and the next `get` tries again.
+
 With Vite, `?worker&url` does not fit the fetcher: Vite bundles a worker
 entry without its exports, so the module loads but has no default export.
 `fetcherUrl()` from `tscache/vite` emits the fetcher as a chunk of its own

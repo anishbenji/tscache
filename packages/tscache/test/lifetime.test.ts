@@ -55,7 +55,19 @@ function fakeLocks(): { locks: LockManagerLike; requests: Requested[] } {
   return { locks, requests };
 }
 
+/**
+ * One turn of the event loop: the fake locks settle in microtasks, which
+ * have all run after it. It waits for no time.
+ */
+// clock-ok: a turn of the event loop, not a wait for time.
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
+ * Waits until `assertion` passes, for a message on a port. A fixed number
+ * of turns can run out on a busy machine (docs/testing.md).
+ */
+const eventually = (assertion: () => unknown) =>
+  vi.waitFor(assertion, { timeout: 4000, interval: 1 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -208,7 +220,7 @@ describe("SharedWorker entry", () => {
       expect(requests).toHaveLength(1);
       expect(requests[0]?.mode).toBe("exclusive");
       requests[0]?.grant();
-      for (let i = 0; i < 50 && early.length === 0; i++) await tick();
+      await eventually(() => expect(early.length).toBeGreaterThan(0));
       expect(early).toEqual([
         expect.objectContaining({
           t: "hello",
@@ -218,7 +230,7 @@ describe("SharedWorker entry", () => {
       ]);
       // Connects after the grant: answered at once, by the same server.
       const late = worker.connect();
-      for (let i = 0; i < 50 && late.length === 0; i++) await tick();
+      await eventually(() => expect(late.length).toBeGreaterThan(0));
       expect(late).toEqual([
         expect.objectContaining({ clientId: "c2", lock: requests[0]?.name }),
       ]);
@@ -231,7 +243,7 @@ describe("SharedWorker entry", () => {
     const worker = await loadSharedWorker(undefined);
     try {
       const seen = worker.connect();
-      for (let i = 0; i < 50 && seen.length === 0; i++) await tick();
+      await eventually(() => expect(seen.length).toBeGreaterThan(0));
       expect(seen).toHaveLength(1);
       expect(seen[0]).toMatchObject({ t: "hello", clientId: "c1" });
       expect(seen[0]).not.toHaveProperty("lock");

@@ -54,6 +54,7 @@ import {
 import { eventSource, liveFeed, polling, type Source, webSocket } from "./live";
 import {
   feedUrl,
+  formingBar,
   market,
   openingRange,
   readRange,
@@ -386,7 +387,8 @@ export function startSession({ open, served, feed }: SessionOptions): Session {
         // Bars after a gap the feed did not fill.
         catchUp(span.end);
       },
-      onOpened: () => catchUp(Date.now()),
+      // Up to the bar forming now, not now itself (formingBar).
+      onOpened: () => catchUp(formingBar(Date.now())),
     });
   }
 

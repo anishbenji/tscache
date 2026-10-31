@@ -59,7 +59,12 @@ async function make(options: Parameters<typeof createClient>[0]) {
   return client;
 }
 
-const settled = () => new Promise((resolve) => setTimeout(resolve, 10));
+/**
+ * Waits until `assertion` passes, for an event on another port. A sleep
+ * would be too short on a busy machine (docs/testing.md).
+ */
+const eventually = (assertion: () => unknown) =>
+  vi.waitFor(assertion, { timeout: 4000, interval: 1 });
 
 let warn: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
@@ -119,9 +124,8 @@ describe("put in a development build", () => {
     cacheB.on("mergeWarning", (e) => heardB.push(e));
     await cacheA.put(batch([3]));
     await cacheA.put(batch([3], [0]));
-    await settled();
     // The event reached the other tab; the console line did not repeat.
-    expect(heardB).toHaveLength(1);
+    await eventually(() => expect(heardB).toHaveLength(1));
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
@@ -143,8 +147,7 @@ describe("put in a production build", () => {
     cache.on("mergeWarning", (e) => heard.push(e));
     await cache.put(batch([3]));
     expect((await cache.put(batch([3], [0]))).warnings).toHaveLength(1);
-    await settled();
-    expect(heard).toHaveLength(1);
+    await eventually(() => expect(heard).toHaveLength(1));
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -172,8 +175,7 @@ describe("orchestrated fetches", () => {
     await cacheA.put(batch([3], [999]));
     // The fetch for slot 13 extends into covered slot 3 and returns price 3.
     await cacheA.get({ start: 13, end: 13 });
-    await settled();
-    expect(heardB).toHaveLength(1);
+    await eventually(() => expect(heardB).toHaveLength(1));
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
       'tscache: a fetch for cache "w" overwrote cached values that differed: [3, 3] price. Reported because warnOnOverlapDiff is on, also as mergeWarning events; printed in development builds only.',
@@ -187,9 +189,12 @@ describe("orchestrated fetches", () => {
       fetcher: { module: fetcherModule },
     });
     const cache = await client.cache(config);
+    const heard: ClientEvents["mergeWarning"][] = [];
+    cache.on("mergeWarning", (e) => heard.push(e));
     await cache.put(batch([3], [999]));
     await cache.get({ start: 13, end: 13 });
-    await settled();
+    // The warning was reported, as an event, and not printed.
+    await eventually(() => expect(heard).toHaveLength(1));
     expect(warn).not.toHaveBeenCalled();
   });
 });

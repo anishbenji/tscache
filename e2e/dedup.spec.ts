@@ -74,3 +74,72 @@ test("pages of separate contexts fetch separately", async ({
     await Promise.all(contexts.map((c) => c.close()));
   }
 });
+
+// Step 44: partial overlaps, in addition to the unchanged identical-range tests.
+test("T34: overlapping reads in two tabs fetch only the uncovered remainder", async ({
+  context,
+  backend,
+}) => {
+  const config = cacheConfig();
+  const a = await open(context);
+  const b = await open(context);
+  for (const page of [a, b])
+    expect((await connect(page, backend.clientOptions())).mode).toBe("shared");
+  await backend.control({ hold: { candles: 2 } });
+  await start(a, "a", config, { start: 3, end: 33 });
+  await backend.waitHeld("candles", 1);
+  await start(b, "b", config, { start: 23, end: 63 });
+  await backend.waitHeld("candles", 2);
+  // Both backend answers remain gated: coverage cannot do the dedup work.
+  expect((await backend.state()).requests).toEqual({ "3-33": 1, "43-63": 1 });
+  expect(await settled(b, "b")).toBe(false);
+  await backend.release("candles");
+  expect(await settle(a, "a")).toEqual({
+    timestamps: [3, 13, 23, 33],
+    volume: [1, 1, 1, 1],
+    coverage: [{ start: 3, end: 33 }],
+    misses: [],
+  });
+  expect(await settle(b, "b")).toEqual({
+    timestamps: [23, 33, 43, 53, 63],
+    volume: [1, 1, 1, 1, 1],
+    coverage: [{ start: 23, end: 63 }],
+    misses: [],
+  });
+});
+
+test("T34: overlapping reads in separate contexts fetch independently", async ({
+  browser,
+  backend,
+}) => {
+  const contexts = [await browser.newContext(), await browser.newContext()];
+  try {
+    const config = cacheConfig();
+    const pages = await Promise.all(contexts.map((context) => open(context)));
+    for (const page of pages)
+      expect((await connect(page, backend.clientOptions())).mode).toBe(
+        "shared",
+      );
+    await backend.control({ hold: { candles: 2 } });
+    const [a, b] = pages;
+    if (a === undefined || b === undefined)
+      throw new Error("two pages required");
+    await start(a, "a", config, { start: 3, end: 33 });
+    await start(b, "b", config, { start: 23, end: 63 });
+    await backend.waitHeld("candles", 2);
+    expect((await backend.state()).requests).toEqual({ "3-33": 1, "23-63": 1 });
+    await backend.release("candles");
+    expect(await settle(a, "a")).toMatchObject({
+      timestamps: [3, 13, 23, 33],
+      coverage: [{ start: 3, end: 33 }],
+      misses: [],
+    });
+    expect(await settle(b, "b")).toMatchObject({
+      timestamps: [23, 33, 43, 53, 63],
+      coverage: [{ start: 23, end: 63 }],
+      misses: [],
+    });
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+  }
+});

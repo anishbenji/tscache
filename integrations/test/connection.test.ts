@@ -199,6 +199,7 @@ describe("connect", () => {
     await connection.dispose();
     await expect(client.cache(config)).rejects.toThrow();
     clients[0]?.lose();
+    // clock-ok: an absence check; a slow machine can only hide a late call, not fail the test.
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(calls).toBe(0);
     expect(clients).toHaveLength(1);
@@ -212,6 +213,7 @@ describe("connect", () => {
     await connection.dispose();
     const late = await lossy();
     release(late.client);
+    // clock-ok: a turn of the event loop, not a wait for time.
     await new Promise((resolve) => setTimeout(resolve, 0));
     await expect(late.client.cache(config)).rejects.toThrow();
     expect(connection.state.status).toBe("connecting");

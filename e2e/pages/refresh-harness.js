@@ -6,6 +6,7 @@
 
 import { refreshOnAuthInvalid } from "/auth-refresh.js";
 
+// clock-ok: a turn of the event loop, not a wait for time.
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function harness({ tokens, failSave = () => false }) {

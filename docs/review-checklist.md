@@ -78,6 +78,10 @@ Every review of a step branch checks the diff against this list. Section referen
 - [ ] Property-style tests exist where A§5 calls for them (coverage merge/subtraction, segment merge).
 - [ ] Contract tests written by Codex were not weakened, skipped or deleted unless the step review file records why.
 - [ ] Multi-tab behaviour is tested in Playwright with one `BrowserContext` and multiple pages, not separate contexts.
+- [ ] No test reads the wall clock, times itself or sleeps for an effect (`docs/testing.md`); `bun scripts/test-clocks.ts` passes, and every `clock-ok` comment says why that line cannot flake.
+- [ ] An assertion that depends on which bar, day or year "now" falls in pins the clock (Vitest fake timers, `page.clock`, the backend's `advanceMs`), and a read up to now ends on the grid, not at now.
+- [ ] Timing assertions (elapsed time, ratios) live in the bench, never in Vitest or Playwright; a timeout only detects a hang.
+- [ ] A test that changes shared state (the backend's clock, failures, latency or version, a server's cache) undoes it or sets up its own preconditions; Playwright retries stay at 0.
 
 ## 11. Toolchain and code quality (AGENTS.md)
 

@@ -14,6 +14,7 @@ The primary driver is **T3 Code**: one Claude thread per step, plus a Codex thre
 | `.claude/hooks/guard-bash.sh`, `guard-bash.ts` | Claude | Tripwire for literal `bun test` and git-hook bypasses; threat model in the `.ts` header, regression cases in `guard-bash.test.sh`. `bun run ci` is the backstop |
 | `.codex/config.toml` | Codex, once the project is trusted | Pins `gpt-6.1-sol` at high effort |
 | `docs/review-checklist.md` | Reviewer | Invariants every review checks, and the findings format |
+| `docs/testing.md` | Everyone | Rules for clocks, waiting, timing and shared state in tests; `scripts/flake-hunt.sh` and the `Flake hunt` workflow |
 | `scripts/codex-review.sh` | Claude | Runs `bun run ci`, then a headless read-only Codex review (prompts C and D live here) |
 | `scripts/review-watch.sh` | Claude | Runs `codex-review.sh` under a silence watchdog; Codex sessions can stall without output |
 | `.reviews/step-NN/` | Claude | Raw review output per round (gitignored) |

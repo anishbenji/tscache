@@ -14,7 +14,18 @@
 
 import { readdirSync } from "node:fs";
 import { createBackend } from "@examples/mock-backend/backend";
-import { decodeSnapshot, type EncodedSnapshot, type GetResult } from "tscache";
+import {
+  COLUMNS_TYPE,
+  ColumnsError,
+  decodeColumns,
+  encodeColumns,
+} from "@examples/mock-backend/columns";
+import {
+  type Dtype,
+  decodeSnapshot,
+  type EncodedSnapshot,
+  type GetResult,
+} from "tscache";
 import type { FetchRequest } from "tscache/fetcher";
 
 const SNIPPETS = new URL("../snippets/", import.meta.url);
@@ -202,6 +213,174 @@ const RUNS: Record<string, Run> = {
     }
     check(typeof response.meta?.version === "string", "no version");
     check(typeof response.meta?.finalizedUntil === "number", "no watermark");
+  },
+  async "fetcher-columns.ts"() {
+    const { default: json } = await import(FETCHER);
+    const { default: columns } = await load("fetcher-columns.ts");
+    // Several pages, joined, hold what the JSON fetcher reads.
+    const request: FetchRequest = {
+      cacheId: "crypto/BTC",
+      range: { start: now - 5 * 24 * 60 * MINUTE, end: now - 60 * MINUTE },
+      interval: MINUTE,
+      alignmentOffset: 0,
+      context: { origin },
+    };
+    const [binary, text] = await Promise.all([
+      columns.fetch(request),
+      json.fetch(request),
+    ]);
+    check(binary.timestamps instanceof Float64Array, "timestamps not typed");
+    check(
+      binary.fields.volume instanceof Uint32Array,
+      "volume not a u32 column",
+    );
+    check(
+      binary.timestamps.length > 5000 &&
+        binary.timestamps.join() === text.timestamps.join(),
+      "the timestamps differ from the JSON fetcher's",
+    );
+    for (const name of CANDLE_FIELDS) {
+      check(
+        Array.from(binary.fields[name] as ArrayLike<number>).join() ===
+          (text.fields[name] as number[]).join(),
+        `field ${name} differs from the JSON fetcher's`,
+      );
+    }
+    // The watermark follows the clock, which may tick between the two.
+    check(binary.meta?.version === text.meta?.version, "the versions differ");
+    check(typeof binary.meta?.finalizedUntil === "number", "no watermark");
+    // One page: its columns are views over the one body fetched.
+    const hour = await columns.fetch({
+      ...request,
+      range: { start: now - 2 * 60 * MINUTE, end: now - 60 * MINUTE },
+    });
+    const buffers = new Set(
+      [hour.timestamps, ...Object.values(hour.fields)].map(
+        (view) => (view as Float64Array).buffer,
+      ),
+    );
+    check(buffers.size === 1, `one page decoded into ${buffers.size} buffers`);
+    // The join's rule table (columns.ts), against the guide's fetcher with
+    // the pages served in hand: mixed dtypes and mixed formats widen to
+    // float64 and keep every value (a u16 300 never reads 44: step 42 R1-1;
+    // a range answered partly as JSON still joins: R3-1), and names built to
+    // collide in a delimited signature are refused (R2-1).
+    type Column = [string, Dtype, number];
+    /** A page as a columns body, or as JSON when `json` is set. */
+    const serve = (columns: Column[], t: number, json: boolean) => {
+      const meta = { version: "v1", finalizedUntil: now };
+      const members = t === now ? { meta } : { meta, next: now };
+      const fields = Object.fromEntries(columns.map(([n, , v]) => [n, [v]]));
+      return json
+        ? Response.json({ timestamps: [t], fields, ...members })
+        : new Response(
+            encodeColumns(
+              {
+                timestamps: [t],
+                fields,
+                dtypes: Object.fromEntries(columns.map(([n, d]) => [n, d])),
+              },
+              members,
+            ),
+            { headers: { "content-type": COLUMNS_TYPE } },
+          );
+    };
+    const odd = "a:u8\u0000a";
+    /** What, both pages (columns, JSON?), and the volume or error expected. */
+    const cases: [
+      string,
+      [Column[], boolean],
+      [Column[], boolean],
+      number[] | "refused",
+    ][] = [
+      [
+        "u8 then u16",
+        [[["v", "u8", 1]], false],
+        [[["v", "u16", 300]], false],
+        [1, 300],
+      ],
+      [
+        "columns then JSON",
+        [[["v", "u8", 1]], false],
+        [[["v", "f64", 300.5]], true],
+        [1, 300.5],
+      ],
+      [
+        "JSON then columns",
+        [[["v", "f64", 300.5]], true],
+        [[["v", "u8", 1]], false],
+        [300.5, 1],
+      ],
+      [
+        "colliding names",
+        [
+          [
+            ["a", "u8", 1],
+            [odd, "u16", 2],
+          ],
+          false,
+        ],
+        [
+          [
+            [odd, "u8", 3],
+            ["a", "u16", 300],
+          ],
+          false,
+        ],
+        "refused",
+      ],
+    ];
+    const pageFetch = globalThis.fetch;
+    try {
+      for (const [
+        what,
+        [first, firstJson],
+        [second, secondJson],
+        expected,
+      ] of cases) {
+        const pages = [
+          serve(first, now - MINUTE, firstJson),
+          serve(second, now, secondJson),
+        ];
+        globalThis.fetch = Object.assign(async () => pages.shift(), pageFetch);
+        const got = await columns
+          .fetch({ ...request, range: { start: now - MINUTE, end: now } })
+          .then(
+            (response: { fields: Record<string, ArrayLike<number>> }) =>
+              response.fields,
+            (error: unknown) => error,
+          );
+        if (expected === "refused") {
+          check(
+            got instanceof ColumnsError,
+            `pages of ${what} gave ${String(got)}, not a ColumnsError`,
+          );
+          continue;
+        }
+        const volume = (got as Record<string, ArrayLike<number>>).v;
+        check(
+          volume instanceof Float64Array &&
+            Array.from(volume).join() === expected.join(),
+          `pages of ${what} gave ${got instanceof Error ? got.message : Array.from(volume ?? []).join()}, not Float64Array ${expected.join()}`,
+        );
+      }
+    } finally {
+      globalThis.fetch = pageFetch;
+    }
+    // Under Bun as under Node (Vitest): a Buffer at an unaligned offset of
+    // its pool decodes, from a copy (R2-2).
+    const bytes = encodeColumns({
+      timestamps: [now],
+      fields: { close: [1.5] },
+      dtypes: { close: "f64" },
+    });
+    const pool = Buffer.alloc(bytes.byteLength + 3);
+    pool.set(bytes, 3);
+    const fromBuffer = decodeColumns(pool.subarray(3));
+    check(
+      fromBuffer.timestamps[0] === now && fromBuffer.fields.close?.[0] === 1.5,
+      "an unaligned Buffer did not decode",
+    );
   },
   async "getting-started.ts"() {
     const { result } = await load("getting-started.ts");

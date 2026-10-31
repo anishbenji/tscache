@@ -48,14 +48,19 @@ range, an unknown cache, a disposed client ([Errors](/usage/errors)).
 With a fetcher configured, and without `cacheOnly`, a read:
 
 1. computes the uncovered parts of the request;
-2. **coalesces** them: adjacent misses merge, and a miss that abuts existing coverage is extended by one
-   interval into it, so the response overlaps what is known by one point and the ranges join;
-3. issues one fetch per coalesced range, unless the same range of the same cache is already in flight,
-   from any tab: then it awaits that fetch instead (**dedup**);
-4. writes each response as authoritative for its whole range, below the response's own watermark;
-5. reads again and resolves.
+2. subtracts the fetches already in flight for the same cache, from any tab, and awaits them for the
+   overlap instead of fetching it again (**dedup**);
+3. **coalesces** the rest: adjacent misses merge, and a miss that abuts existing coverage is extended by
+   one interval into it, so the response overlaps what is known by one point and the ranges join. A miss
+   that abuts a fetch in flight is not extended into it;
+4. issues one fetch per coalesced range;
+5. writes each response as authoritative for its whole range, below the response's own watermark;
+6. reads once, after every fetch it awaited, and resolves.
 
-Dedup is by exact range: two overlapping but different ranges fetch separately.
+Two reads of the same range share one fetch, and a read that overlaps a fetch in flight asks only for
+what lies outside it, so a chart that scrolls faster than the backend answers asks for each bar once. A
+fetch that never settles holds every read that needs one of its slots, so a fetcher bounds its requests
+([Writing a fetcher](/guides/fetcher)).
 
 ## Claiming a range yourself
 

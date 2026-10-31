@@ -99,6 +99,7 @@ test("a slow answer for the whole week does not undo a later zoom", async ({
       .poll(async () => Number(await page.getByTestId("empty").textContent()))
       .toBeLessThan(week / 2);
     await waitNotices(page, 2);
+    // clock-ok: the count must stay down; a slow machine can only hide a late rise.
     await page.waitForTimeout(500);
     expect(Number(await page.getByTestId("empty").textContent())).toBeLessThan(
       week / 2,

@@ -1,0 +1,88 @@
+# Runs tests many times to surface flakes (scripts/flake-hunt.sh,
+# docs/testing.md). Never a required check, and never on a pull request:
+# a manual run hunts in the test files a branch changed since a base (or
+# the files given), and the weekly run hunts in every test, with every core
+# kept busy. Playwright retries stay at 0, so a flake fails its run.
+name: Flake hunt
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Hunt in the test files changed since this branch
+        default: main
+      files:
+        description: Or in these test files (space-separated)
+        default: ""
+      runs:
+        description: Runs per test
+        default: "20"
+      load:
+        description: Keep every core busy while the tests run
+        type: boolean
+        default: true
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flake-hunt-${{ github.ref }}
+
+jobs:
+  hunt:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The base branch, to find the files the branch changed.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - run: bun install --frozen-lockfile
+
+      - name: Install Chromium for Playwright
+        run: bunx playwright install --with-deps chromium
+
+      # The Playwright suites serve the built package.
+      - run: bun run build
+
+      - name: Hunt
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ inputs.base }}
+          FILES: ${{ inputs.files }}
+          RUNS: ${{ inputs.runs }}
+          LOAD: ${{ inputs.load }}
+          FLAKE_HUNT_LOGS: ${{ runner.temp }}/flake-hunt
+        run: |
+          if [ "$EVENT" = schedule ]; then
+            scripts/flake-hunt.sh -n 5 --load --all
+            exit
+          fi
+          args=(-n "$RUNS")
+          [ "$LOAD" = true ] && args+=(--load)
+          if [ -n "$FILES" ]; then
+            read -ra files <<< "$FILES"
+            args+=("${files[@]}")
+          else
+            args+=(--base "origin/$BASE")
+          fi
+          scripts/flake-hunt.sh "${args[@]}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: flake-hunt-logs
+          path: ${{ runner.temp }}/flake-hunt
+          if-no-files-found: ignore

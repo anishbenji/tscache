@@ -273,7 +273,7 @@ export class RpcServer {
       ),
     put: (c, req, p) => this.#put(c, req.id, p.cacheId as string, p),
     invalidate: (_c, _r, p) =>
-      this.#engine.invalidate(p.cacheId as string, p.range as Range),
+      this.#orchestrator.invalidate(p.cacheId as string, p.range as Range),
     clear: (_c, _r, p) => this.#engine.clear(p.cacheId as string),
     clearAll: () => this.#engine.clearAll(),
     setFinalizedUntil: (_c, _r, p) =>

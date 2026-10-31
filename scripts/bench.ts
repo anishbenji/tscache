@@ -8,18 +8,23 @@
 //                                [--slowdown 0.15] [--setup <name>]
 //       the working tree against a base revision, case by case, in each
 //       runtime; prints a table, writes .bench-results/, and with --gate
-//       fails on a confirmed regression in Chromium or Bun that no
-//       Perf-Accepted trailer allows (Node only reports). --slowdown makes
+//       fails on a confirmed regression that no Perf-Accepted trailer
+//       allows, in a case packages/tscache/bench/gated.json lists for its
+//       runtime (every other case only reports). --slowdown makes
 //       the head that much slower, to calibrate the gate on a known
 //       regression; with --base HEAD it measures a same-revision run.
 //       --setup picks one of the setups in bench/setups.ts (Chromium's
 //       switches, batch length, rounds) to calibrate it on the runner.
 //   bun scripts/bench.ts e2e [--base <ref>] [--only a,b] [--rounds 20]
+//                            [--fetchers columns,columns]
 //   bun scripts/bench.ts e2e --smoke
 //       the end-to-end scenarios in Chromium (scripts/bench-e2e.ts): a new
 //       tab's first read, a read through a SharedWorker, two tabs sharing a
 //       fetch; paired against the base and report-only, or with --smoke
-//       each once on the working tree, checked (part of `bun run ci`)
+//       each once on the working tree, checked (part of `bun run ci`).
+//       --fetchers names the fixture fetcher's format on the base and the
+//       head (columns or json); with --base HEAD and a clean tree,
+//       `--fetchers json,columns` times the two formats on one engine.
 //
 // One bundle carries both revisions of the engine: the base's source,
 // taken from git (`git archive`, nothing checked out), and the working
@@ -41,11 +46,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BunPlugin } from "bun";
+import type { FetcherFormat } from "../packages/tscache/bench/e2e-api";
 import {
   acceptances,
+  failing,
   flagged,
   GATE,
+  type GatedCases,
   type Git,
+  gatedCases,
   noisy,
   type Verdict,
   verdictOf,
@@ -62,11 +71,12 @@ const RESULTS = join(ROOT, ".bench-results");
 type Runtime = "bun" | "node" | "chromium";
 
 /**
- * The runtimes whose regressions fail the gate: Chromium (V8, what most
- * users run) and Bun (JSC, the engine of Safari). Node is a second V8 and
- * only reports.
+ * The cases whose confirmed regression fails the gate, per runtime: those
+ * calibration showed the gate judges reliably (docs/benchmarking.md).
  */
-const GATED: ReadonlySet<Runtime> = new Set(["chromium", "bun"]);
+const GATED: GatedCases = gatedCases(
+  JSON.parse(readFileSync(join(PACKAGE, "bench/gated.json"), "utf8")),
+);
 
 interface Args {
   command: "smoke" | "compare" | "e2e";
@@ -79,6 +89,21 @@ interface Args {
   setup: BenchSetup;
   /** e2e: each scenario once on the working tree, checked. */
   smoke: boolean;
+  /** e2e: the fixture fetcher's format on the base and on the head. */
+  fetchers: { base: FetcherFormat; head: FetcherFormat };
+}
+
+/** `--fetchers base,head`, each `columns` or `json`. */
+function fetchersOf(text: string | undefined): Args["fetchers"] {
+  const [base, head, ...rest] = (text ?? "columns,columns").split(",");
+  const format = (f: string | undefined): f is FetcherFormat =>
+    f === "columns" || f === "json";
+  if (!format(base) || !format(head) || rest.length > 0) {
+    throw new Error(
+      `--fetchers must be two of columns and json, as base,head; not ${text}`,
+    );
+  }
+  return { base, head };
 }
 
 /** 10 to 1000 rounds (medianRanks): fewer give no 95 % interval. */
@@ -103,6 +128,9 @@ function parseArgs(argv: string[]): Args {
   if (command === "e2e" && misplaced.length > 0) {
     throw new Error(`e2e takes no ${misplaced.join(", ")}`);
   }
+  if (command !== "e2e" && rest.includes("--fetchers")) {
+    throw new Error(`${command} takes no --fetchers`);
+  }
   const value = (flag: string) => {
     const i = rest.indexOf(flag);
     return i === -1 ? undefined : rest[i + 1];
@@ -123,6 +151,7 @@ function parseArgs(argv: string[]): Args {
     slowdown: slowdown === undefined ? undefined : Number(slowdown),
     setup,
     smoke: rest.includes("--smoke"),
+    fetchers: fetchersOf(value("--fetchers")),
   };
 }
 
@@ -284,8 +313,10 @@ interface RuntimeReport {
   confirmed: CaseResult[];
   verdicts: Record<string, Verdict>;
   noisy: boolean;
-  /** Regressions that fail the gate here. */
-  failures: number;
+  /** The cases whose regression fails the gate in this runtime (gated.json). */
+  gated: readonly string[];
+  /** The regressions that fail the gate here: of gated cases, in a quiet run. */
+  failing: string[];
 }
 
 interface Comparison {
@@ -335,14 +366,12 @@ async function measure(
         );
   const again = new Map(confirmed.map((r) => [r.name, r.sample]));
   const quiet = !noisy(control?.sample);
-  const gated = quiet && GATED.has(runtime);
   const verdicts: Record<string, Verdict> = {};
   for (const { name, sample } of results) {
     if (sample === undefined) continue;
     const allowed = accepted.get(`${name}@${runtime}`) ?? accepted.get(name);
     verdicts[name] = verdictOf(sample, again.get(name), allowed);
   }
-  const regressions = Object.values(verdicts).filter((v) => v === "regression");
   return {
     runtime,
     control,
@@ -350,7 +379,8 @@ async function measure(
     confirmed,
     verdicts,
     noisy: !quiet,
-    failures: gated ? regressions.length : 0,
+    gated: GATED.get(runtime) ?? [],
+    failing: failing({ runtime, noisy: !quiet, verdicts }, GATED),
   };
 }
 
@@ -362,7 +392,12 @@ const interval = (s: Sample | undefined) =>
     ? "–"
     : `${s.ratio.toFixed(3)} [${s.low.toFixed(3)}, ${s.high.toFixed(3)}]`;
 
-function row(name: string, s: Sample, verdict: Verdict | undefined): string {
+function row(
+  name: string,
+  s: Sample,
+  verdict: Verdict | undefined,
+  gates?: boolean,
+): string {
   const cells = [
     `\`${name}\``,
     ms(s.baseMs),
@@ -370,25 +405,28 @@ function row(name: string, s: Sample, verdict: Verdict | undefined): string {
     s.ratio.toFixed(3),
     `${s.low.toFixed(3)}–${s.high.toFixed(3)}`,
     verdict ?? "",
+    ...(gates === undefined ? [] : [gates ? "gates" : "reports"]),
   ];
   return `| ${cells.join(" | ")} |`;
 }
 
 function render(report: RuntimeReport): string[] {
-  const reported = GATED.has(report.runtime) ? "" : " (reported, never gated)";
+  const reported = report.gated.length > 0 ? "" : " (reported, no case gated)";
   const noise = report.noisy
     ? " (noisy: the A/A control left its bounds, nothing fails)"
     : "";
   const rows = report.results.flatMap(({ name, sample }) =>
-    sample === undefined ? [] : [row(name, sample, report.verdicts[name])],
+    sample === undefined
+      ? []
+      : [row(name, sample, report.verdicts[name], report.gated.includes(name))],
   );
   return [
     `#### ${report.runtime}${reported}${noise}`,
     "",
     `A/A control (\`${report.control?.name}\`): ${interval(report.control?.sample)}`,
     "",
-    "| Case | Base | Head | Head/base | 95 % CI | |",
-    "|---|---:|---:|---:|---:|---|",
+    "| Case | Base | Head | Head/base | 95 % CI | | Gate |",
+    "|---|---:|---:|---:|---:|---|---|",
     ...rows,
     "",
   ];
@@ -420,10 +458,10 @@ async function compare(args: Args): Promise<number> {
     `### Benchmarks: \`${headSha.slice(0, 9)}\` against \`${baseSha.slice(0, 9)}\` (${args.base})`,
     "",
   ];
-  let failures = 0;
+  const failures: string[] = [];
   for (const runtime of args.runtimes) {
     const report = await measure(runtime, comparison);
-    failures += report.failures;
+    failures.push(...report.failing.map((name) => `${name}@${runtime}`));
     const record = {
       schema: 1,
       base: baseSha,
@@ -437,12 +475,12 @@ async function compare(args: Args): Promise<number> {
     lines.push(...render(report));
   }
   publish(lines.join("\n"));
-  if (failures > 0) {
+  if (failures.length > 0) {
     console.error(
-      `\n${failures} confirmed regression(s). If deliberate, add a trailer to a commit of the pull request: Perf-Accepted: <case> <max ratio> <reason> (docs/benchmarking.md).`,
+      `\nConfirmed regression of a gated case: ${failures.join(", ")}. If deliberate, add a trailer to a commit of the pull request: Perf-Accepted: <case>[@<runtime>] <max ratio> <reason> (docs/benchmarking.md).`,
     );
   }
-  return args.gate && failures > 0 ? 1 : 0;
+  return args.gate && failures.length > 0 ? 1 : 0;
 }
 
 async function smoke(): Promise<number> {
@@ -470,14 +508,21 @@ function checks(results: (CaseResult & { ms?: number })[]): number {
 async function e2e(args: Args): Promise<number> {
   const work = mkdtempSync(join(tmpdir(), "tscache-bench-"));
   const headSrc = join(PACKAGE, "src");
-  const run = { headSrc, work, rounds: args.rounds, only: args.only };
+  const run = {
+    headSrc,
+    work,
+    rounds: args.rounds,
+    only: args.only,
+    fetchers: args.fetchers,
+  };
   if (args.smoke) return checks(await runE2e({ ...run, baseSrc: undefined }));
   const baseSha = extractBase(args.base, work);
   const headSha = git("rev-parse", "HEAD");
   const baseSrc = join(work, "packages/tscache/src");
   const results: E2eResult[] = await runE2e({ ...run, baseSrc });
   mkdirSync(RESULTS, { recursive: true });
-  const record = { schema: 1, base: baseSha, head: headSha, results };
+  const { fetchers } = args;
+  const record = { schema: 1, base: baseSha, head: headSha, fetchers, results };
   const file = join(RESULTS, "e2e.json");
   writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
   const rows = results.flatMap(({ name, sample }) =>
@@ -485,6 +530,8 @@ async function e2e(args: Args): Promise<number> {
   );
   const lines = [
     `### End-to-end scenarios, Chromium: \`${headSha.slice(0, 9)}\` against \`${baseSha.slice(0, 9)}\` (${args.base})`,
+    "",
+    `Fixture fetcher: ${fetchers.head} on the head, ${fetchers.base} on the base.`,
     "",
     "Report-only: no timing here fails a pull request (docs/benchmarking.md).",
     "",

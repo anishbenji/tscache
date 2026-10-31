@@ -33,13 +33,27 @@ export function openingRange(now: number): Range {
 }
 
 /**
+ * The start of the bar forming at `now` on the grid of `config` (the
+ * market's by default). A range that ends at `now` itself would end
+ * between grid points, and the cache snaps such an end outward to the next
+ * one, a bar that cannot exist yet: a read crossing a minute boundary would
+ * then fetch three minutes instead of two.
+ */
+export function formingBar(
+  now: number,
+  { interval, alignmentOffset = 0 }: CacheConfig = market,
+): number {
+  return now - ((((now - alignmentOffset) % interval) + interval) % interval);
+}
+
+/**
  * The range to read for `visible` on screen: one screen more on each side,
- * so a short scroll is answered from the cache. Never past `now`, where
- * the backend has nothing yet.
+ * so a short scroll is answered from the cache. Never past the bar forming
+ * now (formingBar), where the backend has nothing yet.
  */
 export function readRange(visible: Range, now: number): Range {
   const span = visible.end - visible.start;
-  const end = Math.min(visible.end + span, now);
+  const end = Math.min(visible.end + span, formingBar(now));
   return { start: Math.min(visible.start - span, end), end };
 }
 

@@ -11,7 +11,17 @@ export type Side = "base" | "head";
  * The scenarios timed inside one page; handshake-first-read takes a new
  * page per run (scripts/bench-e2e.ts).
  */
-export type PageScenario = "read-viewport-shared" | "two-tabs-one-fetch";
+export type PageScenario =
+  | "read-viewport-shared"
+  | "two-tabs-one-fetch"
+  | "live-tail-get";
+
+/**
+ * How the fixture fetcher (e2e/pages/fetcher.js) asks for its bars: as a
+ * columns body or as JSON. The driver names one per side in the page's
+ * URL (`/?base=json&head=columns`); both default to columns.
+ */
+export type FetcherFormat = "columns" | "json";
 
 /** The bars every scenario reads: a chart's screen and one each side. */
 export const BARS = 1500;
@@ -40,6 +50,10 @@ export interface Preparation {
 export interface E2ePage {
   /** handshake-first-read: a new client, its first read, timed once. */
   firstRead(side: Side, ns: string): Promise<Once>;
+  /** T36: a new cache and its opening 1,500-bar read, outside the timer. */
+  scrollOpen(side: Side, ns: string): Promise<void>;
+  /** T36: post twelve scroll reads together and check every result. */
+  scrollRun(side: Side): Promise<Once>;
   /** Connects this page's client of `side` and readies the scenario. */
   prepare(preparation: Preparation): Promise<void>;
   /** The scenario's operation once, on one side. */

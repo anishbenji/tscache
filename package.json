@@ -26,6 +26,7 @@
     "fallow": "fallow audit",
     "changelog": "git-cliff -o CHANGELOG.md",
     "ci": "bash scripts/ci.sh",
+    "demo": "bun scripts/demo.ts",
     "size": "bun scripts/size.ts",
     "bench": "bun scripts/bench.ts compare",
     "bench:smoke": "bun scripts/bench.ts smoke",

@@ -3,9 +3,12 @@
 // package's client of each revision from the server (`/base/index.js`,
 // `/head/index.js`), whose SharedWorkers fetch from the Playwright suites'
 // mock backend through their fixture fetcher (e2e/pages/fetcher.js: price
-// is the timestamp, volume how often the backend was asked for the range).
-// Every operation checks what it read and throws on a wrong result, so a
-// scenario cannot quietly stop doing its work.
+// is the timestamp, volume how often the backend was asked for the range),
+// which asks for each side's format named in the page's URL.
+// live-tail-get's worker uses a fetcher that answers from memory instead
+// (/tail-fetcher.js, served by the driver), so it times the worker's own
+// work. Every operation checks what it read and throws on a wrong result,
+// so a scenario cannot quietly stop doing its work.
 
 import type * as Client from "../src/entries/index";
 import type {
@@ -19,6 +22,7 @@ import type {
 import {
   BARS,
   type E2ePage,
+  type FetcherFormat,
   type Once,
   type PageScenario,
   type Preparation,
@@ -32,6 +36,21 @@ const T0 = Date.UTC(2026, 0, 5);
 
 function config(id: string): CacheConfig {
   return { id, interval: INTERVAL, fields: { price: "f64", volume: "i16" } };
+}
+
+/**
+ * live-tail-get's cache: the newest bar of its screen (rangeOf(0)) is
+ * provisional, so every get misses it and fetches it again, as a polling
+ * live chart does. volume counts the fetches (u32: the sampler runs
+ * tens of thousands).
+ */
+function tailConfig(id: string): CacheConfig {
+  return {
+    id,
+    interval: INTERVAL,
+    fields: { price: "f64", volume: "u32" },
+    finalizedUntil: rangeOf(0).end,
+  };
 }
 
 /** The `seq`th read: BARS bars, right after the previous read's. */
@@ -59,6 +78,44 @@ function checked(got: GetResult, range: Range): number {
   return n;
 }
 
+/** The fixture fetcher's format on `side`, as the page's URL names it. */
+function formatOf(side: Side): FetcherFormat {
+  const format = new URLSearchParams(location.search).get(side) ?? "columns";
+  if (format !== "columns" && format !== "json") {
+    throw new Error(`unknown fetcher format ${format} for ${side}`);
+  }
+  return format;
+}
+
+/**
+ * The bars of a live-tail read, once checked: the screen, its newest bar
+ * still a miss (provisional), and that bar written by the cache's
+ * `fetches`th fetch (the tail fetcher's volume counts the fetches made
+ * for a cache, setup's included).
+ */
+function checkedTail(got: GetResult, range: Range, fetches: number): number {
+  const n = got.timestamps.length;
+  const price = got.fields.price as Float64Array;
+  const volume = got.fields.volume as Uint32Array;
+  const [miss] = got.misses;
+  const right =
+    n === BARS &&
+    got.timestamps[0] === range.start &&
+    got.timestamps[n - 1] === range.end &&
+    price[n - 1] === range.end &&
+    volume[n - 1] === fetches &&
+    got.misses.length === 1 &&
+    miss?.reason === "uncached" &&
+    miss.range.start === range.end &&
+    miss.range.end === range.end;
+  if (!right) {
+    throw new Error(
+      `wrong live-tail result: ${n} bars, newest bar fetched ${volume[n - 1]} times (expected ${fetches}), misses ${JSON.stringify(got.misses)}`,
+    );
+  }
+  return n;
+}
+
 /** The client entry of `side`'s revision, as the bench server serves it. */
 async function load(side: Side): Promise<typeof Client> {
   const url = `/${side}/index.js`;
@@ -69,10 +126,18 @@ async function load(side: Side): Promise<typeof Client> {
  * Options for a client of `side`, whose SharedWorker is the one named by
  * `worker` (a fresh name starts a fresh worker).
  */
-function options(side: Side, ns: string, worker: string): ClientOptions {
+function options(
+  side: Side,
+  ns: string,
+  worker: string,
+  module = "/fetcher.js",
+): ClientOptions {
   return {
     workerUrl: `/${side}/worker.js?${worker}`,
-    fetcher: { module: "/fetcher.js", context: { ns, token: "at-0" } },
+    fetcher: {
+      module,
+      context: { ns, token: "at-0", format: formatOf(side) },
+    },
   };
 }
 
@@ -112,6 +177,22 @@ function readViewport(cache: CacheHandle, entry: Prepared): AsyncOp {
   return async () => {
     entry.calls++;
     return checked(await cache.get(range), range);
+  };
+}
+
+/**
+ * A cache holding the screen; the operation gets it again, which fetches
+ * the provisional newest bar and reads the screen.
+ */
+function liveTail(cache: CacheHandle, entry: Prepared): AsyncOp {
+  const range = rangeOf(0);
+  // The setup's opening read was the cache's first fetch, so each
+  // operation must see the next count: a get that did not fetch fails.
+  let fetches = 1;
+  return async () => {
+    entry.calls++;
+    fetches++;
+    return checkedTail(await cache.get(range), range, fetches);
   };
 }
 
@@ -176,10 +257,25 @@ function lead(
 
 async function prepare(p: Preparation): Promise<void> {
   const { createClient } = await load(p.side);
-  const client = shared(await createClient(options(p.side, p.ns, p.scenario)));
-  const cache = await client.cache(config(p.id));
+  const tail = p.scenario === "live-tail-get";
+  const client = shared(
+    await createClient(
+      options(
+        p.side,
+        p.ns,
+        p.scenario,
+        tail ? "/tail-fetcher.js" : "/fetcher.js",
+      ),
+    ),
+  );
+  const cache = await client.cache(tail ? tailConfig(p.id) : config(p.id));
   const state: Prepared = { reset: async () => {}, calls: 0 };
-  if (p.scenario === "read-viewport-shared") {
+  if (tail) {
+    // The opening read is the cache's first fetch: volume 1.
+    const range = rangeOf(0);
+    checkedTail(await cache.get(range), range, 1);
+    state.op = liveTail(cache, state);
+  } else if (p.scenario === "read-viewport-shared") {
     const wide = { start: rangeOf(0).start, end: rangeOf(2).end };
     checked(await cache.get(wide), wide);
     state.op = readViewport(cache, state);
@@ -203,7 +299,54 @@ async function once(scenario: PageScenario, side: Side): Promise<Once> {
   return { ms, value };
 }
 
+// T36 (§4.9.1 rule 13): one client per side, a fresh cache and disjoint
+// history per operation. The driver gates HTTP responses in the checked run.
+const SCROLL_SCREEN = 500 * INTERVAL;
+const scrolling = new Map<
+  Side,
+  { client: TscacheClient; seq: number; cache?: CacheHandle; newest?: number }
+>();
+const scrollRange = (end: number): Range => ({
+  start: end - 2 * SCROLL_SCREEN,
+  end: end + SCROLL_SCREEN - INTERVAL,
+});
+
 const page: E2ePage = {
+  async scrollOpen(side, ns) {
+    let state = scrolling.get(side);
+    if (state === undefined) {
+      const { createClient } = await load(side);
+      state = {
+        client: shared(
+          await createClient(
+            options(side, ns, crypto.randomUUID(), "/scroll-fetcher.js"),
+          ),
+        ),
+        seq: 0,
+      };
+      scrolling.set(side, state);
+    }
+    state.newest = T0 - state.seq++ * 16 * SCROLL_SCREEN;
+    state.cache = await state.client.cache(config(crypto.randomUUID()));
+    const range = scrollRange(state.newest);
+    checked(await state.cache.get(range), range);
+  },
+  async scrollRun(side) {
+    const state = scrolling.get(side);
+    if (state?.cache === undefined || state.newest === undefined)
+      throw new Error("fast-scroll is not open");
+    const { cache, newest } = state;
+    const ranges = Array.from({ length: 12 }, (_, i) =>
+      scrollRange(newest - (i + 1) * SCROLL_SCREEN),
+    );
+    const start = performance.now();
+    const results = await Promise.all(ranges.map((range) => cache.get(range)));
+    const ms = performance.now() - start;
+    let value = 0;
+    for (const [i, got] of results.entries())
+      value += checked(got, ranges[i] as Range);
+    return { ms, value };
+  },
   async firstRead(side, ns) {
     const { createClient } = await load(side);
     const range = rangeOf(0);
