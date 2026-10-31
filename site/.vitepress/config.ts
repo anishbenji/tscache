@@ -96,6 +96,7 @@ export default defineConfig({
             { text: "Credentials and refresh", link: "/guides/auth" },
             { text: "Server rendering", link: "/guides/ssr" },
             { text: "Live feeds", link: "/guides/live-feeds" },
+            { text: "Persistence", link: "/guides/persistence" },
             { text: "Expiry and other patterns", link: "/guides/patterns" },
           ],
         },

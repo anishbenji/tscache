@@ -29,8 +29,8 @@ bun run docs:build   # builds it into site/.vitepress/dist
 - [`docs/guides/worker-setup.md`](docs/guides/worker-setup.md): serving the
   worker and fetcher with Vite, webpack or no bundler; server rendering.
 - [`docs/guides/patterns.md`](docs/guides/patterns.md): what tscache leaves to
-  the application (expiry, restatements, credentials, a lost worker) and the
-  limits to design around.
+  the application (expiry, restatements, credentials, a lost worker), the
+  limits to design around, and keeping a cache in IndexedDB across sessions.
 
 ## Examples
 

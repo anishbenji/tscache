@@ -482,6 +482,21 @@ const RUNS: Record<string, Run> = {
     checkFetched(result);
     await forgetYesterday(cache);
   },
+  async "persistence.ts"(logs) {
+    const { keepStorage, logout, openCandles, watchPersistence } =
+      await load("persistence.ts");
+    const { createClient } = await import("tscache");
+    // No workers here: the client is in-process, where persist does nothing.
+    const client = await createClient({ mode: "in-process" });
+    const unsubscribe = watchPersistence(client);
+    const { cache, persisted } = await openCandles(client);
+    check(!persisted, "an in-process client claims to persist");
+    await cache.put({ timestamps: [0], fields: { close: [1], volume: [2] } });
+    check(typeof (await keepStorage()) === "boolean", "no answer to persist()");
+    await logout(client);
+    unsubscribe();
+    check(logs.length === 0, `unexpected output: ${JSON.stringify(logs)}`);
+  },
   async "vite-config.ts"() {
     const { default: config } = await load("vite-config.ts");
     check(

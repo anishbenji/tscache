@@ -18,6 +18,7 @@ with the cache id filled in; `cache.id` is that id.
 | `version` | none | dataset version; a different one reported by a put clears the cache |
 | `finalizedUntil` | none | initial watermark; points at or after it are provisional |
 | `warnOnOverlapDiff` | `false` | report writes that change held values ([events](/concepts/events)) |
+| `persist` | `false` | keep the cache in IndexedDB across sessions, in the SharedWorker hosting only ([Persistence](/guides/persistence)) |
 
 An invalid config rejects with `ConfigError` naming the field.
 
@@ -71,6 +72,7 @@ Applies a snapshot where the cache knows nothing; see [Snapshots](/usage/snapsho
 
 ## on(event, fn)
 
-`client.on` filtered to this cache, for `cacheCleared` and `mergeWarning`. Returns the unsubscribe.
+`client.on` filtered to this cache, for `cacheCleared`, `mergeWarning` and `persistStopped`. Returns
+the unsubscribe.
 
 <<< @/snippets/cache.ts#events{ts}
