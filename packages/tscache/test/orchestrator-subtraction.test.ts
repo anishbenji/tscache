@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InvalidRangeError } from "../src/errors";
+import type { FetchRequest, FetchResponse } from "../src/types";
 import {
   authError,
   complete,
@@ -286,7 +287,7 @@ describe("N31 in-flight subtraction", () => {
     expect(h.calls).toHaveLength(2);
   });
 
-  it("T18: applied-then-wiped overlap stays uncached without a drop (locked DC-1 option a)", async () => {
+  it("T18: applied-then-wiped overlap re-plans once and completes (N29 as amended, DC-1 option b)", async () => {
     const h = harness();
     const seed = await h.connect();
     await version(h, seed, "v1");
@@ -294,13 +295,15 @@ describe("N31 in-flight subtraction", () => {
     h.call(0).answer("v1");
     complete(await x.promise, r(3, 103));
     h.call(1).answer("v2");
-    const got = await y.promise;
     await h.turn(b);
-    expect(h.calls).toHaveLength(2);
-    expect(got.misses).toEqual([miss(53, 103, "uncached")]);
-    expect(got.coverage).toEqual([r(113, 153)]);
-    expect(Array.from(got.timestamps)).toEqual([113, 123, 133, 143, 153]);
-    // DC-1 option b would instead fetch [53,113] and return a complete read.
+    // Nothing b awaited was dropped, but its own response cleared a's points
+    // before b's round ended: b plans its one second round over what is
+    // missing, with the flank into its own [113, 153].
+    expect(h.ranges()).toEqual([r(3, 103), r(113, 153), r(53, 113)]);
+    expect(y.settled()).toBe(false);
+    h.call(2).answer("v2");
+    complete(await y.promise, r(53, 153));
+    expect(h.calls).toHaveLength(3);
   });
 
   it("T19: a second-round joiner stops after its second drop, even when the issuer retries", async () => {
@@ -691,8 +694,9 @@ describe("N31 in-flight subtraction", () => {
     // follows a's by five promise reactions. a's get must read in the step
     // its round ends; an extra await before the read let b's clear wipe a's
     // point first (an uncached miss with nothing dropped). Earlier landings
-    // of b are T18's case (DC-1). The count pins today's path from a fetch's
-    // decision to the read: a change that lengthens it fails here.
+    // of b clear the cache before a's round ends, and a re-plans (N29 as
+    // amended; the sweep F5 below). The count pins today's path from a
+    // fetch's decision to the read: a change that lengthens it fails here.
     const h = harness();
     const o = await h.direct();
     const x = o.get(config.id, r(13, 13));
@@ -714,5 +718,181 @@ describe("N31 in-flight subtraction", () => {
     };
     const got = await o.get(config.id, r(3, 43));
     expect(got.misses).toEqual([miss(3, 43, "auth-pending")]);
+  });
+});
+
+// N29 as amended on 2026-10-31 (user decision #10, option B; DC-1 in
+// docs/reviews/step-44.md): a get also plans its one second round when the
+// cache was cleared while its first round waited, whether or not a fetch it
+// awaited was dropped (§4.9.1 rule 5). docs/reviews/step-47.md lists these.
+describe("N29 as amended: a clear while a get waits re-plans once", () => {
+  async function clearedWhileWaiting(h: Harness) {
+    const seed = await h.connect();
+    await version(h, seed, "v1");
+    const a = await h.connect();
+    const x = h.get(a, r(3, 103));
+    await h.turn(a);
+    const z = h.get(seed, r(203, 253));
+    await h.turn(seed);
+    expect(h.ranges()).toEqual([r(3, 103), r(203, 253)]);
+    return { seed, a, x, z };
+  }
+
+  it("F1: a get whose joined fetch is applied, then wiped by another response's clear, re-plans once and completes", async () => {
+    const h = harness();
+    const { seed, a, x, z } = await clearedWhileWaiting(h);
+    const b = await h.connect();
+    const y = h.get(b, r(33, 73));
+    await h.turn(b);
+    expect(h.calls).toHaveLength(2);
+    // One step: a's fetch applies at v1, then the other brings v2 and clears
+    // a's points before either get's round ends.
+    h.call(0).answer("v1");
+    h.call(1).answer("v2");
+    await h.turn(a);
+    await h.turn(b);
+    await h.turn(seed);
+    // a and b share the refetch: whichever re-plans first issues it.
+    const retry = h.ranges().slice(2);
+    uniqueUncovered(retry, r(3, 103));
+    expect(retry.every((q) => q.start >= 3 && q.end <= 103)).toBe(true);
+    expect(y.settled()).toBe(false);
+    for (const call of h.calls.slice(2)) call.answer("v2");
+    complete(await y.promise, r(33, 73));
+    complete(await x.promise, r(3, 103));
+    complete(await z.promise, r(203, 253));
+  });
+
+  it("F2: a get whose own fetch is applied, then wiped by another response's clear, re-plans once and completes", async () => {
+    const h = harness();
+    const { seed, a, x, z } = await clearedWhileWaiting(h);
+    h.call(0).answer("v1");
+    h.call(1).answer("v2");
+    await h.turn(a);
+    await h.turn(seed);
+    // The clearing fetch's get re-plans too; none of its range is missing.
+    expect(h.ranges()).toEqual([r(3, 103), r(203, 253), r(3, 103)]);
+    complete(await z.promise, r(203, 253));
+    expect(x.settled()).toBe(false);
+    h.call(2).answer("v2");
+    complete(await x.promise, r(3, 103));
+    expect(h.calls).toHaveLength(3);
+  });
+
+  it.each(["wiped after it applied", "dropped"])(
+    "F3: a clear during the second round is final: the range comes back uncached, with no third round (%s)",
+    async (how) => {
+      const h = harness();
+      const { seed, a, x, z } = await clearedWhileWaiting(h);
+      h.call(0).answer("v1");
+      h.call(1).answer("v2");
+      await h.turn(a);
+      expect(h.ranges()).toEqual([r(3, 103), r(203, 253), r(3, 103)]);
+      await z.promise;
+      if (how === "dropped") {
+        await version(h, seed, "v3");
+        h.call(2).answer("v2");
+      } else {
+        // Issued after the first clear, so it is applied, and its v3 clears
+        // a's second-round points before a's read.
+        const w = h.get(seed, r(303, 353));
+        await h.turn(seed);
+        expect(h.ranges().at(-1)).toEqual(r(303, 353));
+        h.call(2).answer("v2");
+        h.call(3).answer("v3");
+        complete(await w.promise, r(303, 353));
+      }
+      const got = await x.promise;
+      expect(got.misses).toEqual([miss(3, 103, "uncached")]);
+      expect(got.coverage).toEqual([]);
+      await h.turn(a);
+      await h.turn(seed);
+      expect(h.calls).toHaveLength(how === "dropped" ? 3 : 4);
+    },
+  );
+
+  it.each(["outside the range", "inside the range"])(
+    "F4: a clear while a get waits costs one re-plan and fetches only what is missing (wiped %s)",
+    async (where) => {
+      const h = harness();
+      const a = await h.connect();
+      const inside = where === "inside the range";
+      await h.put(a, inside ? r(3, 43) : r(203, 253), "v1");
+      const coverage = vi.spyOn(h.engine, "coverage");
+      const x = h.get(a, r(3, 103));
+      await h.turn(a);
+      expect(h.ranges()).toEqual([inside ? r(43, 103) : r(3, 103)]);
+      // The get's own response brings v2: its put clears the cache, then
+      // applies the response.
+      h.call(0).answer("v2");
+      await h.turn(a);
+      if (inside) {
+        // Only the wiped [3, 33], with the flank into the response's 43.
+        expect(h.ranges().slice(1)).toEqual([r(3, 43)]);
+        h.call(1).answer("v2");
+      }
+      complete(await x.promise, r(3, 103));
+      expect(h.calls).toHaveLength(inside ? 2 : 1);
+      // One coverage read per round: the first round and the one re-plan.
+      expect(coverage).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([0, 1, 2, 3, 4, 5])(
+    "F5: the R4-1 interleaving with the clearing response %i reactions after the first: both gets complete",
+    async (reactions) => {
+      const h = harness();
+      const o = await h.direct();
+      const x = o.get(config.id, r(13, 13));
+      const y = o.get(config.id, r(23, 23));
+      expect(h.calls).toHaveLength(2);
+      // A re-plan's fetch is answered as it is issued.
+      const gate = (
+        globalThis as unknown as {
+          __n31: { fetch: (q: FetchRequest) => Promise<FetchResponse> };
+        }
+      ).__n31;
+      const gated = gate.fetch;
+      gate.fetch = (request) => {
+        const answer = gated(request);
+        h.call(h.calls.length - 1).answer("v2");
+        return answer;
+      };
+      h.call(0).answer("v1");
+      for (let i = 0; i < reactions; i++) await Promise.resolve();
+      h.call(1).answer("v2");
+      complete(await x, r(13, 13));
+      complete(await y, r(23, 23));
+      // Whichever side of x's read the clear lands on, x fetches its point
+      // at most once more, with the flank into y's.
+      const later = h.ranges().slice(2);
+      expect(later.length).toBeLessThanOrEqual(1);
+      for (const q of later) expect(q).toEqual(r(13, 23));
+    },
+  );
+
+  it("F6: a get released by an auth flip after a clear re-plans under the auth gate: the wiped slots come back auth-pending", async () => {
+    const h = harness();
+    const a = await h.connect();
+    const b = await h.connect();
+    await h.put(a, r(113, 153), "v1");
+    const x = h.get(a, r(3, 153));
+    await h.turn(a);
+    expect(h.ranges()).toEqual([r(3, 113)]);
+    // A newer version clears [113, 153]; a's fetch is still out.
+    await version(h, b, "v2");
+    const z = h.get(b, r(203, 253));
+    await h.turn(b);
+    h.call(1).fail(authError());
+    const got = await x.promise;
+    expect(got.coverage).toEqual([]);
+    for (let t = 3; t <= 153; t += 10) {
+      expect(
+        got.misses.find((m) => m.range.start <= t && t <= m.range.end)?.reason,
+        `slot ${t}`,
+      ).toBe("auth-pending");
+    }
+    expect((await z.promise).misses).toEqual([miss(203, 253, "auth-pending")]);
+    expect(h.calls).toHaveLength(2);
   });
 });
