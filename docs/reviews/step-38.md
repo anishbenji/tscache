@@ -1,6 +1,6 @@
 # Step 38 — IndexedDB persistence
 
-Branch: `feat/38-persistence` · Reviewer: GPT-6.1 Sol (high) · Rounds: 6 · Status: scope narrowed to the SharedWorker hosting by the user (decision #8, 2026-10-31), design rewritten for slice (a); `clearAll` redesigned as a writer barrier after round 6, re-review pending · Verdict after triage: re-review
+Branch: `feat/38-persistence` · Reviewer: GPT-6.1 Sol (high) · Rounds: 7 (design) · Status: design settled at round 7; slice (a) implemented against Codex's contract tests ("Implementation, slice (a)" below), implementation review pending · Verdict after triage: design merge
 
 Design for keeping a cache's authoritative data in IndexedDB, so a reload or a new tab starts from what earlier sessions fetched (`docs/roadmap.md`, item 6 of the performance plan). This branch carries design text only: `docs/architecture.md` §4.10 and decision rows N45–N61. Codex writes the contract tests from §4.10 next; the implementation follows in one slice, (a), with an optional later slice (c). The director settled the plan's decision points P1–P10 with the recommended options (rows N45–N54); the design took N55–N60 with its recommended options; the user confirmed all of it on 2026-10-30 (below). After review round 2 the concurrency core was redesigned under the convergence check of `docs/workflow.md` (step 7): rows N52, N55, N57, N58 and N59 changed in substance, N60 was amended and N61 added. The user has not confirmed the redesign yet; what it changes for the user is listed under "Decision concerns after round 2". After round 4 blocked in merge mode again, the user narrowed persistence to the SharedWorker hosting on 2026-10-31 (decision #8, option A): merge mode and slice (b) are gone, and "Scope narrowed" below records what changed. Rounds 5 and 6 each found a defect in `clearAll`; under the convergence check its mechanism was redesigned as a barrier for the writer ("Round 6 redesign" below).
 
@@ -23,7 +23,21 @@ Design for keeping a cache's authoritative data in IndexedDB, so a reload or a n
 | e4b03fd | Merge of `origin/main` |
 | c1fee98 | `docs(architecture)` and `docs(review)`: round 5 fix (R5-1): no load during a pending `clearAll` (§4.10.5 rule 3, property (h2)); round 5 triage |
 | 0a94ebe | `docs(architecture)`: `clearAll` redesigned as a writer barrier (round 6, R6-1): §4.10.5 rule 3, §4.10.6 (open, the writer, scheduling, durability, flush, the `clearAll` paragraph, properties (f), (h), (h2) and (i)–(n)), §4.10.1, §4.10.9; rows N54, N58, N61 changed |
-| (this commit) | `docs(review)`: round 6 triage, the redesign and its adversarial pass, the plan's test rows for the barrier, decisions D25–D28 |
+| 46ad573 | `docs(review)`: round 6 triage, the redesign and its adversarial pass, the plan's test rows for the barrier, decisions D25–D28 |
+| fd7397c | `docs(review)`: design round 7, settled |
+| b65a0bc | `feat(engine)`: `persist` flag, change reporting (`onChange`, `onMutate`) and `CacheState.restore`, with the record types and the store interface; contract tests `config-persist`, `cache-changes`, `cache-restore`, `cache-restore-rejections` |
+| 96c7768 | `feat(persist)`: `openIdbStore`; `fake-indexeddb`; contract test `persist-store-conformance` with the `MemoryStore` helper |
+| 4a98fab | `feat(persist)`: the `Persister`; contract tests `persister-*` (eight files) with the harness |
+| 2c81a8c | `feat(worker)`: the SharedWorker hosting's persister, the RPC server wiring, `persistStopped` on the client; tests `rpc-persist`, `hosting`, `client` |
+| 69d6942 | `build(deps)`: `fake-indexeddb` moved to the package's manifest (Fallow) |
+| aa3b540 | `refactor(persist)`: smaller functions under Fallow's complexity gate |
+| 0541548 | `test(perf)`: the exact persistence budgets |
+| 53301ac | `test(e2e)`: `e2e/persist.spec.ts` |
+| d75c544 | `perf(bench)`: the `reload-first-read` scenario |
+| 700a371 | `docs`: persistence in the patterns guide, the site's persistence guide, config and event tables |
+| 532ead7 | Merge of `origin/main` (step 47, 7c9c264) |
+| 398c6cb | `chore(size)`: entry budgets reset for persistence |
+| (this commit) | `docs(review)`: the implementation notes below; the e2e scenario table in `docs/benchmarking.md` |
 
 ### Implementation plan
 
@@ -250,7 +264,7 @@ One interleaving per rule of §4.10.4–§4.10.7, each mixing a pending load, a 
 
 ## Contract-test changes
 
-None. No contract test exists yet for this step; the lists above are what Codex writes from §4.10 as redesigned.
+None. Codex's slice (a) contract tests (13 suites and 3 helpers) pass unmodified; no test was found to contradict §4.10. Earlier tests changed by the additive surface are listed under "Implementation, slice (a)".
 
 ## Decision concerns
 
@@ -440,3 +454,84 @@ For the user; the design takes the recommended option in each.
 ## Round 7 (narrowed design, `clearAll` barrier) — reviewer verdict: merge
 
 No findings; every earlier accepted finding fixed or superseded by the scope change. **Design settled.** Next: Codex contract tests for slice (a) (the list above, items 1–11), then the implementation, on this branch.
+
+## Implementation, slice (a)
+
+Against Codex's contract tests, on this branch (the plan suggested a branch of its own; the director kept the design branch). Persistence is built for the SharedWorker hosting only (D21). Module layout as §4.10 specifies:
+
+| Module | What it carries |
+|---|---|
+| `types.ts`, `engine/validate.ts`, `engine/engine.ts` | `CacheConfig.persist` (resolved `false` when omitted, `ConfigError` for a non-boolean) and `ResolvedCacheConfig.persist`; `persist` in N20's structural fields; `ClientEvents.persistStopped`. Engine forwards each cache's `onChange` and `onMutate` to observers, and exposes `cacheStateOf` and `observeCaches` to the persister; no entry exports them |
+| `engine/cache.ts` | `CacheChange`, the hooks and their calls per §4.10.4's table; every mutating call that passed validation runs through one helper that signals `onMutate` after its changes, also when it throws; `restore` with its knows-nothing precondition, the record checks of step 2, the version rule, the watermark step and the page parts; `coveredSlots` and `pageSnapshot` for the record builder |
+| `engine/merge.ts`, `engine/snapshot.ts`, `engine/read.ts` | `pageOf` and `pageRange`, the store's exact page arithmetic, now shared; `ValidSnapshot.range`; `takeSnapshot` restricted to parts (a page snapshot's segments) |
+| `persist/records.ts`, `persist/store.ts` | `CacheRecord`, `PageRecord`, `cacheRecordOf`, `pageRecordsOf` (together `recordsOf(S)`, §4.10.2); `PersistStore`, `StoredCache`, `WritePlan`, `PageRange` |
+| `persist/idb-store.ts` | `openIdbStore` (§4.10.3) |
+| `persist/persister.ts` | `Persister` (§4.10.6): open and the abandon rule, the writer, scheduling, plans, failures and the cleanup, durability, the `clearAll` barrier, `close` |
+| `rpc/server.ts`, `entries/worker.ts` | The optional persister; `cache` awaits `open`; every op naming a cache waits for `durable` when the removal count grew; `clearAll` runs both clears in one step; the flush when the last connection goes; the `persistStopped` broadcast. The SharedWorker path builds the persister when `indexedDB` exists; the dedicated path and `openInProcess` build none |
+| `client/events.ts`, `client/cache.ts` | `persistStopped` re-emitted; `CacheEvent` gains it |
+
+### Decisions made in implementation
+
+| # | Decision | Why |
+|---|---|---|
+| I1 | **Debounce against a queued request** (Codex ambiguity 1, the recommended reading). A queued flush job's due time is the earlier of its explicit requests (a removal or a `flush` call: now; a retry: the failed attempt plus `debounceMs`) and its cache's quiet spell, `min(latest change + debounceMs, first change not yet taken + maxDelayMs)`. A `write`, `version` or `watermark` change to a cache whose job is queued but not running therefore re-times the quiet spell from the latest change, still capped by `maxDelayMs` from the first unflushed change; it never moves an explicit request later. The job's deadline is the earlier of its requests' deadlines and the quiet spell's due time plus `timeoutMs`. A retry keeps its failed job's deadline (N61), also when it joins a queued job, which then takes the earlier deadline. Both are frozen when the job starts | Scheduling (§4.10.6) says a change makes the flush due "`debounceMs` after the latest such change", and that a request joining a queued job takes "the earlier due time, the earlier deadline"; reading the quiet spell as one re-timed request per cache and the rest as fixed requests satisfies both, and the scheduling and writer tests pin it |
+| I2 | **Property (d) with every write failing** (Codex ambiguity 2, the recommended reading). "Every write failing" covers the flush's attempts; the cleanup after the stop is a separate write that may succeed, and then the store holds nothing of the cache. When the cleanup fails too, the records stay | §4.10.6, Failures: the cleanup's failure is ignored and the records stay (§4.10.1, "What can outlive a removal"); the separate tests (`persister-durable`, cleanup failing or not) pin both cases |
+| I3 | **`restore` sets `rewrite` for stored records that are valid but not canonical**: a cache record whose pages apply no part (a lone cache record), a page whose range is not the hull of its coverage or that holds a point outside its coverage, page numbers that do not ascend strictly, a stored config with keys beyond the six, a cache record naming another cache id | §4.10.5 step 7 says `rewrite` is false exactly when every record was applied in full, "and then `recordsOf(S)` equals `stored`"; for these records that consequence would fail, and property (g), convergence after one flush, with it. Each check only adds a rewrite of records the format never produces; canonical records still restore with `rewrite: false` (property (a)) |
+| I4 | **A `hydrate` part whose write fails reports `remove`** over that part, as a failed `put` reports its withdrawn slots | Not in §4.10.4's table; conservative: the part's coverage is withdrawn, and the removal has its pages rewritten at once |
+| I5 | **The IndexedDB adapter walks page ranges with a cursor** (`openCursor`, then `continue([cacheId, start])`) instead of `IDBKeyRange` | The conformance suite passes `fake-indexeddb` as a factory, and its key-range class is no global under Node, so a key-range adapter would need a second code path for the suite. The cursor seeks, so pages outside the ranges and other caches' pages are not visited |
+| I6 | **`ifExists` without `IDBFactory.databases()`** (a browser that lacks it) opens, and so creates, the database | A `clearAll` must not fail, and turn persistence off for the worker (D27), because a browser cannot list databases; the cost is an empty database on such a browser |
+| I7 | **"Due at once" is a zero-delay timer.** A change, `flush`, `clearAll` and `close` only arm the writer's one timer; the writer steps synchronously from that timer and when a job, a load or a store opening settles | N58 asks the operation's own call to complete before the job starts; arming from the public methods too keeps a store call from starting inside the caller's synchronous step (a `flush` would otherwise start a write that a following `open`'s read queues behind) |
+| I8 | **`flush(id)` also waits for the cache's running job** when nothing more is dirty | Property (a): after `await flush()` the store must equal `recordsOf(S)`, which a running job's write may not have committed yet |
+| I9 | **`Persister.clearAll()` abandons a load still pending at the call** | The engine's `clear` does so (rule 2) when the caller runs `Engine.clearAll()` first, as specified; this keeps the barrier's "no load reads the disk" for a caller that does not |
+| I10 | **The server's `clearAll` runs the persister's clear even when an `Engine.clearAll` listener throws**, then rethrows | `Engine.clearAll` clears every cache before rethrowing a listener's error (N22); the disk must follow memory |
+| I11 | **Wiring shape**: `createServer(lock?, openStore?, options?)` in `entries/worker.ts`, and `RpcServer.persistStopped(event)` as the persister's `onStopped` | §4.10.8 gives the constructor, `new RpcServer(engine, lib, lock?, persister?)`; the persister's `onStopped` needs the server, which is built after it |
+| I12 | **Time** is `performance.now()`; a timer that fires early re-arms | Monotonic in workers; Vitest's fake timers fake it |
+| I13 | **`fake-indexeddb` sits in `packages/tscache`'s dev dependencies**, not the root's as the plan said | Fallow reports a dependency imported by a workspace that does not list it |
+| I14 | **`hosting.test.ts` is a new file**; the plan said "additions" | No such file existed; the hosting tests lived in `client.test.ts` and `lifetime.test.ts` |
+
+Existing tests changed by the additive surface: `cache-put.test.ts`, `engine-cache.test.ts` (two expectations) and `rpc.test.ts` assert the exact resolved config, which now carries `persist: false` (§4.10.1). Each expectation gained that field; nothing else changed.
+
+### Tests with the code
+
+- `rpc-persist.test.ts` (17): `cache` answers after the load; two ports read once; `invalidate`, `clear`, `setFinalizedUntil` back and `clearAll` answer only once durable, through a failed first write (gates, no timers); a `put` and an orchestrated `get` bringing a new version or a first watermark likewise; a non-removing `put` and `get` answer while a removal's write is held; a raw `clearAll` abandons another port's load; the last connection's dispose flushes; `persistStopped` reaches both ports through `createServer`'s wiring; a non-persisted cache never touches the store; a server without a persister answers as before; an abandoned load's rewrite deletes every page. With the server's `durable` wait removed, 8 of them fail.
+- `hosting.test.ts` (4): the SharedWorker entry over `fake-indexeddb` persists, and a second worker loads what the first flushed; the SharedWorker entry without IndexedDB, the dedicated entry and `openInProcess`, with a stub `indexedDB` that records every property read, touch nothing and emit no `persistStopped`.
+- `client.test.ts` (2): `client.on` and `cache.on` (filtered by cache) receive `persistStopped`; an unknown cache-scoped event is ignored.
+- `perf/persist.test.ts` (10): the plan's exact budgets, all within bounds. Stored bytes per bar: 36.125 (24/7), 36.126 (sessions), 36.858 (dropouts), against 36.75, 36.75 and 37.25.
+- `e2e/persist.spec.ts` (5, Chromium): a reload on a new worker URL reads from IndexedDB without a fetch; the provisional tail is fetched again; both object stores are empty after `clearAll`; another `version` fetches again; two tabs on the new worker share one load and fetch nothing.
+
+### Bench results
+
+Heavy runs under the machine's lock, on the Apple Silicon Mac, 2026-10-31. Head `532ead7` (the branch merged with `origin/main`), base `7c9c264` (`origin/main`); the scenario page is the working tree's on both sides.
+
+- **Smoke** (`bun scripts/bench.ts e2e --smoke --only reload-first-read,handshake-first-read`): passes; `reload-first-read` 8.80 ms with no fetch.
+- **Paired** (`bun scripts/bench.ts e2e --base origin/main --only reload-first-read,handshake-first-read,live-tail-get,two-tabs-one-fetch`, 20 rounds):
+
+| Scenario | Base | Head | Head/base | 95 % CI |
+|---|---:|---:|---:|---:|
+| `handshake-first-read` | 7.80 ms | 8.20 ms | 1.065 | 1.051–1.079 |
+| `reload-first-read` | 7.60 ms | 8.40 ms | 1.105 | 1.092–1.120 |
+| `two-tabs-one-fetch` | 345.3 µs | 342.6 µs | 0.992 | 0.967–1.014 |
+| `live-tail-get` | 26.0 µs | 26.3 µs | 1.009 | 0.994–1.048 |
+
+Report-only. `reload-first-read`: the head made no fetch in any run, and the base one per run, as the driver checks. The base fetches from the loopback backend, which answers in well under a millisecond, so on this machine the IndexedDB load (the database's opening in a new worker, one read transaction and the restore) costs about 0.8 ms more than the loopback fetch it replaces; on a real network the request saved is the larger cost. `handshake-first-read` is about 6.5 % slower on the head, which does not persist in that scenario: the worker bundle is larger (the persister and the adapter: 16.5 kB brotli against 12.3 before) and the SharedWorker builds a persister at start. `two-tabs-one-fetch` and `live-tail-get` show no change: both intervals hold 1.
+
+Entry sizes (`chore(size)`, 398c6cb): `index` 16,330 B, `worker` 16,928 B, `engine` 10,330 B; budgets reset by the documented rule; `fetcher` and `vite` unchanged.
+
+### Verification
+
+On the branch head before this commit (398c6cb, merged with `origin/main` 7c9c264):
+
+- `bunx vitest run`: 102 files, 2,052 tests, all pass; the 13 contract suites hold 256 of them.
+- `bun run typecheck`: passes. `bunx biome check`: clean. `bun scripts/test-clocks.ts`: 135 files clean.
+- `bun run knip`: clean. `FALLOW_AUDIT_BASE=main bun run fallow`: no issues in the changed files (three inherited unused-member warnings on `CacheHandle`, not gating).
+- `bun run build`, with publint and attw: clean. `bun scripts/size.ts`: every entry within its budget.
+- `bun run docs:check` and `bun run docs:run` (the persistence snippet included): pass.
+- `bunx playwright test --project=chromium e2e/persist.spec.ts`, under the lock: 5 passed.
+- The full gate, `bun run ci` under the lock wrapper, runs on the branch head after this commit; its result is in the implementer's report to the director.
+
+Not verified: Firefox's and Safari's IndexedDB (Playwright runs Chromium only); `extendedLifetime` and the quota stop (slice (c)); `reload-first-read` against a real network; two SharedWorkers writing during a deploy skew (§4.10.7, by design only). Not measured: the eager load's cost for a cache of many pages (§4.10.10).
+
+### Notes for the reviewer
+
+- A confirmed gap claimed over a very wide range (a `put` whose authority range spans millions of pages) gets one page record per page that holds coverage, as §4.10.2 specifies; an incremental flush skips pages outside its dirty ranges without visiting them, but a full rewrite of such a cache writes every page.
+- The worker entry now carries the persister for every app, persisting or not (`handshake-first-read` above). Loading `persist/` with a dynamic import at the first persisted `open` would recover most of it; not done, since the plan does not ask for it and it adds a module load inside the first `cache()`.
