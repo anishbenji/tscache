@@ -207,8 +207,13 @@ export class Persister {
     });
   }
 
-  /** Starts persisting a cache: loads and applies its records. Idempotent. */
-  open(cacheId: string): Promise<void> {
+  /**
+   * Starts persisting a cache: loads and applies its records. Idempotent.
+   * `startedAt` (performance.now() time, default now) starts the load's
+   * deadline earlier: the hosting's lazy loading of this module counts
+   * against the same bound (§4.10.8).
+   */
+  open(cacheId: string, startedAt?: number): Promise<void> {
     const known = this.#tracked.get(cacheId);
     if (known !== undefined) return known.opened;
     let state: CacheState;
@@ -228,9 +233,13 @@ export class Persister {
       cache.rewrite = true;
       this.#quiet(cache);
     } else {
-      cache.loadTimer = setTimeout(() => {
-        if (cache.status === "loading") this.#stop(cache, "unavailable");
-      }, this.#timeoutMs);
+      const elapsed = startedAt === undefined ? 0 : this.#now() - startedAt;
+      cache.loadTimer = setTimeout(
+        () => {
+          if (cache.status === "loading") this.#stop(cache, "unavailable");
+        },
+        Math.max(0, this.#timeoutMs - elapsed),
+      );
       void this.#load(cache);
     }
     return cache.opened;
@@ -1048,4 +1057,39 @@ export class Persister {
     }
     for (const resolve of this.#drainWaiters.splice(0)) resolve();
   }
+}
+
+/**
+ * Runs an op that names a cache (§4.10.8): when the op, or another
+ * meanwhile, recorded a removal, it answers, success or failure, only once
+ * that removal is durable or the cache's persistence stopped (N58). The
+ * hosting calls it for every op of the RPC server that names a cache.
+ */
+export function durably(
+  persister: Persister,
+  cacheId: string,
+  op: () => unknown,
+): unknown {
+  const before = persister.removals(cacheId);
+  const settle = async (): Promise<void> => {
+    if (persister.removals(cacheId) > before) {
+      await persister.durable(cacheId);
+    }
+  };
+  let result: unknown;
+  try {
+    result = op();
+  } catch (error) {
+    return settle().then(() => Promise.reject(error));
+  }
+  return Promise.resolve(result).then(
+    async (value) => {
+      await settle();
+      return value;
+    },
+    async (error: unknown) => {
+      await settle();
+      throw error;
+    },
+  );
 }

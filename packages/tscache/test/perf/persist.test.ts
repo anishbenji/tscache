@@ -7,6 +7,7 @@ import {
   series,
 } from "../../bench/fixtures";
 import { Engine } from "../../src/engine/engine";
+import { HostedPersistence } from "../../src/persist/hosted";
 import { Persister } from "../../src/persist/persister";
 import { PortClient } from "../../src/rpc/port-client";
 import type { MessagePortLike } from "../../src/rpc/protocol";
@@ -163,10 +164,13 @@ describe("a chart scrolling back after a reload (counters.test.ts)", () => {
   async function session(store: MemoryStore) {
     const engine = new Engine();
     let server: RpcServer | undefined;
-    const persister = new Persister(engine, async () => store, {
-      onStopped: (event) => server?.persistStopped(event),
-    });
-    server = new RpcServer(engine, "0.0.0", undefined, persister);
+    const persistence = new HostedPersistence(
+      engine,
+      () => import("../../src/persist/lazy"),
+      async () => store,
+      { onStopped: (event) => server?.persistStopped(event) },
+    );
+    server = new RpcServer(engine, "0.0.0", undefined, persistence);
     const channel = new MessageChannel();
     server.attach(channel.port1 as MessagePortLike);
     const client = await PortClient.connect(channel.port2 as MessagePortLike, {
@@ -175,6 +179,8 @@ describe("a chart scrolling back after a reload (counters.test.ts)", () => {
     clients.push(client);
     const cache = { ...candleConfig("scroll"), persist: true };
     await client.request("cache", cache);
+    const persister = persistence.persister;
+    if (persister === undefined) throw new Error("the persister did not load");
     const get = (range: Range) =>
       client.request("get", { cacheId: cache.id, range });
     return { get, persister };

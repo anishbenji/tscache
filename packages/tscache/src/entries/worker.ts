@@ -4,12 +4,12 @@
 // SharedWorker: one server, each connecting port attached once the
 // worker holds its lifetime lock (N32), whose name hello reports. Only the
 // SharedWorker persists (§4.10.8, N52): one engine is then the only writer
-// of its origin's database.
+// of its origin's database. The persister and the IndexedDB adapter are a
+// chunk of their own, loaded at the first persisted cache.
 
 import { Engine } from "../engine/engine";
-import { openIdbStore } from "../persist/idb-store";
-import { Persister, type PersisterOptions } from "../persist/persister";
-import type { PersistStore } from "../persist/store";
+import { HostedPersistence, type OpenStore } from "../persist/hosted";
+import type { PersisterOptions } from "../persist/persister";
 import { holdLifetimeLock, lockManager } from "../rpc/lifetime";
 import type { MessagePortLike } from "../rpc/protocol";
 import { RpcServer } from "../rpc/server";
@@ -30,13 +30,13 @@ function dedicatedWorkerScope(): MessagePortLike | undefined {
   return dedicated ? (scope as MessagePortLike) : undefined;
 }
 
-type OpenStore = (options?: {
-  ifExists?: boolean;
-}) => Promise<PersistStore | undefined>;
+/** The lazily loaded persistence chunk (persist/lazy.ts). */
+const lazyPersist = () => import("../persist/lazy");
 
 /**
  * Builds the engine and server; exported for tests. With `openStore`, the
- * server persists through a Persister whose stops it broadcasts (§4.10.8).
+ * server persists through a lazily loaded Persister whose stops it
+ * broadcasts (§4.10.8).
  */
 export function createServer(
   lock?: string,
@@ -46,19 +46,30 @@ export function createServer(
   const engine = new Engine();
   if (openStore === undefined) return new RpcServer(engine, LIB_VERSION, lock);
   let server: RpcServer | undefined;
-  const persister = new Persister(engine, openStore, {
+  const persistence = new HostedPersistence(engine, lazyPersist, openStore, {
     ...options,
     onStopped: (event) => server?.persistStopped(event),
   });
-  server = new RpcServer(engine, LIB_VERSION, lock, persister);
+  server = new RpcServer(engine, LIB_VERSION, lock, persistence);
   return server;
 }
 
-/** IndexedDB, when this realm has it: what the SharedWorker persists to. */
+/**
+ * IndexedDB, when this realm has it: what the SharedWorker persists to.
+ * Only its presence is checked at start; the factory is read when the
+ * store first opens, since the getter costs a worker's start time and an
+ * app that persists nothing never needs it. The adapter is in the lazy
+ * chunk, which the persister has loaded by then.
+ */
 function idbStore(): OpenStore | undefined {
-  const factory = (globalThis as { indexedDB?: IDBFactory }).indexedDB;
-  if (factory === undefined) return undefined;
-  return (options) => openIdbStore(factory, options);
+  if (!("indexedDB" in globalThis)) return undefined;
+  return (options) =>
+    lazyPersist().then((chunk) =>
+      chunk.openIdbStore(
+        (globalThis as unknown as { indexedDB: IDBFactory }).indexedDB,
+        options,
+      ),
+    );
 }
 
 /** The SharedWorker global, when this module runs inside one. */
