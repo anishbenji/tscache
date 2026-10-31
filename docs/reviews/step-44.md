@@ -1,6 +1,6 @@
 # Step 44 — In-flight subtraction (N31)
 
-Branch: `feat/44-inflight-subtraction` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 (design) + 1 (implementation) · Status: implementation round 1 triaged, awaiting round 2 · Verdict after triage: design merge
+Branch: `feat/44-inflight-subtraction` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 (design) + 2 (implementation) · Status: implementation round 2 triaged, awaiting round 3 · Verdict after triage: design merge
 
 Design for subtracting the fetches already in flight from a `get`'s misses, so overlapping reads share fetches instead of each fetching its whole miss (`docs/roadmap.md` N31; item 7 of the performance plan). This branch carries design text only: `docs/architecture.md` §4.9.1 and decision rows N31 (resolved) and N62–N65. Codex reviews the design next, then writes the contract tests listed below from §4.9.1; the implementation follows, strict test-first. The user deferred N31 on 2026-10-08; the director's standing grant approved the plan's recommendation to build it.
 
@@ -19,7 +19,8 @@ Design for subtracting the fetches already in flight from a `get`'s misses, so o
 | e2ab6df | `chore(size)`: the worker entry's brotli budget raised to 12,576 B (measured 12,063 B + 512 B, docs/benchmarking.md); the step adds about 320 B and main had 125 B of headroom |
 | d70ce3b | This file: the scope rows above |
 | 9b75621 | Merge of `origin/main` (the demo hub, chore 28 and the chore 43 bench gate); clean, and `bun run ci` passed on the merge |
-| (this commit) | Implementation round 1 (review round 3): a fetcher that throws synchronously is decided after a turn; two regression tests |
+| eba96b7 | Implementation round 1 (review round 3): a fetcher that throws synchronously is decided after a turn; two regression tests |
+| (this commit) | Implementation round 2 (review round 4): a get reads in the step its last round ends; one regression test |
 
 ## Implementation plan
 
@@ -189,6 +190,14 @@ Bars served by `fast-scroll`: checked run, base 18,003 and head 7,501; every one
 | # | Sev | Finding | Decision | Resolution |
 |---|---|---|---|---|
 | R3-1 | P0 | A fetcher whose `fetch` throws synchronously (`fetch() { throw new Error("offline") }`) makes `get()` reject with `ReferenceError: Cannot access 'entry' before initialization`: `#run` catches the throw and runs `leave()` in its `finally` before its first await, while `#issue` is still initializing the entry. A `get` must never reject for data availability (checklist §6) | accepted | Reproduced. Fixed by the director: `#run` turns a synchronous throw from the fetcher (or from cloning its context) into a rejected promise and awaits it, so the outcome is decided after a turn, like any rejection: the entry is initialized and listed first, and leaves the list in the deciding step as rule 1 says. The fetcher is still called synchronously within the round. Before the fix, an entry decided this way would also have been listed after it had left, stranding it for later gets to join. Tests first (`orchestrator-subtraction.test.ts`, two "R3-1 regression" cases): an ordinary throw fails its range with `'fetch-failed'` and the next `get` issues a new fetch and completes; a throw carrying the auth marker leaves the get `'auth-pending'`. The first failed with the reviewer's `ReferenceError` before the fix; both pass after it, with the 81 orchestrator tests |
+
+## Implementation round 2 (review round 4) — reviewer verdict: block
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P0 | `get` awaited `#rounds(...)` and then read, so the async return added promise reactions between the last round's end and the read, against rule 4 ("no await between the final round and its read"). Two gets over `[13, 13]` and `[23, 23]` whose responses land five reactions apart, the second with a new version: the first get's point is applied, then wiped by the second response's clear before the first get reads, which returns `'uncached'` with nothing dropped | accepted | Reproduced. Fixed by the director: `#rounds` takes the read as a callback and calls it in the step its last round ends (also on the gated and nothing-to-await paths), so `get` returns `#rounds`' promise with no await of its own. Test first (`orchestrator-subtraction.test.ts`, "R4-1 regression", the reviewer's interleaving): it failed on the old code and passes on the fix, with the 82 orchestrator tests. A probe over 0–14 reactions between the two responses showed the first get keeping its point from 6 reactions on before the fix and from 5 after it; the landings before that are T18's applied-then-wiped case, which the design keeps under N29 as written (DC-1, parked for the user as pending decision #10) |
+
+**Convergence check, director's call.** Rounds 3 and 4 both found the get path's sequencing across awaits (R3-1: an outcome decided before its entry was listed; R4-1: a read one async return after its round). So the class was audited rather than the instance patched: the get path now has exactly three awaits, each where §4.9.1 puts one: `#run` awaits the fetcher's answer and decides the outcome, lists nothing and removes the entry in the continuation (rule 1); `#rounds` awaits `#awaitFetches` once per round and, in the continuation of its last round, reads (rule 4); `#awaitFetches` awaits the race of the outcomes against an auth flip (§4.9 design y). No other await or `.then` lies between a decision and the read. The remaining reactions inside `#awaitFetches` (`Promise.all`, `Promise.race`) are the awaiting itself; closing that window would need the read inside each fetch's decision step or DC-1's option (b), both beyond this step. If round 5 finds the get path's sequencing again, the director escalates instead of patching.
 
 ## Contract-test changes
 

@@ -686,6 +686,25 @@ describe("N31 in-flight subtraction", () => {
     complete(await retry, r(3, 43));
   });
 
+  it("R4-1 regression: a get reads in the step its last round ends, before another fetch's version clear lands", async () => {
+    // The reviewer's interleaving: b's response, carrying a new version,
+    // follows a's by five promise reactions. a's get must read in the step
+    // its round ends; an extra await before the read let b's clear wipe a's
+    // point first (an uncached miss with nothing dropped). Earlier landings
+    // of b are T18's case (DC-1). The count pins today's path from a fetch's
+    // decision to the read: a change that lengthens it fails here.
+    const h = harness();
+    const o = await h.direct();
+    const x = o.get(config.id, r(13, 13));
+    const y = o.get(config.id, r(23, 23));
+    expect(h.calls).toHaveLength(2);
+    h.call(0).answer("v1");
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    h.call(1).answer("v2");
+    complete(await x, r(13, 13));
+    complete(await y, r(23, 23));
+  });
+
   it("R3-1 regression: a fetcher that throws the auth marker leaves the get pending auth, not rejected", async () => {
     const h = harness();
     const o = await h.direct();

@@ -394,31 +394,32 @@ export class Orchestrator {
       return this.#engine.get(cacheId, range, options);
     }
     const grid = this.#engine.configOf(cacheId);
-    const settled = await this.#rounds(
-      cacheId,
-      snapOut(range, grid),
-      requestId,
-    );
-    // The only read: its result and `options.snapshot` come from one state
-    // (§2.8, N36), with no await between the last fetch and it.
-    const result = this.#engine.get(cacheId, range, options);
-    return {
-      ...result,
-      misses: result.misses.flatMap((m) => annotate(m, settled, grid)),
-    };
+    return this.#rounds(cacheId, snapOut(range, grid), requestId, (settled) => {
+      // The only read: its result and `options.snapshot` come from one state
+      // (§2.8, N36). #rounds calls it in the step its last round ends, with
+      // no await between the last fetch and it (§4.9.1 rule 4).
+      const result = this.#engine.get(cacheId, range, options);
+      return {
+        ...result,
+        misses: result.misses.flatMap((m) => annotate(m, settled, grid)),
+      };
+    });
   }
 
   /**
-   * A get's rounds: every fetch it awaited, with its outcome, in round
-   * order. Two rounds at most: the second runs after a fence drop and asks
-   * for what is still missing, minus what already failed (N29, rule 5).
-   * Nothing is awaited when a round has nothing to await.
+   * A get's rounds, then its read: `read` gets every fetch the get awaited,
+   * with its outcome, in round order, and runs in the same synchronous step
+   * as the last round's end, so no other fetch lands between them. Two
+   * rounds at most: the second runs after a fence drop and asks for what is
+   * still missing, minus what already failed (N29, rule 5). Nothing is
+   * awaited when a round has nothing to await.
    */
   async #rounds(
     cacheId: string,
     request: SlotRange,
     requestId: string | undefined,
-  ): Promise<Settled[]> {
+    read: (settled: Settled[]) => GetResult,
+  ): Promise<GetResult> {
     const settled: Settled[] = [];
     let blocked: SlotRange[] = [];
     for (let round = 0; round < 2; round++) {
@@ -437,7 +438,7 @@ export class Orchestrator {
       if (round === 1 || !outcomes.some((o) => o.kind === "dropped")) break;
       blocked = blockedBy(settled);
     }
-    return settled;
+    return read(settled);
   }
 
   /**
