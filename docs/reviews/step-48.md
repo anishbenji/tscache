@@ -81,7 +81,7 @@ Every interval contains 1: no change, as expected. The scenarios run over the lo
 | `bun run fallow` | no issues in the changed files |
 | `E2E_EXAMPLES= bunx playwright test e2e/client.spec.ts --project chromium` | 7 passed |
 | `bun scripts/size.ts` | every entry within budget (table above) |
-| `bun run ci` | see the final report of this step |
+| `bun run ci` (heavy-job lock, on `0350e63`) | exit 0: Vitest 1,770 passed, Playwright 153 passed (chromium, examples with the SSR apps, demo), sizes within budget, bench and e2e smokes ok |
 
 ## Not verified
 
