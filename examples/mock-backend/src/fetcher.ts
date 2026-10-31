@@ -2,7 +2,11 @@
 // (docs/architecture.md §2.5). A cache id names the series as
 // `<dataset>/<symbol>`, optionally followed by more segments that only keep
 // ids apart (`candles/ACME/30m`). The backend answers in pages; a fetcher
-// must return the whole requested range, so it loops over them.
+// must return the whole requested range, so it loops over them. It asks for
+// pages as columns bodies (src/columns.ts), which decode without parsing a
+// number, and reads JSON from a backend that answers JSON anyway, page by
+// page: each page is normalized as it arrives, and the pages are joined by
+// the one rule table in src/columns.ts, whatever mix of formats they came in.
 
 import {
   AuthInvalidError,
@@ -10,6 +14,15 @@ import {
   type FetchRequest,
   type FetchResponse,
 } from "tscache/fetcher";
+import {
+  COLUMNS_TYPE,
+  decodeColumns,
+  fromColumns,
+  fromJson,
+  isColumnsType,
+  joinPages,
+  type NormalPage,
+} from "./columns";
 import { type FetchNotice, postFetchNotice } from "./notices";
 
 /** The fetcher context the examples pass to createClient and updateAuth. */
@@ -22,13 +35,22 @@ export interface ExampleContext {
    * examples pass the address they listen on.
    */
   origin?: string;
+  /**
+   * How to ask for pages: as columns bodies (the default) or as JSON, for
+   * comparing the two.
+   */
+  format?: "columns" | "json";
 }
 
-interface Page {
-  timestamps: number[];
-  fields: Record<string, number[]>;
+/** What the backend's pages carry besides their columns. */
+interface PageMembers {
   meta: { version: string; finalizedUntil: number };
   next?: number;
+}
+
+/** One page: its columns normalized, whatever its format, and its members. */
+interface Page extends PageMembers {
+  columns: NormalPage;
 }
 
 function stringIn(context: unknown, key: keyof ExampleContext) {
@@ -59,21 +81,35 @@ async function fetchPage(
   const url = `${path}?${query}`;
   const origin = stringIn(request.context, "origin");
   const token = stringIn(request.context, "token");
+  const headers: Record<string, string> = {};
+  if (token !== undefined) headers.authorization = `Bearer ${token}`;
+  if (stringIn(request.context, "format") !== "json") {
+    headers.accept = `${COLUMNS_TYPE}, application/json;q=0.5`;
+  }
   const response = await fetch(
     origin === undefined ? url : new URL(url, origin),
-    {
-      headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
-    },
+    { headers },
   );
   if (response.status === 401) {
     throw new AuthInvalidError("the backend refused the access token");
   }
   if (!response.ok) throw new Error(`the backend answered ${response.status}`);
-  return (await response.json()) as Page;
+  if (!isColumnsType(response.headers.get("content-type"))) {
+    const body = (await response.json()) as PageMembers;
+    return { columns: fromJson(body), meta: body.meta, ...nextOf(body) };
+  }
+  // Views over the body: no value is parsed or copied.
+  const decoded = decodeColumns(await response.arrayBuffer());
+  const members = decoded.header as unknown as PageMembers;
+  return {
+    columns: fromColumns(decoded),
+    meta: members.meta,
+    ...nextOf(members),
+  };
 }
 
-function append(target: number[], values: readonly number[]): void {
-  for (const value of values) target.push(value);
+function nextOf({ next }: PageMembers): { next?: number } {
+  return next === undefined ? {} : { next };
 }
 
 /**
@@ -87,27 +123,26 @@ async function collect(
 ): Promise<FetchResponse | undefined> {
   let page = await fetchPage(path, request, request.range.start);
   const { version } = page.meta;
-  const timestamps: number[] = [];
-  // No prototype, so a field named `constructor` or `__proto__` is a key
-  // like any other rather than an inherited member.
-  const fields: Record<string, number[]> = Object.create(null);
+  const pages: Page[] = [];
   // The earliest watermark of all pages: a later page was answered later,
   // and its watermark would claim an earlier page's provisional points.
   let finalizedUntil = page.meta.finalizedUntil;
   for (;;) {
     counted();
     if (page.meta.version !== version) return undefined;
-    append(timestamps, page.timestamps);
-    for (const [name, values] of Object.entries(page.fields)) {
-      fields[name] ??= [];
-      append(fields[name], values);
-    }
+    pages.push(page);
     finalizedUntil = Math.min(finalizedUntil, page.meta.finalizedUntil);
-    if (page.next === undefined) {
-      return { timestamps, fields, meta: { version, finalizedUntil } };
-    }
+    if (page.next === undefined) break;
     page = await fetchPage(path, request, page.next);
   }
+  // One rule for every mix of formats, and names compared one by one
+  // (src/columns.ts, "join").
+  const { timestamps, fields } = joinPages(pages.map((p) => p.columns));
+  return {
+    timestamps,
+    fields,
+    meta: { version, finalizedUntil },
+  };
 }
 
 async function fetchRange(

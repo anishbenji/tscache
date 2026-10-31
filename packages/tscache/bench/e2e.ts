@@ -3,7 +3,8 @@
 // package's client of each revision from the server (`/base/index.js`,
 // `/head/index.js`), whose SharedWorkers fetch from the Playwright suites'
 // mock backend through their fixture fetcher (e2e/pages/fetcher.js: price
-// is the timestamp, volume how often the backend was asked for the range).
+// is the timestamp, volume how often the backend was asked for the range),
+// which asks for each side's format named in the page's URL.
 // live-tail-get's worker uses a fetcher that answers from memory instead
 // (/tail-fetcher.js, served by the driver), so it times the worker's own
 // work. Every operation checks what it read and throws on a wrong result,
@@ -21,6 +22,7 @@ import type {
 import {
   BARS,
   type E2ePage,
+  type FetcherFormat,
   type Once,
   type PageScenario,
   type Preparation,
@@ -76,6 +78,15 @@ function checked(got: GetResult, range: Range): number {
   return n;
 }
 
+/** The fixture fetcher's format on `side`, as the page's URL names it. */
+function formatOf(side: Side): FetcherFormat {
+  const format = new URLSearchParams(location.search).get(side) ?? "columns";
+  if (format !== "columns" && format !== "json") {
+    throw new Error(`unknown fetcher format ${format} for ${side}`);
+  }
+  return format;
+}
+
 /**
  * The bars of a live-tail read, once checked: the screen, its newest bar
  * still a miss (provisional), and that bar written by the cache's
@@ -123,7 +134,10 @@ function options(
 ): ClientOptions {
   return {
     workerUrl: `/${side}/worker.js?${worker}`,
-    fetcher: { module, context: { ns, token: "at-0" } },
+    fetcher: {
+      module,
+      context: { ns, token: "at-0", format: formatOf(side) },
+    },
   };
 }
 
