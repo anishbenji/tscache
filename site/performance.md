@@ -18,9 +18,10 @@ summarises them.
 - **Lookups:** a read among 8,192 single-point segments looks at 14 of them; a scan would read all.
 
 These are exact budgets: they count rather than time, and a pull request that exceeds one fails. So
-does one that grows an entry past its compressed size budget: `tscache` is about 13.7 kB,
-`tscache/worker` 11.1 kB, `tscache/engine` 8.8 kB, `tscache/fetcher` 0.14 kB and `tscache/vite`
-0.95 kB (Brotli, minified, measured 2026-10-26).
+does one that grows an entry past its compressed size budget: `tscache` is about 4.4 kB, plus
+11.1 kB for the in-process hosting it loads only when a client runs in the page,
+`tscache/worker` 11.8 kB, `tscache/engine` 9.1 kB, `tscache/fetcher` 0.14 kB and `tscache/vite`
+0.95 kB (Brotli, minified, measured 2026-10-31).
 
 ## How fast
 
