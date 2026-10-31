@@ -50,7 +50,11 @@ export interface E2eRun {
   fetchers: Readonly<Record<Side, FetcherFormat>>;
 }
 
-type Scenario = "handshake-first-read" | "fast-scroll" | PageScenario;
+type Scenario =
+  | "handshake-first-read"
+  | "reload-first-read"
+  | "fast-scroll"
+  | PageScenario;
 
 /** The scenarios, in the order run, with what each times. */
 const SCENARIOS: Readonly<Record<Scenario, string>> = {
@@ -58,6 +62,8 @@ const SCENARIOS: Readonly<Record<Scenario, string>> = {
     "T36: twelve overlapping reads with responses held, exactly 7,501 bars served; timing report-only",
   "handshake-first-read":
     "a new tab creates a client, connects to a new SharedWorker and reads 1,500 bars it fetches",
+  "reload-first-read":
+    "a reload: a new tab and a new SharedWorker read 1,500 bars an earlier worker persisted; the head loads them from IndexedDB without a fetch, the base fetches",
   "read-viewport-shared":
     "get 1,500 cached bars through a SharedWorker: the port round trip and the transfer",
   "two-tabs-one-fetch":
@@ -285,6 +291,96 @@ async function firstReads(d: Driver): Promise<E2eResult> {
     return result("handshake-first-read", {
       sample: summarise(base, head, 1),
     });
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * reload-first-read: per run, a setup page reads the bars into a persisted
+ * cache of its own (one fetch) and disposes its client, so its worker
+ * writes them at once; the driver waits until IndexedDB holds them (the
+ * head; the base persists nothing). Then a new page, with a worker URL no
+ * earlier run used, creates a client, opens the cache and reads the same
+ * bars, timed in the page from createClient. The head must not fetch; the
+ * base, which ignores `persist`, fetches the bars again. Paired like
+ * handshake-first-read: one run a batch.
+ */
+async function reloadReads(d: Driver): Promise<E2eResult> {
+  const context = await d.browser.newContext();
+  const api = (page: Page) => ({
+    setup: (side: Side, ns: string, id: string) =>
+      page.evaluate(
+        ([s, n, i]) =>
+          (
+            globalThis as unknown as { tscacheE2e: E2ePage }
+          ).tscacheE2e.reloadSetup(s, n, i),
+        [side, ns, id] as const,
+      ),
+    stored: (id: string) =>
+      page.evaluate(
+        (i) =>
+          (
+            globalThis as unknown as { tscacheE2e: E2ePage }
+          ).tscacheE2e.storedPages(i),
+        id,
+      ),
+    read: (side: Side, ns: string, id: string) =>
+      page.evaluate(
+        ([s, n, i]) =>
+          (
+            globalThis as unknown as { tscacheE2e: E2ePage }
+          ).tscacheE2e.reloadRead(s, n, i),
+        [side, ns, id] as const,
+      ),
+  });
+  const once = async (side: Side): Promise<Once> => {
+    const ns = randomUUID();
+    const id = randomUUID();
+    const setup = await open(context, d.pageUrl);
+    try {
+      await api(setup).setup(side, ns, id);
+      if (side === "head") {
+        await expect.poll(() => api(setup).stored(id)).toBeGreaterThan(0);
+      }
+    } finally {
+      await setup.close();
+    }
+    const page = await open(context, d.pageUrl);
+    try {
+      const run = await api(page).read(side, ns, id);
+      const seen = Object.values(await fetches(d.origin, ns));
+      const expected = side === "head" ? 1 : 2;
+      if (seen.length !== 1 || seen[0] !== expected) {
+        throw new Error(
+          `reload-first-read ${side}: the bars were fetched ${JSON.stringify(seen)} times, expected ${expected}`,
+        );
+      }
+      return run;
+    } finally {
+      await page.close();
+    }
+  };
+  try {
+    if (d.sides.length === 1) {
+      return result("reload-first-read", await once("head"));
+    }
+    for (let i = 0; i < 2; i++) {
+      await once("base");
+      await once("head");
+    }
+    const base: number[] = [];
+    const head: number[] = [];
+    for (let round = 0; round < d.rounds; round++) {
+      if (round % 2 === 0) {
+        base.push((await once("base")).ms);
+        head.push((await once("head")).ms);
+      } else {
+        head.push((await once("head")).ms);
+        base.push((await once("base")).ms);
+      }
+    }
+    return result("reload-first-read", { sample: summarise(base, head, 1) });
   } finally {
     await context.close();
   }
@@ -532,9 +628,11 @@ export async function runE2e(run: E2eRun): Promise<E2eResult[]> {
       results.push(
         scenario === "handshake-first-read"
           ? await firstReads(d)
-          : scenario === "fast-scroll"
-            ? await fastScroll(d)
-            : await inPage(d, scenario),
+          : scenario === "reload-first-read"
+            ? await reloadReads(d)
+            : scenario === "fast-scroll"
+              ? await fastScroll(d)
+              : await inPage(d, scenario),
       );
     }
     return results;

@@ -8,8 +8,8 @@ import type { Sample } from "./sample";
 export type Side = "base" | "head";
 
 /**
- * The scenarios timed inside one page; handshake-first-read takes a new
- * page per run (scripts/bench-e2e.ts).
+ * The scenarios timed inside one page; handshake-first-read and
+ * reload-first-read take new pages per run (scripts/bench-e2e.ts).
  */
 export type PageScenario =
   | "read-viewport-shared"
@@ -50,6 +50,21 @@ export interface Preparation {
 export interface E2ePage {
   /** handshake-first-read: a new client, its first read, timed once. */
   firstRead(side: Side, ns: string): Promise<Once>;
+  /**
+   * reload-first-read's setup: a new client and SharedWorker read the bars
+   * into the persisted cache `id` (one fetch), then the client is disposed.
+   */
+  reloadSetup(side: Side, ns: string, id: string): Promise<void>;
+  /**
+   * The page records the origin's IndexedDB holds for cache `id`; 0 when
+   * there is no database (none is created).
+   */
+  storedPages(id: string): Promise<number>;
+  /**
+   * reload-first-read: a new client and SharedWorker open the persisted
+   * cache `id` and read the setup's bars, timed from createClient.
+   */
+  reloadRead(side: Side, ns: string, id: string): Promise<Once>;
   /** T36: a new cache and its opening 1,500-bar read, outside the timer. */
   scrollOpen(side: Side, ns: string): Promise<void>;
   /** T36: post twelve scroll reads together and check every result. */

@@ -39,6 +39,14 @@ function config(id: string): CacheConfig {
 }
 
 /**
+ * reload-first-read's cache: kept in IndexedDB (§4.10). The base, from
+ * before persistence, ignores the flag and fetches again.
+ */
+function persistedConfig(id: string): CacheConfig {
+  return { ...config(id), persist: true };
+}
+
+/**
  * live-tail-get's cache: the newest bar of its screen (rangeOf(0)) is
  * provisional, so every get misses it and fetches it again, as a polling
  * live chart does. volume counts the fetches (u32: the sampler runs
@@ -353,6 +361,48 @@ const page: E2ePage = {
     const start = performance.now();
     const client = await createClient(options(side, ns, crypto.randomUUID()));
     const cache = await client.cache(config(crypto.randomUUID()));
+    const got = await cache.get(range);
+    const ms = performance.now() - start;
+    shared(client);
+    return { ms, value: checked(got, range) };
+  },
+  async reloadSetup(side, ns, id) {
+    const { createClient } = await load(side);
+    const range = rangeOf(0);
+    const client = shared(
+      await createClient(options(side, ns, crypto.randomUUID())),
+    );
+    const cache = await client.cache(persistedConfig(id));
+    checked(await cache.get(range), range);
+    // The worker's last connection goes, so it writes at once (§4.10.8).
+    await client.dispose();
+  },
+  async storedPages(id) {
+    const listed = await indexedDB.databases();
+    if (!listed.some((info) => info.name === "tscache")) return 0;
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("tscache");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const pages = db.transaction("pages").objectStore("pages");
+      const range = IDBKeyRange.bound([id, -Infinity], [id, Infinity]);
+      return await new Promise<number>((resolve, reject) => {
+        const request = pages.count(range);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } finally {
+      db.close();
+    }
+  },
+  async reloadRead(side, ns, id) {
+    const { createClient } = await load(side);
+    const range = rangeOf(0);
+    const start = performance.now();
+    const client = await createClient(options(side, ns, crypto.randomUUID()));
+    const cache = await client.cache(persistedConfig(id));
     const got = await cache.get(range);
     const ms = performance.now() - start;
     shared(client);
