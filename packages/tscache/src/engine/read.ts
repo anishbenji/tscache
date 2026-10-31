@@ -16,7 +16,10 @@ import type { Dtype, GetResult } from "../types";
 type Schema = Readonly<Record<string, Dtype>>;
 
 /** Index of the first segment ending at or after `slot`. */
-function firstEndingFrom(segments: readonly Segment[], slot: number): number {
+export function firstEndingFrom(
+  segments: readonly Segment[],
+  slot: number,
+): number {
   let lo = 0;
   let hi = segments.length;
   while (lo < hi) {

@@ -94,10 +94,11 @@ function validateFinalizedUntil(value: unknown): number | undefined {
   return value;
 }
 
-function validateWarnFlag(value: unknown): boolean {
+/** An optional boolean flag, false when omitted. */
+function validateFlag(value: unknown, what: string): boolean {
   if (value === undefined) return false;
   if (typeof value !== "boolean") {
-    fail(`warnOnOverlapDiff must be a boolean when set, got ${show(value)}`);
+    fail(`${what} must be a boolean when set, got ${show(value)}`);
   }
   return value;
 }
@@ -130,7 +131,11 @@ export function resolveCacheConfig(config: CacheConfig): ResolvedCacheConfig {
       config.segmentSlotCap === undefined
         ? DEFAULT_SEGMENT_SLOT_CAP
         : validateSegmentSlotCap(config.segmentSlotCap),
-    warnOnOverlapDiff: validateWarnFlag(config.warnOnOverlapDiff),
+    warnOnOverlapDiff: validateFlag(
+      config.warnOnOverlapDiff,
+      "warnOnOverlapDiff",
+    ),
+    persist: validateFlag(config.persist, "persist"),
     ...(version !== undefined ? { version } : {}),
     ...(finalizedUntil !== undefined ? { finalizedUntil } : {}),
   };

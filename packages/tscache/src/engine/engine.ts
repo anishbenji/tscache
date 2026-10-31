@@ -16,7 +16,7 @@ import type {
   ResolvedCacheConfig,
   Snapshot,
 } from "../types";
-import { CacheState } from "./cache";
+import { type CacheChange, CacheState } from "./cache";
 import { Emitter } from "./emitter";
 import { resolveCacheConfig } from "./validate";
 
@@ -36,6 +36,7 @@ const STRUCTURAL = [
   "gapSplitK",
   "segmentSlotCap",
   "warnOnOverlapDiff",
+  "persist",
 ] as const;
 
 function sameFields(
@@ -67,9 +68,47 @@ function assertCompatible(
   }
 }
 
+/**
+ * Observes what every cache's mutations change (§4.10.4): the persister's
+ * view of the engine. Called synchronously inside the mutating call.
+ */
+export interface CacheObserver {
+  onChange(cacheId: string, change: CacheChange): void;
+  onMutate(cacheId: string): void;
+}
+
+/** Internal access for the persister (§4.10.4); set by Engine's static block. */
+let stateOf: (engine: Engine, cacheId: string) => CacheState;
+let addObserver: (engine: Engine, observer: CacheObserver) => void;
+
+/**
+ * A cache's state, for the persister only (§4.10.4): no package entry
+ * exports this. Throws UnknownCacheError for an unknown id.
+ */
+export function cacheStateOf(engine: Engine, cacheId: string): CacheState {
+  return stateOf(engine, cacheId);
+}
+
+/**
+ * Subscribes to the changes and mutations of every cache of the engine,
+ * present and future (§4.10.4). For the persister only: no package entry
+ * exports this.
+ */
+export function observeCaches(engine: Engine, observer: CacheObserver): void {
+  addObserver(engine, observer);
+}
+
 export class Engine {
   readonly #caches = new Map<string, CacheState>();
   readonly #events = new Emitter<EngineEvents>();
+  readonly #observers: CacheObserver[] = [];
+
+  static {
+    stateOf = (engine, cacheId) => engine.#state(cacheId);
+    addObserver = (engine, observer) => {
+      engine.#observers.push(observer);
+    };
+  }
 
   /**
    * Get-or-create (N4, N20). Returns the resolved config the cache was
@@ -82,8 +121,16 @@ export class Engine {
       assertCompatible(live.config, resolved);
       return live.config;
     }
+    const id = resolved.id;
+    const observers = this.#observers;
     const created = new CacheState(resolved, {
-      onVersionClear: () => this.#cleared(resolved.id, "version-mismatch"),
+      onVersionClear: () => this.#cleared(id, "version-mismatch"),
+      onChange: (change) => {
+        for (const observer of observers) observer.onChange(id, change);
+      },
+      onMutate: () => {
+        for (const observer of observers) observer.onMutate(id);
+      },
     });
     this.#caches.set(resolved.id, created);
     return created.config;

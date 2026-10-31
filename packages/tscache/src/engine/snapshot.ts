@@ -22,6 +22,7 @@ import type {
   ResolvedCacheConfig,
   Snapshot,
 } from "../types";
+import { firstEndingFrom } from "./read";
 
 /** The state a snapshot is taken from. */
 export interface SnapshotSource {
@@ -34,6 +35,8 @@ export interface SnapshotSource {
 
 /** A validated incoming snapshot, in slot terms. */
 export interface ValidSnapshot {
+  /** The snapshot's range, in slots. */
+  range: SlotRange;
   version: string | undefined;
   /** The snapshot's watermark with its slot. */
   watermark: { t: number; slot: number } | undefined;
@@ -76,17 +79,28 @@ function clipped(
   return copy.transferPayload();
 }
 
-/** What the cache knows about `request` (already snapped outward). */
+/**
+ * What the cache knows about `request` (already snapped outward). With
+ * `parts` (ascending, disjoint, inside `request`), the segments hold only
+ * the present points inside those parts: one payload per segment per part,
+ * as a persisted page record keeps them (§4.10.2).
+ */
 export function takeSnapshot(
   source: SnapshotSource,
   request: SlotRange,
+  parts: readonly SlotRange[] = [request],
 ): Snapshot {
   const { config } = source;
   const options = segmentOptions(config);
   const segments: DenseSegmentPayload[] = [];
-  for (const segment of source.segments) {
-    const payload = clipped(segment, request, options);
-    if (payload !== undefined) segments.push(payload);
+  const all = source.segments;
+  for (const part of parts) {
+    for (let i = firstEndingFrom(all, part.start); i < all.length; i++) {
+      const segment = all[i] as Segment;
+      if ((segment.extent as SlotRange).start > part.end) break;
+      const payload = clipped(segment, part, options);
+      if (payload !== undefined) segments.push(payload);
+    }
   }
   const snapshot: Snapshot = {
     format: 1,
@@ -249,5 +263,5 @@ export function validateSnapshot(
   const meta = checkMeta(input, config);
   const coverage = checkCoverage(input.coverage, request, config);
   const segments = checkSegments(input.segments, request, config);
-  return { ...meta, coverage, segments };
+  return { range: request, ...meta, coverage, segments };
 }

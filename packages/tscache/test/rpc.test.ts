@@ -200,6 +200,7 @@ describe("operations round-trip", () => {
       gapSplitK: 4,
       segmentSlotCap: 32_768,
       warnOnOverlapDiff: false,
+      persist: false,
     });
     expect(
       await client.request("put", {
