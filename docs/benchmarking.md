@@ -25,7 +25,7 @@ tscache is meant to be fast at what a chart does: read the screen it shows, take
 
 | Budget | Measured (2026-10-26) | Fails when | Where |
 |---|---|---|---|
-| Brotli bytes per package entry (each entry bundled with its shared chunks, minified) | `index` 15.95 kB, `worker` 16.53, `engine` 10.09, `fetcher` 0.14, `vite` 0.95 (step 38, persistence, 2026-10-31) | over `packages/tscache/bench/budgets.json` (measured + max(512 B, 3 %)) | `bun scripts/size.ts`, in `bun run ci` |
+| Brotli bytes per package entry (each entry bundled with its shared chunks, minified; what it loads with `import()` on a row of its own, bundled without what the entry holds) | `index` 15.27 kB, `worker` 12.90, `worker (lazy)` 5.18 (the persistence chunk), `engine` 9.52, `fetcher` 0.14, `vite` 0.95 (step 38, persistence loaded lazily, 2026-10-31) | over `packages/tscache/bench/budgets.json` (measured + max(512 B, 3 %)); a file of `dist/` importing an entry file | `bun scripts/size.ts`, in `bun run ci` |
 | ArrayBuffer bytes per cached bar, a year put day by day (Node, after a full collection, engine held alive) | 24/7: 36.233 B, sessions: 36.000, with dropouts: 36.745, against 36 B of fields | below 36 B (the engine was collected: the reading is wrong) or above 36.75 / 36.75 / 37.25 | `memory.test.ts` |
 | Fetches for a chart's opening read and twelve screens back, then forward again | 13 fetches; what they cover is at most 0.2 % more than what was read; none on the way forward | another count, more overfetch, or any repeat | `counters.test.ts` |
 | A cached read of 1,500 bars through the port | one message each way; 66,000 bytes moved (8 B timestamp and 36 B of fields per bar); no buffer copied; the sender keeps none | anything else | `counters.test.ts` |
@@ -64,14 +64,14 @@ These time what a page sees: the client, a real SharedWorker and its port, and t
 
 | Scenario | What a page does | Timed from, to | Base, Chromium |
 |---|---|---|---:|
-| `handshake-first-read` | a new tab creates a client, connects to a new SharedWorker and reads bars the worker fetches | `createClient` called, to the first `get` resolving: worker start, handshake, the fetcher module's import, one fetch, the merge and the transfer | 7.4–7.5 ms |
-| `reload-first-read` | a reload: a new tab creates a client, connects to a new SharedWorker and reads bars an earlier worker persisted | `createClient` called, to the first `get` resolving: worker start, handshake, the database's opening, one read transaction, the restore and the transfer; the base, from before persistence, fetches instead | 7.6 ms (base, fetching); head 8.4 ms |
+| `handshake-first-read` | a new tab creates a client, connects to a new SharedWorker and reads bars the worker fetches | `createClient` called, to the first `get` resolving: worker start, handshake, the fetcher module's import, one fetch, the merge and the transfer | 8.2–8.3 ms (7.4–7.5 before the bundles were split into chunks, step 38) |
+| `reload-first-read` | a reload: a new tab creates a client, connects to a new SharedWorker and reads bars an earlier worker persisted | `createClient` called, to the first `get` resolving: worker start, handshake, the database's opening, one read transaction, the persistence chunk's import, the restore and the transfer; the base, from before persistence, fetches instead | 8.2 ms (base, fetching); head 9.7 ms |
 | `read-viewport-shared` | `get` cached bars through a SharedWorker | the request posted, to its result in the page: the port round trip, the engine's read and the transfer | 32–33 µs |
 | `two-tabs-one-fetch` | two tabs of one browser ask for the same new range at once | the first tab asking, to both tabs holding the bars: one fetch, its merge, two reads and transfers, and one `BroadcastChannel` message each way between the tabs | 400–450 µs |
 | `live-tail-get` | a live chart polls: `get` the screen, whose newest bar is provisional | the request posted, to its result in the page: the port round trip, the fetch of the newest bar from a fetcher that answers at once, its merge, the read and the transfer | 30 µs |
 | `fast-scroll` | a chart scrolls back faster than the backend answers: twelve reads, each a screen further back, posted together | the first scroll read posted, to the last resolved: each read's fetch of its new screen over HTTP, the rest awaited from the fetches in flight (§4.9.1), the merges, twelve reads and transfers | 2.25 ms |
 
-**How they run.** The driver bundles the package's client, worker and fetcher entries of each revision with Bun (unminified ESM, as `tsdown` emits) and serves them beside the scenario page, the Playwright suites' mock backend (`scripts/e2e-backend.ts`) and their fixture fetcher (`e2e/pages/fetcher.js`). The fixture fetcher asks for binary columns bodies (the format of `examples/mock-backend/src/columns.ts`), or for JSON on a side that `--fetchers` names `json`; with `--base HEAD` on a clean tree, `--fetchers json,columns` times the two formats on one engine (step 42). Each scenario gets a BrowserContext of its own, so its pages share its SharedWorkers and no other scenario's.
+**How they run.** The driver bundles the package's client, worker and fetcher entries of each revision with Bun (unminified ESM split into chunks, as `tsdown` emits: code the entries share is a chunk of its own, and the worker's persistence code, which it loads with `import()`, stays a chunk that loads only when a cache persists; step 38) and serves them beside the scenario page, the Playwright suites' mock backend (`scripts/e2e-backend.ts`) and their fixture fetcher (`e2e/pages/fetcher.js`). The fixture fetcher asks for binary columns bodies (the format of `examples/mock-backend/src/columns.ts`), or for JSON on a side that `--fetchers` names `json`; with `--base HEAD` on a clean tree, `--fetchers json,columns` times the two formats on one engine (step 42). Each scenario gets a BrowserContext of its own, so its pages share its SharedWorkers and no other scenario's.
 - `handshake-first-read` opens a new page for every run, and a worker URL no earlier run used, so each run starts a new SharedWorker. The driver alternates the revisions, base then head, head then base, one run per side per round, after two warm-up runs per side. A run takes milliseconds, far above the clock's 100 µs, so a batch is one run.
 - `reload-first-read` takes two pages per run. A setup page reads the bars into a persisted cache of its own (one fetch) and disposes its client, so its SharedWorker, losing its last connection, writes them at once; for the head the driver waits until IndexedDB holds the page record. Then a new page, with a worker URL no earlier run used, creates a client, opens the cache and reads the same bars, timed in the page. Runs are paired as in `handshake-first-read`. The base has no persistence and ignores `persist`, so the pair compares a load from IndexedDB with a fetch from the loopback backend, which answers in well under a millisecond: what the head saves is the request to the backend, which on a real network is the larger cost.
 - `read-viewport-shared` connects one page to both revisions, each with its own SharedWorker, fills each cache with three screens by one fetch, and reads the middle screen. `sampleAsync` times it as `sample` times a case: warm-up, 40 ms batches, 20 paired rounds, each operation awaited before the next starts.
@@ -84,6 +84,28 @@ These time what a page sees: the client, a real SharedWorker and its port, and t
 **Why report-only.** Three scenarios include a fetch over the loopback interface and a server's response time, which the engine does not control, and none has been calibrated. They have no A/A control and no confirmation, and nothing gates on them; their step in the `bench` job continues on error, so that job's result does not depend on them once it is required. A regression shows as a ratio in the job summary, for a reviewer to read.
 
 Times are from the Apple Silicon Mac, in two runs with base and head the same revision (2026-10-30). Their median ratios were 0.973–1.029, and every 95 % interval held 1; a full run takes about 10 s. `fast-scroll` came later (step 44) and has had no same-revision run.
+
+### Step 38: persistence paid for only when used
+
+The SharedWorker loads its persistence code (the persister, `restore`, the record builder and the IndexedDB adapter) with `import()` at the first persisted cache or `clearAll`, and `restore` left `CacheState`'s module (architecture §4.10.8). Entry sizes, Brotli bytes, every revision measured with `scripts/size.ts` of the step's head (Bun 1.4.2):
+
+| Entry | `main` (`7c9c264`) | Persistence, eager (`14f0c7f`) | Persistence, lazy | Budget before → after |
+|---|---:|---:|---:|---:|
+| `index` | 15,096 | 16,330 | 15,641 | 16,848 → 16,160 |
+| `worker` | 12,085 | 16,928 | 13,210 | 17,440 → 13,728 |
+| `worker (lazy)` | — | — | 5,303 | new: 5,824 |
+| `engine` | 9,326 | 10,330 | 9,753 | 10,848 → 10,272 |
+
+End-to-end, paired against `origin/main` (20 rounds, Apple Silicon Mac, 2026-10-31; both sides built split into chunks):
+
+| Scenario | Eager (`14f0c7f`, unsplit build) | Lazy |
+|---|---:|---:|
+| `handshake-first-read` | 1.065 (1.051–1.079) | 1.030 (1.012–1.049) |
+| `reload-first-read` | 1.105 (1.092–1.120) | 1.184 (1.169–1.195) |
+| `two-tabs-one-fetch` | 0.992 (0.967–1.014) | 0.999 (0.969–1.037) |
+| `live-tail-get` | 1.009 (0.994–1.048) | 0.995 (0.976–1.002) |
+
+Against the eager revision itself, both built split, `handshake-first-read` is 0.977 (0.966–0.978). What it still pays against `main` is code the worker parses at start: the engine's change reporting and the seams the chunk reaches the engine through (§4.10.4; alone, 1.018, 1.000–1.037) and the loading shell (`persist/hosted.ts`). `reload-first-read` now imports the chunk as well.
 
 ## How a timing is taken
 

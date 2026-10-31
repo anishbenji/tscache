@@ -20,6 +20,15 @@ import workerUrl from "tscache/worker?worker&url";
 const client = await createClient({ workerUrl });
 ```
 
+The worker loads its persistence code (the persister and the IndexedDB
+adapter) with `import()`, only once a cache with `persist: true` opens or
+`clearAll` runs. Vite's default worker format, `'iife'`, inlines that code
+into the worker file, where it is downloaded with the worker but not run.
+With `worker: { format: "es" }` in `vite.config.ts`, it becomes a chunk of
+its own that an app persisting nothing never downloads. Pass the URL as Vite
+gives it: the worker's chunks import the worker file by that URL, so a query
+or fragment added to it would load the worker's code a second time.
+
 ## webpack 5 (and Rspack)
 
 webpack bundles a worker only when it sees `new Worker(new URL(...))` in your
