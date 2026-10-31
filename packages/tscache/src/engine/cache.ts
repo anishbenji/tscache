@@ -170,6 +170,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** A stored cache record's version and watermark, once checked. */
+interface StoredMeta {
+  version: string | undefined;
+  watermark: Meta["finalizedUntil"];
+}
+
+/** Absent, or a non-empty string. */
+function isStoredVersion(value: unknown): value is string | undefined {
+  return value === undefined || (typeof value === "string" && value.length > 0);
+}
+
+/** A safe-integer page number after `after`: pages ascend, each once. */
+function isPageAfter(
+  value: unknown,
+  after: number | undefined,
+): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    (after === undefined || value > after)
+  );
+}
+
+/** Whether a page snapshot's range is the hull of its coverage (§4.10.2). */
+function isHull({ coverage, range }: ValidSnapshot): boolean {
+  return (
+    coverage[0]?.start === range.start && coverage.at(-1)?.end === range.end
+  );
+}
+
+/** The present points a validated snapshot carries. */
+function pointsIn({ segments }: ValidSnapshot): number {
+  let n = 0;
+  for (const segment of segments) n += segment.size;
+  return n;
+}
+
 /** Whether a stored `fields` names exactly the schema's fields and dtypes. */
 function sameSchema(
   value: unknown,
@@ -233,27 +270,43 @@ export class CacheState {
       options?.range,
     );
     const meta = this.#validateMeta(batch.meta);
+    return this.#mutating(() => this.#putValid(points, authority, meta));
+  }
+
+  /**
+   * Runs a mutating call that passed validation, then signals `onMutate`
+   * once, after its `onChange` calls, also when it throws (§4.10.4).
+   */
+  #mutating<T>(call: () => T): T {
     try {
-      const cleared = this.#applyVersion(meta.version);
-      const wm = meta.finalizedUntil;
-      const touched = authority ?? spanOf(points);
-      const claim = claimOf(touched, wm?.slot);
-      const slotWarnings = this.#writeOrWithdraw(
-        points,
-        authority,
-        wm?.slot,
-        touched,
-        cleared,
-      );
-      const moved = wm === undefined ? undefined : this.#advance(wm.t, wm.slot);
-      this.#reportWrite(touched);
-      if (moved !== undefined) this.#reportWatermark(moved);
-      if (claim !== undefined) this.#cover(claim);
-      if (cleared) this.#hooks.onVersionClear?.();
-      return { warnings: this.#toWarnings(slotWarnings), cleared };
+      return call();
     } finally {
       this.#hooks.onMutate?.();
     }
+  }
+
+  #putValid(
+    points: Columns,
+    authority: SlotRange | undefined,
+    meta: Meta,
+  ): CachePutResult {
+    const cleared = this.#applyVersion(meta.version);
+    const wm = meta.finalizedUntil;
+    const touched = authority ?? spanOf(points);
+    const claim = claimOf(touched, wm?.slot);
+    const slotWarnings = this.#writeOrWithdraw(
+      points,
+      authority,
+      wm?.slot,
+      touched,
+      cleared,
+    );
+    const moved = wm === undefined ? undefined : this.#advance(wm.t, wm.slot);
+    this.#reportWrite(touched);
+    this.#reportWatermark(moved);
+    if (claim !== undefined) this.#cover(claim);
+    if (cleared) this.#hooks.onVersionClear?.();
+    return { warnings: this.#toWarnings(slotWarnings), cleared };
   }
 
   /**
@@ -278,9 +331,9 @@ export class CacheState {
   }
 
   /** `watermark`, then the removal of the region it made provisional. */
-  #reportWatermark(moved: Moved): void {
-    if (moved.changed) this.#hooks.onChange?.({ kind: "watermark" });
-    if (moved.removed !== undefined) {
+  #reportWatermark(moved: Moved | undefined): void {
+    if (moved?.changed) this.#hooks.onChange?.({ kind: "watermark" });
+    if (moved?.removed !== undefined) {
       this.#hooks.onChange?.({ kind: "remove", slots: moved.removed });
     }
   }
@@ -316,31 +369,27 @@ export class CacheState {
    */
   hydrate(snapshot: Snapshot): HydrateResult {
     const valid = validateSnapshot(snapshot, this.config);
-    try {
-      if (
-        valid.version !== undefined &&
-        this.#version !== undefined &&
-        valid.version !== this.#version
-      ) {
+    return this.#mutating(() => this.#hydrateValid(valid));
+  }
+
+  #hydrateValid(valid: ValidSnapshot): HydrateResult {
+    const version = valid.version;
+    if (version !== undefined && this.#version !== undefined) {
+      if (version !== this.#version) {
         return { applied: [], skipped: "version-mismatch" };
       }
-      if (valid.version !== undefined && this.#version === undefined) {
-        this.#version = valid.version;
-        this.#hooks.onChange?.({ kind: "version" });
-      }
-      if (valid.watermark !== undefined) {
-        const moved = this.#advance(valid.watermark.t, valid.watermark.slot);
-        if (moved !== undefined) this.#reportWatermark(moved);
-      }
-      const parts = this.#unknownParts(valid.coverage);
-      for (const part of parts) {
-        this.#apply(valid, part);
-        this.#hooks.onChange?.({ kind: "write", slots: part });
-      }
-      return { applied: parts.map((part) => toMs(part, this.config)) };
-    } finally {
-      this.#hooks.onMutate?.();
+    } else if (version !== undefined) {
+      this.#version = version;
+      this.#hooks.onChange?.({ kind: "version" });
     }
+    const wm = valid.watermark;
+    if (wm !== undefined) this.#reportWatermark(this.#advance(wm.t, wm.slot));
+    const parts = this.#unknownParts(valid.coverage);
+    for (const part of parts) {
+      this.#apply(valid, part);
+      this.#hooks.onChange?.({ kind: "write", slots: part });
+    }
+    return { applied: parts.map((part) => toMs(part, this.config)) };
   }
 
   /**
@@ -394,24 +443,41 @@ export class CacheState {
       );
     }
     const { cache, pages } = stored;
-    if (cache === undefined) return { applied: [], rewrite: pages.length > 0 };
-    const record = this.#acceptRecord(cache);
-    if (record === undefined) return { applied: [], rewrite: true };
-    if (this.#version !== undefined && record.version !== this.#version) {
-      return { applied: [], rewrite: true };
+    const record = cache === undefined ? undefined : this.#acceptRecord(cache);
+    // Absent with pages (orphans), invalid, or of another version (N56).
+    if (
+      record === undefined ||
+      (this.#version !== undefined && record.version !== this.#version)
+    ) {
+      return { applied: [], rewrite: cache !== undefined || pages.length > 0 };
     }
     this.#version ??= record.version;
-    const wm = record.watermark;
-    // The cache covers nothing, so an advance withdraws nothing.
+    this.#restoreWatermark(record.watermark);
+    return this.#restorePages(pages, record.version);
+  }
+
+  /**
+   * The record's watermark advances this one forwards only (N17); the cache
+   * covers nothing, so nothing is withdrawn. A `watermark` change is reported
+   * when the watermark now differs from the record's.
+   */
+  #restoreWatermark(wm: Meta["finalizedUntil"]): void {
     if (wm !== undefined) this.#advance(wm.t, wm.slot);
     if (this.#finalizedUntil !== wm?.t) {
       this.#hooks.onChange?.({ kind: "watermark" });
     }
+  }
+
+  /** Applies every valid page, ascending (§4.10.5 steps 5–7). */
+  #restorePages(
+    pages: readonly unknown[],
+    version: string | undefined,
+  ): RestoreResult {
     const parts: SlotRange[] = [];
     let rewrite = false;
     let last: number | undefined;
     for (const page of pages) {
-      const valid = this.#acceptPage(page, record.version, last);
+      const valid = this.#acceptPage(page, version, last);
       if (valid === undefined) {
         rewrite = true;
         continue;
@@ -420,44 +486,44 @@ export class CacheState {
       if (!this.#restorePage(valid.snapshot, parts)) rewrite = true;
     }
     // A cache record whose pages cover nothing is not what a flush writes.
-    if (parts.length === 0) rewrite = true;
-    return { applied: this.#merged(parts), rewrite };
+    return {
+      applied: this.#merged(parts),
+      rewrite: rewrite || parts.length === 0,
+    };
   }
 
   /** The cache record's version and watermark, or undefined when it fails a check (§4.10.5 step 2). */
-  #acceptRecord(
-    record: unknown,
-  ):
-    | { version: string | undefined; watermark: Meta["finalizedUntil"] }
-    | undefined {
+  #acceptRecord(record: unknown): StoredMeta | undefined {
     if (
       !isRecord(record) ||
       record.cacheId !== this.config.id ||
-      record.format !== 1
-    ) {
-      return undefined;
-    }
-    const config = record.config;
-    if (
-      !isRecord(config) ||
-      Object.keys(config).length !== RECORD_CONFIG.length + 1 ||
-      !RECORD_CONFIG.every((field) => config[field] === this.config[field]) ||
-      !sameSchema(config.fields, this.config.fields)
+      record.format !== 1 ||
+      !this.#sameStructure(record.config)
     ) {
       return undefined;
     }
     const { version, finalizedUntil } = record;
-    if (
-      version !== undefined &&
-      (typeof version !== "string" || version.length === 0)
-    ) {
-      return undefined;
-    }
+    if (!isStoredVersion(version)) return undefined;
     if (finalizedUntil === undefined) return { version, watermark: undefined };
-    if (typeof finalizedUntil !== "number") return undefined;
+    const watermark = this.#storedWatermark(finalizedUntil);
+    return watermark === undefined ? undefined : { version, watermark };
+  }
+
+  /** Whether a stored config names exactly this cache's structural fields (N20). */
+  #sameStructure(config: unknown): boolean {
+    return (
+      isRecord(config) &&
+      Object.keys(config).length === RECORD_CONFIG.length + 1 &&
+      RECORD_CONFIG.every((field) => config[field] === this.config[field]) &&
+      sameSchema(config.fields, this.config.fields)
+    );
+  }
+
+  /** A stored watermark `slotAtOrAfter` accepts, with its slot; undefined otherwise. */
+  #storedWatermark(t: unknown): Meta["finalizedUntil"] {
+    if (typeof t !== "number") return undefined;
     try {
-      const slot = slotAtOrAfter(finalizedUntil, this.config);
-      return { version, watermark: { t: finalizedUntil, slot } };
+      return { t, slot: slotAtOrAfter(t, this.config) };
     } catch (error) {
       if (!(error instanceof InvalidRangeError)) throw error;
       return undefined;
@@ -476,29 +542,37 @@ export class CacheState {
     if (
       !isRecord(page) ||
       page.cacheId !== this.config.id ||
-      typeof page.page !== "number" ||
-      !Number.isSafeInteger(page.page) ||
-      (after !== undefined && page.page <= after)
+      !isPageAfter(page.page, after)
     ) {
       return undefined;
     }
+    const snapshot = this.#pageSnapshotOf(page.snapshot, page.page, version);
+    return snapshot === undefined ? undefined : { page: page.page, snapshot };
+  }
+
+  /**
+   * A page's snapshot when it passes `hydrate`'s validation, lies in page
+   * `page`, names `version` and carries no watermark; undefined otherwise.
+   */
+  #pageSnapshotOf(
+    input: unknown,
+    page: number,
+    version: string | undefined,
+  ): ValidSnapshot | undefined {
     let snapshot: ValidSnapshot;
     try {
-      snapshot = validateSnapshot(page.snapshot, this.config);
+      snapshot = validateSnapshot(input, this.config);
     } catch {
       // Untrusted bytes: whatever fails to decode is a page to skip.
       return undefined;
     }
     const cap = this.config.segmentSlotCap;
-    if (
-      snapshot.watermark !== undefined ||
-      snapshot.version !== version ||
-      pageOf(snapshot.range.start, cap) !== page.page ||
-      pageOf(snapshot.range.end, cap) !== page.page
-    ) {
-      return undefined;
-    }
-    return { page: page.page, snapshot };
+    const fits =
+      snapshot.watermark === undefined &&
+      snapshot.version === version &&
+      pageOf(snapshot.range.start, cap) === page &&
+      pageOf(snapshot.range.end, cap) === page;
+    return fits ? snapshot : undefined;
   }
 
   /**
@@ -508,31 +582,32 @@ export class CacheState {
    * point left outside every part, its range the hull of its coverage.
    */
   #restorePage(valid: ValidSnapshot, parts: SlotRange[]): boolean {
-    const { coverage, range, segments } = valid;
-    let canonical =
-      coverage[0]?.start === range.start && coverage.at(-1)?.end === range.end;
-    let present = 0;
-    for (const segment of segments) present += segment.size;
+    let whole = isHull(valid);
     let written = 0;
-    for (const covered of coverage) {
+    for (const covered of valid.coverage) {
       const part =
         this.#volatileFrom === undefined
           ? covered
           : below(covered, this.#volatileFrom);
-      if (part?.end !== covered.end) canonical = false;
+      if (part?.end !== covered.end) whole = false;
       if (part === undefined) continue;
-      const points = collect(segments, part, this.config.fields);
-      try {
-        this.#store.put(points, part);
-      } catch (error) {
-        this.#coverage.subtract(part);
-        throw error;
-      }
-      this.#coverage.add(part);
-      written += points.slots.length;
+      written += this.#restorePart(valid, part);
       parts.push(part);
     }
-    return canonical && written === present;
+    return whole && written === pointsIn(valid);
+  }
+
+  /** Writes a part with the page's points inside it as authority, and covers it; returns how many. */
+  #restorePart(valid: ValidSnapshot, part: SlotRange): number {
+    const points = collect(valid.segments, part, this.config.fields);
+    try {
+      this.#store.put(points, part);
+    } catch (error) {
+      this.#coverage.subtract(part);
+      throw error;
+    }
+    this.#coverage.add(part);
+    return points.slots.length;
   }
 
   /** Slot parts in ascending order → ms ranges, adjacent ones merged. */
@@ -595,22 +670,18 @@ export class CacheState {
   /** Forgets coverage; the points stay (N16). Snaps outward (N1). */
   invalidate(range: Range): void {
     const slots = snapOut(range, this.config);
-    try {
+    this.#mutating(() => {
       this.#coverage.subtract(slots);
       this.#hooks.onChange?.({ kind: "remove", slots });
-    } finally {
-      this.#hooks.onMutate?.();
-    }
+    });
   }
 
   /** Drops segments and coverage; config, version and watermark stay. */
   clear(): void {
-    try {
+    this.#mutating(() => {
       this.#clear();
       this.#hooks.onChange?.({ kind: "clear" });
-    } finally {
-      this.#hooks.onMutate?.();
-    }
+    });
   }
 
   #clear(): void {
@@ -621,11 +692,7 @@ export class CacheState {
   /** Sets the watermark exactly; moving it back makes points provisional again. */
   setFinalizedUntil(t: number): void {
     const slot = slotAtOrAfter(t, this.config);
-    try {
-      this.#reportWatermark(this.#setWatermark(t, slot));
-    } finally {
-      this.#hooks.onMutate?.();
-    }
+    this.#mutating(() => this.#reportWatermark(this.#setWatermark(t, slot)));
   }
 
   /**

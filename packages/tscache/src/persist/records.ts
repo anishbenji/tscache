@@ -1,15 +1,16 @@
 /**
  * Persisted records (docs/architecture.md §4.10.2, N51, N53, N55): one cache
  * record per persisted cache and one page record per page that holds
- * coverage, built from memory alone. `recordsOf(S)` is what a flush writes
- * and, with a single writer, what the disk holds after it.
+ * coverage, built from memory alone. `recordsOf(S)`, the cache record and
+ * the page records together, is what a flush writes and, with a single
+ * writer, what the disk holds after it.
  */
 
 import type { CacheState } from "../engine/cache";
 import { pageOf, pageRange } from "../engine/merge";
 import type { SlotRange } from "../grid";
 import type { Dtype, Snapshot } from "../types";
-import type { PageRange, StoredCache } from "./store";
+import type { PageRange } from "./store";
 
 /** Store 'caches': one per persisted cache. */
 export interface CacheRecord {
@@ -40,24 +41,11 @@ export interface PageRecord {
 }
 
 /**
- * The canonical records of a cache's state (§4.10.2): empty when it covers
- * nothing; otherwise its cache record and, ascending, the record of every
- * page holding coverage, or of those pages inside `within` (merged,
- * ascending ranges).
+ * The cache record of `recordsOf(S)` (§4.10.2): undefined when the state
+ * covers nothing, so a cleared cache leaves nothing on disk.
  */
-export function recordsOf(
-  state: CacheState,
-  within?: readonly PageRange[],
-): StoredCache {
-  const covered = state.coveredSlots();
-  if (covered.length === 0) return { cache: undefined, pages: [] };
-  return {
-    cache: cacheRecordOf(state),
-    pages: pageRecordsOf(state, covered, within),
-  };
-}
-
-function cacheRecordOf(state: CacheState): CacheRecord {
+export function cacheRecordOf(state: CacheState): CacheRecord | undefined {
+  if (state.coveredSlots().length === 0) return undefined;
   const c = state.config;
   const record: CacheRecord = {
     cacheId: c.id,
@@ -90,11 +78,16 @@ function nextWithin(
   return undefined;
 }
 
-function pageRecordsOf(
+/**
+ * The page records of `recordsOf(S)` (§4.10.2), ascending: one for every
+ * page holding coverage, or for those pages inside `within` (merged,
+ * ascending ranges).
+ */
+export function pageRecordsOf(
   state: CacheState,
-  covered: readonly SlotRange[],
-  within: readonly PageRange[] | undefined,
+  within?: readonly PageRange[],
 ): PageRecord[] {
+  const covered = state.coveredSlots();
   const cap = state.config.segmentSlotCap;
   const out: PageRecord[] = [];
   let page: number | undefined;

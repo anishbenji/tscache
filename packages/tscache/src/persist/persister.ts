@@ -15,7 +15,7 @@ import { cacheStateOf, type Engine, observeCaches } from "../engine/engine";
 import { pageOf } from "../engine/merge";
 import type { SlotRange } from "../grid";
 import type { ClientEvents } from "../types";
-import { recordsOf } from "./records";
+import { cacheRecordOf, pageRecordsOf } from "./records";
 import type { PageRange, PersistStore, StoredCache, WritePlan } from "./store";
 
 export interface PersisterOptions {
@@ -42,6 +42,18 @@ type OpenStore = (options?: {
 
 /** Every page of a cache. */
 const EVERY_PAGE: PageRange = { start: -Infinity, end: Infinity };
+
+/** Changes that count a removal and make the flush due at once (N58). */
+const REMOVALS: ReadonlySet<CacheChange["kind"]> = new Set(["remove", "clear"]);
+
+/**
+ * Changes after which every record is rewritten: each page record names the
+ * version, and a cleared cache leaves nothing on disk (§4.10.2).
+ */
+const REWRITES: ReadonlySet<CacheChange["kind"]> = new Set([
+  "clear",
+  "version",
+]);
 
 /** A cache under persistence, from its first open() on. */
 interface Tracked {
@@ -228,17 +240,19 @@ export class Persister {
         ? [...this.#tracked.values()]
         : [this.#tracked.get(cacheId)];
     const now = this.#now();
-    const pending: Promise<void>[] = [];
-    for (const cache of caches) {
-      if (cache?.status !== "running") continue;
-      if (this.#dirty(cache) || cache.queued !== undefined) {
-        this.#request(cache, now);
-      }
-      const job = cache.queued ?? cache.running;
-      if (job !== undefined) pending.push(this.#settles(job));
-    }
+    const pending = caches.flatMap((cache) => this.#flushOne(cache, now));
     this.#arm();
     return Promise.all(pending).then(() => undefined);
+  }
+
+  /** Makes a running cache's flush due at `now`; the job to wait for, if any. */
+  #flushOne(cache: Tracked | undefined, now: number): Promise<void>[] {
+    if (cache?.status !== "running") return [];
+    if (this.#dirty(cache) || cache.queued !== undefined) {
+      this.#request(cache, now);
+    }
+    const job = cache.queued ?? cache.running;
+    return job === undefined ? [] : [this.#settles(job)];
   }
 
   /** How many removals (`remove` and `clear` changes) have been recorded for the cache; 0 when untracked. */
@@ -341,41 +355,31 @@ export class Persister {
   }
 
   #change(cacheId: string, change: CacheChange): void {
-    const cache = this.#tracked.get(cacheId);
-    if (cache === undefined || cache.status === "stopped" || this.#closed) {
-      return;
-    }
+    const cache = this.#live(cacheId);
+    if (cache === undefined) return;
     if (cache.status === "loading") this.#abandon(cache);
-    switch (change.kind) {
-      case "write":
-        this.#mark(cache, change.slots);
-        this.#quiet(cache);
-        return;
-      case "remove":
-        this.#mark(cache, change.slots);
-        cache.removals++;
-        this.#request(cache, this.#now());
-        return;
-      case "clear":
-        cache.rewrite = true;
-        cache.removals++;
-        this.#request(cache, this.#now());
-        return;
-      case "version":
-        // Every page record names the version (§4.10.2).
-        cache.rewrite = true;
-        this.#quiet(cache);
-        return;
-      case "watermark":
-        cache.meta = true;
-        this.#quiet(cache);
-        return;
+    const { kind } = change;
+    if ("slots" in change) this.#mark(cache, change.slots);
+    if (REWRITES.has(kind)) cache.rewrite = true;
+    if (kind === "watermark") cache.meta = true;
+    if (REMOVALS.has(kind)) {
+      cache.removals++;
+      this.#request(cache, this.#now());
+    } else {
+      this.#quiet(cache);
     }
   }
 
   #mutate(cacheId: string): void {
+    const cache = this.#live(cacheId);
+    if (cache?.status === "loading") this.#abandon(cache);
+  }
+
+  /** A tracked cache whose changes count: neither stopped nor closed. */
+  #live(cacheId: string): Tracked | undefined {
     const cache = this.#tracked.get(cacheId);
-    if (cache?.status === "loading" && !this.#closed) this.#abandon(cache);
+    if (cache?.status === "stopped" || this.#closed) return undefined;
+    return cache;
   }
 
   /**
@@ -560,6 +564,24 @@ export class Persister {
     clearTimeout(cache.loadTimer);
     cache.loadTimer = undefined;
     this.#drop(cache);
+    this.#dropJobs(cache);
+    cache.resolveOpened();
+    this.#report(
+      error === undefined
+        ? { cacheId: cache.id, reason }
+        : { cacheId: cache.id, reason, error },
+    );
+    if (cleanup && this.#store !== undefined) {
+      const now = this.#now();
+      this.#queue.push(this.#job("cleanup", cache, now, now + this.#timeoutMs));
+    } else {
+      this.#cleaned(cache);
+    }
+    this.#pump();
+  }
+
+  /** A stopped cache's queued and running jobs are abandoned; their waiters settle. */
+  #dropJobs(cache: Tracked): void {
     for (const job of [cache.queued, cache.running]) {
       if (job === undefined) continue;
       this.#unqueue(job);
@@ -568,23 +590,14 @@ export class Persister {
     }
     cache.queued = undefined;
     cache.running = undefined;
-    cache.resolveOpened();
-    const event: StopEvent =
-      error === undefined
-        ? { cacheId: cache.id, reason }
-        : { cacheId: cache.id, reason, error };
+  }
+
+  #report(event: StopEvent): void {
     try {
       this.#onStopped?.(event);
     } catch {
       // A listener's failure must not leave the writer half-updated.
     }
-    if (cleanup && this.#store !== undefined) {
-      const now = this.#now();
-      this.#queue.push(this.#job("cleanup", cache, now, now + this.#timeoutMs));
-    } else {
-      this.#cleaned(cache);
-    }
-    this.#pump();
   }
 
   /** The stop's cleanup settled, or there is none: release durable(). */
@@ -762,21 +775,28 @@ export class Persister {
     const now = this.#now();
     const current = this.#current;
     if (current !== undefined && current.deadline <= now) this.#expire(current);
+    this.#sweep(now);
+    while (this.#current === undefined) {
+      const next = this.#next(now);
+      if (next === undefined) break;
+      this.#start(next);
+    }
+  }
+
+  /**
+   * Fails the queued jobs whose deadline has passed, and drops a flush job
+   * nothing requests any more: the running job took its changes.
+   */
+  #sweep(now: number): void {
     for (const job of [...this.#queue]) {
       if (!this.#queue.includes(job) || this.#held(job)) continue;
-      if (job.kind === "flush" && this.#dueOf(job) === Infinity) {
-        // Its changes were taken by the running job: nothing to request.
+      if (this.#dueOf(job) === Infinity) {
         this.#unqueue(job);
         if (job.cache?.queued === job) job.cache.queued = undefined;
         this.#settle(job);
       } else if (this.#deadlineOf(job) <= now) {
         this.#expire(job);
       }
-    }
-    while (this.#current === undefined) {
-      const next = this.#next(now);
-      if (next === undefined) break;
-      this.#start(next);
     }
   }
 
@@ -830,31 +850,18 @@ export class Persister {
   #expire(job: Job): void {
     this.#unqueue(job);
     if (this.#current === job) this.#current = undefined;
+    const reason = job.error === undefined ? "unavailable" : "error";
     const cache = job.cache;
-    switch (job.kind) {
-      case "flush": {
-        if (cache === undefined) return;
-        if (cache.queued === job) cache.queued = undefined;
-        if (cache.running === job) cache.running = undefined;
-        this.#settle(job);
-        // The attempt running at a clearAll() ends without a stop.
-        if (job.final) return;
-        const reason = job.error === undefined ? "unavailable" : "error";
-        this.#stop(cache, reason, job.error);
-        return;
-      }
-      case "cleanup":
-        this.#settle(job);
-        if (cache !== undefined) this.#cleaned(cache);
-        return;
-      case "clear":
-        this.#clearFailed(
-          job,
-          job.error === undefined ? "unavailable" : "error",
-          job.error,
-        );
-        return;
+    if (cache === undefined) {
+      this.#clearFailed(job, reason, job.error);
+      return;
     }
+    if (cache.queued === job) cache.queued = undefined;
+    if (cache.running === job) cache.running = undefined;
+    this.#settle(job);
+    if (job.kind === "cleanup") this.#cleaned(cache);
+    // The attempt running at a clearAll() ends without a stop.
+    else if (!job.final) this.#stop(cache, reason, job.error);
   }
 
   /** The job ended (success, or a final attempt's failure): the next one may start. */
@@ -905,15 +912,12 @@ export class Persister {
 
   /** The plan from memory alone: a flush never reads the disk (§4.10.6). */
   #plan(cache: Tracked, taken: Taken): WritePlan {
-    const strict = taken.removals > cache.durable;
-    const records = taken.rewrite
-      ? recordsOf(cache.state)
-      : recordsOf(cache.state, taken.pages);
+    const within = taken.rewrite ? undefined : taken.pages;
     return {
-      deletePages: taken.rewrite ? [{ ...EVERY_PAGE }] : taken.pages,
-      putPages: records.pages,
-      putCache: records.cache ?? null,
-      strict,
+      deletePages: within ?? [{ ...EVERY_PAGE }],
+      putPages: pageRecordsOf(cache.state, within),
+      putCache: cacheRecordOf(cache.state) ?? null,
+      strict: taken.removals > cache.durable,
     };
   }
 
