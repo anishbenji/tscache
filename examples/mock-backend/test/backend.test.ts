@@ -197,9 +197,17 @@ describe("createBackend", () => {
   it("delays answers by the configured latency", async () => {
     const backend = createBackend({ latencyMs: 0, now: () => NOW });
     await call(backend, "/api/control", post({ latencyMs: 40 }));
-    const started = performance.now();
-    await call(backend, `/api/series/events/x?${query}`);
-    expect(performance.now() - started).toBeGreaterThanOrEqual(35);
+    // On fake timers: the answer waits exactly the latency, on any machine.
+    vi.useFakeTimers();
+    let answered = false;
+    const answer = call(backend, `/api/series/events/x?${query}`).then(() => {
+      answered = true;
+    });
+    await vi.advanceTimersByTimeAsync(39);
+    expect(answered).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await answer;
+    vi.useRealTimers();
     expect((await stats(backend)).latencyMs).toBe(40);
     for (const latencyMs of [-1, 1.5, "9", null]) {
       await call(backend, "/api/control", post({ latencyMs }));

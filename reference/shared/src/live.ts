@@ -28,6 +28,7 @@
 
 import type { Connection } from "@tscache/integrations/shared/connection";
 import type { CacheConfig, PutBatch, Range } from "tscache";
+import { formingBar } from "./market";
 
 /** What a source reports while its tab holds the feed. */
 export interface Holder {
@@ -352,12 +353,7 @@ export function webSocket({
  * bar that cannot exist yet, so both ends lie on the grid of `config`.
  */
 export function polling(everyMs: number, config: CacheConfig): Source {
-  const { interval, alignmentOffset = 0 } = config;
-  /** The start of the bar forming now. */
-  const forming = () => {
-    const now = Date.now();
-    return now - ((((now - alignmentOffset) % interval) + interval) % interval);
-  };
+  const forming = () => formingBar(Date.now(), config);
   return ({ opened, polled }) => {
     opened();
     let since = forming();

@@ -143,6 +143,7 @@ export async function connect(
     }
     // modeFallback arrives on a zero timer queued inside createClient; this
     // later one runs after it.
+    // clock-ok: zero timers run in the order queued; this waits for no time.
     await new Promise((resolve) => setTimeout(resolve, 0));
     const fallbacks = w.log.filter((e) => e.event === "modeFallback");
     return { mode: w.client.mode, fallbacks: fallbacks.map((e) => e.payload) };
@@ -275,38 +276,28 @@ export async function clear(page: Page, config: CacheConfig): Promise<void> {
 }
 
 /**
- * Fails within 5 s unless the page's worker answers a cache-only get. A
- * failure detector, not a timing assumption: a dead worker would otherwise
- * leave the caller hanging until the test timeout.
+ * Waits until the page's worker answers a cache-only get, in a named step:
+ * a dead worker leaves the step hanging, and the test's own timeout ends
+ * it, reporting the step. No guard of its own, which would race the
+ * worker against a deadline (docs/testing.md).
  */
 export async function expectWorkerAlive(
   page: Page,
   config: CacheConfig,
   range: Range,
 ): Promise<void> {
-  await page.evaluate(
-    async ({ cfg, range }) => {
-      const w = window as unknown as E2EWindow;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(
-            new Error(
-              "the SharedWorker did not answer within 5 s; it dies with the renderer of the tab that created it (N32)",
-            ),
-          );
-        }, 5000);
-      });
-      const answer = w.client
-        .cache(cfg)
-        .then((cache) => cache.get(range, { cacheOnly: true }));
-      try {
-        await Promise.race([answer, timeout]);
-      } finally {
-        clearTimeout(timer);
-      }
+  await base.step(
+    "the SharedWorker answers a cache-only get (it dies with the renderer of the tab that created it, N32)",
+    async () => {
+      await page.evaluate(
+        async ({ cfg, range }) => {
+          const w = window as unknown as E2EWindow;
+          const cache = await w.client.cache(cfg);
+          await cache.get(range, { cacheOnly: true });
+        },
+        { cfg: config, range },
+      );
     },
-    { cfg: config, range },
   );
 }
 

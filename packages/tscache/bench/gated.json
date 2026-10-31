@@ -1,0 +1,13 @@
+{
+  "bun": [
+    "read-viewport",
+    "read-viewport-sessions",
+    "put-page",
+    "put-live-bar",
+    "append-bars",
+    "fill-month",
+    "snapshot-roundtrip",
+    "read-transfer"
+  ],
+  "chromium": []
+}

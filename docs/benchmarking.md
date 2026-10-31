@@ -9,12 +9,13 @@ tscache is meant to be fast at what a chart does: read the screen it shows, take
   - the memory a cached bar keeps;
   - what a chart scrolling back costs the backend;
   - what a read costs the port between page and worker;
+  - how often an orchestrated `get` reads the engine;
   - how many segments a read looks at;
   - how often a growing segment reallocates.
 - **Timings compare the pull request with its base** in one job, case by case. Both revisions sit in one bundle, which is timed in **Chromium** (V8, which most users run) and **Bun** (JSC, the engine of Safari). The rounds alternate their order, so a busy runner slows both sides alike.
 - **When a timing fails:** a case fails when its median slowdown is 10 % or more and the 95 % confidence interval lies above 3 %, and a second run in a fresh process confirms it. A same-revision control, timed just before in a process of its own, must stay quiet, or the run is called noisy and nothing fails.
-- **Timing reports only until it is calibrated on GitHub's runner** (`bench-calibrate.yml`): it must fire in none of 20 same-revision runs and catch at least 90 % of runs with a 25 % slowdown injected. Then `--gate` goes on and the `bench` check becomes required.
-- **End-to-end scenarios in Chromium only report:** a new tab's first read, a read through a SharedWorker, and two tabs sharing a fetch, each paired against the base. They fail on a wrong result or an extra fetch (a smoke run in `bun run ci`), never on a timing.
+- **Timing gates case by case, where calibration on GitHub's runner shows it reliable** (`bench-calibrate.yml`): a case gates in a runtime once it fired in none of 20 same-revision runs and caught at least 90 % of runs with a 25 % slowdown injected. The gated cases are listed in `packages/tscache/bench/gated.json`: since chore 43, eight cases in Bun. Every other case, and all of Chromium, reports. The `bench` check is not yet required in branch protection.
+- **End-to-end scenarios in Chromium only report:** a new tab's first read, a read through a SharedWorker, two tabs sharing a fetch, and a live chart's get of a provisional newest bar, each paired against the base. They fail on a wrong result or an extra fetch (a smoke run in `bun run ci`), never on a timing.
 - **No new dependency.** The sampler is about 240 lines, with its variant for operations that complete later (`packages/tscache/bench/sample.ts`).
 
 ## What is measured
@@ -27,6 +28,7 @@ tscache is meant to be fast at what a chart does: read the screen it shows, take
 | ArrayBuffer bytes per cached bar, a year put day by day (Node, after a full collection, engine held alive) | 24/7: 36.233 B, sessions: 36.000, with dropouts: 36.745, against 36 B of fields | below 36 B (the engine was collected: the reading is wrong) or above 36.75 / 36.75 / 37.25 | `memory.test.ts` |
 | Fetches for a chart's opening read and twelve screens back, then forward again | 13 fetches; what they cover is at most 0.2 % more than what was read; none on the way forward | another count, more overfetch, or any repeat | `counters.test.ts` |
 | A cached read of 1,500 bars through the port | one message each way; 66,000 bytes moved (8 B timestamp and 36 B of fields per bar); no buffer copied; the sender keeps none | anything else | `counters.test.ts` |
+| Engine reads per orchestrated `get`: a fetch of the provisional newest bar, a cache hit, `cacheOnly` | 1 each (planned from coverage, read once after the fetches) | another count | `counters.test.ts` |
 | Segment extents a read looks at among 8,192 single-point segments | 14 | more than 24 (a scan would read 8,192) | `counters.test.ts` |
 | Mask allocations while a segment grows by 16,384 single-point appends | doubling | none observed (the counting no longer sees the growth: a redesign must update the test), more than 12, or more than 12,288 bytes | `counters.test.ts` |
 
@@ -61,13 +63,15 @@ These time what a page sees: the client, a real SharedWorker and its port, and t
 | `handshake-first-read` | a new tab creates a client, connects to a new SharedWorker and reads bars the worker fetches | `createClient` called, to the first `get` resolving: worker start, handshake, the fetcher module's import, one fetch, the merge and the transfer | 7.4–7.5 ms |
 | `read-viewport-shared` | `get` cached bars through a SharedWorker | the request posted, to its result in the page: the port round trip, the engine's read and the transfer | 32–33 µs |
 | `two-tabs-one-fetch` | two tabs of one browser ask for the same new range at once | the first tab asking, to both tabs holding the bars: one fetch, its merge, two reads and transfers, and one `BroadcastChannel` message each way between the tabs | 400–450 µs |
+| `live-tail-get` | a live chart polls: `get` the screen, whose newest bar is provisional | the request posted, to its result in the page: the port round trip, the fetch of the newest bar from a fetcher that answers at once, its merge, the read and the transfer | 30 µs |
 
 **How they run.** The driver bundles the package's client, worker and fetcher entries of each revision with Bun (unminified ESM, as `tsdown` emits) and serves them beside the scenario page, the Playwright suites' mock backend (`scripts/e2e-backend.ts`) and their fixture fetcher (`e2e/pages/fetcher.js`). The fixture fetcher asks for binary columns bodies (the format of `examples/mock-backend/src/columns.ts`), or for JSON on a side that `--fetchers` names `json`; with `--base HEAD` on a clean tree, `--fetchers json,columns` times the two formats on one engine (step 42). Each scenario gets a BrowserContext of its own, so its pages share its SharedWorkers and no other scenario's.
 - `handshake-first-read` opens a new page for every run, and a worker URL no earlier run used, so each run starts a new SharedWorker. The driver alternates the revisions, base then head, head then base, one run per side per round, after two warm-up runs per side. A run takes milliseconds, far above the clock's 100 µs, so a batch is one run.
 - `read-viewport-shared` connects one page to both revisions, each with its own SharedWorker, fills each cache with three screens by one fetch, and reads the middle screen. `sampleAsync` times it as `sample` times a case: warm-up, 40 ms batches, 20 paired rounds, each operation awaited before the next starts.
+- `live-tail-get` connects one page to both revisions, each with its own SharedWorker, whose cache marks the screen's newest bar provisional (`finalizedUntil`), and fills it with one get. Every get then misses that bar and fetches it again. Its fetcher answers from memory at once, so the scenario times the worker's work, not a server's; it counts the fetches made for the cache in the volume field, the setup's included, so each get must see the next count and one that did not fetch fails.
 - `two-tabs-one-fetch` connects two pages to each revision. The first page sends the range to the second over a `BroadcastChannel` and asks for it itself; the operation ends when its own get has resolved and the second page's answer has arrived. Each operation asks for a range no earlier one did, and the cache is cleared between batches, outside the timer.
 
-**What fails them.** Every operation checks what it read (the bar count, the first and last timestamp, the last price, no misses) and throws on a wrong result. After each scenario the driver asks the backend what it served: `handshake-first-read` one fetch per run, `read-viewport-shared` only its fill (every read is a cache hit), `two-tabs-one-fetch` one fetch per operation, of a range asked for once. The second tab's get either joins the fetch in flight or, if that fetch has already landed, reads the cache; either way the tabs share one fetch. `e2e/dedup.spec.ts` proves the join itself, with the backend holding the fetch open.
+**What fails them.** Every operation checks what it read (the bar count, the first and last timestamp, the last price, no misses) and throws on a wrong result. After each scenario the driver asks the backend what it served: `handshake-first-read` one fetch per run, `read-viewport-shared` only its fill (every read is a cache hit), `two-tabs-one-fetch` one fetch per operation, of a range asked for once. `live-tail-get` checks on the page that every get fetched the newest bar once more, and that the backend served nothing. The second tab's get either joins the fetch in flight or, if that fetch has already landed, reads the cache; either way the tabs share one fetch. `e2e/dedup.spec.ts` proves the join itself, with the backend holding the fetch open.
 
 **Why report-only.** Two scenarios include a fetch over the loopback interface and a server's response time, which the engine does not control, and none has been calibrated. They have no A/A control and no confirmation, and nothing gates on them; their step in the `bench` job continues on error, so that job's result does not depend on them once it is required. A regression shows as a ratio in the job summary, for a reviewer to read.
 
@@ -106,7 +110,8 @@ The paired sampler serves all three runtimes. Vitest remains the runner for the 
 | Memory, fetch, port, extent and growth budgets | Vitest: pre-push, `bun run ci`, the `ci` job | over budget, always |
 | `bench:smoke`: every case once, its result checked | `bun run ci` | a case returns the wrong result |
 | `e2e --smoke`: every end-to-end scenario once, in Chromium, checked | `bun run ci` | a wrong result, or a fetch the scenario should not make |
-| Timing, Chromium and Bun | the `bench` job | report-only now; once calibrated: a confirmed regression no trailer allows |
+| Timing, Bun, the cases in `bench/gated.json` | the `bench` job (`compare --gate`) | a confirmed regression no trailer allows, in a run whose A/A control was quiet |
+| Timing, every other case and all of Chromium | the `bench` job | never: report-only, shown in the summary as `reports` |
 | End-to-end timings, Chromium | the `bench` job | never: report-only, the step continues on error |
 
 **A timing regression** must meet all of these:
@@ -114,9 +119,10 @@ The paired sampler serves all three runtimes. Vitest remains the runner for the 
 - the confidence interval's lower bound at least **1.03**;
 - the head slower by at least **0.25 µs** per operation;
 - the same in a **confirmation**: the case timed again in a fresh process with 30 rounds;
-- an A/A control inside its bounds.
+- an A/A control inside its bounds;
+- the case listed for its runtime in `packages/tscache/bench/gated.json`.
 
-`bench/gate.ts` holds these decisions, and `test/perf/gate.test.ts` tests them. The same file tests the sampler's logic (pairing, alternation, calibration, the median and its interval) on a virtual clock that its operations advance, so the correctness suite measures no time and cannot fail on a busy machine. How the sampler behaves on real hardware is measured where timing belongs: the A/A control in every `bench` run, and the calibration dispatches below.
+`bench/gate.ts` holds these decisions, and `test/perf/gate.test.ts` and `test/perf/gated.test.ts` test them (the latter also checks that `gated.json` names only cases the bench runs). The same file tests the sampler's logic (pairing, alternation, calibration, the median and its interval) on a virtual clock that its operations advance, so the correctness suite measures no time and cannot fail on a busy machine. How the sampler behaves on real hardware is measured where timing belongs: the A/A control in every `bench` run, and the calibration dispatches below.
 
 **Accepting a deliberate regression.** Add a trailer to a commit of the pull request:
 
@@ -137,7 +143,7 @@ GitHub's merge ref, a conflict outside the source, and a branch behind its base 
 - it fired in none of the 20 same-revision runs;
 - it caught at least 90 % of the runs at 25 %, in every gated case whose slowdown clears the floor.
 
-Detection at 15 % is recorded too. Then the `bench` job gets `--gate` and becomes a required check (one line in branch protection). If calibration fails, the thresholds widen, or timing stays report-only with the exact budgets carrying the gate. Each calibration's tally is added below.
+Detection at 15 % is recorded too. The conditions are judged per runtime and case, and the cases that meet both are listed in `packages/tscache/bench/gated.json`, which the `bench` job's `compare --gate` reads: a confirmed regression fails the job only in a listed case. The file is data, not code: adding a case after a calibration it passes, or removing one that a later calibration fails, is an edit of that file, with the run ids in the commit message and the tally below. A runtime the file leaves out, or lists with no case, only reports; Node can never be listed. Making the `bench` check required is one line in branch protection, and the user's decision. Each calibration's tally is added below.
 
 ## Commands
 
@@ -149,6 +155,7 @@ bun run bench:e2e       # the end-to-end scenarios, the working tree against ori
 bun scripts/bench.ts e2e --base main --only two-tabs-one-fetch --rounds 30
 bun scripts/bench.ts e2e --base HEAD --fetchers json,columns   # the fetch formats, one engine
 bun run bench           # the working tree against origin/main, in Chromium and Bun
+bun scripts/bench.ts compare --gate   # as the bench job runs it: fails on a gated case's confirmed regression
 bun scripts/bench.ts compare --base main --only read-viewport --runtime bun
 bun scripts/bench.ts compare --base HEAD --slowdown 0.25   # local calibration run
 bun scripts/bench.ts compare --base HEAD --setup short-batches   # a setup of the Chromium noise experiment
@@ -180,6 +187,11 @@ bun scripts/size.ts --update                               # reseed the size bud
 | 2026-10-30 | the same, setup `combined` (both sets of switches, 100 ms batches, 30 rounds), run 40995984942 | 0 | Chromium quiet in 20 of 20; Bun in 20. No case fired |
 | 2026-10-30 | GitHub runner, chore 39 at `b0345b1` (100 ms batches and 30 rounds the default), run 40999175509 | 0.15 | Chromium, 20 quiet runs: 20 in six cases, 19 in `fill-month`, 13 in `read-viewport-sessions`, 10 in `put-page`. Bun, 20 quiet runs: 20 in six cases, 19 in `snapshot-roundtrip`, 6 in `append-bars`, 5 in `read-year` |
 | 2026-10-30 | the same, run 40999178404 | 0.25 | Chromium, 19 quiet runs (1 noisy): 19 in seven cases, 18 (95 %) in `read-viewport-sessions`, 16 (84 %) in `put-page`. Bun, 19 quiet runs (1 noisy): 19 in eight cases, 9 (47 %) in `read-year` |
+| 2026-10-30 | GitHub runner, chore 43 at `89efd15` (main after #51, #52, #56 and #57), run 41077561504 | 0 | Bun: no case fired in 20 quiet runs. Chromium: no case fired in 19 quiet runs (1 noisy) |
+| 2026-10-30 | the same, run 41077575673 | 0.15 | Bun, 19 quiet runs (1 noisy): 19 in `read-viewport-sessions`, `put-page` and `fill-month`, 18 in `read-viewport`, `put-live-bar`, `append-bars` and `snapshot-roundtrip`, 17 in `read-transfer`, 4 in `read-year`. Chromium, 19 quiet runs (1 noisy): 19 in seven cases, 17 in `put-live-bar`, 13 in `read-viewport-sessions` |
+| 2026-10-30 | the same, run 41077588416 | 0.25 | Bun, 20 quiet runs: 20 in eight cases, 17 (85 %) in `read-year`. Chromium, 20 quiet runs: 20 in all nine cases |
+| 2026-10-30 | the `read-year` injection experiment: chore 43 at `2b38ca9`, `read-year` slowed by repeating the call instead of waiting, run 41078306816 | 0.15 | Bun, 18 quiet runs (2 noisy): 5 in `read-year` (4 of 19 with the wait, above) |
+| 2026-10-30 | the same, run 41078312567 | 0.25 | Bun, 20 quiet runs: 20 in `read-year` (17 with the wait, above), 20 in every other case. Chromium: 20 of 20 in every case |
 
 **Verdict of the 2026-10-30 calibration: the timing gate stays report-only.** Bun met both conditions except `read-year` at 25 % (84 %, below 90 %). Chromium could not be judged: its A/A control left [0.95, 1.05] in 17 to 20 of the 20 runs per dispatch. The batches were long enough (512 calls of about 0.11 ms, some 56 ms, against the 40 ms the timer needs), and the control's round ratios split into groups near 0.7, 1.0 and 1.4, so the noise comes from the runner (two shared vCPUs for Chromium's processes), not from the timer. Before the gate can block:
 1. Done: recalibrate on a main that includes step 22 (#43), which made the reads several times faster and so changes what each case measures.
@@ -195,6 +207,12 @@ Next: find out why an injected slowdown in `read-year` measures smaller than inj
 **Verdict of the Chromium noise experiment (chore 39): `compare` now times 100 ms batches and 30 rounds, and Chromium can be judged.** Each setup was dispatched once at slowdown 0 on the same branch within a few minutes, with `default` as that day's control. Only the longer batches moved Chromium's quiet count to 19 of 20 or more: 19 alone, 20 with the switches added. The anti-backgrounding switches alone (12 of 20) and the renderer limit alone (10 of 20) did no better than the control (15 of 20). The bench already ran Playwright's headless shell (`chrome-headless-shell`, one renderer process, as the run's process log shows), so the renderer limit had nothing to limit; Playwright already passes `--disable-background-timer-throttling` to the renderer. The default takes the longer batches alone, the one change the evidence supports; 19 and 20 of 20 cannot be told apart in one dispatch. No case fired at slowdown 0 in any setup. Of the 23 noisy runs with 40 ms batches across the three setups that used them, 19 had calibrated half the usual batch (256 calls of `read-viewport` instead of 512, so the operation ran at about half speed while the batch was sized) and an interval as wide as [0.5, 1.9]; every quiet run had 512 calls or more. That points to slow phases of the runner, which a 40 ms batch can fall inside and a 100 ms batch spans; this is an interpretation of these runs, not tested further. The cost is time: a calibration job takes about four minutes instead of two, and the `bench` job of `ci.yml` grows by about as much.
 
 With the new timing, both runtimes meet the gate's conditions except in one case each: at 25 %, Chromium caught `put-page` in 84 % of quiet runs and Bun caught `read-year` in 47 %; every other case reached 95 % or more, and no case fired at 0. The gate stays report-only: turning it on, in either runtime or per case, is the separate step planned for it (the Bun-only per-case gate), which should now consider Chromium too, without `put-page`. Detection at 15 % is uneven (`put-page` 10 and `read-viewport-sessions` 13 of 20 in Chromium; `append-bars` 6 and `read-year` 5 of 20 in Bun). A larger runner was not needed.
+
+**Verdict of the recalibration after the engine optimisations (chore 43): Bun gates eight cases.** On main at `89efd15`, with #51, #52 and #57 making the engine faster, Bun fired in no case in 20 same-revision runs and caught every 25 % slowdown in eight cases: `read-viewport`, `read-viewport-sessions`, `put-page`, `put-live-bar`, `append-bars`, `fill-month`, `snapshot-roundtrip` and `read-transfer`. They are listed in `bench/gated.json` and fail the `bench` job on a confirmed regression. `read-year` caught 17 of 20 (85 %) and stays report-only, as does all of Chromium.
+
+**The `read-year` injection.** The performance plan's hypothesis was that the injected wait lets the engine's background threads free the previous call's memory (about 25 MB of new columns per call), so part of the injected time is absorbed. Slowing the case by repeating the call instead tested it. On this main the hypothesis does not hold: the median measured ratio at 25 % was about 1.28 with the wait and 1.26 with repetition, both at or above the injected fraction, and detection at 15 % was 4 of 19 and 5 of 18. Repetition caught 20 of 20 at 25 % against 17 with the wait, but with the same measured slowdown that difference is the case's noise, not the injection. Its misses are runs whose interval or confirmation fell short: `read-year`'s batches hold only 16 or 32 calls, its time per call differed about twofold between runner machines (about 4 and 8 ms), and its round-to-round ratios scatter widely. The injection stays as it was. Whatever absorbed the slowdown after step 22 (17 % and 47 % detected at 25 %) no longer shows on this main.
+
+**Chromium meets the conditions in this calibration** (no false alarm in 19 quiet runs, every case caught in 20 of 20 at 25 %, `put-page` included, which reached 84 % in chore 39). One dispatch at each slowdown is all the evidence so far, against two earlier calibrations it failed, so Chromium stays report-only until the user decides; adding it is an edit of `gated.json`.
 
 ## How this setup was chosen
 
@@ -216,5 +234,5 @@ Fable then reviewed the implementation against the converged design. It found a 
 
 ## Next
 
-1. **Calibrate on GitHub's runner** (above) and turn the gate on. First calibration on 2026-10-30: not yet; see the calibration log.
+1. **Calibrate on GitHub's runner** (above) and turn the gate on. Done for eight Bun cases (chore 43). Open: `read-year` in Bun, Chromium (which met the conditions once, in chore 43), and whether the `bench` check becomes required.
 2. **Done (step 22): the first optimisation the benches pointed at.** `DenseSegment.slice` built each read point by point (a per-slot presence check, a `number[]`, then `Float64Array.from`). It now counts the present slots first (free when the segment has no gap), allocates each result once, and copies a fully present span with one `TypedArray.prototype.slice` per column. Measured locally against `main` (`bun scripts/bench.ts compare --base main --runtime bun,chromium`, head/base median): `read-viewport` 0.150 in Bun and 0.590 in Chromium, `read-viewport-sessions` 0.151 and 0.716, `read-year` 0.097 and 0.526, `snapshot-roundtrip` 0.748 and 0.972.

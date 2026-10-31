@@ -58,6 +58,7 @@ export default defineConfig({
           items: [
             { text: "What tscache is", link: "/" },
             { text: "Getting started", link: "/guide/getting-started" },
+            { text: "Demo hub", link: "/guide/demo" },
           ],
         },
         {

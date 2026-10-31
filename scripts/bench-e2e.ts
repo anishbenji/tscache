@@ -54,7 +54,31 @@ const SCENARIOS: Readonly<Record<Scenario, string>> = {
     "get 1,500 cached bars through a SharedWorker: the port round trip and the transfer",
   "two-tabs-one-fetch":
     "two tabs ask for the same 1,500 bars at once and share one fetch",
+  "live-tail-get":
+    "get 1,500 bars whose newest is provisional through a SharedWorker: one fetch answered at once, the merge, the read and the transfer",
 };
+
+/**
+ * live-tail-get's fetcher: answers every grid point of the range at once,
+ * from memory, so the scenario times the worker's work rather than a
+ * server's. price is the timestamp; volume counts the fetches made for
+ * the cache so far, so the page sees that each get fetched once more.
+ */
+const TAIL_FETCHER = `
+  const fetches = new Map();
+  export default {
+    async fetch({ cacheId, range, interval, alignmentOffset }) {
+      const calls = (fetches.get(cacheId) ?? 0) + 1;
+      fetches.set(cacheId, calls);
+      const timestamps = [];
+      const first = Math.ceil((range.start - alignmentOffset) / interval) * interval + alignmentOffset;
+      for (let t = first; t <= range.end; t += interval) timestamps.push(t);
+      return {
+        timestamps,
+        fields: { price: timestamps, volume: timestamps.map(() => calls) },
+      };
+    },
+  };`;
 
 /** A scenario's result; the smoke's carries its one run's time. */
 export type E2eResult = CaseResult & { ms?: number };
@@ -109,6 +133,11 @@ function serve(out: string) {
       }
       if (url.pathname.startsWith("/backend/")) return backend(request, url);
       if (url.pathname === "/columns.js") return columnsModule();
+      if (url.pathname === "/tail-fetcher.js") {
+        return new Response(TAIL_FETCHER, {
+          headers: { "content-type": "text/javascript" },
+        });
+      }
       const path = files(url.pathname);
       const file = path === undefined ? undefined : Bun.file(path);
       if (file === undefined || !(await file.exists())) {
@@ -219,7 +248,8 @@ async function firstReads(d: Driver): Promise<E2eResult> {
  * operation ran: read-viewport-shared only its one fill (every read is a
  * cache hit), two-tabs-one-fetch one per operation, of a range no other
  * asked for (the second tab's get joined the first's fetch, or found its
- * result cached).
+ * result cached), live-tail-get none (its fetcher answers from memory, and
+ * the page checks that every get fetched).
  */
 function checkFetches(
   scenario: PageScenario,
@@ -227,10 +257,13 @@ function checkFetches(
   calls: number,
 ): void {
   const counts = Object.values(seen);
-  const right =
-    scenario === "read-viewport-shared"
-      ? counts.length === 1 && counts[0] === 1
-      : counts.length === calls && counts.every((n) => n === 1);
+  const expected: Record<PageScenario, () => boolean> = {
+    "read-viewport-shared": () => counts.length === 1 && counts[0] === 1,
+    "two-tabs-one-fetch": () =>
+      counts.length === calls && counts.every((n) => n === 1),
+    "live-tail-get": () => counts.length === 0,
+  };
+  const right = expected[scenario]();
   if (!right) {
     throw new Error(
       `${scenario}: ${calls} operations made these fetches: ${JSON.stringify(seen)}`,
