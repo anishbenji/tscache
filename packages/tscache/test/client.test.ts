@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClient } from "../src/client/client";
+import { ClientEmitter } from "../src/client/events";
 import { Engine } from "../src/engine/engine";
 import {
   ConfigError,
@@ -635,5 +636,46 @@ describe("worker loss (N32)", () => {
       expect(heard).toEqual(["first", "second"]);
       expect(reported).toHaveLength(1);
     });
+  });
+});
+
+describe("persistStopped (§4.10.1, §4.10.8)", () => {
+  it("reaches client.on, and cache.on filtered by cache id", async () => {
+    const { servers } = installFakeWorkers();
+    const client = await make({ workerUrl: url });
+    const a = await client.cache(config);
+    const b = await client.cache({ ...config, id: "other" });
+    const all: ClientEvents["persistStopped"][] = [];
+    const onA: ClientEvents["persistStopped"][] = [];
+    const onB: ClientEvents["persistStopped"][] = [];
+    client.on("persistStopped", (e) => all.push(e));
+    a.on("persistStopped", (e) => onA.push(e));
+    b.on("persistStopped", (e) => onB.push(e));
+    const stop: ClientEvents["persistStopped"] = {
+      cacheId: "c",
+      reason: "error",
+      error: { name: "UnknownError", message: "disk refused" },
+    };
+    servers.get(url)?.persistStopped(stop);
+    // A round trip on the same port: the event was posted before its answer.
+    await a.get({ start: 3, end: 3 });
+    expect(all).toEqual([stop]);
+    expect(onA).toEqual([stop]);
+    expect(onB).toEqual([]);
+  });
+
+  it("an unknown cache-scoped event is still ignored", () => {
+    const emitter = new ClientEmitter();
+    const heard: unknown[] = [];
+    emitter.on("persistStopped", (e) => heard.push(e));
+    emitter.on("cacheCleared", (e) => heard.push(e));
+    emitter.receive({
+      t: "evt",
+      scope: "cache",
+      cacheId: "c",
+      event: "persistPaused",
+      payload: { cacheId: "c" },
+    });
+    expect(heard).toEqual([]);
   });
 });

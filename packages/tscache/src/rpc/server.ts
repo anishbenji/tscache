@@ -8,7 +8,10 @@
 import type { Engine } from "../engine/engine";
 import { ProtocolMismatchError, show, TscacheError } from "../errors";
 import { Orchestrator } from "../orchestrator/orchestrator";
+import type { Persister } from "../persist/persister";
 import type {
+  CacheConfig,
+  ClientEvents,
   GetOptions,
   GetResult,
   PutBatch,
@@ -64,14 +67,26 @@ export class RpcServer {
   readonly #orchestrator: Orchestrator;
   readonly #lib: string;
   readonly #lock: string | undefined;
+  readonly #persister: Persister | undefined;
   readonly #connections = new Set<Connection>();
   #nextClient = 0;
 
-  /** `lock`: the Web Lock the worker holds for its lifetime, sent in hello (N32). */
-  constructor(engine: Engine, lib: string, lock?: string) {
+  /**
+   * `lock`: the Web Lock the worker holds for its lifetime, sent in hello
+   * (N32). `persister`: the SharedWorker hosting's persistence (§4.10.8);
+   * without one, `persist: true` does nothing and every op answers as
+   * before persistence.
+   */
+  constructor(
+    engine: Engine,
+    lib: string,
+    lock?: string,
+    persister?: Persister,
+  ) {
     this.#engine = engine;
     this.#lib = lib;
     this.#lock = lock;
+    this.#persister = persister;
     this.#orchestrator = new Orchestrator(engine, (evt) =>
       this.#broadcast(evt),
     );
@@ -110,6 +125,20 @@ export class RpcServer {
     this.#send(connection, hello);
   }
 
+  /**
+   * Tells every ready port that a cache's persistence stopped (§4.10.8):
+   * the persister's `onStopped`.
+   */
+  persistStopped(payload: ClientEvents["persistStopped"]): void {
+    this.#broadcast({
+      t: "evt",
+      scope: "cache",
+      cacheId: payload.cacheId,
+      event: "persistStopped",
+      payload,
+    });
+  }
+
   /** Attached ports still alive (for tests and diagnostics). */
   get connections(): number {
     return this.#connections.size;
@@ -137,6 +166,8 @@ export class RpcServer {
     }
     connection.unlisten();
     connection.port.close?.();
+    // The last tab is gone: write what the debounce still holds (§4.10.8).
+    if (this.#connections.size === 0) void this.#persister?.flush();
   }
 
   /**
@@ -263,27 +294,103 @@ export class RpcServer {
     Op,
     (connection: Connection, req: Req, p: Params) => unknown
   > = {
-    cache: (_c, req) => this.#engine.cache(req.params as never),
+    cache: (_c, req) => this.#cache(req.params as CacheConfig),
     get: (c, req, p) =>
-      this.#orchestrator.get(
-        p.cacheId as string,
-        p.range as Range,
-        p.options,
-        `${c.clientId}:${req.id}`,
+      this.#durably(p.cacheId, () =>
+        this.#orchestrator.get(
+          p.cacheId as string,
+          p.range as Range,
+          p.options,
+          `${c.clientId}:${req.id}`,
+        ),
       ),
-    put: (c, req, p) => this.#put(c, req.id, p.cacheId as string, p),
+    put: (c, req, p) =>
+      this.#durably(p.cacheId, () =>
+        this.#put(c, req.id, p.cacheId as string, p),
+      ),
     invalidate: (_c, _r, p) =>
-      this.#orchestrator.invalidate(p.cacheId as string, p.range as Range),
-    clear: (_c, _r, p) => this.#engine.clear(p.cacheId as string),
-    clearAll: () => this.#engine.clearAll(),
+      this.#durably(p.cacheId, () =>
+        this.#orchestrator.invalidate(p.cacheId as string, p.range as Range),
+      ),
+    clear: (_c, _r, p) =>
+      this.#durably(p.cacheId, () => this.#engine.clear(p.cacheId as string)),
+    clearAll: () => this.#clearAll(),
     setFinalizedUntil: (_c, _r, p) =>
-      this.#engine.setFinalizedUntil(p.cacheId as string, p.t as number),
+      this.#durably(p.cacheId, () =>
+        this.#engine.setFinalizedUntil(p.cacheId as string, p.t as number),
+      ),
     hydrate: (_c, _r, p) =>
-      this.#engine.hydrate(p.cacheId as string, p.snapshot as Snapshot),
+      this.#durably(p.cacheId, () =>
+        this.#engine.hydrate(p.cacheId as string, p.snapshot as Snapshot),
+      ),
     updateAuth: (_c, _r, p) => this.#orchestrator.updateAuth(p.context),
     // Acknowledged first; #request detaches the port afterwards.
     dispose: () => undefined,
   };
+
+  /**
+   * Get-or-create; a persisted cache answers once its load settled, so no
+   * call through a handle reaches a cache whose load is pending (§4.10.5).
+   * `open` is called in the same synchronous step that creates the cache.
+   */
+  #cache(config: CacheConfig): unknown {
+    const resolved = this.#engine.cache(config);
+    const persister = this.#persister;
+    if (persister === undefined || !resolved.persist) return resolved;
+    return persister.open(resolved.id).then(() => resolved);
+  }
+
+  /**
+   * Runs an op that names a cache. When it recorded a removal, or another
+   * op did meanwhile, it answers, success or failure, only once that
+   * removal is durable or the cache's persistence stopped (N58).
+   */
+  #durably(cacheId: unknown, op: () => unknown): unknown {
+    const persister = this.#persister;
+    if (persister === undefined || typeof cacheId !== "string") return op();
+    const before = persister.removals(cacheId);
+    const settle = async (): Promise<void> => {
+      if (persister.removals(cacheId) > before) {
+        await persister.durable(cacheId);
+      }
+    };
+    let result: unknown;
+    try {
+      result = op();
+    } catch (error) {
+      return settle().then(() => Promise.reject(error));
+    }
+    return Promise.resolve(result).then(
+      async (value) => {
+        await settle();
+        return value;
+      },
+      async (error: unknown) => {
+        await settle();
+        throw error;
+      },
+    );
+  }
+
+  /**
+   * Empties every cache, and with a persister the disk, in the same
+   * synchronous step (N54); answers once the disk is empty or every
+   * persisted cache has stopped.
+   */
+  #clearAll(): unknown {
+    const persister = this.#persister;
+    if (persister === undefined) return this.#engine.clearAll();
+    let failure: { error: unknown } | undefined;
+    try {
+      this.#engine.clearAll();
+    } catch (error) {
+      // Every cache was cleared anyway (N22); the disk must follow.
+      failure = { error };
+    }
+    return persister.clearAll().then(() => {
+      if (failure !== undefined) throw failure.error;
+    });
+  }
 
   /** put, then the request-scoped mergeWarning events (N21). */
   #put(
