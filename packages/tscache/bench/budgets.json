@@ -1,8 +1,8 @@
 {
   "brotli": {
-    "index": 15156,
-    "worker": 12576,
-    "engine": 9488,
+    "index": 16848,
+    "worker": 17440,
+    "engine": 10848,
     "fetcher": 656,
     "vite": 1488
   }
