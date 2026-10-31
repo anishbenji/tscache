@@ -53,6 +53,7 @@ describe("series", () => {
     chart.show(a);
     chart.show(b);
     await until(() => answers.length > 0);
+    // clock-ok: an absence check; a slow machine can only hide a late answer, not fail the test.
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(answers.map((answer) => answer.range)).toEqual([b]);
   });
@@ -137,6 +138,7 @@ describe("series", () => {
     chart.show(a);
     chart.refresh();
     await until(() => answers.length === 1);
+    // clock-ok: an absence check; a slow machine can only hide a late answer, not fail the test.
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(answers).toHaveLength(1);
   });
@@ -147,6 +149,7 @@ describe("series", () => {
     chart.dispose();
     chart.show(a);
     chart.refresh(b);
+    // clock-ok: an absence check; a slow machine can only hide a late answer, not fail the test.
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(answers).toEqual([]);
   });
@@ -156,6 +159,7 @@ describe("series", () => {
     const { chart, answers } = recorder(connection);
     chart.show(a);
     chart.dispose();
+    // clock-ok: an absence check; a slow machine can only hide a late answer, not fail the test.
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(answers).toEqual([]);
   });

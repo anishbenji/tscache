@@ -130,7 +130,12 @@ async function make(options: Parameters<typeof createClient>[0]) {
   return client;
 }
 
-const settled = () => new Promise((resolve) => setTimeout(resolve, 5));
+/**
+ * Waits until `assertion` passes, for an event the test cannot await. A
+ * sleep would be too short on a busy machine (docs/testing.md).
+ */
+const eventually = (assertion: () => unknown) =>
+  vi.waitFor(assertion, { timeout: 4000, interval: 1 });
 
 describe("createClient options", () => {
   it("requires workerUrl unless pinned in-process", async () => {
@@ -167,19 +172,20 @@ describe("fallback chain", () => {
     expect(client.mode).toBe("in-process");
     const seen: ClientEvents["modeFallback"][] = [];
     client.on("modeFallback", (e) => seen.push(e));
-    await settled();
-    expect(seen).toEqual([
-      {
-        from: "shared",
-        to: "dedicated",
-        reason: expect.stringMatching(/SharedWorker/),
-      },
-      {
-        from: "dedicated",
-        to: "in-process",
-        reason: expect.stringMatching(/Worker/),
-      },
-    ]);
+    await eventually(() => {
+      expect(seen).toEqual([
+        {
+          from: "shared",
+          to: "dedicated",
+          reason: expect.stringMatching(/SharedWorker/),
+        },
+        {
+          from: "dedicated",
+          to: "in-process",
+          reason: expect.stringMatching(/Worker/),
+        },
+      ]);
+    });
   });
 
   it("uses the dedicated worker when SharedWorker is missing, and terminates it on dispose", async () => {
@@ -213,8 +219,9 @@ describe("fallback chain", () => {
     const cleared: ClientEvents["cacheCleared"][] = [];
     cb.on("cacheCleared", (e) => cleared.push(e));
     await ca.clear();
-    await settled();
-    expect(cleared).toEqual([{ cacheId: "c", reason: "manual" }]);
+    await eventually(() => {
+      expect(cleared).toEqual([{ cacheId: "c", reason: "manual" }]);
+    });
   });
 
   it("falls back when the worker constructor throws or the script fails to start", async () => {
@@ -229,6 +236,7 @@ describe("fallback chain", () => {
     vi.stubGlobal("Worker", function FakeWorker() {
       const channel = new MessageChannel();
       const w = workerLike(channel.port2, () => {});
+      // clock-ok: the fake worker's error comes after its constructor returns, as a browser's does. Its zero timer is queued before the client's handshake timer, which is longer, so no pause can put that timer first.
       setTimeout(() => w.fail("script 404"), 0);
       return w;
     });
@@ -236,11 +244,12 @@ describe("fallback chain", () => {
     expect(client.mode).toBe("in-process");
     const seen: ClientEvents["modeFallback"][] = [];
     client.on("modeFallback", (e) => seen.push(e));
-    await settled();
-    expect(seen.map((e) => e.reason)).toEqual([
-      expect.stringMatching(/blocked by CSP/),
-      expect.stringMatching(/script 404/),
-    ]);
+    await eventually(() => {
+      expect(seen.map((e) => e.reason)).toEqual([
+        expect.stringMatching(/blocked by CSP/),
+        expect.stringMatching(/script 404/),
+      ]);
+    });
   });
 
   it("falls back when a worker never says hello", async () => {
@@ -309,17 +318,18 @@ describe("cache handle", () => {
     await a.clear();
     await client.clearAll();
     await client.updateAuth({ token: "t" });
-    await settled();
-    expect(warningsA).toEqual([
-      {
-        cacheId: "c",
-        requestId: expect.stringMatching(/^c1:\d+$/),
-        range: { start: 3, end: 3 },
-        fields: ["price"],
-      },
-    ]);
-    // b hears only its own clear (from clearAll), not a's manual clear.
-    expect(clearedB).toEqual([{ cacheId: "other", reason: "clear-all" }]);
+    await eventually(() => {
+      expect(warningsA).toEqual([
+        {
+          cacheId: "c",
+          requestId: expect.stringMatching(/^c1:\d+$/),
+          range: { start: 3, end: 3 },
+          fields: ["price"],
+        },
+      ]);
+      // b hears only its own clear (from clearAll), not a's manual clear.
+      expect(clearedB).toEqual([{ cacheId: "other", reason: "clear-all" }]);
+    });
   });
 });
 
@@ -327,6 +337,8 @@ describe("lifecycle (round 1)", () => {
   it("a SharedWorker that answers after the timeout completes nothing: this side's port is closed", async () => {
     let closed = 0;
     let messages = 0;
+    /** Attaches the worker's server, which then says hello: the test's call. */
+    let answer = () => {};
     vi.stubGlobal("Worker", undefined);
     vi.stubGlobal(
       "SharedWorker",
@@ -335,8 +347,9 @@ describe("lifecycle (round 1)", () => {
         constructor() {
           const channel = new MessageChannel();
           const server = new RpcServer(new Engine(), "0.0.0");
-          // Attach late: hello arrives after the client gave up.
-          setTimeout(() => server.attach(channel.port1 as MessagePortLike), 60);
+          // Nothing answers until the test says so, after the client gave
+          // up: the hello is late by construction, not by a timer.
+          answer = () => server.attach(channel.port1 as MessagePortLike);
           const port = channel.port2;
           this.port = {
             postMessage: (m: unknown, t?: Transferable[]) => {
@@ -360,6 +373,9 @@ describe("lifecycle (round 1)", () => {
     );
     const client = await make({ workerUrl: url, handshakeTimeoutMs: 20 });
     expect(client.mode).toBe("in-process");
+    // The hello arrives now, after the timeout.
+    answer();
+    // clock-ok: an absence check after the late hello; a slow machine can only hide an init, not fail the test.
     await new Promise((r) => setTimeout(r, 120));
     // Abandoned on timeout: the port was closed and no init was ever sent.
     expect(closed).toBe(1);
@@ -413,9 +429,10 @@ describe("lifecycle (round 1)", () => {
     });
     const reported: unknown[] = [];
     vi.stubGlobal("reportError", (e: unknown) => reported.push(e));
-    await settled();
-    expect(seen).toEqual(["dedicated", "in-process"]);
-    expect(reported).toHaveLength(1);
+    await eventually(() => {
+      expect(seen).toEqual(["dedicated", "in-process"]);
+      expect(reported).toHaveLength(1);
+    });
   });
 
   it("disposes itself on pagehide, telling the worker", async () => {
@@ -433,13 +450,14 @@ describe("lifecycle (round 1)", () => {
     expect(server?.connections).toBe(1);
     // Into the back/forward cache: the page may return, so nothing changes.
     listeners.get("pagehide")?.({ persisted: true });
-    await settled();
-    expect(server?.connections).toBe(1);
+    // A round trip that a disposed client would reject.
     await client.clearAll();
+    expect(server?.connections).toBe(1);
     // Really leaving: dispose.
     listeners.get("pagehide")?.({ persisted: false });
-    await settled();
-    expect(server?.connections).toBe(0);
+    await eventually(() => {
+      expect(server?.connections).toBe(0);
+    });
     await expect(client.clearAll()).rejects.toBeInstanceOf(TscacheError);
     expect(listeners.has("pagehide")).toBe(false);
   });
@@ -566,7 +584,8 @@ describe("worker loss (N32)", () => {
     expect(requests[0]?.signal?.aborted).toBe(true);
     // A grant racing the withdrawal changes nothing.
     requests[0]?.grant();
-    await settled();
+    // clock-ok: an absence check; a slow machine can only hide a wrong event, not fail the test.
+    await new Promise((resolve) => setTimeout(resolve, 5));
     expect(lost).toEqual([]);
     await expect(client.clearAll()).rejects.toMatchObject({
       message: "client disposed",
@@ -593,8 +612,7 @@ describe("worker loss (N32)", () => {
     const lost: ClientEvents["workerLost"][] = [];
     client.on("workerLost", (e) => lost.push(e));
     fake.server.detach(fake.ports[0] as MessagePortLike);
-    for (let i = 0; i < 50 && lost.length === 0; i++) await settled();
-    expect(lost).toEqual([{ reason: "port closed" }]);
+    await eventually(() => expect(lost).toEqual([{ reason: "port closed" }]));
     await expect(client.clearAll()).rejects.toMatchObject({
       message: "port closed",
     });
@@ -613,8 +631,9 @@ describe("worker loss (N32)", () => {
     });
     client.on("workerLost", () => heard.push("second"));
     requests[0]?.grant();
-    await settled();
-    expect(heard).toEqual(["first", "second"]);
-    expect(reported).toHaveLength(1);
+    await eventually(() => {
+      expect(heard).toEqual(["first", "second"]);
+      expect(reported).toHaveLength(1);
+    });
   });
 });

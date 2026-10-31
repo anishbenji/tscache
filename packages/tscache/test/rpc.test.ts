@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Engine } from "../src/engine/engine";
 import {
   ConfigError,
@@ -79,15 +79,23 @@ function events(client: PortClient): Evt[] {
   return seen;
 }
 
+/**
+ * One turn of the event loop: pending microtasks have run. It waits for no
+ * time; only absence checks use it, which a slow machine cannot fail.
+ */
+// clock-ok: a turn of the event loop, not a wait for time.
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** Polls a condition for up to a second: peer-close events are asynchronous. */
-async function until(condition: () => boolean): Promise<void> {
-  for (let i = 0; i < 200 && !condition(); i++) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  expect(condition()).toBe(true);
-}
+/**
+ * Waits until `condition` holds: messages and peer-close events are
+ * asynchronous. A sleep or a fixed number of polls would run out on a busy
+ * machine (docs/testing.md); this fails only at the test's timeout.
+ */
+const until = (condition: () => boolean) =>
+  vi.waitFor(() => expect(condition()).toBe(true), {
+    timeout: 4000,
+    interval: 1,
+  });
 
 describe("handshake", () => {
   it("assigns clientIds in connection order and completes init", async () => {
@@ -126,8 +134,7 @@ describe("handshake", () => {
     server.attach(channel.port1 as MessagePortLike);
     channel.port2.postMessage({ t: "req", id: 1, op: "clearAll", params: {} });
     channel.port2.postMessage({ t: "init", protocol: PROTOCOL_VERSION + 1 });
-    await tick();
-    await tick();
+    await until(() => replies.length >= 3);
     expect(replies[0]).toMatchObject({ t: "hello", clientId: "c1" });
     expect(replies[1]).toMatchObject({
       t: "res",
@@ -300,7 +307,8 @@ describe("events", () => {
       batch: batch([3, 13], [30, 130]),
     });
     await a.request("clear", { cacheId: "rpc" });
-    await tick();
+    // b's events come on its own port, unordered with a's reply.
+    await until(() => seenA.length >= 2 && seenB.length >= 2);
     const warning = {
       t: "evt",
       scope: "request",
@@ -406,7 +414,7 @@ describe("transport lifecycle (round 3)", () => {
     b.dispose();
     await until(() => server.connections === 1);
     await a.request("clear", { cacheId: "rpc" });
-    await tick();
+    await until(() => seenA.length >= 1);
     expect(seenA).toHaveLength(1);
   });
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClient } from "../src/client/client";
 import { Engine } from "../src/engine/engine";
 import { TscacheError } from "../src/errors";
@@ -31,6 +31,11 @@ interface Log {
   /** updateAuth stalls until releaseAuth is called. */
   slowAuth?: boolean;
   releaseAuth?: () => void;
+  /** Stalled fetches that have since returned or thrown. */
+  done?: number;
+  /** A gated module's import has started, and waits for importGate. */
+  importing?: boolean;
+  importGate?: Promise<void>;
 }
 const log = (): Log => (globalThis as unknown as { __tsc: Log }).__tsc;
 function resetLog(mode: Log["mode"] = "ok"): void {
@@ -60,6 +65,7 @@ const fetcherSource = `
       }
       if (g.mode === "slow") {
         await new Promise((r) => { g.release = r; });
+        g.done = (g.done ?? 0) + 1;
         if (g.afterRelease === "auth") { const e = new Error("401 late"); e.code = "tscache:auth-invalid"; throw e; }
         if (g.afterRelease === "fail") throw new Error("late failure");
       }
@@ -155,6 +161,50 @@ function captureAuthReleases(): (() => void)[] {
 
 const get = (c: PortClient, range: Range, options?: unknown) =>
   c.request("get", { cacheId: "o", range, options }) as Promise<GetResult>;
+
+/**
+ * Waits until `assertion` passes, for an effect the test cannot await: an
+ * event on another port, a fetch the worker starts. A sleep would be too
+ * short on a busy machine (docs/testing.md); this fails only at the test's
+ * timeout.
+ */
+const eventually = (assertion: () => unknown) =>
+  vi.waitFor(assertion, { timeout: 4000, interval: 1 });
+
+/**
+ * A round trip on `c`'s port. The server answers a port's messages in
+ * order, so what it did with everything sent before has run, including
+ * the microtasks of a fetch that has just settled.
+ */
+const barrier = (c: PortClient) =>
+  get(c, { start: 3, end: 3 }, { cacheOnly: true });
+
+/**
+ * A fetcher module whose import waits for log().importGate, so a test
+ * decides how long the first load lasts instead of a timer.
+ */
+const gatedModule = (source: string) =>
+  dataUrl(
+    `const g = globalThis.__tsc; g.importing = true; await g.importGate;\n${source}`,
+  );
+
+/** Opens log().importGate: the gated import completes. */
+function gateImport(): () => void {
+  let open = () => {};
+  log().importGate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return open;
+}
+
+/** Resolves when the server receives a tab's init on `port`. */
+function initOn(port: MessagePort): Promise<void> {
+  return new Promise((resolve) => {
+    port.addEventListener("message", ({ data }) => {
+      if ((data as { t?: string } | undefined)?.t === "init") resolve();
+    });
+  });
+}
 
 describe("coalesce (slots)", () => {
   const grid = { interval: 10, alignmentOffset: 3 };
@@ -257,12 +307,15 @@ describe("orchestrated get", () => {
     resetLog("slow");
     const { a, b } = await pair();
     const pa = get(a, { start: 3, end: 23 });
-    await new Promise((r) => setTimeout(r, 20));
+    await eventually(() => expect(log().requests).toHaveLength(1));
     const pb = get(b, { start: 3, end: 23 });
-    await new Promise((r) => setTimeout(r, 20));
+    // The server has taken b's get while a's fetch is still stalled, so the
+    // two overlap: b joins the fetch in flight instead of starting one.
+    await barrier(b);
     expect(log().requests).toHaveLength(1);
     log().release?.();
     const [ra, rb] = await Promise.all([pa, pb]);
+    expect(log().requests).toHaveLength(1);
     expect(ra).toEqual(rb);
     expect(Array.from(ra.fields.volume as Int16Array)).toEqual([1, 1, 1]);
   });
@@ -299,11 +352,12 @@ describe("auth (designs b and y)", () => {
     const second = await get(b, { start: 23, end: 33 });
     expect(second.misses[0]?.reason).toBe("auth-pending");
     expect(log().requests).toHaveLength(1);
-    await new Promise((r) => setTimeout(r, 10));
     const authEvents = (seen: Evt[]) =>
       seen.filter((e) => e.scope === "client" && e.event === "authInvalid");
-    expect(authEvents(seenA)).toHaveLength(1);
-    expect(authEvents(seenB)).toHaveLength(1);
+    await eventually(() => {
+      expect(authEvents(seenA)).toHaveLength(1);
+      expect(authEvents(seenB)).toHaveLength(1);
+    });
     // N33: the event names the context the refused fetch carried.
     expect(authEvents(seenA)[0]?.payload).toEqual({
       error: { name: "Error", message: "401" },
@@ -330,27 +384,27 @@ describe("refused context (N33)", () => {
     b.on((e) => seen.push(e));
     // A fetch goes out under t0 and stalls.
     const stalled = get(a, { start: 3, end: 13 });
-    for (let i = 0; i < 100 && log().release === undefined; i++) {
-      await new Promise((r) => setTimeout(r, 5));
-    }
+    await eventually(() => expect(log().release).toBeDefined());
     expect(log().requests.at(-1)?.context).toEqual({ token: "t0" });
     await b.request("updateAuth", { context: { token: "t1" } });
     // Its refusal comes after t1 replaced t0: it says nothing about t1.
     log().release?.();
     expect((await stalled).misses[0]?.reason).toBe("auth-pending");
-    await new Promise((r) => setTimeout(r, 10));
+    // An event for t0 would reach b's port before the one for t1 below,
+    // and fail its exact check.
     expect(seen.filter((e) => e.event === "authInvalid")).toEqual([]);
     // A refusal of t1 is reported with t1.
     log().mode = "auth";
     expect((await get(b, { start: 23, end: 33 })).misses[0]?.reason).toBe(
       "auth-pending",
     );
-    await new Promise((r) => setTimeout(r, 10));
-    expect(
-      seen.filter((e) => e.event === "authInvalid").map((e) => e.payload),
-    ).toEqual([
-      { error: { name: "Error", message: "401" }, context: { token: "t1" } },
-    ]);
+    await eventually(() =>
+      expect(
+        seen.filter((e) => e.event === "authInvalid").map((e) => e.payload),
+      ).toEqual([
+        { error: { name: "Error", message: "401" }, context: { token: "t1" } },
+      ]),
+    );
   });
 });
 
@@ -363,13 +417,14 @@ describe("context copies (adversarial A2-1)", () => {
     expect((await get(a, { start: 3, end: 13 })).misses[0]?.reason).toBe(
       "auth-pending",
     );
-    await new Promise((r) => setTimeout(r, 10));
     // Still cloneable and still naming the refused token.
-    expect(
-      seen.filter((e) => e.event === "authInvalid").map((e) => e.payload),
-    ).toEqual([
-      { error: { name: "Error", message: "401" }, context: { token: "t0" } },
-    ]);
+    await eventually(() =>
+      expect(
+        seen.filter((e) => e.event === "authInvalid").map((e) => e.payload),
+      ).toEqual([
+        { error: { name: "Error", message: "401" }, context: { token: "t0" } },
+      ]),
+    );
     await b.request("updateAuth", { context: { token: "t1" } });
     log().mode = "ok";
     expect((await get(a, { start: 3, end: 13 })).misses).toEqual([]);
@@ -388,12 +443,13 @@ describe("context copies (adversarial A2-1)", () => {
       "auth-pending",
     );
     expect(log().requests.at(-1)?.context).toEqual({ token: "t1" });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(
-      seen.filter((e) => e.event === "authInvalid").map((e) => e.payload),
-    ).toEqual([
-      { error: { name: "Error", message: "401" }, context: { token: "t1" } },
-    ]);
+    await eventually(() =>
+      expect(
+        seen.filter((e) => e.event === "authInvalid").map((e) => e.payload),
+      ).toEqual([
+        { error: { name: "Error", message: "401" }, context: { token: "t1" } },
+      ]),
+    );
   });
 });
 
@@ -411,7 +467,7 @@ describe("version fence (N29)", () => {
       },
     });
     const pending = get(a, { start: 3, end: 13 });
-    await new Promise((r) => setTimeout(r, 20));
+    await eventually(() => expect(log().release).toBeDefined());
     // A newer version arrives while the fetch is in flight.
     await a.request("put", {
       cacheId: "o",
@@ -511,12 +567,16 @@ describe("round 1 regressions", () => {
     log().mode = "slow";
     const releases = captureReleases();
     const pending = get(a, { start: 3, end: 73 });
-    await new Promise((r) => setTimeout(r, 30));
+    await eventually(() => expect(releases).toHaveLength(2));
     expect(releases).toHaveLength(2);
     // First fetch applies, then a newer version clears, then the second
     // fetch answers and must be dropped and re-requested.
     releases[0]?.();
-    await new Promise((r) => setTimeout(r, 10));
+    await eventually(async () =>
+      expect(
+        (await get(a, { start: 3, end: 13 }, { cacheOnly: true })).misses,
+      ).toEqual([]),
+    );
     await a.request("put", {
       cacheId: "o",
       batch: {
@@ -575,21 +635,22 @@ describe("round 1 regressions", () => {
     b.on((e) => seenB.push(e));
     // The fetch extends into the covered slot 3 and returns price 3 there.
     await a.request("get", { cacheId: "w", range: { start: 13, end: 13 } });
-    await new Promise((r) => setTimeout(r, 10));
     const warnings = (seen: Evt[]) =>
       seen.filter((e) => e.event === "mergeWarning");
-    expect(warnings(seenA)).toEqual([
-      expect.objectContaining({
-        scope: "request",
-        cacheId: "w",
-        requestId: expect.stringMatching(/^c1:\d+$/),
-        payload: expect.objectContaining({
-          range: { start: 3, end: 3 },
-          fields: ["price", "volume"],
+    await eventually(() => {
+      expect(warnings(seenA)).toEqual([
+        expect.objectContaining({
+          scope: "request",
+          cacheId: "w",
+          requestId: expect.stringMatching(/^c1:\d+$/),
+          payload: expect.objectContaining({
+            range: { start: 3, end: 3 },
+            fields: ["price", "volume"],
+          }),
         }),
-      }),
-    ]);
-    expect(warnings(seenB)).toHaveLength(1);
+      ]);
+      expect(warnings(seenB)).toHaveLength(1);
+    });
   });
 
   it("an auth failure under superseded credentials does not invalidate the new ones", async () => {
@@ -598,7 +659,7 @@ describe("round 1 regressions", () => {
     const releases = captureReleases();
     const first = get(a, { start: 3, end: 13 });
     const second = get(a, { start: 43, end: 53 });
-    await new Promise((r) => setTimeout(r, 30));
+    await eventually(() => expect(releases).toHaveLength(2));
     expect(releases).toHaveLength(2);
     // The first stalled fetch fails with 401: auth goes invalid.
     log().afterRelease = "auth";
@@ -641,12 +702,14 @@ describe("round 2 regressions", () => {
     });
     const releases = captureReleases();
     const pending = get(a, { start: 3, end: 73 });
-    await new Promise((r) => setTimeout(r, 30));
+    await eventually(() => expect(releases).toHaveLength(2));
     expect(releases).toHaveLength(2);
     // Left fetch [3,23] fails; a version clear fences the right one [53,73].
     log().afterRelease = "fail";
     releases[0]?.();
-    await new Promise((r) => setTimeout(r, 10));
+    // The failure is handled before the clear below fences anything.
+    await eventually(() => expect(log().done).toBe(1));
+    await barrier(a);
     delete log().afterRelease;
     await a.request("put", {
       cacheId: "o",
@@ -657,7 +720,7 @@ describe("round 2 regressions", () => {
       },
     });
     releases[1]?.();
-    await new Promise((r) => setTimeout(r, 10));
+    await eventually(() => expect(log().requests).toHaveLength(3));
     // The retry covers what is still uncached minus the failed range, on grid.
     const retry = log().requests[2];
     expect(retry?.range).toEqual({ start: 33, end: 73 });
@@ -688,14 +751,14 @@ describe("round 2 regressions", () => {
     const releases = captureReleases();
     const first = get(a, { start: 3, end: 13 });
     const second = get(a, { start: 43, end: 53 });
-    await new Promise((r) => setTimeout(r, 30));
+    await eventually(() => expect(releases).toHaveLength(2));
     log().afterRelease = "auth";
     releases[0]?.();
     await first;
     await b.request("updateAuth", { context: { token: "new" } });
     // Same range as the still-pending old-token fetch: a fresh fetch starts.
     const third = get(b, { start: 43, end: 53 });
-    await new Promise((r) => setTimeout(r, 30));
+    await eventually(() => expect(releases).toHaveLength(3));
     expect(releases).toHaveLength(3);
     expect(log().requests[2]?.context).toEqual({ token: "new" });
     releases[1]?.();
@@ -720,7 +783,7 @@ describe("round 3 regressions", () => {
     });
     const releases = captureReleases();
     const wide = get(a, { start: 3, end: 73 });
-    await new Promise((r) => setTimeout(r, 20));
+    await eventually(() => expect(releases).toHaveLength(1));
     await a.request("put", {
       cacheId: "o",
       batch: {
@@ -730,7 +793,7 @@ describe("round 3 regressions", () => {
       options: { range: { start: 23, end: 53 } },
     });
     const flanked = get(b, { start: 3, end: 73 });
-    await new Promise((r) => setTimeout(r, 20));
+    await eventually(() => expect(releases).toHaveLength(3));
     expect(releases).toHaveLength(3);
     // A version clear fences all three; the flanks finish first.
     await a.request("put", {
@@ -743,7 +806,7 @@ describe("round 3 regressions", () => {
     });
     releases[1]?.();
     releases[2]?.();
-    await new Promise((r) => setTimeout(r, 30));
+    await eventually(() => expect(releases.length).toBeGreaterThanOrEqual(4));
     // b's retry must be a fresh fetch, not the stale [3,73] still in flight.
     expect(releases.length).toBeGreaterThanOrEqual(4);
     releases[0]?.();
@@ -758,13 +821,10 @@ describe("round 3 regressions", () => {
     const { a } = await pair({ token: "old" });
     const authReleases = captureAuthReleases();
     const updating = a.request("updateAuth", { context: { token: "new" } });
-    await new Promise((r) => setTimeout(r, 20));
-    const during = await Promise.race([
-      get(a, { start: 3, end: 13 }),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 200)),
-    ]);
-    expect(during).not.toBe("timeout");
-    expect((during as GetResult).misses[0]?.reason).toBe("auth-pending");
+    await eventually(() => expect(authReleases).toHaveLength(1));
+    // With the hook stalled, a get that waited for it would never resolve.
+    const during = await get(a, { start: 3, end: 13 });
+    expect(during.misses[0]?.reason).toBe("auth-pending");
     expect(log().requests).toHaveLength(0);
     authReleases[0]?.();
     await updating;
@@ -783,10 +843,10 @@ describe("round 3 regressions", () => {
       a.request("updateAuth", { context: { token: "t1" } }),
       b.request("updateAuth", { context: { token: "t2" } }),
     ]);
-    await new Promise((r) => setTimeout(r, 20));
+    await eventually(() => expect(authReleases).toHaveLength(1));
     expect(authReleases).toHaveLength(1);
     authReleases[0]?.();
-    await new Promise((r) => setTimeout(r, 20));
+    await eventually(() => expect(authReleases).toHaveLength(2));
     expect(authReleases).toHaveLength(2);
     authReleases[1]?.();
     await updates;
@@ -809,8 +869,9 @@ describe("round 3 regressions", () => {
     );
     expect(log().requests).toHaveLength(1);
     expect(log().requests[0]?.context).toEqual(latest);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(seen.filter((e) => e.event === "authInvalid")).toHaveLength(1);
+    await eventually(() =>
+      expect(seen.filter((e) => e.event === "authInvalid")).toHaveLength(1),
+    );
   });
 });
 
@@ -824,12 +885,8 @@ describe("round 4 regressions", () => {
     const authReleases = captureAuthReleases();
     const updating = a.request("updateAuth", { context: { token: "new" } });
     // The hook is stalled; this get must not wait for it.
-    const quick = await Promise.race([
-      get(a, { start: 23, end: 33 }),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 200)),
-    ]);
-    expect(quick).not.toBe("timeout");
-    expect((quick as GetResult).misses[0]?.reason).toBe("auth-pending");
+    const quick = await get(a, { start: 23, end: 33 });
+    expect(quick.misses[0]?.reason).toBe("auth-pending");
     log().mode = "ok";
     authReleases[0]?.();
     await updating;
@@ -855,12 +912,12 @@ describe("round 4 regressions", () => {
     await a.request("cache", config);
     const releases = captureReleases();
     const stale = get(a, { start: 3, end: 13 });
-    await new Promise((r) => setTimeout(r, 20));
+    await eventually(() => expect(releases).toHaveLength(1));
     expect(releases).toHaveLength(1);
     // A second tab joins with fresh credentials and asks for the same range.
     const b = await connect({ token: "new" });
     const fresh = get(b, { start: 3, end: 13 });
-    await new Promise((r) => setTimeout(r, 20));
+    await eventually(() => expect(releases).toHaveLength(2));
     expect(releases).toHaveLength(2);
     expect(log().requests[1]?.context).toEqual({ token: "new" });
     log().afterRelease = "auth";
@@ -899,9 +956,9 @@ describe("round 5 regressions", () => {
     const releases = captureReleases();
     const authReleases = captureAuthReleases();
     const stale = get(a, { start: 3, end: 13 });
-    await new Promise((r) => setTimeout(r, 20));
+    await eventually(() => expect(releases).toHaveLength(1));
     const updating = a.request("updateAuth", { context: { token: "new" } });
-    await new Promise((r) => setTimeout(r, 20));
+    await eventually(() => expect(authReleases).toHaveLength(1));
     const during = await get(a, { start: 43, end: 53 });
     expect(during.misses[0]?.reason).toBe("auth-pending");
     log().afterRelease = "auth";
@@ -938,23 +995,28 @@ describe("round 5 regressions", () => {
 
   it("a tab joining while the module is still importing has its context delivered after the load", async () => {
     resetLog();
-    const slowModule = dataUrl(
-      `await new Promise((r) => setTimeout(r, 60));
-       export * from ${JSON.stringify(fetcherModule)};
+    const slowModule = gatedModule(
+      `export * from ${JSON.stringify(fetcherModule)};
        export { default } from ${JSON.stringify(fetcherModule)};`,
     );
+    const openImport = gateImport();
     const server = new RpcServer(new Engine(), "0.0.0");
     const connect = (context: unknown) => {
       const channel = new MessageChannel();
       server.attach(channel.port1 as MessagePortLike);
-      return PortClient.connect(channel.port2 as MessagePortLike, {
+      const inited = initOn(channel.port1);
+      const client = PortClient.connect(channel.port2 as MessagePortLike, {
         fetcher: { module: slowModule, context },
       });
+      return { inited, client };
     };
     const first = connect({ token: "old" });
-    await new Promise((r) => setTimeout(r, 10));
+    await eventually(() => expect(log().importing).toBe(true));
     const second = connect({ token: "new" });
-    const [a, b] = await Promise.all([first, second]);
+    // The second tab joins while the first load is still importing.
+    await second.inited;
+    openImport();
+    const [a, b] = await Promise.all([first.client, second.client]);
     open.push(a, b);
     expect(log().auth).toEqual([{ token: "new" }]);
     await a.request("cache", config);
@@ -989,10 +1051,7 @@ describe("round 6 regression", () => {
 
 describe("round 7 regressions", () => {
   const slowModule = () =>
-    dataUrl(
-      `await new Promise((r) => setTimeout(r, 60));
-       export { default } from ${JSON.stringify(fetcherModule)};`,
-    );
+    gatedModule(`export { default } from ${JSON.stringify(fetcherModule)};`);
 
   it("updateAuth during the first import waits for it, so the fetcher's hook hears the material", async () => {
     resetLog();
@@ -1004,9 +1063,16 @@ describe("round 7 regressions", () => {
     };
     const pull = await connect();
     open.push(pull);
+    const openImport = gateImport();
     const loading = connect({ fetcher: { module: slowModule() } });
-    await new Promise((r) => setTimeout(r, 10));
-    await pull.request("updateAuth", { context: { token: "fresh" } });
+    await eventually(() => expect(log().importing).toBe(true));
+    const updating = pull.request("updateAuth", {
+      context: { token: "fresh" },
+    });
+    // The server has taken the update before the import completes.
+    await pull.request("cache", config);
+    openImport();
+    await updating;
     const fetching = await loading;
     open.push(fetching);
     expect(log().auth).toEqual([{ token: "fresh" }]);
@@ -1094,17 +1160,14 @@ describe("adversarial regressions", () => {
     });
     const releases = captureReleases();
     const pending = get(a, { start: 3, end: 73 });
-    await new Promise((r) => setTimeout(r, 20));
-    expect(releases).toHaveLength(2);
+    await eventually(() => expect(releases).toHaveLength(2));
     // The left fetch fails with 401; the right one stays out.
     log().afterRelease = "auth";
     releases[0]?.();
-    const got = await Promise.race([
-      pending,
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 300)),
-    ]);
-    expect(got).not.toBe("timeout");
-    expect((got as GetResult).misses.map((m) => m.reason)).toEqual([
+    // The right fetch is never released before this: a get still waiting
+    // on it would never resolve.
+    const got = await pending;
+    expect(got.misses.map((m) => m.reason)).toEqual([
       "auth-pending",
       "auth-pending",
     ]);
@@ -1168,12 +1231,10 @@ describe("round 10 and 11 regressions", () => {
       },
       { range: { start: 23, end: 43 } },
     );
-    const got = await Promise.race([
-      o.get("o", { start: 3, end: 73 }),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 300)),
-    ]);
-    expect(got).not.toBe("timeout");
-    expect((got as GetResult).misses.map((m) => m.reason)).toEqual([
+    // The stalled fetch is released only after: a get still waiting on it
+    // would never resolve.
+    const got = await o.get("o", { start: 3, end: 73 });
+    expect(got.misses.map((m) => m.reason)).toEqual([
       "auth-pending",
       "auth-pending",
     ]);
