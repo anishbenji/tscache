@@ -502,6 +502,25 @@ describe("joinPages", () => {
     }
   });
 
+  it("refuses a JSON page whose column length differs from its timestamps, before any join (R4-1)", () => {
+    // Joined, a long page and a short one cancel out: [0, 60000, 120000]
+    // against [10, 20, 30] would store 20 at 60000.
+    const long = '{"timestamps":[0],"fields":{"v":[10,20]}}';
+    const short = '{"timestamps":[120000],"fields":{"v":[]}}';
+    for (const text of [long, short]) {
+      expect(() => fromJson(JSON.parse(text)), text).toThrow(
+        /has \d+ values for 1 timestamps/,
+      );
+    }
+    expect(() =>
+      joinPages([
+        fromJson(JSON.parse(long)),
+        binaryPage([["v", "f64", 30]], 1),
+        fromJson(JSON.parse(short)),
+      ]),
+    ).toThrow(ColumnsError);
+  });
+
   it("refuses pages whose columns differ in name or order", () => {
     const ab = binaryPage(
       [

@@ -420,7 +420,8 @@ function jsonColumn(value: unknown, what: string): PageColumn {
 
 /**
  * A parsed JSON page (`{ timestamps, fields }`), normalized. Throws
- * ColumnsError for a column that is not a list of numbers.
+ * ColumnsError for a column that is not a list of numbers, or whose length
+ * differs from the timestamps'.
  */
 export function fromJson(page: unknown): NormalPage {
   const { timestamps, fields } = (page ?? {}) as Record<string, unknown>;
@@ -428,12 +429,25 @@ export function fromJson(page: unknown): NormalPage {
     throw new ColumnsError("the JSON page has no fields object");
   }
   const names = Object.keys(fields);
+  const times = jsonColumn(timestamps, "the JSON page's timestamps");
+  const count = times.values.length;
   return {
-    timestamps: jsonColumn(timestamps, "the JSON page's timestamps"),
+    timestamps: times,
     names,
-    fields: names.map((name) =>
-      jsonColumn((fields as Record<string, unknown>)[name], `field "${name}"`),
-    ),
+    fields: names.map((name) => {
+      const column = jsonColumn(
+        (fields as Record<string, unknown>)[name],
+        `field "${name}"`,
+      );
+      // Checked per page, as decodeColumns does: once pages are joined, a
+      // long page and a short one can cancel out in the total.
+      if (column.values.length !== count) {
+        throw new ColumnsError(
+          `field "${name}" has ${column.values.length} values for ${count} timestamps`,
+        );
+      }
+      return column;
+    }),
   };
 }
 

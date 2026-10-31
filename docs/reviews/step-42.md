@@ -1,6 +1,6 @@
 # Step 42 — Binary fetch format in the examples, reference backends and guide
 
-Branch: `docs/42-binary-fetcher` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: round 3 triaged, awaiting round 4
+Branch: `docs/42-binary-fetcher` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: round 4 triaged, awaiting round 5
 
 Item 5 of the performance plan (§6): a binary columnar response format for the examples' mock backend (which the reference clients also use), its fetchers and the Playwright fixture, documented in the site's fetcher guide. The library does not change. Implemented by Claude while the user was away, under the director's child rules of 2026-10-30.
 
@@ -17,6 +17,7 @@ Item 5 of the performance plan (§6): a binary columnar response format for the 
 | 984001e | Round 2 fixes: structural schema comparison in `joinColumns` and in the examples' fetcher; explicit aligned copy in `decodeColumns` |
 | 48250a4 | Round 2 triage |
 | c84feaa | Round 3: page joining restructured into normalize-then-join (`fromColumns`, `fromJson`, `joinPages`), used by the examples' fetcher and the guide's snippet |
+| (this commit) | Round 4: `fromJson` checks each field's length against the page's timestamps, as `decodeColumns` does; round 4 triage |
 
 ## Decisions
 
@@ -144,6 +145,14 @@ Nothing is narrowed or rounded. Names and their order are still compared one by 
 **A round 1 behaviour changed, on the director's rule.** Round 1 made two binary dtypes in one column a refusal (R1-1). The rule table now widens them to float64, which keeps every value and so still prevents the narrowing R1-1 reported. The two tests that pinned the refusal (`fetcher.test.ts`: u8 then u16, f64 then f32; `columns.test.ts`: differing dtypes) now pin the exact widened values, which is the stronger check, and the `docs:run` case expects `Float64Array [1, 300]`. No contract test is involved.
 
 **Every place pages are joined:** the examples' fetcher and the guide's snippet (both now `joinPages`; the snippet also reads JSON pages). The e2e fixture fetcher and the bench read one page per range and join nothing; `/columns.js` is `columns.ts` with types stripped.
+
+## Round 4 — reviewer verdict: block
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R4-1 | P0 | `fromJson` does not check a field's length against its own page's timestamps, so across joined pages a long page and a short one cancel out: JSON `timestamps:[0], v:[10,20]`, columns `timestamps:[60000], v:[30]`, JSON `timestamps:[120000], v:[]` join to three timestamps and three values, the engine accepts them and stores 20 at 60000 | accepted | Fixed by the director: `fromJson` now refuses a field whose length differs from the page's timestamp count, with the same message as `decodeColumns`, so every normalized page holds equal-length columns before any join. The gap also covered JSON-only ranges (two JSON pages cancel out the same way), which predate this step's mixed joins. Test first: the reviewer's pages refuse, alone and in the join (`columns.test.ts`, R4-1); with the check disabled for one run that test failed, restored it passes |
+
+**Convergence check, director's call.** Page joining has drawn a finding in all four rounds. This one is not in the join rule: it is a missing per-page invariant at the normalize boundary (every column of a normal page has the timestamps' length), which `decodeColumns` already enforced for columns bodies and `fromJson` did not. The invariant is now enforced at both entry points of `NormalPage`, so no further special case is added to the join. One more round confirms. If round 5 finds page joining or normalizing again, the director escalates instead of patching; the fallback is to refuse mixed formats within one range and document one format per range.
 
 ## Contract-test changes
 
