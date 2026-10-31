@@ -10,9 +10,14 @@
  * the cache's persistence and is reported through `onStopped`.
  */
 
-import type { CacheChange, CacheState } from "../engine/cache";
+import {
+  type CacheChange,
+  type CacheState,
+  installRestore,
+} from "../engine/cache";
 import { cacheStateOf, type Engine, observeCaches } from "../engine/engine";
 import { pageOf } from "../engine/merge";
+import { restore } from "../engine/restore";
 import type { SlotRange } from "../grid";
 import type { ClientEvents } from "../types";
 import { cacheRecordOf, pageRecordsOf } from "./records";
@@ -193,6 +198,9 @@ export class Persister {
     this.#maxDelayMs = options.maxDelayMs ?? 5000;
     this.#timeoutMs = options.timeoutMs ?? 5000;
     this.#onStopped = options.onStopped;
+    // A load applies records through CacheState.restore (§4.10.5), whose
+    // implementation travels with the persister (§4.10.8).
+    installRestore(restore);
     observeCaches(engine, {
       onChange: (cacheId, change) => this.#change(cacheId, change),
       onMutate: (cacheId) => this.#mutate(cacheId),

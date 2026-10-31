@@ -28,7 +28,7 @@ import type {
   Snapshot,
 } from "../types";
 import { validateBatch } from "./batch";
-import { pageOf, SegmentStore } from "./merge";
+import { SegmentStore } from "./merge";
 import type { SlotWarning } from "./overlap";
 import { collect, read } from "./read";
 import { takeSnapshot, type ValidSnapshot, validateSnapshot } from "./snapshot";
@@ -75,7 +75,7 @@ function spanOf(points: Columns): SlotRange | undefined {
 }
 
 /** The part of a range below `limit`, or undefined when there is none. */
-function below(range: SlotRange, limit: number): SlotRange | undefined {
+export function below(range: SlotRange, limit: number): SlotRange | undefined {
   if (range.start >= limit) return undefined;
   return { start: range.start, end: Math.min(range.end, limit - 1) };
 }
@@ -157,69 +157,50 @@ export interface RestoreResult {
   rewrite: boolean;
 }
 
-/** The structural config fields a cache record names (§4.10.2). */
-const RECORD_CONFIG = [
-  "interval",
-  "alignmentOffset",
-  "gapSplitK",
-  "segmentSlotCap",
-  "warnOnOverlapDiff",
-] as const;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+/** The records `restore` takes: untrusted, as read from disk (§4.10.5). */
+export interface StoredRecords {
+  cache: unknown;
+  pages: readonly unknown[];
 }
 
-/** A stored cache record's version and watermark, once checked. */
-interface StoredMeta {
-  version: string | undefined;
-  watermark: Meta["finalizedUntil"];
+/**
+ * What the persistence code reaches inside a cache (§4.10.2, §4.10.5):
+ * `engine/restore.ts` and `persist/records.ts`, through `cacheInternals`.
+ * No package entry exports it.
+ */
+export interface CacheInternals {
+  readonly store: SegmentStore;
+  readonly coverage: CoverageIndex;
+  /** First provisional slot; undefined when nothing is provisional. */
+  readonly volatileFrom: number | undefined;
+  /** Sets the version without clearing (N18); the caller checks there is none. */
+  adoptVersion(version: string): void;
+  /** Advances the watermark forwards only (N17), as a put's meta does. */
+  advance(t: number, slot: number): void;
+  /** Reports a change to the owner (§4.10.4). */
+  report(change: CacheChange): void;
 }
 
-/** Absent, or a non-empty string. */
-function isStoredVersion(value: unknown): value is string | undefined {
-  return value === undefined || (typeof value === "string" && value.length > 0);
+/** Set by CacheState's static block. */
+let internalsOf: (state: CacheState) => CacheInternals;
+
+/** A cache's internals, for the persistence code only (§4.10.5). */
+export function cacheInternals(state: CacheState): CacheInternals {
+  return internalsOf(state);
 }
 
-/** A safe-integer page number after `after`: pages ascend, each once. */
-function isPageAfter(
-  value: unknown,
-  after: number | undefined,
-): value is number {
-  return (
-    typeof value === "number" &&
-    Number.isSafeInteger(value) &&
-    (after === undefined || value > after)
-  );
-}
+type Restore = (state: CacheState, stored: StoredRecords) => RestoreResult;
 
-/** Whether a page snapshot's range is the hull of its coverage (§4.10.2). */
-function isHull({ coverage, range }: ValidSnapshot): boolean {
-  return (
-    coverage[0]?.start === range.start && coverage.at(-1)?.end === range.end
-  );
-}
+/**
+ * `restore`'s implementation, `engine/restore.ts`: installed by the
+ * persister, which loads lazily (§4.10.8), so an application that persists
+ * nothing never loads it.
+ */
+let restoreImpl: Restore | undefined;
 
-/** The present points a validated snapshot carries. */
-function pointsIn({ segments }: ValidSnapshot): number {
-  let n = 0;
-  for (const segment of segments) n += segment.size;
-  return n;
-}
-
-/** Whether a stored `fields` names exactly the schema's fields and dtypes. */
-function sameSchema(
-  value: unknown,
-  schema: Readonly<Record<string, string>>,
-): boolean {
-  if (!isRecord(value)) return false;
-  const names = Object.keys(schema);
-  return (
-    Object.keys(value).length === names.length &&
-    names.every(
-      (name) => Object.hasOwn(value, name) && value[name] === schema[name],
-    )
-  );
+/** Installs `restore`'s implementation; idempotent. */
+export function installRestore(impl: Restore): void {
+  restoreImpl = impl;
 }
 
 export class CacheState {
@@ -246,6 +227,23 @@ export class CacheState {
       }
       this.#finalizedUntil = config.finalizedUntil;
     }
+  }
+
+  static {
+    internalsOf = (state) => ({
+      store: state.#store,
+      coverage: state.#coverage,
+      get volatileFrom() {
+        return state.#volatileFrom;
+      },
+      adoptVersion: (version) => {
+        state.#version = version;
+      },
+      advance: (t, slot) => {
+        state.#advance(t, slot);
+      },
+      report: (change) => state.#hooks.onChange?.(change),
+    });
   }
 
   /** The dataset version in force: config.version, then whatever puts report. */
@@ -424,226 +422,15 @@ export class CacheState {
 
   /**
    * Applies stored (untrusted) records into a cache that knows nothing
-   * (§4.10.5): one synchronous call. The cache record must name this
-   * cache's structure and a dataset version it accepts (N56); its watermark
-   * advances this one forwards only. Each valid page's coverage, minus the
-   * volatile region, is written with the page's points as authority and
-   * covered, as `hydrate` applies a part; an invalid page is skipped.
-   * Reports only a `watermark` change, when the watermark after it differs
-   * from the record's; never `onMutate`. Throws TscacheError, before
-   * anything changes, when the cache covers a slot or holds a point.
+   * (§4.10.5): one synchronous call. The implementation is
+   * `engine/restore.ts`, installed by the persister (`installRestore`);
+   * without it this throws TscacheError.
    */
-  restore(stored: {
-    cache: unknown;
-    pages: readonly unknown[];
-  }): RestoreResult {
-    if (this.#coverage.ranges().length > 0 || this.#store.segments.length > 0) {
-      throw new TscacheError(
-        `restore: cache "${this.config.id}" already holds data; records apply only into a cache that knows nothing`,
-      );
+  restore(stored: StoredRecords): RestoreResult {
+    if (restoreImpl === undefined) {
+      throw new TscacheError("restore: not installed (engine/restore.ts)");
     }
-    const { cache, pages } = stored;
-    const record = cache === undefined ? undefined : this.#acceptRecord(cache);
-    // Absent with pages (orphans), invalid, or of another version (N56).
-    if (
-      record === undefined ||
-      (this.#version !== undefined && record.version !== this.#version)
-    ) {
-      return { applied: [], rewrite: cache !== undefined || pages.length > 0 };
-    }
-    this.#version ??= record.version;
-    this.#restoreWatermark(record.watermark);
-    return this.#restorePages(pages, record.version);
-  }
-
-  /**
-   * The record's watermark advances this one forwards only (N17); the cache
-   * covers nothing, so nothing is withdrawn. A `watermark` change is reported
-   * when the watermark now differs from the record's.
-   */
-  #restoreWatermark(wm: Meta["finalizedUntil"]): void {
-    if (wm !== undefined) this.#advance(wm.t, wm.slot);
-    if (this.#finalizedUntil !== wm?.t) {
-      this.#hooks.onChange?.({ kind: "watermark" });
-    }
-  }
-
-  /** Applies every valid page, ascending (§4.10.5 steps 5–7). */
-  #restorePages(
-    pages: readonly unknown[],
-    version: string | undefined,
-  ): RestoreResult {
-    const parts: SlotRange[] = [];
-    let rewrite = false;
-    let last: number | undefined;
-    for (const page of pages) {
-      const valid = this.#acceptPage(page, version, last);
-      if (valid === undefined) {
-        rewrite = true;
-        continue;
-      }
-      last = valid.page;
-      if (!this.#restorePage(valid.snapshot, parts)) rewrite = true;
-    }
-    // A cache record whose pages cover nothing is not what a flush writes.
-    return {
-      applied: this.#merged(parts),
-      rewrite: rewrite || parts.length === 0,
-    };
-  }
-
-  /** The cache record's version and watermark, or undefined when it fails a check (§4.10.5 step 2). */
-  #acceptRecord(record: unknown): StoredMeta | undefined {
-    if (
-      !isRecord(record) ||
-      record.cacheId !== this.config.id ||
-      record.format !== 1 ||
-      !this.#sameStructure(record.config)
-    ) {
-      return undefined;
-    }
-    const { version, finalizedUntil } = record;
-    if (!isStoredVersion(version)) return undefined;
-    if (finalizedUntil === undefined) return { version, watermark: undefined };
-    const watermark = this.#storedWatermark(finalizedUntil);
-    return watermark === undefined ? undefined : { version, watermark };
-  }
-
-  /** Whether a stored config names exactly this cache's structural fields (N20). */
-  #sameStructure(config: unknown): boolean {
-    return (
-      isRecord(config) &&
-      Object.keys(config).length === RECORD_CONFIG.length + 1 &&
-      RECORD_CONFIG.every((field) => config[field] === this.config[field]) &&
-      sameSchema(config.fields, this.config.fields)
-    );
-  }
-
-  /** A stored watermark `slotAtOrAfter` accepts, with its slot; undefined otherwise. */
-  #storedWatermark(t: unknown): Meta["finalizedUntil"] {
-    if (typeof t !== "number") return undefined;
-    try {
-      return { t, slot: slotAtOrAfter(t, this.config) };
-    } catch (error) {
-      if (!(error instanceof InvalidRangeError)) throw error;
-      return undefined;
-    }
-  }
-
-  /**
-   * A page record that passes every check of §4.10.5 step 5, or undefined.
-   * Pages must ascend, each once, after `after`.
-   */
-  #acceptPage(
-    page: unknown,
-    version: string | undefined,
-    after: number | undefined,
-  ): { page: number; snapshot: ValidSnapshot } | undefined {
-    if (
-      !isRecord(page) ||
-      page.cacheId !== this.config.id ||
-      !isPageAfter(page.page, after)
-    ) {
-      return undefined;
-    }
-    const snapshot = this.#pageSnapshotOf(page.snapshot, page.page, version);
-    return snapshot === undefined ? undefined : { page: page.page, snapshot };
-  }
-
-  /**
-   * A page's snapshot when it passes `hydrate`'s validation, lies in page
-   * `page`, names `version` and carries no watermark; undefined otherwise.
-   */
-  #pageSnapshotOf(
-    input: unknown,
-    page: number,
-    version: string | undefined,
-  ): ValidSnapshot | undefined {
-    let snapshot: ValidSnapshot;
-    try {
-      snapshot = validateSnapshot(input, this.config);
-    } catch {
-      // Untrusted bytes: whatever fails to decode is a page to skip.
-      return undefined;
-    }
-    const cap = this.config.segmentSlotCap;
-    const fits =
-      snapshot.watermark === undefined &&
-      snapshot.version === version &&
-      pageOf(snapshot.range.start, cap) === page &&
-      pageOf(snapshot.range.end, cap) === page;
-    return fits ? snapshot : undefined;
-  }
-
-  /**
-   * Writes and covers a valid page's coverage below the volatile region
-   * (§4.10.5 step 6) and appends the parts. Returns whether the page was
-   * applied in full and is what a flush would write: no part clipped, no
-   * point left outside every part, its range the hull of its coverage.
-   */
-  #restorePage(valid: ValidSnapshot, parts: SlotRange[]): boolean {
-    let whole = isHull(valid);
-    let written = 0;
-    for (const covered of valid.coverage) {
-      const part =
-        this.#volatileFrom === undefined
-          ? covered
-          : below(covered, this.#volatileFrom);
-      if (part?.end !== covered.end) whole = false;
-      if (part === undefined) continue;
-      written += this.#restorePart(valid, part);
-      parts.push(part);
-    }
-    return whole && written === pointsIn(valid);
-  }
-
-  /** Writes a part with the page's points inside it as authority, and covers it; returns how many. */
-  #restorePart(valid: ValidSnapshot, part: SlotRange): number {
-    const points = collect(valid.segments, part, this.config.fields);
-    try {
-      this.#store.put(points, part);
-    } catch (error) {
-      this.#coverage.subtract(part);
-      throw error;
-    }
-    this.#coverage.add(part);
-    return points.slots.length;
-  }
-
-  /** Slot parts in ascending order → ms ranges, adjacent ones merged. */
-  #merged(parts: readonly SlotRange[]): Range[] {
-    const out: SlotRange[] = [];
-    for (const part of parts) {
-      const last = out.at(-1);
-      if (last !== undefined && last.end + 1 === part.start)
-        last.end = part.end;
-      else out.push({ ...part });
-    }
-    return out.map((part) => toMs(part, this.config));
-  }
-
-  /** The covered slot ranges, ascending (for the persisted records, §4.10.2). */
-  coveredSlots(): SlotRange[] {
-    return this.#coverage.ranges();
-  }
-
-  /**
-   * A snapshot of `request` (slots) without the watermark, whose segments
-   * hold only the present points inside `parts`: a persisted page's
-   * snapshot (§4.10.2).
-   */
-  pageSnapshot(request: SlotRange, parts: readonly SlotRange[]): Snapshot {
-    return takeSnapshot(
-      {
-        config: this.config,
-        segments: this.#store.segments,
-        coverage: this.#coverage,
-        version: this.#version,
-        finalizedUntil: undefined,
-      },
-      request,
-      parts,
-    );
+    return restoreImpl(this, stored);
   }
 
   /** The parts of `ranges` this cache neither covers nor holds as provisional. */

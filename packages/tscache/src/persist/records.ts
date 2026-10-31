@@ -6,8 +6,9 @@
  * writer, what the disk holds after it.
  */
 
-import type { CacheState } from "../engine/cache";
+import { type CacheState, cacheInternals } from "../engine/cache";
 import { pageOf, pageRange } from "../engine/merge";
+import { takeSnapshot } from "../engine/snapshot";
 import type { SlotRange } from "../grid";
 import type { Dtype, Snapshot } from "../types";
 import type { PageRange } from "./store";
@@ -45,7 +46,7 @@ export interface PageRecord {
  * covers nothing, so a cleared cache leaves nothing on disk.
  */
 export function cacheRecordOf(state: CacheState): CacheRecord | undefined {
-  if (state.coveredSlots().length === 0) return undefined;
+  if (cacheInternals(state).coverage.ranges().length === 0) return undefined;
   const c = state.config;
   const record: CacheRecord = {
     cacheId: c.id,
@@ -87,7 +88,7 @@ export function pageRecordsOf(
   state: CacheState,
   within?: readonly PageRange[],
 ): PageRecord[] {
-  const covered = state.coveredSlots();
+  const covered = cacheInternals(state).coverage.ranges();
   const cap = state.config.segmentSlotCap;
   const out: PageRecord[] = [];
   let page: number | undefined;
@@ -125,7 +126,7 @@ export function pageRecordsOf(
 /**
  * The page snapshot (§4.10.2): the envelope of the hull of the page's
  * coverage, without a watermark, whose segments hold exactly the present
- * points inside that coverage.
+ * points inside that coverage (one payload per segment per part).
  */
 function pageRecordOf(
   state: CacheState,
@@ -135,9 +136,17 @@ function pageRecordOf(
   const first = parts[0] as SlotRange;
   const last = parts.at(-1) as SlotRange;
   const hull = { start: first.start, end: last.end };
-  return {
-    cacheId: state.config.id,
-    page,
-    snapshot: state.pageSnapshot(hull, parts),
-  };
+  const { store, coverage } = cacheInternals(state);
+  const snapshot = takeSnapshot(
+    {
+      config: state.config,
+      segments: store.segments,
+      coverage,
+      version: state.version,
+      finalizedUntil: undefined,
+    },
+    hull,
+    parts,
+  );
+  return { cacheId: state.config.id, page, snapshot };
 }
