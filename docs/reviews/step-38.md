@@ -436,3 +436,7 @@ For the user; the design takes the recommended option in each.
 
 1. **A failed `clearAll` turns persistence off for the rest of the worker's life** (D27). After a clear fails at its deadline (5 s of a disk refusing the strict write), every persisted cache stops, and a cache opened later in the same worker stops at once with `persistStopped`; persistence resumes with the next SharedWorker. Options: (a) accept (recommended: the disk still holds what the logout was to delete, and the worker must not load it back; a store that fails to open already has the same effect); (b) let later opens load as before, accepting that a failed logout's data can be served again in the same worker until a later clear succeeds; (c) retry the clear before each later load, one clear per open while the disk fails, with a bound of its own to design.
 2. **While a `clearAll` is pending, nothing is written or loaded** (D25). On a healthy disk the window lasts milliseconds; on a failing one up to 5 s, during which additions wait in memory and a cache opened meanwhile starts cold. A worker that ends inside the window loses those additions, which is harmless (§4.10.8). Listed because one call now holds every cache's writes; no narrower rule closed both R5-1 and R6-1.
+
+## Round 7 (narrowed design, `clearAll` barrier) — reviewer verdict: merge
+
+No findings; every earlier accepted finding fixed or superseded by the scope change. **Design settled.** Next: Codex contract tests for slice (a) (the list above, items 1–11), then the implementation, on this branch.
