@@ -11,7 +11,8 @@ tscache is meant to be fast at what a chart does: read the screen it shows, take
   - what a read costs the port between page and worker;
   - how often an orchestrated `get` reads the engine;
   - how many segments a read looks at;
-  - how often a growing segment reallocates.
+  - how often a growing segment reallocates;
+  - what persistence costs the disk: transactions, records and stored bytes.
 - **Timings compare the pull request with its base** in one job, case by case. Both revisions sit in one bundle, which is timed in **Chromium** (V8, which most users run) and **Bun** (JSC, the engine of Safari). The rounds alternate their order, so a busy runner slows both sides alike.
 - **When a timing fails:** a case fails when its median slowdown is 10 % or more and the 95 % confidence interval lies above 3 %, and a second run in a fresh process confirms it. A same-revision control, timed just before in a process of its own, must stay quiet, or the run is called noisy and nothing fails.
 - **Timing gates case by case, where calibration on GitHub's runner shows it reliable** (`bench-calibrate.yml`): a case gates in a runtime once it fired in none of 20 same-revision runs and caught at least 90 % of runs with a 25 % slowdown injected. The gated cases are listed in `packages/tscache/bench/gated.json`: since chore 43, eight cases in Bun. Every other case, and all of Chromium, reports. The `bench` check is not yet required in branch protection.
@@ -31,6 +32,9 @@ tscache is meant to be fast at what a chart does: read the screen it shows, take
 | Engine reads per orchestrated `get`: a fetch of the provisional newest bar, a cache hit, `cacheOnly` | 1 each (planned from coverage, read once after the fetches) | another count | `counters.test.ts` |
 | Segment extents a read looks at among 8,192 single-point segments | 14 | more than 24 (a scan would read 8,192) | `counters.test.ts` |
 | Mask allocations while a segment grows by 16,384 single-point appends | doubling | none observed (the counting no longer sees the growth: a redesign must update the test), more than 12, or more than 12,288 bytes | `counters.test.ts` |
+| Fetches when the scroll-back above runs again on a second server, engine and persister over the first one's flushed store | 0 | any | `persist.test.ts` |
+| Persistence transactions (fake timers, the persister's defaults): reads per persisted cache opened, and for one not persisted; writes for 50 puts in one debounce window, after one `invalidate`, after puts wholly in the volatile region, after a clean load; page records put after a put inside one page (2026-10-31) | 1 and 0; 1 relaxed, 1 strict, 0, 0; that page's and the cache record | another count, durability or page | `persist.test.ts` |
+| Stored bytes per bar (payload masks and field buffers summed from the page records), the memory budget's three years | 24/7: 36.125 B, sessions: 36.126, with dropouts: 36.858 (2026-10-31) | above 36.75 / 36.75 / 37.25 | `persist.test.ts` |
 
 These are exact on any machine, so the gate is the number. A deliberate change edits the budget in the pull request that needs it, with the reason in the commit message.
 
