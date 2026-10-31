@@ -11,6 +11,7 @@
         "@commitlint/config-conventional": "^21.2.3",
         "@playwright/test": "^1.63.0",
         "@types/bun": "^1.4.4",
+        "fake-indexeddb": "^6.2.7",
         "fallow": "^3.31.0",
         "git-cliff": "^2.14.2",
         "knip": "^6.39.0",
@@ -873,6 +874,8 @@
     "execa": ["execa@9.6.1", "", { "dependencies": { "@sindresorhus/merge-streams": "^4.0.0", "cross-spawn": "^7.0.6", "figures": "^6.1.0", "get-stream": "^9.0.0", "human-signals": "^8.0.1", "is-plain-obj": "^4.1.0", "is-stream": "^4.0.1", "npm-run-path": "^6.0.0", "pretty-ms": "^9.2.0", "signal-exit": "^4.1.0", "strip-final-newline": "^4.0.0", "yoctocolors": "^2.1.1" } }, "sha512-9Be3ZoN4LmYR90tUoVu2te2BsbzHfhJyfEiAVfz7N5/zv+jduIfLrV2xdQXOHbaD6KgpGdO9PRPM1Y4Q9QkPkA=="],
 
     "expect-type": ["expect-type@1.4.0", "", {}, "sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA=="],
+
+    "fake-indexeddb": ["fake-indexeddb@6.2.7", "", {}, "sha512-g0ghQ+BmU3CSZaHup5FigEAAtCmtNyxkrmID7OAeK2qONHghw1aQ2l2T1RxmfhP1H1tEXVRWArUTGVCk5832ww=="],
 
     "fallow": ["fallow@3.31.0", "", { "dependencies": { "detect-libc": "2.1.2" }, "optionalDependencies": { "@fallow-cli/darwin-arm64": "3.31.0", "@fallow-cli/darwin-x64": "3.31.0", "@fallow-cli/linux-arm64-gnu": "3.31.0", "@fallow-cli/linux-arm64-musl": "3.31.0", "@fallow-cli/linux-x64-gnu": "3.31.0", "@fallow-cli/linux-x64-musl": "3.31.0", "@fallow-cli/win32-arm64-msvc": "3.31.0", "@fallow-cli/win32-x64-msvc": "3.31.0", "fallow-type-aware": "3.31.0" }, "bin": { "fallow": "bin/fallow", "fallow-lsp": "bin/fallow-lsp", "fallow-mcp": "bin/fallow-mcp" } }, "sha512-grYLCk3DoKFR1jbdJhI6t2AXou0SecJa0Thg/rULTNd8tU9/eGLKRCwzmYqZhkWXEbxT7Oh4TGNNUZXO6+KzuQ=="],
 
