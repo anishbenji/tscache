@@ -281,8 +281,13 @@ export class Orchestrator {
     this.#broadcast = broadcast;
     this.#auth = new AuthState(broadcast);
     engine.on("cacheCleared", ({ cacheId }) => {
-      this.#generation.set(cacheId, (this.#generation.get(cacheId) ?? 0) + 1);
+      this.#generation.set(cacheId, this.#generationOf(cacheId) + 1);
     });
+  }
+
+  /** The cache's cacheCleared count: the version fence (N29). */
+  #generationOf(cacheId: string): number {
+    return this.#generation.get(cacheId) ?? 0;
   }
 
   /**
@@ -425,7 +430,7 @@ export class Orchestrator {
     let blocked: SlotRange[] = [];
     for (let round = 0; round < 2; round++) {
       // Read in the round's own synchronous step: the generation it plans under.
-      const planned = this.#generation.get(cacheId) ?? 0;
+      const planned = this.#generationOf(cacheId);
       const awaited = this.#round(cacheId, request, blocked, requestId);
       if ("gated" in awaited) {
         for (const r of awaited.gated) {
@@ -441,9 +446,7 @@ export class Orchestrator {
       // Every fetch a round awaits carries the generation it planned under,
       // so a dropped one implies a clear: this one comparison covers it, and
       // a clear that wiped fetches already applied too.
-      if (round === 1 || (this.#generation.get(cacheId) ?? 0) === planned) {
-        break;
-      }
+      if (round === 1 || this.#generationOf(cacheId) === planned) break;
       blocked = blockedBy(settled);
     }
     return read(settled);
@@ -530,7 +533,7 @@ export class Orchestrator {
       return { gated: planFetches(request, around, blocked, grid) };
     }
     const list = this.#inflight.get(cacheId) ?? [];
-    const generation = this.#generation.get(cacheId) ?? 0;
+    const generation = this.#generationOf(cacheId);
     const joinable = list.filter(
       (e) =>
         !e.fenced &&
@@ -633,7 +636,7 @@ export class Orchestrator {
         return this.#refused(fetched.error, authGeneration, context);
       }
       // Cleared by a newer version while in flight: this answer is stale.
-      if ((this.#generation.get(cacheId) ?? 0) !== generation) {
+      if (this.#generationOf(cacheId) !== generation) {
         return { kind: "dropped" };
       }
       return this.#apply(cacheId, range, fetched.response, requestId);
