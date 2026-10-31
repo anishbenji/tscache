@@ -45,8 +45,10 @@ unversioned cache adopts without clearing anything. From then on:
 - a put or response whose `meta.version` differs **clears the cache** (data and coverage), adopts the
   new version, then applies the batch; every tab hears `cacheCleared` with reason
   `'version-mismatch'`;
-- a fetch that was in flight when the cache was cleared is not applied; the waiting `get` asks once more
-  for what is still missing, and returns it as `'uncached'` if that answer is dropped too;
+- a fetch that was in flight when the cache was cleared is not applied. A `get` that was waiting when
+  the cache was cleared asks once more for what is still missing, whether the clear dropped an answer
+  or wiped one already stored, and returns as `'uncached'` what a clear during that second request
+  drops or wipes;
 - a put without `meta.version` changes nothing about the version.
 
 `version` and `finalizedUntil` in a config apply only when the cache is created. A tab that opens an

@@ -36,7 +36,7 @@ copy, and you own them.
 
 | Reason | Means | What to do |
 |---|---|---|
-| `'uncached'` | not known: no fetcher is configured, you read with `cacheOnly`, a version change dropped its answer twice ([versions](/concepts/freshness)), or it is the provisional tail, which is never covered and so stays a miss even right after its fetch returned its points | fetch and `put` it yourself, or read without `cacheOnly`; for the tail, nothing: its points are in the result |
+| `'uncached'` | not known: no fetcher is configured, you read with `cacheOnly`, the cache was cleared while the read waited and again while it asked once more ([versions](/concepts/freshness)), or it is the provisional tail, which is never covered and so stays a miss even right after its fetch returned its points | fetch and `put` it yourself, or read without `cacheOnly`; for the tail, nothing: its points are in the result |
 | `'fetch-failed'` | the fetch threw, or its response failed validation; `error` has its `name` and `message` | read again later; nothing about the failure is cached |
 | `'auth-pending'` | credentials are invalid, so the fetch was not made, or it was refused | refresh, call `updateAuth`, read again ([Credentials](/guides/auth)) |
 
