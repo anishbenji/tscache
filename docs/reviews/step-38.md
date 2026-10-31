@@ -37,7 +37,14 @@ Design for keeping a cache's authoritative data in IndexedDB, so a reload or a n
 | 700a371 | `docs`: persistence in the patterns guide, the site's persistence guide, config and event tables |
 | 532ead7 | Merge of `origin/main` (step 47, 7c9c264) |
 | 398c6cb | `chore(size)`: entry budgets reset for persistence |
-| (this commit) | `docs(review)`: the implementation notes below; the e2e scenario table in `docs/benchmarking.md` |
+| 14f0c7f | `docs(review)`: the implementation notes below; the e2e scenario table in `docs/benchmarking.md` |
+| 3f8b2ba | `chore(size)`: an entry's `import()` targets measured on a row of their own; no file of `dist/` may import an entry |
+| c62f0a1 | `refactor(engine)`: `restore` in `engine/restore.ts`, installed by the persister; the `cacheInternals` seam; the Vitest setup file |
+| eb9d727 | `perf(worker)`: the persistence chunk and `HostedPersistence`; `RpcServer` takes a `Persistence`; tests `persist-hosted` |
+| 8f44290 | `test(vite)`: `vite-worker.test.ts` |
+| 4ce659c | `perf(bench)`: the e2e revisions split into chunks |
+| 6cae53e | `chore(size)`: budgets for persistence loaded lazily |
+| (next commits) | `docs`: §4.10 and rows N59, N61 clarified, the worker setup guides, `docs/benchmarking.md`, the site's sizes; `docs(review)`: "Persistence paid for only when used" below |
 
 ### Implementation plan
 
@@ -534,4 +541,77 @@ Not verified: Firefox's and Safari's IndexedDB (Playwright runs Chromium only); 
 ### Notes for the reviewer
 
 - A confirmed gap claimed over a very wide range (a `put` whose authority range spans millions of pages) gets one page record per page that holds coverage, as §4.10.2 specifies; an incremental flush skips pages outside its dirty ranges without visiting them, but a full rewrite of such a cache writes every page.
-- The worker entry now carries the persister for every app, persisting or not (`handshake-first-read` above). Loading `persist/` with a dynamic import at the first persisted `open` would recover most of it; not done, since the plan does not ask for it and it adds a module load inside the first `cache()`.
+- The worker entry now carries the persister for every app, persisting or not (`handshake-first-read` above). Loading `persist/` with a dynamic import at the first persisted `open` would recover most of it; not done, since the plan does not ask for it and it adds a module load inside the first `cache()`. Done after this note: "Persistence paid for only when used" below.
+
+## Persistence paid for only when used (2026-10-31)
+
+Slice (a) made every application pay for persistence: the worker's initial load carried the persister and the IndexedDB adapter, and `index` and `engine` carried `CacheState.restore`. Under the standing grant the director took the recommended option: load the persistence code only when a cache persists, and move `restore` out of the always-bundled modules. The contract tests are unchanged.
+
+| Module | What changed |
+|---|---|
+| `engine/restore.ts` (new) | `restore`, moved from `engine/cache.ts`, with the record checks; reaches the cache through `cacheInternals` |
+| `engine/cache.ts` | `cacheInternals` (store, coverage, volatile region, version adoption, the watermark's advance, change reports), exported by no entry; `installRestore`; `CacheState.restore` delegates to the installed implementation and throws `TscacheError` without one; `coveredSlots` and `pageSnapshot` removed |
+| `persist/records.ts` | reads coverage and segments through `cacheInternals`; builds page snapshots with `takeSnapshot` |
+| `persist/persister.ts` | installs `restore` when built; `open(cacheId, startedAt?)`; `durably`, the removal rule of N58, moved here from the RPC server |
+| `persist/lazy.ts` (new) | the chunk: re-exports `Persister`, `durably` and `openIdbStore` |
+| `persist/hosted.ts` (new) | `HostedPersistence`: the RPC server's persistence in the SharedWorker; imports the chunk at the first persisted open or `clearAll`, holds calls until it has loaded, bounds the import |
+| `rpc/server.ts` | takes a `Persistence` (`open`, `durably`, `clearAll`, `flush`) instead of a `Persister` |
+| `entries/worker.ts` | `import("../persist/lazy")`; IndexedDB's presence checked with `in`, its factory read when the store first opens |
+| `scripts/size.ts` | an entry's `import()` targets are left out of it and measured on a row of their own (`worker (lazy)`, budget key `worker:lazy`); fails when a file of `dist/` imports an entry file |
+| `scripts/bench-e2e.ts` | both revisions bundled with splitting; `/dist/` served from the head's build |
+
+### Decisions made in implementation
+
+| # | Decision | Why |
+|---|---|---|
+| I15 | **The chunk loads at the first `open` of a persisted cache, or at the first `clearAll`**, even in an app that persists nothing | `clearAll` must empty the disk of earlier sessions (N54), which may have persisted under another version of the app; before this change the same call already opened the database (`ifExists`) |
+| I16 | **Until the chunk has loaded, an op on a cache whose open waits is held, and once one op is held, every later op and `clearAll`; ops on other caches run at once.** Everything held reaches the persister in arrival order | The persister then sees each call where it would have seen it had it been loaded all along: a held mutation abandons the pending load (§4.10.5 rule 2), and a held removal answers once durable (N58). Holding every op would make an app's non-persisted caches wait for the chunk at start; holding none would apply a mutation the persister never saw, and its load would then fail `restore`'s precondition or load what a removal deleted |
+| I17 | **`clearAll` before the chunk has loaded clears memory at once and holds only its disk part** | `Engine.clearAll` and the persister's clear stay in arrival order with every other op (N54), and a cache opened meanwhile starts cold, as under the barrier (§4.10.5 rule 3) |
+| I18 | **The import counts against the load's deadline**: `Persister.open(cacheId, startedAt)` arms the load's timer for `timeoutMs` from the hosting's `open`; the import itself is bounded by `timeoutMs` from its start | `cache()` of a persisted cache still answers within 5 s (N46). A removal held for the chunk, and a `clearAll` before it, wait for the import and then for at most the two deadlines of N61 (recorded as a clarification of N61) |
+| I19 | **A chunk that fails to load, or has not loaded `timeoutMs` after its import started, turns persistence off for the worker's life**: every waiting and later open stops with `'unavailable'` (with `{ name, message }` of the import's error when it failed), held ops run as they come, and `clearAll` clears memory only; a chunk that arrives late is ignored | As a store that fails to open (§4.10.6); recorded as a clarification of N59. The next SharedWorker tries again |
+| I20 | **`RpcServer` takes a `Persistence` of four calls instead of a `Persister`** | The removal rule and the combined clear no longer sit in the server, which `index` bundles for the in-process hosting; §4.10.8 updated |
+| I21 | **`restore` stays a method of `CacheState`, delegating to `engine/restore.ts`, which the persister installs** | The contract tests call `restore` on a `CacheState` they construct and spy on `CacheState.prototype.restore` (`persister-abandon`), so the method had to stay; its implementation could leave. `engine/restore.ts` stays in `engine/`, as engine logic under strict test-first, and nothing in `engine/` imports it |
+| I22 | **A Vitest setup file (`test/setup-restore.ts`) installs `restore` before every test file** | Unit tests that call `restore` on a bare `CacheState` build no persister. The alternative, an install line in `persist-test-helpers.ts`, would have changed a contract-test file |
+| I23 | **IndexedDB's presence is checked with `"indexedDB" in globalThis`; the factory is read when the store first opens** | Paired runs of `handshake-first-read` without the persistence wiring: 1.018 (1.000–1.037) without reading `indexedDB`, 1.031 (1.012–1.049) reading it at start. The hosting tests model a realm without IndexedDB as an absent global, which the presence test keeps |
+| I24 | **The e2e bench bundles both revisions with splitting** | Without it, Bun inlines the `import()` and the bench would time the persister's download and parse in every scenario. With it, both sides load the code their entries share as a chunk, as `tsdown`'s output does; the base's `handshake-first-read` rose from 7.4–7.5 ms to 8.2–8.3 ms with the extra file |
+| I25 | **`size.ts` bundles each entry with its `import()` targets left out, and each lazy chunk without the files the entry holds**, not with Bun's `splitting` | Bun's splitting moves modules an entry shares with its dynamic chunk into a third file, where Rolldown keeps them in the entry; measured that way the worker grew by 1.1 kB of chunk overhead that no app bundler produces |
+| I26 | **The guides recommend Vite's `worker.format: 'es'` and say to pass the worker URL unchanged; the examples keep Vite's default** | With the default `'iife'` Vite inlines the chunk into the worker file, where it is downloaded and not run; with `'es'` it is a file of its own, which Vite's build imports the worker entry from, by the entry's URL (`vite-worker.test.ts`), so a query added to the URL would load the worker's code twice. Switching the examples and reference clients is left for the user (below) |
+| I27 | **`perf/persist.test.ts`'s session builds its server with `HostedPersistence` and the real chunk**, and reads the persister through `HostedPersistence.persister` | It built `new RpcServer(engine, lib, undefined, persister)`, which no longer type-checks; the wiring now follows the worker's. No bound changed |
+
+Vite and the preload helper: Vite inserts its module-preload helper only into client builds that are not worker builds (`getInsertPreload` checks `!config.isWorker`), so the chunk of a `?worker&url` build never carries it, in either worker format; `vite-worker.test.ts` checks both outputs for the helper and for `document`. `fetcherUrl()`'s guard walks only the fetcher's graph in the client build, so the worker's chunk does not reach it. The package's own `dist/`: `lazy-*.js` imports only the shared chunks, never `worker.js`, which `size.ts` now checks for every file.
+
+### Entry sizes
+
+Brotli bytes, every revision built with `tsdown` and measured with this branch's `scripts/size.ts` (Bun 1.4.2). The "before" figures above (14,740, 12,063, 9,110 for `main`) came from an earlier measurement; under one script `main` measures as below.
+
+| Entry | `main` (`7c9c264`) | Eager (`14f0c7f`) | Lazy (this change) | Lazy − `main` | Budget, 398c6cb → now |
+|---|---:|---:|---:|---:|---:|
+| `index` | 15,096 | 16,330 | 15,641 | +545 | 16,848 → 16,160 |
+| `worker` | 12,085 | 16,928 | 13,210 | +1,125 | 17,440 → 13,728 |
+| `worker (lazy)` | — | — | 5,303 | — | new: 5,824 |
+| `engine` | 9,326 | 10,330 | 9,753 | +427 | 10,848 → 10,272 |
+| `fetcher` | 142 | 142 | 142 | 0 | 656 |
+| `vite` | 970 | 970 | 970 | 0 | 1,488 |
+
+What `index` and `engine` still carry over `main` is the change reporting of §4.10.4 (`onChange`, `onMutate`, the engine's observers), the seams the chunk reaches the engine through (`cacheStateOf`, `observeCaches`, `cacheInternals`, the `restore` delegate), the `persist` flag, `persistStopped` on the client, and `takeSnapshot`'s parts (a binary search to each part's first segment). The worker's initial load adds `HostedPersistence`, about 500 B.
+
+### Bench results
+
+Under the machine's lock, Apple Silicon Mac, 2026-10-31, both sides built split into chunks (I24). Paired against `origin/main` (`7c9c264`), 20 rounds, `bun scripts/bench.ts e2e --base origin/main --only handshake-first-read,reload-first-read,two-tabs-one-fetch,live-tail-get`:
+
+| Scenario | Base | Head | Head/base | 95 % CI | Eager (`14f0c7f`, unsplit build) |
+|---|---:|---:|---:|---:|---:|
+| `handshake-first-read` | 8.30 ms | 8.60 ms | 1.030 | 1.012–1.049 | 1.065 (1.051–1.079) |
+| `reload-first-read` | 8.20 ms | 9.70 ms | 1.184 | 1.169–1.195 | 1.105 (1.092–1.120) |
+| `two-tabs-one-fetch` | 354.7 µs | 355.5 µs | 0.999 | 0.969–1.037 | 0.992 (0.967–1.014) |
+| `live-tail-get` | 26.1 µs | 26.0 µs | 0.995 | 0.976–1.002 | 1.009 (0.994–1.048) |
+
+Against the eager revision, both built split (`--base 14f0c7f --only handshake-first-read`): 0.977 (0.966–0.978).
+
+**The target was not met:** `handshake-first-read`'s interval does not include 1.0. Two runs isolate what remains: with the persistence wiring removed from the worker entry (the shell neither built nor bundled, IndexedDB not read), 1.018 (1.000–1.037); with only `indexedDB` read at start, 1.031 (1.012–1.049), which I23 then removed. What is left is the code the worker parses at start (the bench serves unminified bundles): the engine's change reporting and seams, about 4.4 kB of the shared chunk, and the shell, about 6 kB of `worker.js`. The change reporting is §4.10.4's design and is needed by persistence. `reload-first-read` now imports the chunk before it opens the database, about 1.5 ms over the loopback fetch it replaces where the eager revision took 0.8 ms; on a real network the request saved is the larger cost.
+
+### Tests with the code
+
+- `persist-hosted.test.ts` (12): nothing loads while no cache persists (ops answer in their own call, `flush` does nothing); the first persisted open imports the chunk once and opens answer after their loads; an op on a waiting cache is held and then abandons the load, so the stored points never load and the flush rewrites the records; a held removal answers once durable; ops on other caches run at once; once an op is held, later ops and `clearAll` wait behind it in order; `clearAll` before any open clears memory at once and loads the chunk to empty the disk; a `clearAll` while an open waits leaves the cache cold with nothing read; an import that fails stops waiting and later opens with `'unavailable'` and its error, once each; an import past `timeoutMs` turns persistence off and its late arrival is ignored (fake timers); the import counts against the load's deadline (fake timers: 5 s from the open, not from the chunk); a held `flush` reaches the persister after the held op.
+- `vite-worker.test.ts` (2): Vite builds of `?worker&url` in both worker formats, as I26 and the paragraph above describe.
+- `perf/persist.test.ts`: the session's wiring (I27).
