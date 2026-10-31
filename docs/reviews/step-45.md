@@ -38,3 +38,9 @@ None.
 
 - Chromium's quiet count sits at the edge of the bar of 19 of 20 (19, 19, 18 in three dispatches). Options: keep the bar and calibrate again later; count quiet runs over more jobs (for example 40) so that one noisy run weighs less; or accept that a noisy run fails nothing (the gate already stands down when its control is noisy) and judge Chromium on false alarms and detection alone. The last would gate all nine Chromium cases on the evidence so far. Recommendation: keep the bar for now; the user decides whether to relax it.
 - Whether to make the `bench` check required in branch protection (carried over from chore 43).
+
+## Review rounds
+
+| Round | Verdict | Findings | Triage |
+|---|---|---|---|
+| 1 | merge | none | Settled after one round. The decision concern above (Chromium's bar of 19 of 20) is taken as recommended: the bar stays, and Chromium is calibrated again later. It is listed for the user with the `bench` required-check question. |
