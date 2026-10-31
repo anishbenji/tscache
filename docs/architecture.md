@@ -111,7 +111,8 @@ interface CacheConfig {
   /** Opt-in differs-on-overlap warning (O(overlap) cost). Default false. */
   warnOnOverlapDiff?: boolean;
   /** Keep the cache in IndexedDB across sessions; structural (N20). Default
-   *  false. Additive (§4.10.1, N45). */
+   *  false. Acts in the SharedWorker hosting only (N52); elsewhere a no-op.
+   *  Additive (§4.10.1, N45). */
   persist?: boolean;
 }
 ```
@@ -1138,7 +1139,8 @@ interface CacheConfig {
   // …§2.2, plus:
   /**
    * Keep this cache in IndexedDB across sessions (§4.10). Structural (N20):
-   * every tab must pass the same value. Default false.
+   * every tab must pass the same value. Default false. Acts only when the
+   * client's mode is 'shared' (N52); elsewhere accepted and ignored (N45).
    */
   persist?: boolean;
 }
@@ -1174,7 +1176,7 @@ Rules:
 - **When calls wait for the disk.** `cache()` of a persisted cache resolves after its records are loaded and applied, after the load gave up (5000 ms, §4.10.6), or after the load was abandoned because the cache changed meanwhile, so the first `get` through its handle sees the records. A call that removes coverage of a persisted cache resolves only once the removal is durable (N58): `invalidate`, `clear`, `clearAll`, a `setFinalizedUntil` that moves the watermark back or sets the first one, and also a `put`, `hydrate` or orchestrated `get` whose data cleared the cache for a newer version or set its first watermark. Durable means written with strict durability, or else persistence of the cache has stopped and the deletion of its records has settled. The wait is bounded by one deadline (§4.10.6): the write has `timeoutMs` (5000 ms) from the removal to land, retries included; then the cache stops, and the deletion that follows is bounded the same way. On a failing disk such a call therefore takes at most about 10 s, and it never rejects. Nothing else waits: additions are written behind (§4.10.6), and a persistence failure emits `persistStopped` instead of rejecting. A stop during `cache()` is emitted before the handle exists: subscribe with `client.on('persistStopped', …)` to hear it.
 - **What can outlive a removal.** Only a disk that refuses every write: when the removal's write has not landed by its deadline and the deletion that follows the stop fails or times out too, the records written before the removal stay, and a later session that can read them loads them. `persistStopped` reports the stop; nothing in a later session can tell.
 - **Version honesty across sessions** (§2.4). A restatement without a version signal is undetectable, and persistence carries that across reloads: a stored range is served without asking the backend in every later session. Set `CacheConfig.version` when the dataset has one, and stored records of another version are never loaded (N56). TTL stays a consumer pattern: `invalidate` or `clear` on your own clock removes stored ranges too.
-- **One writer.** Every tab of a deploy reaches one SharedWorker, so one engine writes the database, and a `clearAll` from any tab clears that engine's memory and the disk together. Two SharedWorkers write it only for a moment: during a deploy skew (two worker URLs), or while a worker that lost its last tab is still closing as a new tab starts the next. Each writes from its own memory, and page records are self-contained, so the overlap costs coverage, never a wrong point; what one engine removed, the other may still hold and write back once (§4.10.7).
+- **One writer.** Every tab of a deploy reaches one SharedWorker, so one engine writes the database, and a `clearAll` from any of those tabs clears that engine's memory and the disk together. Two SharedWorkers write it only for a moment: during a deploy skew (two worker URLs), or while a worker that lost its last tab is still closing as a new tab starts the next. Each writes from its own memory, and page records are self-contained, so the overlap costs coverage, never a wrong point; what one engine removed, the other may still hold and write back once (§4.10.7).
 - **Durable storage is the app's call (N48).** Browsers evict best-effort storage under pressure, an origin at a time, and the load rule absorbs it. An app that wants its cache kept calls `navigator.storage.persist()` itself; the library never does, since some browsers prompt the user.
 - **Sensitive data.** Stored records are readable by every script of the origin and outlive the session until `clearAll`. Keep per-user or sensitive caches in memory; that is why `persist` is per cache (N45).
 - **Protocol.** No new op. `persistStopped` travels as `{ t: 'evt', scope: 'cache', cacheId, event: 'persistStopped', payload }`. `PROTOCOL_VERSION` stays 1 (as N37): an older worker ignores `persist` (config validation keeps only the fields it knows, `engine/validate.ts`) and never emits the event; an older client ignores the unknown event name (`ClientEmitter.receive`, `client/events.ts`).
