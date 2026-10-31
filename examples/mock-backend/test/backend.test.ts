@@ -7,6 +7,9 @@ import {
   type StreamBatch,
   type Tokens,
 } from "../src/backend";
+import { COLUMNS_TYPE, decodeColumns } from "../src/columns";
+import { datasets } from "../src/datasets";
+import { PAGE_SLOTS } from "../src/series";
 
 const NOW = Date.UTC(2026, 5, 3, 15);
 const MINUTE = 60_000;
@@ -47,6 +50,75 @@ describe("createBackend", () => {
     expect(body.meta).toEqual({ version: "v1", finalizedUntil: NOW });
     expect(body.next).toBeUndefined();
     expect((await stats(backend)).pages).toEqual({ metrics: 1 });
+  });
+
+  it("answers the same page as a columns body when the request accepts one", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const path = `/api/series/candles/ACME?${query}`;
+    const json = await call(backend, path);
+    const binary = await call(backend, path, {
+      headers: { accept: `${COLUMNS_TYPE}, application/json;q=0.5` },
+    });
+    expect(json.headers.get("content-type")).toMatch(/^application\/json/);
+    expect(binary.headers.get("content-type")).toBe(COLUMNS_TYPE);
+    // Caches between the two must keep the formats apart.
+    expect(json.headers.get("vary")).toBe("accept");
+    expect(binary.headers.get("vary")).toBe("accept");
+    const page = await json.json();
+    const decoded = decodeColumns(await binary.arrayBuffer());
+    expect(decoded.header.fields).toEqual(
+      Object.entries(datasets.candles.fields).map(([name, dtype]) => ({
+        name,
+        dtype,
+      })),
+    );
+    expect(decoded.fields.volume).toBeInstanceOf(Uint32Array);
+    expect(page.timestamps.length).toBeGreaterThan(0);
+    expect([...decoded.timestamps]).toEqual(page.timestamps);
+    for (const [name, values] of Object.entries(decoded.fields)) {
+      expect([...values]).toEqual(page.fields[name]);
+    }
+    expect(decoded.header.meta).toEqual(page.meta);
+    expect(decoded.header.next).toBeUndefined();
+    expect((await stats(backend)).formats).toEqual({ json: 1, columns: 1 });
+  });
+
+  it("carries the next page's start in a columns header", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const long = `start=${NOW - 2 * PAGE_SLOTS * MINUTE}&end=${NOW}&interval=${MINUTE}&offset=0`;
+    const path = `/api/series/metrics/web?${long}`;
+    const page = await (await call(backend, path)).json();
+    const binary = await call(backend, path, {
+      headers: { accept: COLUMNS_TYPE },
+    });
+    const { header, timestamps } = decodeColumns(await binary.arrayBuffer());
+    expect(header.next).toBe(page.next);
+    expect(timestamps).toHaveLength(PAGE_SLOTS);
+  });
+
+  it("answers JSON when the Accept refuses columns or prefers JSON", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const typeFor = async (accept: string) =>
+      (
+        await call(backend, `/api/series/metrics/web?${query}`, {
+          headers: { accept },
+        })
+      ).headers.get("content-type");
+    expect(await typeFor(`${COLUMNS_TYPE};q=0, application/json`)).toMatch(
+      /^application\/json/,
+    );
+    expect(await typeFor(`application/json, ${COLUMNS_TYPE};q=0.1`)).toMatch(
+      /^application\/json/,
+    );
+    expect(await typeFor("APPLICATION/VND.TSCACHE.COLUMNS")).toBe(COLUMNS_TYPE);
+  });
+
+  it("answers JSON to a request that accepts anything", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const response = await call(backend, `/api/series/metrics/web?${query}`, {
+      headers: { accept: "*/*" },
+    });
+    expect(response.headers.get("content-type")).toMatch(/^application\/json/);
   });
 
   it("leaves other paths alone and rejects bad requests", async () => {
