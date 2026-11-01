@@ -12,7 +12,7 @@
     "@reference/shared": "workspace:*",
     "@tscache/integrations": "workspace:*",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react-dom": "^19.3.1",
     "tscache": "workspace:*"
   },
   "devDependencies": {
