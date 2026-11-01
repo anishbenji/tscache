@@ -12,7 +12,7 @@
     "@reference/shared": "workspace:*",
     "@solidjs/web": "2.0.0-rc.14",
     "@tscache/integrations": "workspace:*",
-    "solid-js": "2.0.0-rc.14",
+    "solid-js": "2.0.0-rc.19",
     "tscache": "workspace:*"
   },
   "devDependencies": {

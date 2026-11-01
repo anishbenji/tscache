@@ -11,7 +11,7 @@
     "@examples/mock-backend": "workspace:*",
     "@solidjs/web": "2.0.0-rc.14",
     "lightweight-charts": "^5.2.1",
-    "solid-js": "2.0.0-rc.14",
+    "solid-js": "2.0.0-rc.19",
     "tscache": "workspace:*"
   },
   "devDependencies": {
