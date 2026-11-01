@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@examples/mock-backend": "workspace:*",
-    "@solidjs/web": "2.0.0-rc.14",
+    "@solidjs/web": "2.0.0-rc.19",
     "solid-js": "2.0.0-rc.14",
     "tscache": "workspace:*",
     "uplot": "^1.6.32"
