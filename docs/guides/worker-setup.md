@@ -26,7 +26,9 @@ adapter) with `import()`, only once a cache with `persist: true` opens or
 to empty the database). Vite's default worker format, `'iife'`, inlines that code
 into the worker file, where it is downloaded with the worker but not run.
 With `worker: { format: "es" }` in `vite.config.ts`, it becomes a chunk of
-its own that an app persisting nothing never downloads. Pass the URL as Vite
+its own that an app persisting nothing never downloads. The `tscache/vite`
+plugin, `fetcherUrl()`, warns once in `vite build` when the format is
+`'iife'`; it never changes the format itself. Pass the URL as Vite
 gives it: the worker's chunks import the worker file by that URL, so a query
 or fragment added to it would load the worker's code a second time.
 
