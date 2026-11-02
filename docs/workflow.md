@@ -6,19 +6,19 @@ The primary driver is **T3 Code**: one Claude thread per step, plus a Codex thre
 
 ## Files that drive the agents
 
-| File | Read by | Purpose |
-|---|---|---|
-| `AGENTS.md` | Codex natively; Claude through `CLAUDE.md` | Shared rules, roles, review rules |
-| `CLAUDE.md` | Claude | Imports `AGENTS.md`, plus Claude-only notes |
-| `.claude/settings.json` | Claude Code, and Agent SDK hosts that load project settings | Permissions, Bash guard hook, Codex plugin |
-| `.claude/hooks/guard-bash.sh`, `guard-bash.ts` | Claude | Tripwire for literal `bun test` and git-hook bypasses; threat model in the `.ts` header, regression cases in `guard-bash.test.sh`. `bun run ci` is the backstop |
-| `.codex/config.toml` | Codex, once the project is trusted | Pins `gpt-6.1-sol` at high effort |
-| `docs/review-checklist.md` | Reviewer | Invariants every review checks, and the findings format |
-| `docs/testing.md` | Everyone | Rules for clocks, waiting, timing and shared state in tests; `scripts/flake-hunt.sh` and the `Flake hunt` workflow |
-| `scripts/codex-review.sh` | Claude | Runs `bun run ci`, then a headless read-only Codex review (prompts C and D live here) |
-| `scripts/review-watch.sh` | Claude | Runs `codex-review.sh` under a silence watchdog; Codex sessions can stall without output |
-| `.reviews/step-NN/` | Claude | Raw review output per round (gitignored) |
-| `docs/reviews/step-NN.md` | Everyone | Findings and triage for each step |
+| File                                           | Read by                                                     | Purpose                                                                                                                                                         |
+| ---------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AGENTS.md`                                    | Codex natively; Claude through `CLAUDE.md`                  | Shared rules, roles, review rules                                                                                                                               |
+| `CLAUDE.md`                                    | Claude                                                      | Imports `AGENTS.md`, plus Claude-only notes                                                                                                                     |
+| `.claude/settings.json`                        | Claude Code, and Agent SDK hosts that load project settings | Permissions, Bash guard hook, Codex plugin                                                                                                                      |
+| `.claude/hooks/guard-bash.sh`, `guard-bash.ts` | Claude                                                      | Tripwire for literal `bun test` and git-hook bypasses; threat model in the `.ts` header, regression cases in `guard-bash.test.sh`. `bun run ci` is the backstop |
+| `.codex/config.toml`                           | Codex, once the project is trusted                          | Pins `gpt-6.1-sol` at high effort                                                                                                                               |
+| `docs/review-checklist.md`                     | Reviewer                                                    | Invariants every review checks, and the findings format                                                                                                         |
+| `docs/testing.md`                              | Everyone                                                    | Rules for clocks, waiting, timing and shared state in tests; `scripts/flake-hunt.sh` and the `Flake hunt` workflow                                              |
+| `scripts/codex-review.sh`                      | Claude                                                      | Runs `bun run ci`, then a headless read-only Codex review (prompts C and D live here)                                                                           |
+| `scripts/review-watch.sh`                      | Claude                                                      | Runs `codex-review.sh` under a silence watchdog; Codex sessions can stall without output                                                                        |
+| `.reviews/step-NN/`                            | Claude                                                      | Raw review output per round (gitignored)                                                                                                                        |
+| `docs/reviews/step-NN.md`                      | Everyone                                                    | Findings and triage for each step                                                                                                                               |
 
 ## One-time setup
 
@@ -35,14 +35,14 @@ Do steps 1–2 yourself; T3 Code (a Claude thread) can do the rest with your app
 
 ## Per-step loop
 
-| # | Who | Action | Engine steps ③–⑧ | Other steps |
-|---|---|---|---|---|
-| 0 | You | `git switch -c feat/NN-slug main` | ✓ | ✓ |
-| 1 | Codex thread | Contract tests — prompt A. Leave uncommitted. | ✓ | — |
-| 2 | Claude thread | Implement — prompt B | ✓ | ✓ |
-| 3 | Claude thread | Review loop — prompt E (below) | ✓ | ✓ |
-| 4 | Claude thread | `git push -u origin feat/NN-slug`, then open a pull request whose body is the merge request from `docs/reviews/step-NN.md` | ✓ | ✓ |
-| 5 | You | Read the pull request, wait for the CI check, merge it on GitHub (merge commit). Then locally: `git switch main && git pull --ff-only` | ✓ | ✓ |
+| #   | Who           | Action                                                                                                                                 | Engine steps ③–⑧ | Other steps |
+| --- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------- |
+| 0   | You           | `git switch -c feat/NN-slug main`                                                                                                      | ✓                | ✓           |
+| 1   | Codex thread  | Contract tests — prompt A. Leave uncommitted.                                                                                          | ✓                | —           |
+| 2   | Claude thread | Implement — prompt B                                                                                                                   | ✓                | ✓           |
+| 3   | Claude thread | Review loop — prompt E (below)                                                                                                         | ✓                | ✓           |
+| 4   | Claude thread | `git push -u origin feat/NN-slug`, then open a pull request whose body is the merge request from `docs/reviews/step-NN.md`             | ✓                | ✓           |
+| 5   | You           | Read the pull request, wait for the CI check, merge it on GitHub (merge commit). Then locally: `git switch main && git pull --ff-only` | ✓                | ✓           |
 
 Keep tooling off step branches. Changes to hooks, scripts, agent configuration or this workflow go on their own `chore/NN-slug` branch from `main` with their own review loop, so a step review covers only the step's code.
 
@@ -104,26 +104,26 @@ Do not act on "Decision concerns" — list them for me.
 
 The CLI runs prompts B and E and the review script exactly as T3 Code does. The Codex plugin is an alternative for one-off reviews:
 
-| Purpose | CLI |
-|---|---|
-| Contract tests (A) | `/codex:rescue --fresh --background <prompt A>` |
-| One-off review | `/codex:review --base main --background` (not steerable; Codex applies the `AGENTS.md` review rules) |
-| One-off adversarial review | `/codex:adversarial-review --base main --background <focus>` |
-| Collect output | `/codex:status`, `/codex:result` |
+| Purpose                    | CLI                                                                                                  |
+| -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Contract tests (A)         | `/codex:rescue --fresh --background <prompt A>`                                                      |
+| One-off review             | `/codex:review --base main --background` (not steerable; Codex applies the `AGENTS.md` review rules) |
+| One-off adversarial review | `/codex:adversarial-review --base main --background <focus>`                                         |
+| Collect output             | `/codex:status`, `/codex:result`                                                                     |
 
 Never enable the plugin's review gate; it loops Claude and Codex and drains usage. The review loop above replaces it.
 
 ## Adversarial-review schedule
 
-| Step | Focus |
-|---|---|
-| ③ Coverage index | Inclusive-range fenceposts and snap-outward; ms↔slot conversion confined to one site; merge and subtraction on adjacent, touching and nested ranges |
-| ⑤ Merge / put path | Atomic reject leaves no partial state; new-wins across segment boundaries; K-split and slot-cap edges; overlap-warning cost when off |
-| ⑦ Invalidation suite | Volatile region never gaining authority; watermark moving backwards; version-mismatch clear racing a put |
-| ⑨ RPC + handshake | Cache-owned buffers never transferred; mismatch handling; payload still valid for IndexedDB and SSR |
-| ⑩ SharedWorker + fallback | Fallback order and pinning; tab death; the no-SharedWorker (Chrome Android) path |
-| ⑪ Fetcher orchestration | Dedup keying, flank coalescing, `authInvalid`/`updateAuth` races, `get` never blocking on auth |
-| ⑫ Playwright suite | Tests passing for the wrong reason (pages vs contexts), flakiness, timing assumptions |
+| Step                      | Focus                                                                                                                                               |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ③ Coverage index          | Inclusive-range fenceposts and snap-outward; ms↔slot conversion confined to one site; merge and subtraction on adjacent, touching and nested ranges |
+| ⑤ Merge / put path        | Atomic reject leaves no partial state; new-wins across segment boundaries; K-split and slot-cap edges; overlap-warning cost when off                |
+| ⑦ Invalidation suite      | Volatile region never gaining authority; watermark moving backwards; version-mismatch clear racing a put                                            |
+| ⑨ RPC + handshake         | Cache-owned buffers never transferred; mismatch handling; payload still valid for IndexedDB and SSR                                                 |
+| ⑩ SharedWorker + fallback | Fallback order and pinning; tab death; the no-SharedWorker (Chrome Android) path                                                                    |
+| ⑪ Fetcher orchestration   | Dedup keying, flank coalescing, `authInvalid`/`updateAuth` races, `get` never blocking on auth                                                      |
+| ⑫ Playwright suite        | Tests passing for the wrong reason (pages vs contexts), flakiness, timing assumptions                                                               |
 
 The Bash guard (`.claude/hooks/guard-bash.ts`) is frozen and excluded from adversarial review: it is a tripwire for common accidents, and `bun run ci` is the backstop. Change it only for an accident actually observed, with a regression case.
 

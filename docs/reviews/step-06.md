@@ -6,10 +6,10 @@ Branch: `feat/06-read-path` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Stat
 
 No functional defect found.
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R1-1 | P1 | No test covers a confirmed gap: a covered stretch with no points must come back as coverage, not as a miss | accepted | Confirmed by reading the tests (the property test puts a point in every request). Added in 0a31a4a: fully and partly covered empty stretches, with and without other data |
-| R1-2 | P1 | The no-segment tests accept any field record, so `fields: {}` would pass | accepted | Confirmed: the loop over `Object.values` runs zero times. Both tests now assert the schema-shaped empty record (0a31a4a) |
+| #    | Sev | Finding                                                                                                    | Decision | Resolution                                                                                                                                                                |
+| ---- | --- | ---------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1-1 | P1  | No test covers a confirmed gap: a covered stretch with no points must come back as coverage, not as a miss | accepted | Confirmed by reading the tests (the property test puts a point in every request). Added in 0a31a4a: fully and partly covered empty stretches, with and without other data |
+| R1-2 | P1  | The no-segment tests accept any field record, so `fields: {}` would pass                                   | accepted | Confirmed: the loop over `Object.values` runs zero times. Both tests now assert the schema-shaped empty record (0a31a4a)                                                  |
 
 ## Round 2 — reviewer verdict: merge
 

@@ -12,12 +12,12 @@ Step ② of the commit plan: the public type surface (architecture §2), the err
 
 ### Commits
 
-| Group | Commits |
-|---|---|
-| Step ② code | a58cc2f types and errors · a876b66 config validation · e76269c literal auth marker · cb4fb92, df74084 alignment offset · 7afd517 non-object config · 33f7440, 1396ac1 test hygiene |
-| Agent workflow | a865e55 workflow, checklist, Claude/Codex config · 719ad5f Fallow pin · e371c71 review script · 2ed571a, 2836be8, e4e7add docs |
-| Bash guard | 6968b72, 53740ce, 0ec39f0, 1fc3198, 516947f, 291a9df |
-| Triage | b744887, b6b72f5, d51de0d, this file |
+| Group          | Commits                                                                                                                                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Step ② code    | a58cc2f types and errors · a876b66 config validation · e76269c literal auth marker · cb4fb92, df74084 alignment offset · 7afd517 non-object config · 33f7440, 1396ac1 test hygiene |
+| Agent workflow | a865e55 workflow, checklist, Claude/Codex config · 719ad5f Fallow pin · e371c71 review script · 2ed571a, 2836be8, e4e7add docs                                                     |
+| Bash guard     | 6968b72, 53740ce, 0ec39f0, 1fc3198, 516947f, 291a9df                                                                                                                               |
+| Triage         | b744887, b6b72f5, d51de0d, this file                                                                                                                                               |
 
 ### Review outcome
 
@@ -41,12 +41,12 @@ Medium for the guard, by design. It is a tripwire for accidents, not a security 
 
 No coverage tool is installed (adding `@vitest/coverage-v8` would be a dependency decision). By inspection:
 
-| Module | Covered | Not covered |
-|---|---|---|
-| `engine/validate.ts` | Defaults; explicit values; frozen result and defensive `fields` copy; every dtype; 30 rejection cases (each field, NaN, Infinity, unsafe integers, empty and array `fields`, non-object config); offset normalization incl. negative, over-interval, near 2^53 and `-0` | — |
-| `errors.ts` | Hierarchy, `name`, `PutError` and `ProtocolMismatchError` fields, literal marker type, marker detection incl. a foreign class copy | Nothing constructs `PutError` yet (step ⑤) |
-| `types.ts`, entries | Type-checked; build, attw and publint resolve every entry | No test pins the exact export list of `.` |
-| Guard | 85 command cases plus a crash check, run in CI | Known limits above |
+| Module               | Covered                                                                                                                                                                                                                                                                 | Not covered                                |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `engine/validate.ts` | Defaults; explicit values; frozen result and defensive `fields` copy; every dtype; 30 rejection cases (each field, NaN, Infinity, unsafe integers, empty and array `fields`, non-object config); offset normalization incl. negative, over-interval, near 2^53 and `-0` | —                                          |
+| `errors.ts`          | Hierarchy, `name`, `PutError` and `ProtocolMismatchError` fields, literal marker type, marker detection incl. a foreign class copy                                                                                                                                      | Nothing constructs `PutError` yet (step ⑤) |
+| `types.ts`, entries  | Type-checked; build, attw and publint resolve every entry                                                                                                                                                                                                               | No test pins the exact export list of `.`  |
+| Guard                | 85 command cases plus a crash check, run in CI                                                                                                                                                                                                                          | Known limits above                         |
 
 ### Residual notes
 
@@ -65,30 +65,30 @@ git switch main && git merge --no-ff feat/02-core-types
 
 Run by hand with prompt C before `scripts/codex-review.sh` existed. `bun run ci` could not run in the read-only sandbox; the reviewer ran tsc, Biome, Knip, Fallow and Vitest (36/36) separately. The implementer's host run of `bun run ci` passed.
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R1-1 | P0 | Step ②: `alignmentOffset` restricted to `[0, interval)` without approval | accepted | Validated: architecture §2.2 and decision #3 define alignment only as `(t - alignmentOffset) % interval === 0`, and `-1000` with interval 60 000 aligns t = 59 000. Any safe-integer offset is now accepted and normalized into `[0, interval)` (same grid, so equivalent configs resolve identically). Integers remain required because timestamps are exact integers (S§3.1). Fixed in cb4fb92. |
-| R1-2 | P1 | Step ②: `AuthInvalidError.code` typed `string`, not the literal | accepted | Validated with a type-level test that failed under tsc. Tests were not type-checked at all, so 33f7440 adds `test/` to the package tsconfig. e76269c types `code` and `AUTH_INVALID_CODE` as `'tscache:auth-invalid'` (architecture §2.6); the constant needed an annotation because an unannotated `const` widens to `string` through generic inference. |
-| R1-3 | P1 | Tooling: guard misses `bun test` after a newline | accepted | Reproduced with the new regression cases in `.claude/hooks/guard-bash.test.sh`, now run by `bun run ci`. Fixed in 6968b72. |
-| R1-4 | P2 | Tooling: guard blocks harmless mentions of hook-bypass flags | accepted in part | Reproduced: the guard blocked a grep for the rule. 6968b72 moved bypass matching to command position, which a security review showed let `sudo`, `env`, absolute git paths and `bash -c` hide the flags. 53740ce restores match-anywhere and exempts only commands that never invoke git. A git commit whose message mentions a bypass flag stays blocked: telling a message from a real flag needs shell parsing, and the guard fails closed (AGENTS.md: never bypass git hooks). |
+| #    | Sev | Finding                                                                  | Decision         | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---- | --- | ------------------------------------------------------------------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1-1 | P0  | Step ②: `alignmentOffset` restricted to `[0, interval)` without approval | accepted         | Validated: architecture §2.2 and decision #3 define alignment only as `(t - alignmentOffset) % interval === 0`, and `-1000` with interval 60 000 aligns t = 59 000. Any safe-integer offset is now accepted and normalized into `[0, interval)` (same grid, so equivalent configs resolve identically). Integers remain required because timestamps are exact integers (S§3.1). Fixed in cb4fb92.                                                                                  |
+| R1-2 | P1  | Step ②: `AuthInvalidError.code` typed `string`, not the literal          | accepted         | Validated with a type-level test that failed under tsc. Tests were not type-checked at all, so 33f7440 adds `test/` to the package tsconfig. e76269c types `code` and `AUTH_INVALID_CODE` as `'tscache:auth-invalid'` (architecture §2.6); the constant needed an annotation because an unannotated `const` widens to `string` through generic inference.                                                                                                                          |
+| R1-3 | P1  | Tooling: guard misses `bun test` after a newline                         | accepted         | Reproduced with the new regression cases in `.claude/hooks/guard-bash.test.sh`, now run by `bun run ci`. Fixed in 6968b72.                                                                                                                                                                                                                                                                                                                                                         |
+| R1-4 | P2  | Tooling: guard blocks harmless mentions of hook-bypass flags             | accepted in part | Reproduced: the guard blocked a grep for the rule. 6968b72 moved bypass matching to command position, which a security review showed let `sudo`, `env`, absolute git paths and `bash -c` hide the flags. 53740ce restores match-anywhere and exempts only commands that never invoke git. A git commit whose message mentions a bypass flag stays blocked: telling a message from a real flag needs shell parsing, and the guard fails closed (AGENTS.md: never bypass git hooks). |
 
 ## Security review (background, between rounds 1 and 2)
 
 Claude Code's commit security review flagged the guard twice. Both were reviewed against the guard's purpose, a tripwire for the AGENTS.md hook rules.
 
-| # | Finding | Decision | Resolution |
-|---|---|---|---|
-| S-1 | 6968b72: command-position matching lets wrappers (`sudo`, `env`, absolute git path, `bash -c`) hide hook-bypass flags | accepted | Fixed in 53740ce (see R1-4). |
+| #   | Finding                                                                                                                                      | Decision | Resolution                                                                                                                                                                                                                                                                                                                                             |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S-1 | 6968b72: command-position matching lets wrappers (`sudo`, `env`, absolute git path, `bash -c`) hide hook-bypass flags                        | accepted | Fixed in 53740ce (see R1-4).                                                                                                                                                                                                                                                                                                                           |
 | S-2 | Parser differentials: quote or backslash splicing, git's abbreviated long options, case-insensitive `core.hooksPath`, quoted Lefthook values | accepted | Fixed in 0ec39f0: matching runs on text with quotes and backslashes stripped and case folded; `--no-v…` prefixes, Lefthook exclude/skip/uninstall routes and wrapped or path-qualified test-runner calls are caught. The guard now states that it is a tripwire, not a security boundary — regexes cannot follow variables, `eval` or scripts on disk. |
 
 ## Round 2 — reviewer verdict: block
 
 Via `scripts/codex-review.sh`; host `bun run ci` passed. The reviewer confirmed R1-2 and R1-3 fixed and R1-4's partial acceptance justified.
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R2-1 | P0 | Step ②: R1-1 normalization loses precision near 2^53 (re-raises R1-1) | accepted | Reproduced: interval `Number.MAX_SAFE_INTEGER`, offset 2 resolved to 1. Now adds interval only to negative remainders, and turns a `-0` remainder into `0` (found while fixing). Boundary tests added. Fixed in df74084. |
-| R2-2 | P2 | Tooling: guard blocks backticks inside a single-quoted commit message | accepted | Reproduced with a regression case. Backtick substitution is now checked on text with single-quoted spans removed. Fixed in 1fc3198. |
+| #    | Sev | Finding                                                               | Decision | Resolution                                                                                                                                                                                                               |
+| ---- | --- | --------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R2-1 | P0  | Step ②: R1-1 normalization loses precision near 2^53 (re-raises R1-1) | accepted | Reproduced: interval `Number.MAX_SAFE_INTEGER`, offset 2 resolved to 1. Now adds interval only to negative remainders, and turns a `-0` remainder into `0` (found while fixing). Boundary tests added. Fixed in df74084. |
+| R2-2 | P2  | Tooling: guard blocks backticks inside a single-quoted commit message | accepted | Reproduced with a regression case. Backtick substitution is now checked on text with single-quoted spans removed. Fixed in 1fc3198.                                                                                      |
 
 Also: 1396ac1 replaces Vitest's deprecated `toThrowError` with `toThrow` (no behaviour change).
 
@@ -96,23 +96,23 @@ Also: 1396ac1 replaces Vitest's deprecated `toThrowError` with `toThrow` (no beh
 
 Host `bun run ci` passed. The reviewer confirmed every earlier accepted finding fixed and re-raised no rejection. All three findings are further parser differentials in the guard, so instead of another regex patch the guard was rebuilt as a shell tokenizer (`.claude/hooks/guard-bash.ts`): quotes, escapes, `$'…'`, operators, heredocs, `$(…)` and backtick substitutions, `bash -c` and `eval` bodies, leading assignments and wrappers are resolved, and the rules apply to real argv. Unparseable input fails closed if it names a guarded tool, and a guard crash now blocks instead of allowing (Claude Code only blocks on exit 2). The regression file holds 61 command cases plus a crash check.
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R3-1 | P1 | Tooling: git global options (`-C`, `-c`) hide `commit -n` | accepted | Reproduced. Global options are skipped before the subcommand. Fixed in 516947f. |
-| R3-2 | P1 | Tooling: a leading `VAR=value` hides the forbidden test runner | accepted | Reproduced. Leading assignments are consumed (and checked) before argv0. Fixed in 516947f. |
-| R3-3 | P2 | Tooling: `(bun test)` inside a single-quoted message is blocked | accepted | Reproduced. Quoted text is now a word, never a command boundary; mentions of bypass flags inside commit messages and heredocs also pass now, which supersedes the strict-side note in R1-4. Fixed in 516947f. |
+| #    | Sev | Finding                                                         | Decision | Resolution                                                                                                                                                                                                    |
+| ---- | --- | --------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R3-1 | P1  | Tooling: git global options (`-C`, `-c`) hide `commit -n`       | accepted | Reproduced. Global options are skipped before the subcommand. Fixed in 516947f.                                                                                                                               |
+| R3-2 | P1  | Tooling: a leading `VAR=value` hides the forbidden test runner  | accepted | Reproduced. Leading assignments are consumed (and checked) before argv0. Fixed in 516947f.                                                                                                                    |
+| R3-3 | P2  | Tooling: `(bun test)` inside a single-quoted message is blocked | accepted | Reproduced. Quoted text is now a word, never a command boundary; mentions of bypass flags inside commit messages and heredocs also pass now, which supersedes the strict-side note in R1-4. Fixed in 516947f. |
 
 ## Round 4 — reviewer verdict: merge after fixes
 
 Host `bun run ci` passed. The reviewer confirmed the other accepted findings fixed. Round 4 hit both stop rules: the four-round cap, and the convergence check (the guard drew findings in every round). R4-4 is step ② code and was triaged normally. For the guard the user chose to fix the four validated findings and stop without a fifth round, recording the guard's known limits in its header.
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R4-1 | P1 | Tooling: a leading redirection (`2>/dev/null git …`) hides guarded commands | accepted | Reproduced. Redirection targets and fd numbers are no longer argv; process substitution still parses. Fixed in 291a9df. |
-| R4-2 | P1 | Tooling: ANSI-C escapes (`$'b\x75n' test`) hide the forbidden runner | accepted | Reproduced. `$'…'` is decoded as bash does (hex, unicode, octal, control and named escapes). Fixed in 291a9df. |
-| R4-3 | P1 | Tooling: Bun global options (`bun --cwd x test`) hide the subcommand | accepted | Reproduced. Bun options and their values are skipped to find the subcommand. Fixed in 291a9df. |
-| R4-4 | P1 | Step ②: null or undefined config throws `TypeError`, not `ConfigError` | accepted | Reproduced for null and undefined. Non-object configs, and arrays passed as `fields` (found while fixing; they were accepted as index-named fields), now throw `ConfigError` (architecture §2.6). Tests added. Fixed in 7afd517. |
-| R4-5 | P2 | Tooling: a commit message mentioning a bypass flag is still blocked | accepted | Reproduced. Git checks now walk real options and skip option values, so a message is never read as a flag. Fixed in 291a9df. |
+| #    | Sev | Finding                                                                     | Decision | Resolution                                                                                                                                                                                                                       |
+| ---- | --- | --------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R4-1 | P1  | Tooling: a leading redirection (`2>/dev/null git …`) hides guarded commands | accepted | Reproduced. Redirection targets and fd numbers are no longer argv; process substitution still parses. Fixed in 291a9df.                                                                                                          |
+| R4-2 | P1  | Tooling: ANSI-C escapes (`$'b\x75n' test`) hide the forbidden runner        | accepted | Reproduced. `$'…'` is decoded as bash does (hex, unicode, octal, control and named escapes). Fixed in 291a9df.                                                                                                                   |
+| R4-3 | P1  | Tooling: Bun global options (`bun --cwd x test`) hide the subcommand        | accepted | Reproduced. Bun options and their values are skipped to find the subcommand. Fixed in 291a9df.                                                                                                                                   |
+| R4-4 | P1  | Step ②: null or undefined config throws `TypeError`, not `ConfigError`      | accepted | Reproduced for null and undefined. Non-object configs, and arrays passed as `fields` (found while fixing; they were accepted as index-named fields), now throw `ConfigError` (architecture §2.6). Tests added. Fixed in 7afd517. |
+| R4-5 | P2  | Tooling: a commit message mentioning a bypass flag is still blocked         | accepted | Reproduced. Git checks now walk real options and skip option values, so a message is never read as a flag. Fixed in 291a9df.                                                                                                     |
 
 ## Contract-test changes
 
@@ -128,59 +128,59 @@ Step ② merged to `main` (4b0f5f3) with the guard's later security findings ope
 
 ### Background security reviews (summaries only)
 
-| # | Finding | Decision | Resolution |
-|---|---|---|---|
-| S-3–S-6 | After 291a9df: control regression, fail-open, parser differential, one more | accepted | Probed without details: 20 realistic bypasses reproduced (run-time values, weak parse-error fallback, wrapper option values, `function`/`coproc`). Fixed in f0520d2; the run-time-value handling was later removed (81a4cc1). |
-| S-7 | Logic bypass | accepted | Nested `sh -c "$CMD"` / `eval` checked text triggers against the nested string only. Fixed in 7ea1e6b; superseded by 81a4cc1. |
-| S-8 | Fail-open regression | accepted | Order-dependent bun/test trigger and a narrowed fallback. Fixed in 4a0fe84; superseded by 81a4cc1. |
-| S-9 | After 81a4cc1: allowlist semantic escape | accepted | The config-read allowlist accepted `get`/`list`/`unset` anywhere, so setting the hooks path to one of those words passed. Only the first operand counts as a subcommand word. Fixed in d1b6a41. |
-| S-10 | After 81a4cc1: sibling-path parity | accepted | `bun x`/`run`/`exec` run another command like the `bunx` wrapper does, but only `test` was checked. The wrapped command is now checked. Fixed in d1b6a41. |
-| S-11 | After d1b6a41: parser differential / control regression | accepted in part | Two literal differentials: option values (`git config --file <path>`, `bun run --cwd <dir>`) were read as the subcommand. Fixed in 38c6a7f. The control-regression part is the approved scope reduction in 81a4cc1 (run-time values and unparseable input pass; CI backstop), not a defect. |
+| #       | Finding                                                                     | Decision         | Resolution                                                                                                                                                                                                                                                                                  |
+| ------- | --------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S-3–S-6 | After 291a9df: control regression, fail-open, parser differential, one more | accepted         | Probed without details: 20 realistic bypasses reproduced (run-time values, weak parse-error fallback, wrapper option values, `function`/`coproc`). Fixed in f0520d2; the run-time-value handling was later removed (81a4cc1).                                                               |
+| S-7     | Logic bypass                                                                | accepted         | Nested `sh -c "$CMD"` / `eval` checked text triggers against the nested string only. Fixed in 7ea1e6b; superseded by 81a4cc1.                                                                                                                                                               |
+| S-8     | Fail-open regression                                                        | accepted         | Order-dependent bun/test trigger and a narrowed fallback. Fixed in 4a0fe84; superseded by 81a4cc1.                                                                                                                                                                                          |
+| S-9     | After 81a4cc1: allowlist semantic escape                                    | accepted         | The config-read allowlist accepted `get`/`list`/`unset` anywhere, so setting the hooks path to one of those words passed. Only the first operand counts as a subcommand word. Fixed in d1b6a41.                                                                                             |
+| S-10    | After 81a4cc1: sibling-path parity                                          | accepted         | `bun x`/`run`/`exec` run another command like the `bunx` wrapper does, but only `test` was checked. The wrapped command is now checked. Fixed in d1b6a41.                                                                                                                                   |
+| S-11    | After d1b6a41: parser differential / control regression                     | accepted in part | Two literal differentials: option values (`git config --file <path>`, `bun run --cwd <dir>`) were read as the subcommand. Fixed in 38c6a7f. The control-regression part is the approved scope reduction in 81a4cc1 (run-time values and unparseable input pass; CI backstop), not a defect. |
 
 ### Round A1 — reviewer verdict: merge after fixes
 
 Fifteen P1 findings: nine fail-opens and six false positives. This was the sixth consecutive round of guard findings, so under the convergence rule the user chose to redesign rather than patch (2026-10-03). The guard now checks literal commands only (81a4cc1). Run-time values, stdin, aliases and unparseable input are out of scope by its header, and `bun run ci` re-runs gitleaks and commitlint over `main..HEAD` as the backstop for any hook bypass (0251ad9). A guard crash now lets the command through instead of blocking every Bash call. The regression file pins both sides: literal forms block, ordinary commands pass, and out-of-scope forms are listed as passing by design.
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| A1-1 | P1 | `LEFTHOOK=$(printf 0)` and other run-time assignments disable hooks | rejected | Run-time value; out of scope by the guard header. The CI backstop catches any resulting commit. |
-| A1-2 | P1 | Shell input from a heredoc or stdin escapes inspection | accepted in part | A literal heredoc fed to a shell (`bash <<'EOF'`) is now parsed as its script (81a4cc1). Stdin from a pipe or `xargs` is out of scope. |
-| A1-3 | P1 | Attached `env -S'…'` and appended arguments | accepted | Fixed in 81a4cc1 and 73ba4b3 (argument boundaries kept). |
-| A1-4 | P1 | `builtin` wrapper | accepted | Fixed in 81a4cc1. |
-| A1-5 | P1 | Run-time `lefthook` subcommand | rejected | Run-time value; out of scope, CI backstop. |
-| A1-6 | P1 | Short-option bypass through a variable (`F=-nm`) | rejected | Run-time value; out of scope, CI backstop. |
-| A1-7 | P1 | Alias defined in the same call | rejected | Aliases are out of scope (the header now covers all aliases, not only earlier calls). |
-| A1-8 | P1 | `$'…'` not truncated at NUL (re-raises R4-2) | accepted | Fixed in 73ba4b3. |
-| A1-9 | P1 | Bun options with values missing from the table (re-raises R4-3) | accepted in part | `--console-depth` and `--user-agent` added (81a4cc1). The tables cover common options by design, as the header states. |
-| A1-10 | P1 | False positive: run-time test filter on `bun run test` | accepted | Run-time heuristics removed (81a4cc1). |
-| A1-11 | P1 | False positive: quoted braces read as expansion (re-raises R4-5) | accepted | Fixed in 81a4cc1. |
-| A1-12 | P1 | False positive: inert text trips run-time git checks | accepted | Fixed in 81a4cc1. |
-| A1-13 | P1 | False positive: `git branch --no-verbose`, `git config --get core.hooksPath` | accepted | Only `--no-veri…` counts, and config reads and unsets pass (81a4cc1). |
-| A1-14 | P1 | False positive: search-string assignment naming `core.hooksPath` | accepted | Only `GIT_CONFIG*` assignments are checked (81a4cc1). |
-| A1-15 | P1 | False positive: `command -v` treated as execution | accepted | Fixed in 81a4cc1. |
+| #     | Sev | Finding                                                                      | Decision         | Resolution                                                                                                                             |
+| ----- | --- | ---------------------------------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| A1-1  | P1  | `LEFTHOOK=$(printf 0)` and other run-time assignments disable hooks          | rejected         | Run-time value; out of scope by the guard header. The CI backstop catches any resulting commit.                                        |
+| A1-2  | P1  | Shell input from a heredoc or stdin escapes inspection                       | accepted in part | A literal heredoc fed to a shell (`bash <<'EOF'`) is now parsed as its script (81a4cc1). Stdin from a pipe or `xargs` is out of scope. |
+| A1-3  | P1  | Attached `env -S'…'` and appended arguments                                  | accepted         | Fixed in 81a4cc1 and 73ba4b3 (argument boundaries kept).                                                                               |
+| A1-4  | P1  | `builtin` wrapper                                                            | accepted         | Fixed in 81a4cc1.                                                                                                                      |
+| A1-5  | P1  | Run-time `lefthook` subcommand                                               | rejected         | Run-time value; out of scope, CI backstop.                                                                                             |
+| A1-6  | P1  | Short-option bypass through a variable (`F=-nm`)                             | rejected         | Run-time value; out of scope, CI backstop.                                                                                             |
+| A1-7  | P1  | Alias defined in the same call                                               | rejected         | Aliases are out of scope (the header now covers all aliases, not only earlier calls).                                                  |
+| A1-8  | P1  | `$'…'` not truncated at NUL (re-raises R4-2)                                 | accepted         | Fixed in 73ba4b3.                                                                                                                      |
+| A1-9  | P1  | Bun options with values missing from the table (re-raises R4-3)              | accepted in part | `--console-depth` and `--user-agent` added (81a4cc1). The tables cover common options by design, as the header states.                 |
+| A1-10 | P1  | False positive: run-time test filter on `bun run test`                       | accepted         | Run-time heuristics removed (81a4cc1).                                                                                                 |
+| A1-11 | P1  | False positive: quoted braces read as expansion (re-raises R4-5)             | accepted         | Fixed in 81a4cc1.                                                                                                                      |
+| A1-12 | P1  | False positive: inert text trips run-time git checks                         | accepted         | Fixed in 81a4cc1.                                                                                                                      |
+| A1-13 | P1  | False positive: `git branch --no-verbose`, `git config --get core.hooksPath` | accepted         | Only `--no-veri…` counts, and config reads and unsets pass (81a4cc1).                                                                  |
+| A1-14 | P1  | False positive: search-string assignment naming `core.hooksPath`             | accepted         | Only `GIT_CONFIG*` assignments are checked (81a4cc1).                                                                                  |
+| A1-15 | P1  | False positive: `command -v` treated as execution                            | accepted         | Fixed in 81a4cc1.                                                                                                                      |
 
 ### Round A2 — reviewer verdict: merge after fixes
 
 First round on the literal-only design (81a4cc1), scoped to that threat model. Host `bun run ci` passed. The reviewer confirmed A1's out-of-scope rejections justified. All nine findings were in scope and reproduced; all fixed.
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| A2-1 | P1 | CI backstop: gitleaks skips merge diffs, so a secret added in a merge resolution escapes | accepted | Confirmed: `git log -p` over the step merge shows 66 diffs without `-m`, 94 with. Fixed in 88cf228. |
-| A2-2 | P1 | `LEFTHOOK_BIN=/usr/bin/true` makes every hook succeed | accepted | Any `LEFTHOOK_*` variable other than the output ones now blocks (1974a61). |
-| A2-3 | P1 | Heredoc interpreter behind an assignment or wrapper (`CI=1 bash <<EOF`) | accepted | Interpreter resolved with the same prefix walk as every command (1974a61). |
-| A2-4 | P1 | `env -S` quoting: bypass and false positive | accepted | The value is split with shell-like quoting (1974a61). |
-| A2-5 | P1 | `git config --comment --get core.hooksPath <dir>` writes but passed (re-raises S-11) | accepted | Config classified in one pass; option values are never flags (1974a61). |
-| A2-6 | P1 | `--` before `eval` and `bash -c` bodies hid them | accepted | Terminator consumed (1974a61). |
-| A2-7 | P1 | False positive: clustered `command -vv` (re-raises A1-15) | accepted | Fixed in 1974a61. |
-| A2-8 | P1 | False positive: single-key read `git config core.hooksPath` | accepted | Legacy single-operand form is a read (1974a61). |
-| A2-9 | P1 | False positive: `-c user.note=core.hooksPath` | accepted | `-c` and `--config-env` match the key only (1974a61). |
+| #    | Sev | Finding                                                                                  | Decision | Resolution                                                                                          |
+| ---- | --- | ---------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| A2-1 | P1  | CI backstop: gitleaks skips merge diffs, so a secret added in a merge resolution escapes | accepted | Confirmed: `git log -p` over the step merge shows 66 diffs without `-m`, 94 with. Fixed in 88cf228. |
+| A2-2 | P1  | `LEFTHOOK_BIN=/usr/bin/true` makes every hook succeed                                    | accepted | Any `LEFTHOOK_*` variable other than the output ones now blocks (1974a61).                          |
+| A2-3 | P1  | Heredoc interpreter behind an assignment or wrapper (`CI=1 bash <<EOF`)                  | accepted | Interpreter resolved with the same prefix walk as every command (1974a61).                          |
+| A2-4 | P1  | `env -S` quoting: bypass and false positive                                              | accepted | The value is split with shell-like quoting (1974a61).                                               |
+| A2-5 | P1  | `git config --comment --get core.hooksPath <dir>` writes but passed (re-raises S-11)     | accepted | Config classified in one pass; option values are never flags (1974a61).                             |
+| A2-6 | P1  | `--` before `eval` and `bash -c` bodies hid them                                         | accepted | Terminator consumed (1974a61).                                                                      |
+| A2-7 | P1  | False positive: clustered `command -vv` (re-raises A1-15)                                | accepted | Fixed in 1974a61.                                                                                   |
+| A2-8 | P1  | False positive: single-key read `git config core.hooksPath`                              | accepted | Legacy single-operand form is a read (1974a61).                                                     |
+| A2-9 | P1  | False positive: `-c user.note=core.hooksPath`                                            | accepted | `-c` and `--config-env` match the key only (1974a61).                                               |
 
 ### Background security reviews after A2
 
-| # | Finding | Decision | Resolution |
-|---|---|---|---|
-| S-12 | `env -S` with an unparseable value skipped the check (with details) | accepted | Falls back to whitespace splitting; `\_` read as env's escaped space. Fixed in b00e29a. |
-| S-13–S-18 | Five parser differentials and one fail-open (summaries only) | accepted as residual | Not investigated: they arrived with every guard commit, the non-convergence the loop rules stop on. Closed by the freeze below. |
+| #         | Finding                                                             | Decision             | Resolution                                                                                                                      |
+| --------- | ------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| S-12      | `env -S` with an unparseable value skipped the check (with details) | accepted             | Falls back to whitespace splitting; `\_` read as env's escaped space. Fixed in b00e29a.                                         |
+| S-13–S-18 | Five parser differentials and one fail-open (summaries only)        | accepted as residual | Not investigated: they arrived with every guard commit, the non-convergence the loop rules stop on. Closed by the freeze below. |
 
 ### Round A3 — reviewer verdict: merge after fixes
 
@@ -194,12 +194,12 @@ Resolves the guard findings left open when step ② merged, by narrowing the gua
 
 ### What changed
 
-| Area | Change |
-|---|---|
-| CI backstop | 0251ad9 gitleaks + commitlint over `main..HEAD`; 88cf228 gitleaks scans merge diffs (`-m`) |
-| Guard | 81a4cc1 literal-only redesign (run-time values, stdin, aliases and unparseable input out of scope; a crash lets the command through); fixes in 73ba4b3, d1b6a41, 38c6a7f, 1974a61, b00e29a; frozen in 8295548. f0520d2, 7ea1e6b and 4a0fe84 are the superseded run-time-value attempt, kept for the record |
-| Review tooling | 176e27f Codex capacity retry |
-| Docs | Workflow file table, adversarial schedule note, `AGENTS.md` CI line, `CLAUDE.md` guard note; triage above |
+| Area           | Change                                                                                                                                                                                                                                                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CI backstop    | 0251ad9 gitleaks + commitlint over `main..HEAD`; 88cf228 gitleaks scans merge diffs (`-m`)                                                                                                                                                                                                                 |
+| Guard          | 81a4cc1 literal-only redesign (run-time values, stdin, aliases and unparseable input out of scope; a crash lets the command through); fixes in 73ba4b3, d1b6a41, 38c6a7f, 1974a61, b00e29a; frozen in 8295548. f0520d2, 7ea1e6b and 4a0fe84 are the superseded run-time-value attempt, kept for the record |
+| Review tooling | 176e27f Codex capacity retry                                                                                                                                                                                                                                                                               |
+| Docs           | Workflow file table, adversarial schedule note, `AGENTS.md` CI line, `CLAUDE.md` guard note; triage above                                                                                                                                                                                                  |
 
 ### Confidence
 

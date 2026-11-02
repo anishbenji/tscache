@@ -13,16 +13,16 @@ Branch: `feat/NN-slug` · Reviewer: GPT-6.1 Sol (<effort>) · Rounds: <n> · Sta
 
 ## Round 1 — reviewer verdict: <block | merge after fixes | merge>
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R1-1 | P1 | <title> | accepted | fixed in <sha> |
-| R1-2 | P2 | <title> | rejected | <how validated; one sentence citing the doc section> |
+| #    | Sev | Finding | Decision | Resolution                                           |
+| ---- | --- | ------- | -------- | ---------------------------------------------------- |
+| R1-1 | P1  | <title> | accepted | fixed in <sha>                                       |
+| R1-2 | P2  | <title> | rejected | <how validated; one sentence citing the doc section> |
 
 ## Round 2 — reviewer verdict: <…>
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R2-1 | P2 | <title> (re-raises R1-2) | rejected | <answer to the reviewer's reason> |
+| #    | Sev | Finding                  | Decision | Resolution                        |
+| ---- | --- | ------------------------ | -------- | --------------------------------- |
+| R2-1 | P2  | <title> (re-raises R1-2) | rejected | <answer to the reviewer's reason> |
 
 ## Contract-test changes
 

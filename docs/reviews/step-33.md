@@ -6,8 +6,8 @@ Item 1 of the performance plan of 2026-10-30 (experiment E1): a read across segm
 
 ## Scope
 
-| Commit | What |
-|---|---|
+| Commit  | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | a0bfab0 | `perf(read)`: `Segment` gains `countIn(range)` and `sliceInto(range, out, at)` (architecture §4.2, internal). `collect` counts the points of every overlapping segment, allocates each result array once, and has each segment write into it at its offset; no slice per segment, no second copy. `sliceInto` checks its offset and the target's room before writing anything. `slice` keeps its contract and its `TypedArray.prototype.slice` fast path from step 22; its gather branch now shares `sliceInto`'s. Tests: `test/dense-segment-slice-into.test.ts` (49), written first. Docs: architecture §4.2 (both methods, the new programming errors, where they came from) |
 
 ## Decisions
@@ -46,17 +46,17 @@ Every read is checked against `slice` and against sentinel values outside the wr
 
 Head/base median of 20 paired rounds, with the 95 % interval. A/A controls: Bun 1.038 [1.028, 1.048], Chromium 1.006 [0.988, 1.018], both inside [0.95, 1.05].
 
-| Case | Bun base → head | Bun ratio | Chromium base → head | Chromium ratio |
-|---|---|---|---|---|
-| `read-viewport` | 10.1 → 7.3 µs | 0.715 [0.684, 0.730] | 14.4 → 8.9 µs | 0.620 [0.615, 0.628] |
-| `read-viewport-sessions` | 3.6 → 2.5 µs | 0.711 [0.554, 0.754] | 6.1 → 3.6 µs | 0.598 [0.589, 0.606] |
-| `read-year` | 2.57 → 2.16 ms | 0.839 [0.743, 0.923] | 3.37 → 2.41 ms | 0.721 [0.703, 0.734] |
-| `read-transfer` | 15.7 → 12.7 µs | 0.803 [0.789, 0.825] | 20.2 → 14.9 µs | 0.750 [0.715, 0.770] |
-| `put-live-bar` (reads back one bar) | 2.2 → 2.1 µs | 0.930 [0.917, 0.976] | 3.4 → 3.0 µs | 0.887 [0.875, 0.890] |
-| `put-page` | 634 → 637 µs | 1.003 [0.998, 1.006] | 170 → 170 µs | 1.000 [0.993, 1.005] |
-| `append-bars` | 55.9 → 53.0 ms | 0.931 [0.886, 1.005] | 80.1 → 80.8 ms | 1.009 [1.001, 1.021] |
-| `fill-month` | 5.83 → 5.90 ms | 1.002 [0.972, 1.030] | 2.12 → 2.00 ms | 0.947 [0.929, 0.958] |
-| `snapshot-roundtrip` | 22.0 → 21.1 ms | 0.965 [0.821, 0.985] | 27.7 → 27.3 ms | 0.986 [0.977, 0.991] |
+| Case                                | Bun base → head | Bun ratio            | Chromium base → head | Chromium ratio       |
+| ----------------------------------- | --------------- | -------------------- | -------------------- | -------------------- |
+| `read-viewport`                     | 10.1 → 7.3 µs   | 0.715 [0.684, 0.730] | 14.4 → 8.9 µs        | 0.620 [0.615, 0.628] |
+| `read-viewport-sessions`            | 3.6 → 2.5 µs    | 0.711 [0.554, 0.754] | 6.1 → 3.6 µs         | 0.598 [0.589, 0.606] |
+| `read-year`                         | 2.57 → 2.16 ms  | 0.839 [0.743, 0.923] | 3.37 → 2.41 ms       | 0.721 [0.703, 0.734] |
+| `read-transfer`                     | 15.7 → 12.7 µs  | 0.803 [0.789, 0.825] | 20.2 → 14.9 µs       | 0.750 [0.715, 0.770] |
+| `put-live-bar` (reads back one bar) | 2.2 → 2.1 µs    | 0.930 [0.917, 0.976] | 3.4 → 3.0 µs         | 0.887 [0.875, 0.890] |
+| `put-page`                          | 634 → 637 µs    | 1.003 [0.998, 1.006] | 170 → 170 µs         | 1.000 [0.993, 1.005] |
+| `append-bars`                       | 55.9 → 53.0 ms  | 0.931 [0.886, 1.005] | 80.1 → 80.8 ms       | 1.009 [1.001, 1.021] |
+| `fill-month`                        | 5.83 → 5.90 ms  | 1.002 [0.972, 1.030] | 2.12 → 2.00 ms       | 0.947 [0.929, 0.958] |
+| `snapshot-roundtrip`                | 22.0 → 21.1 ms  | 0.965 [0.821, 0.985] | 27.7 → 27.3 ms       | 0.986 [0.977, 0.991] |
 
 End to end, Chromium (report-only): `read-viewport-shared` 24.3 → 22.7 µs, 0.926 [0.898, 0.948]. The engine's read is about half of that scenario (performance plan §3), so the gain is diluted by the port round trip.
 

@@ -6,11 +6,11 @@ Runs the Chromium noise experiment of the performance plan (§7.3): which setup 
 
 ## Scope
 
-| Commit | What |
-|---|---|
-| 364810c | `bench.ts compare --setup <name>` and a `setup` input on `bench-calibrate.yml`; setups in `packages/tscache/bench/setups.ts` (tested); `batchMs` passed from the run options to the sampler; the record names its setup; on Linux the Chromium run logs its binaries and processes |
-| b0345b1 | The default setup times `compare` with 100 ms batches and 30 rounds; the earlier timing stays as `short-batches`; the end-to-end scenarios keep 20 rounds; the process log groups by binary and process type |
-| (this commit) | Calibration log and verdict in `docs/benchmarking.md`, and this file |
+| Commit        | What                                                                                                                                                                                                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 364810c       | `bench.ts compare --setup <name>` and a `setup` input on `bench-calibrate.yml`; setups in `packages/tscache/bench/setups.ts` (tested); `batchMs` passed from the run options to the sampler; the record names its setup; on Linux the Chromium run logs its binaries and processes |
+| b0345b1       | The default setup times `compare` with 100 ms batches and 30 rounds; the earlier timing stays as `short-batches`; the end-to-end scenarios keep 20 rounds; the process log groups by binary and process type                                                                       |
+| (this commit) | Calibration log and verdict in `docs/benchmarking.md`, and this file                                                                                                                                                                                                               |
 
 ## Decisions
 
@@ -24,15 +24,15 @@ Runs the Chromium noise experiment of the performance plan (§7.3): which setup 
 
 All dispatches on GitHub's `ubuntu-24.04` runner, 20 jobs each. Tallies from `bun scripts/bench-calibration.ts <artifacts> <slowdown>` over the downloaded `calibration-*` artifacts, and the Chromium control of each job read from its `chromium.json` (its interval, batch size and the setup it records).
 
-| Run | Commit | Setup | Slowdown | Chromium quiet | Bun quiet | Result |
-|---|---|---|---|---:|---:|---|
-| 40995973064 | 364810c | default (40 ms, 20 rounds) | 0 | 15 | 19 | no case fired |
-| 40995975915 | 364810c | unthrottled | 0 | 12 | 19 | no case fired |
-| 40995979086 | 364810c | one-renderer | 0 | 10 | 20 | no case fired |
-| 40995981693 | 364810c | long-batches (100 ms, 30 rounds) | 0 | 19 | 20 | no case fired |
-| 40995984942 | 364810c | combined | 0 | 20 | 20 | no case fired |
-| 40999175509 | b0345b1 | default (100 ms, 30 rounds) | 0.15 | 20 | 20 | see the calibration log |
-| 40999178404 | b0345b1 | default (100 ms, 30 rounds) | 0.25 | 19 | 19 | all cases ≥ 95 % except Chromium `put-page` 84 %, Bun `read-year` 47 % |
+| Run         | Commit  | Setup                            | Slowdown | Chromium quiet | Bun quiet | Result                                                                 |
+| ----------- | ------- | -------------------------------- | -------- | -------------: | --------: | ---------------------------------------------------------------------- |
+| 40995973064 | 364810c | default (40 ms, 20 rounds)       | 0        |             15 |        19 | no case fired                                                          |
+| 40995975915 | 364810c | unthrottled                      | 0        |             12 |        19 | no case fired                                                          |
+| 40995979086 | 364810c | one-renderer                     | 0        |             10 |        20 | no case fired                                                          |
+| 40995981693 | 364810c | long-batches (100 ms, 30 rounds) | 0        |             19 |        20 | no case fired                                                          |
+| 40995984942 | 364810c | combined                         | 0        |             20 |        20 | no case fired                                                          |
+| 40999175509 | b0345b1 | default (100 ms, 30 rounds)      | 0.15     |             20 |        20 | see the calibration log                                                |
+| 40999178404 | b0345b1 | default (100 ms, 30 rounds)      | 0.25     |             19 |        19 | all cases ≥ 95 % except Chromium `put-page` 84 %, Bun `read-year` 47 % |
 
 The process log of runs 40995973064 and 40995979086 shows `chrome-headless-shell` with one browser, two zygote, one GPU, one network and one renderer process, with or without `--renderer-process-limit=1`.
 

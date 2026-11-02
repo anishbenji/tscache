@@ -15,7 +15,7 @@ Primary use cases: financial candles (OHLCV), live server metrics, IoT telemetry
 1. **Never implement without sign-off.** Architecture, API surfaces, data structures, and approaches are reviewed with me first. Your **first deliverable** (§12) is a document, not code.
 2. **Grill me.** When anything is ambiguous, ask until it isn't. Prefer one focused round of questions over assumptions.
 3. **Propose alternatives** for any new decision point — multiple approaches with pros/cons. I make the final call.
-4. **Code quality:** terse, focused, no unnecessary verbosity. Small functions, small files, small modules. TSDoc on public API. TypeScript strict. Document *why*, not *what*.
+4. **Code quality:** terse, focused, no unnecessary verbosity. Small functions, small files, small modules. TSDoc on public API. TypeScript strict. Document _why_, not _what_.
 5. **Commits:** small, human-reviewable, Conventional Commits style. Build features over multiple commits per the plan in §11. Every commit-sized unit leaves the repo green (`bun run ci` passes).
 6. **Local-only development for now:** no GitHub remote, no GitHub Actions. Quality gates live in Lefthook hooks and a local `bun run ci` script (written so it can later become the CI workflow body verbatim).
 
@@ -32,7 +32,7 @@ Primary use cases: financial candles (OHLCV), live server metrics, IoT telemetry
 
 ### 3.2 Storage
 
-- **Coverage is separated from data.** The coverage index records which time ranges are *known/authoritative* (asked the backend; answer is final). Absence of points inside coverage = **confirmed real gap** (weekend, sensor offline). "Is [a,b] cached?" is a pure coverage question.
+- **Coverage is separated from data.** The coverage index records which time ranges are _known/authoritative_ (asked the backend; answer is final). Absence of points inside coverage = **confirmed real gap** (weekend, sensor offline). "Is [a,b] cached?" is a pure coverage question.
 - **Coverage index:** sorted array of disjoint `[start, end]` ranges per cache, binary search, splice on merge. n stays small (tens). Document the rejected alternatives (interval tree, skip list) with pros/cons in the architecture docs.
 - **Coverage semantics:** a fetch response for requested range [a,b] is authoritative for all of [a,b] — except the volatile region (§3.3).
 - **`Segment` interface from day one** (`lookup`, `slice`, `mergeFrom`, `transferPayload`), so coverage logic, merge orchestration, and RPC are layout-agnostic:
@@ -76,23 +76,23 @@ The segment transfer payload (`{layout, start, count, mask?, fields, ...}`) is s
 
 ## 4. Tooling Stack (researched June 2026 — use these)
 
-| Category | Tool | Notes |
-|---|---|---|
-| Package manager / scripts | **Bun** (workspaces) | Bun everywhere except where Node required |
-| Lint + format | **Biome** | replaces ESLint+Prettier; pair with tsc for types |
-| Type-check | **`tsc --noEmit`** (TypeScript 7) authoritative | TypeScript 7 is the native compiler; adopted 2026-10-23 (user) once stable, replacing TS 6 with an optional tsgo check. It ships no JS API: a tool that needs one (TypeDoc, for example) gets TS 6 under an npm alias |
-| Build | **tsdown** | Rolldown/Oxc; ESM-only output; subpath + worker entries; `.d.ts` via oxc with **`isolatedDeclarations: true`** in tsconfig; tsup is EOL — do not use |
-| Publish hygiene | **publint + `attw --pack`** + `npm pack` dry-run | wired into `bun run ci` (tsdown can integrate both) |
-| Dead code / unused deps | **Knip** + **`fallow audit`** | Fallow (fallow-rs/fallow): Rust codebase-intelligence — dead code, duplication, complexity, boundaries; syntactic-only (no type info), so use `@public`/`@internal` TSDoc tags and config `entry` patterns for worker entries to avoid false positives. Both run pre-push, not pre-commit |
-| Commit-msg lint | **commitlint** (`config-conventional`) | `commit-msg` hook |
-| Changelog / versioning | **git-cliff** (recommended) | zero-ceremony, commit-derived, no GitHub dependency; changesets is the alternative if explicit release intents preferred — confirm (Open Decisions) |
-| Git hooks | **Lefthook** | parallel, single YAML |
-| Secret scanning | **gitleaks** | pre-commit |
-| Unit tests + bench | **Vitest 4 — run under Node** | Bun runs everything else; Vitest-on-Bun has documented edge cases and Vitest requires Node ≥22.12. Never `bun test` (different runner) |
-| Multi-tab integration | **standalone Playwright** | **Critical:** Vitest Browser Mode opens one page per file and cannot share a SharedWorker across tabs. Pattern: one `BrowserContext`, multiple `context.newPage()` — pages share the SharedWorker; separate contexts isolate it |
-| Precision micro-bench | **mitata** | for hot paths (binary search, typed-array merge, transfer overhead); Vitest bench (tinybench) for regression gating |
-| API docs | **TypeDoc** + TSDoc | |
-| Optional | **sherif** (workspace dep consistency), **taze** (dep updates) | cheap insurance |
+| Category                  | Tool                                                           | Notes                                                                                                                                                                                                                                                                                     |
+| ------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Package manager / scripts | **Bun** (workspaces)                                           | Bun everywhere except where Node required                                                                                                                                                                                                                                                 |
+| Lint + format             | **Biome**                                                      | replaces ESLint+Prettier; pair with tsc for types                                                                                                                                                                                                                                         |
+| Type-check                | **`tsc --noEmit`** (TypeScript 7) authoritative                | TypeScript 7 is the native compiler; adopted 2026-10-23 (user) once stable, replacing TS 6 with an optional tsgo check. It ships no JS API: a tool that needs one (TypeDoc, for example) gets TS 6 under an npm alias                                                                     |
+| Build                     | **tsdown**                                                     | Rolldown/Oxc; ESM-only output; subpath + worker entries; `.d.ts` via oxc with **`isolatedDeclarations: true`** in tsconfig; tsup is EOL — do not use                                                                                                                                      |
+| Publish hygiene           | **publint + `attw --pack`** + `npm pack` dry-run               | wired into `bun run ci` (tsdown can integrate both)                                                                                                                                                                                                                                       |
+| Dead code / unused deps   | **Knip** + **`fallow audit`**                                  | Fallow (fallow-rs/fallow): Rust codebase-intelligence — dead code, duplication, complexity, boundaries; syntactic-only (no type info), so use `@public`/`@internal` TSDoc tags and config `entry` patterns for worker entries to avoid false positives. Both run pre-push, not pre-commit |
+| Commit-msg lint           | **commitlint** (`config-conventional`)                         | `commit-msg` hook                                                                                                                                                                                                                                                                         |
+| Changelog / versioning    | **git-cliff** (recommended)                                    | zero-ceremony, commit-derived, no GitHub dependency; changesets is the alternative if explicit release intents preferred — confirm (Open Decisions)                                                                                                                                       |
+| Git hooks                 | **Lefthook**                                                   | parallel, single YAML                                                                                                                                                                                                                                                                     |
+| Secret scanning           | **gitleaks**                                                   | pre-commit                                                                                                                                                                                                                                                                                |
+| Unit tests + bench        | **Vitest 4 — run under Node**                                  | Bun runs everything else; Vitest-on-Bun has documented edge cases and Vitest requires Node ≥22.12. Never `bun test` (different runner)                                                                                                                                                    |
+| Multi-tab integration     | **standalone Playwright**                                      | **Critical:** Vitest Browser Mode opens one page per file and cannot share a SharedWorker across tabs. Pattern: one `BrowserContext`, multiple `context.newPage()` — pages share the SharedWorker; separate contexts isolate it                                                           |
+| Precision micro-bench     | **mitata**                                                     | for hot paths (binary search, typed-array merge, transfer overhead); Vitest bench (tinybench) for regression gating                                                                                                                                                                       |
+| API docs                  | **TypeDoc** + TSDoc                                            |                                                                                                                                                                                                                                                                                           |
+| Optional                  | **sherif** (workspace dep consistency), **taze** (dep updates) | cheap insurance                                                                                                                                                                                                                                                                           |
 
 **Hook staging:** pre-commit = Biome (staged) + gitleaks + commitlint (sub-second budget). Pre-push = `tsc --noEmit` + full Biome + build, then Knip and the integration snippets' type check + `fallow audit` + Vitest suite. `bun run ci` = full superset incl. build + publint/attw + Playwright + bench smoke.
 
@@ -122,14 +122,14 @@ docs/                        # architecture decision records, roadmap, guides
 
 Six runnable apps (locked list) exercising five scenarios; each example doubles as a narrative doc page naming the design decision it demonstrates. Proposed mapping (confirm/adjust):
 
-| App | Scenario |
-|---|---|
-| vanilla + uPlot | ② live server-metrics dashboard — watermark/volatile tail; plus ⑤ sparse event-count series (K-split heuristic) as a second page |
-| Solid + uPlot | ③ IoT sensor with dropout gaps + an integer field (presence bitmask showcase) |
-| Solid + Lightweight Charts | ① OHLCV scroll-back with weekend gaps (coverage vs real gaps) |
-| React + Lightweight Charts | ① variant + ④ **multi-tab demo**: two windows, one SharedWorker, visible fetch counter — the raison d'être made visible |
-| React SSR + hydration | mechanism (y): server runs in-process engine, serializes put-payloads into HTML, client hydrates cache from them |
-| Solid SSR + hydration | same mechanism, Solid idioms |
+| App                        | Scenario                                                                                                                         |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| vanilla + uPlot            | ② live server-metrics dashboard — watermark/volatile tail; plus ⑤ sparse event-count series (K-split heuristic) as a second page |
+| Solid + uPlot              | ③ IoT sensor with dropout gaps + an integer field (presence bitmask showcase)                                                    |
+| Solid + Lightweight Charts | ① OHLCV scroll-back with weekend gaps (coverage vs real gaps)                                                                    |
+| React + Lightweight Charts | ① variant + ④ **multi-tab demo**: two windows, one SharedWorker, visible fetch counter — the raison d'être made visible          |
+| React SSR + hydration      | mechanism (y): server runs in-process engine, serializes put-payloads into HTML, client hydrates cache from them                 |
+| Solid SSR + hydration      | same mechanism, Solid idioms                                                                                                     |
 
 **Integration snippets** (in `integrations/`, type-checked, not full apps): Solid (`createResource`), React (hook, Suspense-compatible), Vue (composable), Svelte 5 (runes store), Angular (service + signals), vanilla — each in client-only and SSR+hydration variants (SSR-only is the degenerate case of the same code). The library's framework-coupling surface is deliberately tiny: lifecycle (create/connect once, dispose on teardown) + promise→reactivity.
 

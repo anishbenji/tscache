@@ -10,8 +10,8 @@ once.
   itself.
 - **The worker fetches.** You give it a fetcher module; a `get` for a range the cache does not hold
   fetches only what is missing, once, however many tabs ask at the same moment.
-- **Known gaps are first-class.** The cache records what it *knows* (coverage) separately from the points
-  that *exist*. A weekend without candles, or an hour a sensor was offline, is a confirmed gap: it is
+- **Known gaps are first-class.** The cache records what it _knows_ (coverage) separately from the points
+  that _exist_. A weekend without candles, or an hour a sensor was offline, is a confirmed gap: it is
   never fetched again, and it is not confused with "not loaded yet".
 - **Columns, not objects.** A read returns one typed array per field, which chart libraries take as they
   are, and moves them from the worker to the page without copying.

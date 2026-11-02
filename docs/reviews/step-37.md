@@ -6,10 +6,10 @@ Item 4 of the performance plan (`~/code/tscache-reports/perf-plan.md` §6), buil
 
 ## Scope
 
-| Commit | What |
-|---|---|
-| 398d588 | `perf(snapshot)`: the codec moves to `src/base64.ts`, which takes the native methods once at load and uses them when the runtime has both, and the `btoa`/`atob` code otherwise. `snapshot.ts` calls it and maps any decode error to the same `TscacheError` as before. New `test/base64.test.ts` with its cases in `test/base64-cases.ts`. Docs: architecture §2.8 (encoding for HTML) |
-| (the review commit) | `docs(review)`: this file |
+| Commit              | What                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 398d588             | `perf(snapshot)`: the codec moves to `src/base64.ts`, which takes the native methods once at load and uses them when the runtime has both, and the `btoa`/`atob` code otherwise. `snapshot.ts` calls it and maps any decode error to the same `TscacheError` as before. New `test/base64.test.ts` with its cases in `test/base64-cases.ts`. Docs: architecture §2.8 (encoding for HTML) |
+| (the review commit) | `docs(review)`: this file                                                                                                                                                                                                                                                                                                                                                               |
 
 ## Decisions
 
@@ -29,21 +29,21 @@ Item 4 of the performance plan (`~/code/tscache-reports/perf-plan.md` §6), buil
 
 Paired benchmark, under the heavy-job lock (`bun scripts/bench.ts compare --base origin/main --only snapshot-roundtrip --runtime bun,chromium`, head `398d588` against `59b8da5`), run twice:
 
-| Runtime | Run | Base | Head | Head/base | 95 % CI | A/A control |
-|---|---|---:|---:|---:|---|---|
-| Bun | 1 | 21.05 ms | 8.68 ms | 0.413 | 0.403–0.417 | 1.004 [0.990, 1.028] |
-| Bun | 2 | 23.29 ms | 9.21 ms | 0.397 | 0.380–0.410 | 1.000 [0.997, 1.004] |
-| Chromium | 1 | 27.67 ms | 5.60 ms | 0.201 | 0.196–0.205 | 0.997 [0.976, 1.010] |
-| Chromium | 2 | 27.52 ms | 5.60 ms | 0.203 | 0.198–0.205 | 1.001 [0.988, 1.007] |
+| Runtime  | Run |     Base |    Head | Head/base | 95 % CI     | A/A control          |
+| -------- | --- | -------: | ------: | --------: | ----------- | -------------------- |
+| Bun      | 1   | 21.05 ms | 8.68 ms |     0.413 | 0.403–0.417 | 1.004 [0.990, 1.028] |
+| Bun      | 2   | 23.29 ms | 9.21 ms |     0.397 | 0.380–0.410 | 1.000 [0.997, 1.004] |
+| Chromium | 1   | 27.67 ms | 5.60 ms |     0.201 | 0.196–0.205 | 0.997 [0.976, 1.010] |
+| Chromium | 2   | 27.52 ms | 5.60 ms |     0.203 | 0.198–0.205 | 1.001 [0.988, 1.007] |
 
 Every control is inside [0.95, 1.05]. The plan estimated a drop of about a tenth from the encoder's profile share (12 %); the measured drop is 60 % in Bun and 80 % in Chromium. The case encodes and decodes a month of six columns, and the binary-string encoder and the per-character decoder, which the profile split across `fromCharCode`, `btoa` and loop frames, were most of it.
 
 Micro measurement (`/tmp/perf37/micro.ts`, not committed; one f64 column of 43,200 bars, 345,600 bytes; median of 60 runs after 10 warm-ups):
 
-| | Bun, fallback | Bun, native | Chromium 153, fallback | Chromium 153, native |
-|---|---:|---:|---:|---:|
-| Encode | 2.47 ms | 0.035 ms | 4.6 ms | below 0.1 ms (the clock's resolution) |
-| Decode | 0.223 ms | 0.031 ms | 0.5 ms | 0.1 ms |
+|        | Bun, fallback | Bun, native | Chromium 153, fallback |                  Chromium 153, native |
+| ------ | ------------: | ----------: | ---------------------: | ------------------------------------: |
+| Encode |       2.47 ms |    0.035 ms |                 4.6 ms | below 0.1 ms (the clock's resolution) |
+| Decode |      0.223 ms |    0.031 ms |                 0.5 ms |                                0.1 ms |
 
 ## Not verified
 

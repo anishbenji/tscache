@@ -6,12 +6,12 @@ Read `starter-prompt.md` (normative design register) and `docs/architecture.md` 
 
 ## Roles
 
-| Role | Agent | Does | Never |
-|---|---|---|---|
-| Implementer | Claude | Writes `src/`, scaffolding and non-contract tests; runs the review loop, validating and triaging every finding | Weakens or deletes a contract test without recording why in the step's review file |
-| Contract-test author | Codex | Writes failing tests for engine-logic steps from the architecture doc, before implementation | Creates or edits anything under `src/` |
-| Reviewer | Codex, run headless by Claude via `scripts/codex-review.sh` | Reviews the step branch against `docs/review-checklist.md`, one fresh session per round | Edits, stages or commits anything — review is read-only |
-| Approver | The user | Reads the pull request and its triage, merges it on GitHub once CI is green | — |
+| Role                 | Agent                                                       | Does                                                                                                           | Never                                                                              |
+| -------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Implementer          | Claude                                                      | Writes `src/`, scaffolding and non-contract tests; runs the review loop, validating and triaging every finding | Weakens or deletes a contract test without recording why in the step's review file |
+| Contract-test author | Codex                                                       | Writes failing tests for engine-logic steps from the architecture doc, before implementation                   | Creates or edits anything under `src/`                                             |
+| Reviewer             | Codex, run headless by Claude via `scripts/codex-review.sh` | Reviews the step branch against `docs/review-checklist.md`, one fresh session per round                        | Edits, stages or commits anything — review is read-only                            |
+| Approver             | The user                                                    | Reads the pull request and its triage, merges it on GitHub once CI is green                                    | —                                                                                  |
 
 The per-step pipeline, the review loop, copy-paste prompts and the adversarial-review schedule are in `docs/workflow.md`.
 

@@ -4,13 +4,13 @@
 
 A cache declares its fields at creation, each with a dtype:
 
-| Dtype | Typed array | Bytes |
-|---|---|---|
-| `f64` | `Float64Array` | 8 |
-| `f32` | `Float32Array` | 4 |
-| `i32`, `u32` | `Int32Array`, `Uint32Array` | 4 |
-| `i16`, `u16` | `Int16Array`, `Uint16Array` | 2 |
-| `i8`, `u8` | `Int8Array`, `Uint8Array` | 1 |
+| Dtype        | Typed array                 | Bytes |
+| ------------ | --------------------------- | ----- |
+| `f64`        | `Float64Array`              | 8     |
+| `f32`        | `Float32Array`              | 4     |
+| `i32`, `u32` | `Int32Array`, `Uint32Array` | 4     |
+| `i16`, `u16` | `Int16Array`, `Uint16Array` | 2     |
+| `i8`, `u8`   | `Int8Array`, `Uint8Array`   | 1     |
 
 `f64` is the usual choice. 64-bit integers (BigInt) and `f16` are not supported. The runtime list is
 exported as `DTYPES`.

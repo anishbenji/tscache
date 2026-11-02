@@ -6,12 +6,12 @@ market that trades around the clock, live, and shows the whole client lifecycle.
 published. The integration snippets (`integrations/`) show the smallest wiring for six frameworks;
 these clients add what an application needs on top of it.
 
-| Folder | Status |
-|---|---|
-| `shared/` | What every client uses, whatever its framework (below) |
-| `vanilla/` | Done |
-| `react/` | Done |
-| `solid/` | Done |
+| Folder     | Status                                                 |
+| ---------- | ------------------------------------------------------ |
+| `shared/`  | What every client uses, whatever its framework (below) |
+| `vanilla/` | Done                                                   |
+| `react/`   | Done                                                   |
+| `solid/`   | Done                                                   |
 
 ## How they are built
 
@@ -20,11 +20,11 @@ session owns the connection, the reads, the live feed and the credential refresh
 page's state as one immutable object, replaced on each change. A client only binds that state to
 its framework and draws the chart:
 
-| Client | Binds the session's state with | Draws the chart in |
-|---|---|---|
-| `vanilla/` | a subscription that writes it into the markup | the page's own functions |
-| `react/` | `useSyncExternalStore` (`react/src/session.ts`) | effects on a ref'd element (`Chart.tsx`) |
-| `solid/` | one signal the session's changes replace (`solid/src/session.ts`) | effects on a ref'd element, after an async memo of the chart library (`Chart.tsx`) |
+| Client     | Binds the session's state with                                    | Draws the chart in                                                                 |
+| ---------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `vanilla/` | a subscription that writes it into the markup                     | the page's own functions                                                           |
+| `react/`   | `useSyncExternalStore` (`react/src/session.ts`)                   | effects on a ref'd element (`Chart.tsx`)                                           |
+| `solid/`   | one signal the session's changes replace (`solid/src/session.ts`) | effects on a ref'd element, after an async memo of the chart library (`Chart.tsx`) |
 
 The session starts before the framework renders and ends after it tears down, so StrictMode's
 doubled effects never start a second one. A server-rendered page starts from `initialState`, which

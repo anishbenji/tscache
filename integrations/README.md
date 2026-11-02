@@ -27,14 +27,14 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
 
 ## The frameworks
 
-| Folder | Adapter | Promise to reactivity | Server's read reaches the browser as |
-|---|---|---|---|
-| `vanilla/` | `series(connection, options)` | a request counter: latest wins | a JSON script element |
-| `react/` | `TscacheProvider`, `useSeries` | `use()` under Suspense, inputs through `useDeferredValue` | a JSON script element |
-| `solid/` | `createConnection`, `createSeries` | an async `createMemo` (Solid 2.0 RC) | a JSON script element |
-| `vue/` | `createTscache` plugin, `useSeries` | `watch` with `onWatcherCleanup` into `shallowRef`s | a JSON script element |
-| `svelte/` | `tscacheContext`, `Series` | `$effect` into `$state.raw`, `createSubscriber` | a JSON script element, then props |
-| `angular/` | `provideTscache`, `cacheResource` | `resource()` | `TransferState` |
+| Folder     | Adapter                             | Promise to reactivity                                     | Server's read reaches the browser as |
+| ---------- | ----------------------------------- | --------------------------------------------------------- | ------------------------------------ |
+| `vanilla/` | `series(connection, options)`       | a request counter: latest wins                            | a JSON script element                |
+| `react/`   | `TscacheProvider`, `useSeries`      | `use()` under Suspense, inputs through `useDeferredValue` | a JSON script element                |
+| `solid/`   | `createConnection`, `createSeries`  | an async `createMemo` (Solid 2.0 RC)                      | a JSON script element                |
+| `vue/`     | `createTscache` plugin, `useSeries` | `watch` with `onWatcherCleanup` into `shallowRef`s        | a JSON script element                |
+| `svelte/`  | `tscacheContext`, `Series`          | `$effect` into `$state.raw`, `createSubscriber`           | a JSON script element, then props    |
+| `angular/` | `provideTscache`, `cacheResource`   | `resource()`                                              | `TransferState`                      |
 
 Each framework folder has a README on its idioms and limits. The vanilla snippet is `vanilla/series.ts`
 (a series shows the answer for the latest range it was asked for and drops answers a newer range has

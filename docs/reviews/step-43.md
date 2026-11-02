@@ -6,13 +6,13 @@ Turns the paired timing gate on for the Bun cases that calibration on GitHub's r
 
 ## Scope
 
-| Commit | What |
-|---|---|
-| 719c75c | `feat(bench)`: `gatedCases()` reads and validates `packages/tscache/bench/gated.json` (bun and chromium only, string case names, no duplicates); `failing()` picks the confirmed regressions of gated cases in a quiet run. `bench.ts compare --gate` fails only on those; the summary marks each case `gates` or `reports`, and each runtime's record carries `gated` and `failing`. New `test/perf/gated.test.ts`. The lists start empty |
-| df37955, 2b38ca9 | The `read-year` injection experiment: a case could ask calibration to slow it by repetition, and `read-year` did (reverted below) |
-| 37f6266 | `ci(bench)`: `gated.json` lists the eight Bun cases that passed; the `bench` job runs `compare --gate`; its end-to-end step runs after a gated failure too |
-| 254d2a4 | `revert(bench)`: withdraws the experiment, which did not support its hypothesis |
-| (this commit) | Calibration log, gate rules and verdict in `docs/benchmarking.md`, and this file |
+| Commit           | What                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 719c75c          | `feat(bench)`: `gatedCases()` reads and validates `packages/tscache/bench/gated.json` (bun and chromium only, string case names, no duplicates); `failing()` picks the confirmed regressions of gated cases in a quiet run. `bench.ts compare --gate` fails only on those; the summary marks each case `gates` or `reports`, and each runtime's record carries `gated` and `failing`. New `test/perf/gated.test.ts`. The lists start empty |
+| df37955, 2b38ca9 | The `read-year` injection experiment: a case could ask calibration to slow it by repetition, and `read-year` did (reverted below)                                                                                                                                                                                                                                                                                                          |
+| 37f6266          | `ci(bench)`: `gated.json` lists the eight Bun cases that passed; the `bench` job runs `compare --gate`; its end-to-end step runs after a gated failure too                                                                                                                                                                                                                                                                                 |
+| 254d2a4          | `revert(bench)`: withdraws the experiment, which did not support its hypothesis                                                                                                                                                                                                                                                                                                                                                            |
+| (this commit)    | Calibration log, gate rules and verdict in `docs/benchmarking.md`, and this file                                                                                                                                                                                                                                                                                                                                                           |
 
 ## Decisions
 
@@ -28,13 +28,13 @@ Turns the paired timing gate on for the Bun cases that calibration on GitHub's r
 
 Dispatches of `bench-calibrate.yml` on GitHub's `ubuntu-24.04` runner, setup `default` (100 ms batches, 30 rounds), 20 jobs each. Tallies from `bun scripts/bench-calibration.ts <artifacts> <slowdown>` over the downloaded `calibration-*` artifacts; `read-year`'s per-run samples read from each job's `bun.json`.
 
-| Run | Commit | Slowdown | Bun | Chromium |
-|---|---|---|---|---|
-| 41077561504 | 89efd15 (main) | 0 | 20 quiet; no case fired | 19 quiet (1 noisy); no case fired |
-| 41077575673 | 89efd15 | 0.15 | 19 quiet: 17–19 in eight cases, 4 in `read-year` | 19 quiet: 19 in seven cases, 17 `put-live-bar`, 13 `read-viewport-sessions` |
-| 41077588416 | 89efd15 | 0.25 | 20 quiet: 20 in eight cases, 17 in `read-year` | 20 quiet: 20 in every case |
-| 41078306816 | 2b38ca9 (`read-year` by repetition) | 0.15 | 18 quiet: 5 in `read-year` | — |
-| 41078312567 | 2b38ca9 | 0.25 | 20 quiet: 20 in every case, `read-year` included | 20 in every case |
+| Run         | Commit                              | Slowdown | Bun                                              | Chromium                                                                    |
+| ----------- | ----------------------------------- | -------- | ------------------------------------------------ | --------------------------------------------------------------------------- |
+| 41077561504 | 89efd15 (main)                      | 0        | 20 quiet; no case fired                          | 19 quiet (1 noisy); no case fired                                           |
+| 41077575673 | 89efd15                             | 0.15     | 19 quiet: 17–19 in eight cases, 4 in `read-year` | 19 quiet: 19 in seven cases, 17 `put-live-bar`, 13 `read-viewport-sessions` |
+| 41077588416 | 89efd15                             | 0.25     | 20 quiet: 20 in eight cases, 17 in `read-year`   | 20 quiet: 20 in every case                                                  |
+| 41078306816 | 2b38ca9 (`read-year` by repetition) | 0.15     | 18 quiet: 5 in `read-year`                       | —                                                                           |
+| 41078312567 | 2b38ca9                             | 0.25     | 20 quiet: 20 in every case, `read-year` included | 20 in every case                                                            |
 
 `read-year` in Bun at 25 %: median measured ratio 1.28 with the wait (range 1.16–1.39), 1.26 with repetition (1.15–1.34). Its time per call ranged 3.4–11.6 ms across jobs, in two clusters near 4 and 8 ms, with 16 or 32 calls per batch. The three misses with the wait were two flagged runs whose confirmation fell short and one interval whose low end was below 1.03 (1.026).
 
