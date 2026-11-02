@@ -9,9 +9,9 @@
   },
   "dependencies": {
     "@examples/mock-backend": "workspace:*",
-    "@solidjs/web": "2.0.0-rc.19",
+    "@solidjs/web": "2.0.0-rc.20",
     "lightweight-charts": "^5.2.1",
-    "solid-js": "2.0.0-rc.19",
+    "solid-js": "2.0.0-rc.20",
     "tscache": "workspace:*"
   },
   "devDependencies": {
