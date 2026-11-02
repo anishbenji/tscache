@@ -4,7 +4,10 @@
 // loads with `import()` (the worker's persistence chunk, §4.10.8) is left
 // out of it and reported on a row of its own, `<entry> (lazy)`, bundled
 // without what the entry already holds: an application that never takes
-// that path never loads it. Fails when an entry or its lazy part exceeds
+// that path never loads it. What a lazy chunk loads with `import()` in turn
+// (the in-process hosting's clear-only call, §4.10.7) is left out of it the
+// same way and reported on `<entry> (lazy, nested)`, bundled without what
+// the entry and the lazy chunks above it hold. Fails when an entry or its lazy part exceeds
 // its budget in packages/tscache/bench/budgets.json, or when a file of the
 // built package imports an entry file (a worker loaded under a URL with a
 // query would then evaluate its entry twice).
@@ -151,24 +154,63 @@ function total(sizes: Size[]): Size {
   );
 }
 
+/** The dist files that `files` load with `import()`, other than `except`. */
+function dynamicOf(
+  files: Iterable<string>,
+  except: ReadonlySet<string>,
+): Set<string> {
+  return new Set(
+    [...files]
+      .flatMap((file) => importsOf(source(file)).dynamic)
+      .filter((file) => !except.has(file)),
+  );
+}
+
 /**
  * An entry's initial load, bundled into one file as an application's
  * bundler would, and what it loads with `import()`: each lazy chunk bundled
- * without the files the initial load already holds.
+ * without the files the initial load already holds, and each chunk a lazy
+ * chunk loads with `import()` in turn (nested) without the files the
+ * initial load and the lazy chunks hold. A chunk's own `import()` targets
+ * are left out of it, never inlined.
  */
-async function measure(
-  entry: Entry,
-): Promise<{ initial: Size; lazy: Size | undefined }> {
+async function measure(entry: Entry): Promise<{
+  initial: Size;
+  lazy: Size | undefined;
+  nested: Size | undefined;
+}> {
   const reached = closure([`./${entry}.js`]);
-  const lazyRoots = new Set(
-    [...reached].flatMap((file) => importsOf(source(file)).dynamic),
-  );
+  const lazyRoots = dynamicOf(reached, reached);
   const initial = await bundle(`./${entry}.js`, ENTRIES[entry], lazyRoots);
-  if (lazyRoots.size === 0) return { initial, lazy: undefined };
+  if (lazyRoots.size === 0) {
+    return { initial, lazy: undefined, nested: undefined };
+  }
+  const lazyFiles = closure([...lazyRoots]);
+  const held = new Set([...reached, ...lazyRoots]);
+  const nestedRoots = dynamicOf(lazyFiles, held);
   const lazy = await Promise.all(
-    [...lazyRoots].map((root) => bundle(root, ENTRIES[entry], reached)),
+    [...lazyRoots].map((root) =>
+      bundle(root, ENTRIES[entry], new Set([...reached, ...nestedRoots])),
+    ),
   );
-  return { initial, lazy: total(lazy) };
+  const above = new Set([...reached, ...lazyFiles]);
+  const deeper = dynamicOf(
+    closure([...nestedRoots]),
+    new Set([...above, ...nestedRoots]),
+  );
+  if (deeper.size > 0) {
+    throw new Error(
+      `${entry}: a nested lazy chunk loads ${[...deeper].join(", ")} with import(); measure that level too`,
+    );
+  }
+  const nested = await Promise.all(
+    [...nestedRoots].map((root) => bundle(root, ENTRIES[entry], above)),
+  );
+  return {
+    initial,
+    lazy: total(lazy),
+    nested: nested.length === 0 ? undefined : total(nested),
+  };
 }
 
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(2)} kB`;
@@ -208,9 +250,12 @@ function row(label: string, key: string, size: Size): void {
 }
 checkEntryImports();
 for (const entry of Object.keys(ENTRIES) as Entry[]) {
-  const { initial, lazy } = await measure(entry);
+  const { initial, lazy, nested } = await measure(entry);
   row(entry, entry, initial);
   if (lazy !== undefined) row(`${entry} (lazy)`, `${entry}:lazy`, lazy);
+  if (nested !== undefined) {
+    row(`${entry} (lazy, nested)`, `${entry}:lazy:nested`, nested);
+  }
 }
 
 const table = rows.join("\n");

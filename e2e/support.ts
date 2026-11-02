@@ -268,7 +268,7 @@ export async function read(
   return settle(page, key);
 }
 
-/** Empties every cache, and in the SharedWorker hosting the disk (N54). */
+/** Empties every cache and the disk (N54, N66). */
 export async function clearAll(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await (window as unknown as E2EWindow).client.clearAll();

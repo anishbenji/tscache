@@ -45,7 +45,12 @@ export interface TscacheClient {
   readonly mode: HostingMode;
   /** Get-or-create (N4). */
   cache(config: CacheConfig): Promise<CacheHandle>;
-  /** Empties every cache; in SharedWorker mode this affects ALL tabs. */
+  /**
+   * Empties every cache; in SharedWorker mode this affects ALL tabs. Where
+   * the browser has IndexedDB it also empties the persisted records, from
+   * any hosting (N54, N66), and resolves once the disk is empty or the
+   * clear gave up at its deadline; it never rejects for a disk failure.
+   */
   clearAll(): Promise<void>;
   /** Delivers new auth material to the fetcher (step ⑪). */
   updateAuth(context: unknown): Promise<void>;

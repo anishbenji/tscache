@@ -64,11 +64,21 @@ the user:
 ## Sensitive data and logout
 
 Stored records are readable by every script of the origin and outlive the session. Keep per-user or
-sensitive caches in memory; that is why `persist` is per cache. At logout, one `clearAll()` from a
-shared-hosted tab empties every cache and the database:
+sensitive caches in memory; that is why `persist` is per cache. At logout, one `clearAll()` empties
+every cache and the database:
 
 <<< @/snippets/persistence.ts#logout{ts}
 
-It does not reach the records a still-running worker of another deploy writes back, and a client hosted
-in a dedicated worker or in-process leaves the disk alone. If a `clearAll` cannot empty the disk within
-five seconds, every persisted cache stops, and that worker persists nothing more until it ends.
+It does not reach the records a still-running worker of another deploy writes back. If a `clearAll` cannot
+empty the disk within five seconds, every persisted cache stops, and that worker persists nothing more
+until it ends.
+
+A client hosted in a dedicated worker or in-process persists nothing, but its `clearAll` empties the
+database too, so a logout from any page removes what a SharedWorker session stored. It loads the
+clearing code only then, and creates no database where there is none, except in a browser without
+`indexedDB.databases()` (Firefox before 126), where it cannot tell and leaves an empty database behind.
+It cannot reach the memory of
+a SharedWorker that other tabs still use: that worker writes back what it changes, so to clear it as
+well, call `clearAll` from one of its tabs. When the clear fails (IndexedDB unavailable, or refusing the
+clear for five seconds), the call still resolves, nothing else changes, and the next `clearAll` tries
+again.

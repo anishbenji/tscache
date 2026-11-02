@@ -2,6 +2,7 @@
   "brotli": {
     "index": 5008,
     "index:lazy": 12464,
+    "index:lazy:nested": 6000,
     "worker": 13728,
     "worker:lazy": 5824,
     "engine": 10272,
