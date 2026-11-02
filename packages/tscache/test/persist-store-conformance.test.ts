@@ -179,6 +179,25 @@ function conformance(label: string, make: () => Promise<PersistStore>): void {
         if (field !== undefined) new Uint8Array(field.data).fill(0);
         requireCache(output).config.fields.value = "i8";
         expect(await s.read("persist")).toEqual(expected);
+        // With deletions the store has a walk to make before its puts; the
+        // inputs are still copied when write() is called, not when it ends.
+        const replacement = structuredClone(requirePage(expected, 1));
+        const cache = structuredClone(requireCache(expected));
+        const replaced = {
+          cache: structuredClone(cache),
+          pages: [structuredClone(replacement)],
+        };
+        const replacing = s.write("persist", {
+          deletePages: allPages,
+          putPages: [replacement],
+          putCache: cache,
+          strict: true,
+        });
+        cache.config.interval = 17;
+        replacement.snapshot.coverage.length = 0;
+        replacement.snapshot.segments[0]?.mask?.fill(0);
+        await replacing;
+        expect(await s.read("persist")).toEqual(replaced);
       } finally {
         s.close();
       }
@@ -273,6 +292,52 @@ describe("IndexedDB layout and lifecycle (§4.10.2–3)", () => {
     } finally {
       newer.close();
       store?.close();
+    }
+  });
+});
+
+describe("IndexedDB request failures (§4.10.3)", () => {
+  it("an asynchronous request failure aborts the whole write, deletions included", async () => {
+    const { IDBObjectStore: Store } = await import("fake-indexeddb");
+    const store = await openIdbStore(await idbFactory());
+    if (store === undefined) throw new Error("normal open must return store");
+    const put = Store.prototype.put;
+    try {
+      const data = fixture();
+      await store.write("persist", {
+        deletePages: [],
+        putPages: data.pages,
+        putCache: requireCache(data),
+        strict: false,
+      });
+      // One page put becomes an add of a key that exists: the request fails
+      // asynchronously with a ConstraintError, after the deletions ran.
+      let injected = false;
+      Store.prototype.put = function (
+        this: IDBObjectStore,
+        value: unknown,
+        key?: IDBValidKey,
+      ) {
+        if (this.name === "pages" && !injected) {
+          injected = true;
+          return this.add(value, key);
+        }
+        return put.call(this, value, key);
+      } as typeof put;
+      await expect(
+        store.write("persist", {
+          deletePages: [{ start: -1, end: 0 }],
+          putPages: [requirePage(data, 2)],
+          putCache: { ...requireCache(data), version: "next" },
+          strict: true,
+        }),
+      ).rejects.toMatchObject({ name: "ConstraintError" });
+      expect(injected).toBe(true);
+      Store.prototype.put = put;
+      expect(await store.read("persist")).toEqual(data);
+    } finally {
+      Store.prototype.put = put;
+      store.close();
     }
   });
 });

@@ -93,15 +93,15 @@ function walkPages(
   };
 }
 
-/** A transaction's outcome: its own error, or the one that made us abort it. */
+/**
+ * A transaction's outcome: its own error, or the one that made us abort it.
+ * A failed request is left uncanceled, so IndexedDB aborts the transaction
+ * and nothing of it commits; the error then reaches us through onabort.
+ */
 function settled(tx: IDBTransaction, failure: () => unknown): Promise<void> {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onabort = () => reject(failure() ?? tx.error);
-    tx.onerror = (event) => {
-      // Reported through onabort, which follows; keep it from the global handler.
-      event.preventDefault?.();
-    };
   });
 }
 
@@ -145,24 +145,33 @@ class IdbStore implements PersistStore {
     const outcome = settled(tx, () => failure);
     const pages = tx.objectStore(PAGES);
     const caches = tx.objectStore(CACHES);
-    // Deletions, then page puts, then the cache record: requests run in the
-    // order they are made, and the puts are made once the walk is over.
+    // The puts are made now, so IndexedDB clones the records while the
+    // caller still holds them unchanged. The deletion walk, whose requests
+    // run after them, then spares the pages just put: the outcome is that of
+    // deletions, then page puts, then the cache record.
+    const put = new Set<number>();
+    try {
+      for (const page of plan.putPages) {
+        pages.put(page);
+        put.add(page.page);
+      }
+      if (plan.putCache === null) caches.delete(cacheId);
+      else caches.put(plan.putCache);
+    } catch (error) {
+      // A record that cannot be cloned: none of the plan may land.
+      failure = error;
+      tx.abort();
+      await outcome;
+      return;
+    }
     walkPages(
       pages,
       cacheId,
       merged(plan.deletePages),
-      (cursor) => cursor.delete(),
-      () => {
-        try {
-          for (const page of plan.putPages) pages.put(page);
-          if (plan.putCache === null) caches.delete(cacheId);
-          else caches.put(plan.putCache);
-        } catch (error) {
-          // A record that cannot be cloned: none of the plan may land.
-          failure = error;
-          tx.abort();
-        }
+      (cursor) => {
+        if (!put.has((cursor.key as [string, number])[1])) cursor.delete();
       },
+      () => {},
     );
     await outcome;
   }
