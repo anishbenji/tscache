@@ -2,7 +2,7 @@
 
 Branch: `chore/55-slot-cap-test-time` · Status: implemented, awaiting review
 
-`packages/tscache/test/dense-segment-slice-into.test.ts`, case "reads a segment spanning exactly its slot cap of 32768", crossed the 5 s Vitest timeout twice in full `bun run ci` runs on 2026-11-02 while the machine was busy. Run alone it took 0.6 s, 5.3 s and 1.0 s. The timeout stays at 5 s (a user decision, `vitest.config.ts`); the fix removes the work that made the case slow.
+`packages/tscache/test/dense-segment-slice-into.test.ts`, case "reads a segment spanning exactly its slot cap of 32768", crossed the 5 s Vitest timeout twice in full `bun run ci` runs on 2026-11-02 while the machine was busy. Run alone on the same day (measured by the step-52 child, a separate session) it took 0.6 s, 5.3 s and 1.0 s; the 5.3 s run was over the timeout and failed. The timeout stays at 5 s (a user decision, `vitest.config.ts`); the fix removes the work that made the case slow.
 
 ## Scope
 
@@ -44,7 +44,18 @@ Each run is one `bunx vitest run … -t "slot cap of 32768"` in a fresh process,
 | 4   | 748 ms  | 28 ms  |
 | 5   | 704 ms  | 34 ms  |
 
-Three earlier runs of the unchanged case alone took 4153 ms, 4026 ms and 1371 ms. In the full package suite (`bunx vitest run packages/tscache/test`, 282 files, 1874 tests) the fixed case took 19 ms.
+Three earlier runs of the unchanged case alone, by this step's implementer before the profile was taken, took 4153 ms, 4026 ms and 1371 ms. In the full package suite (`bunx vitest run packages/tscache/test`, 282 files, 1874 tests) the fixed case took 19 ms.
+
+## Flake hunt, before and after
+
+`scripts/flake-hunt.sh -n 20 --load packages/tscache/test/dense-segment-slice-into.test.ts`, run by the director under the machine lock on 2026-11-02, with one busy loop per core (10) throughout:
+
+| Tree                         | Runs | Tests executed |                  Failed runs |
+| ---------------------------- | ---: | -------------: | ---------------------------: |
+| `main` (60bd435), before     |   20 |            980 | 1 (the 32,768 case, timeout) |
+| this branch (801ae77), after |   20 |            980 |                            0 |
+
+The failure is a timeout that appears only under load, so it cannot be reproduced on purpose in a test; the guard is the profile above, which shows the case's own work dropped from about 1.8 s of deep equality to milliseconds.
 
 ## Other slow tests in `packages/tscache/test/`
 
@@ -66,3 +77,12 @@ None has the pattern of this step, and none takes more than about 0.5 s alone; t
 - No full `bun run ci` under load was repeated many times to show the case no longer approaches the timeout; the evidence is the profile and the timings above. `scripts/flake-hunt.sh` was not run.
 - The tests outside `packages/tscache/test/` (examples, integrations, reference, scripts) were not scanned.
 - Timings come from a shared, loaded machine; they show the order of magnitude, not a benchmark.
+
+## Pre-review (Claude), not the gate
+
+Before Codex round 1, an Opus pre-reviewer read the branch. No P0 or P1.
+
+| #    | Sev | Finding                                                                                                            | Decision | Resolution                                                                                                                          |
+| ---- | --- | ------------------------------------------------------------------------------------------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| PR-1 | P2  | The flake fix had no before/after flake-hunt counts, which `docs/testing.md` asks the step's review file to record | accepted | The director ran the hunt under the machine lock: 1 of 20 loaded runs failed before, 0 of 20 after ("Flake hunt, before and after") |
+| PR-2 | nit | The two sets of "run alone" timings for the old case read as one set                                               | accepted | Each set now says who measured it and when; the 5.3 s run is marked as a failure                                                    |
