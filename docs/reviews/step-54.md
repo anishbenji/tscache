@@ -21,7 +21,7 @@ The package has no README of its own (`packages/tscache/` holds none), so there 
 - **Option C, as the director chose:** warn, never change the config. Option B (default the format when unset) was rejected because the format applies to every worker the app builds, so an app's own classic worker would change format in production builds only.
 - **Where:** `buildStart`, which runs once per environment build, reading that environment's `mode`, `consumer` and resolved `worker.format` from `this.environment.config` (moved from `configResolved` after pre-review finding PR-1; see below). A `warned` flag in the plugin instance keeps a watch build's rebuilds to one warning. `config.logger.warn` prints through Vite's logger, so the message appears in the normal build output and honours `logLevel` and `customLogger`.
 - **When:** only when the environment's mode is `build` and its consumer is `client`: the dev server never warns (it serves module workers whatever the format), and a server environment builds no worker, so neither `vite build --ssr` nor the ssr environment of `vite build --app` warns. No warning for `'es'`.
-- **Unconditional on whether the app bundles `tscache/worker`.** Step 53 noted option C "needs a way to tell whether the app bundles `tscache/worker` to stay quiet otherwise". `configResolved` runs before any module is resolved, so it cannot know; a later hook could, at the cost of inspecting the bundle. I did not add that: an app that installs `fetcherUrl()` hosts a tscache client, and the only app that would see a needless warning is one that never gives `createClient` a `workerUrl` (in-process only), for which `worker: { format: "es" }` is harmless. Recorded for the reviewer.
+- **Unconditional on whether the app bundles `tscache/worker`.** Step 53 noted option C "needs a way to tell whether the app bundles `tscache/worker` to stay quiet otherwise". `buildStart` (like `configResolved` before it) runs before any module is resolved, so it cannot know; a later hook could, at the cost of inspecting the bundle. I did not add that: an app that installs `fetcherUrl()` hosts a tscache client, and the only app that would see a needless warning is one that never gives `createClient` a `workerUrl` (in-process only), for which `worker: { format: "es" }` is harmless. Recorded for the reviewer.
 - **The message** names the fix and links the guide paragraph from step 53 on GitHub, since the site has no published URL:
 
   > [tscache] Vite builds workers as IIFE (worker.format 'iife'), which cannot code-split: the tscache worker's persistence code is inlined into the worker file, so every app downloads it, persisting or not. Set worker: { format: 'es' } in vite.config.ts to make it a chunk the worker loads only when a cache persists. See https://github.com/anishbenji/tscache/blob/main/site/guides/vite.md
@@ -52,12 +52,12 @@ Also run: `bun run typecheck` (exit 0), `bunx biome check packages/tscache` (no 
 
 | Entry    | Minified | Gzip     | Brotli   | Budget   |
 | -------- | -------- | -------- | -------- | -------- |
-| `vite`   | 2.42 kB  | 1.33 kB  | 1.16 kB  | 1.45 kB  |
+| `vite`   | 2.52 kB  | 1.37 kB  | 1.20 kB  | 1.45 kB  |
 | `worker` | 45.00 kB | 14.47 kB | 13.01 kB | 13.41 kB |
 
 ## CI
 
-`~/code/tscache-reports/bin/heavy-run.sh "child: ci 54" bun run ci` on the branch with this file: exit 0. Vitest: 110 files, 2,120 tests passed. Playwright: 162 passed (1.9 min); the `[WebServer] … SIGTERM` lines are the preview servers being stopped at teardown. Size and bench smoke rows ok. A first run exited 1 only because Biome formats Markdown and this file's scope table was not yet formatted; `bunx biome check --write docs/reviews/step-54.md` fixed it before the second run.
+`~/code/tscache-reports/bin/heavy-run.sh "child: ci 54" bun run ci` on 551c3d3 (before the pre-review fixes): exit 0. Vitest: 110 files, 2,120 tests passed. Playwright: 162 passed (1.9 min); the `[WebServer] … SIGTERM` lines are the preview servers being stopped at teardown. Size and bench smoke rows ok. A first run exited 1 only because Biome formats Markdown and this file's scope table was not yet formatted; `bunx biome check --write docs/reviews/step-54.md` fixed it before the second run.
 
 ## Pre-review (Claude), not the gate
 
@@ -74,3 +74,9 @@ Also run: `bun run typecheck` (exit 0), `bunx biome check packages/tscache` (no 
 - The new config-file tests use Vite's default `bundle` config loader. The `runner` loader the SSR examples use (`--configLoader runner`) was checked by hand with a throwaway driver outside the repo (`createBuilder` + `buildApp()`, `build.ssr` and a plain build, each with both loaders): 1, 0 and 1 warnings for both. Not a committed test.
 - Vite versions other than the one installed (8.x); `worker.format` and `logger` have been on `ResolvedConfig` since Vite 2.
 - Builds of the examples were not inspected for the warning's absence beyond CI's Playwright run; all nine set `worker: { format: "es" }` since step 53.
+
+After the pre-review fixes, `~/code/tscache-reports/bin/heavy-run.sh "child: ci 54 pre" bun run ci` on a072b24 with this file's pre-review section in the tree: exit 0. Vitest: 110 files, 2,123 tests passed. Playwright: 162 passed. Size rows ok (`vite` 1.20 kB Brotli against 1.45 kB).
+
+### Pre-review 2 (Claude), not the gate
+
+A second Opus pre-reviewer read the branch at 8c4074c: no P0 or P1. It confirmed PR-1 to PR-3 fixed in code, TSDoc, architecture and guides; a real Vite 8.3.5 dev server calls `buildStart` with `mode === "dev"` and the plugin stays quiet; worker bundles never run the app's plugins, so they cannot repeat the warning. Its one nit (this file's sizes table and one bullet still showed the first version's numbers and hook) is fixed here. Its decision concern (no way to silence the warning for an app that keeps `'iife'` on purpose) is parked for the user as decision #18; this step ships without an opt-out.
