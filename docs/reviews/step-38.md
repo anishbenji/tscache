@@ -684,3 +684,17 @@ The `clearAll` barrier has drawn findings in rounds 5 (R5-1, a load during a pen
 - Before the fix, `bunx vitest run test/persister-attempt.test.ts test/persist-hosted.test.ts` in `packages/tscache`, with the two regressions of `persister-attempt.test.ts` then written: 3 failed, 12 passed. Failing: "a flush waiting for the database to open writes no change made during a later clearAll (review round 9, R9-1)", "a flush waiting for the store's opening writes the state it took at its start, never a change made during a later barrier", and "with the store open, a clearAll in the microtasks after the attempt started cannot reach its state", with the messages quoted in R9-1's row.
 - After the fix, the same command: 16 passed. `bunx vitest run test/persist test/rpc-persist.test.ts test/config-persist.test.ts test/hosting.test.ts`: 14 files, 194 tests passed. `bunx tsc -p packages/tscache --noEmit` and Biome on the changed files: clean.
 - `bun run ci` at ceab75e, under the machine's lock: exit 0; Vitest 105 files, 2,071 tests passed; Playwright 155 passed; bench smoke passed. A first run, made before the commit, failed only the flake-hunt script's self-test "no changed test files fails", which expects a tree without uncommitted test files; in that run the flake hunt repeated `persist-hosted.test.ts` 20 times without a failure.
+
+## Implementation round 3 (review round 10) — reviewer verdict: merge
+
+Implementation review of the branch at c154f49 (`.reviews/step-38/round-10.md`). No findings: the reviewer found the earlier accepted findings fixed or superseded by the approved scope change, and no rejected finding worth reopening. The `clearAll` barrier drew no finding, so the convergence rule's escalation did not apply. The review is settled after ten rounds (seven on the design, three on the implementation).
+
+### Merge with main
+
+`main` gained steps 48 (the in-process hosting loaded lazily, #76) and the React and Solid upgrades (#74, #75) while this branch was in review. Four files conflicted:
+
+- `scripts/size.ts`: `main`'s version. Step 48 had taken this branch's lazy-chunk rows and added the strict budget check (`scripts/size-budget.ts`), so `main`'s file is a superset.
+- `packages/tscache/bench/budgets.json`: re-measured on the merge. Following the documented rule, a budget is raised only for a row that no longer fits, to measured + max(512 B, 3 %): `index:lazy` 11,920 → 12,464 B (measured 11,950), `worker` 12,576 → 13,728 (13,210), `engine` 9,488 → 10,272 (9,748). `index` (4,516 B against 5,008) and `worker:lazy` (5,325 against 5,824) keep their budgets.
+- `docs/benchmarking.md` and `site/performance.md`: the merged measurements.
+
+Verification of the merge is `bun run ci` before the push.
