@@ -8,6 +8,12 @@ gives a `?fetcher` import instead: the module's URL with its exports kept.
 
 <<< @/snippets/getting-started.ts#client{ts}
 
+`worker: { format: "es" }` is not the plugin's setting but the worker's: with Vite's default, `'iife'`, the
+worker's persistence code is inlined into the worker file, and with `'es'` it is a chunk the worker loads
+only when a cache persists ([Workers and fallback](/guides/workers#vite)). It applies to every worker
+the app builds: a worker of your own that you create from a `?worker&url` import must then be a
+module worker (`{ type: 'module' }`); a `?worker` constructor import sets that itself.
+
 For TypeScript, declare the import once:
 
 <<< @/snippets/env.d.ts{ts}
