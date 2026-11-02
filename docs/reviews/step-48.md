@@ -89,6 +89,12 @@ Every interval contains 1: no change, as expected. The scenarios run over the lo
 - A client created inside an application's own Web Worker bundled by Vite: Vite's module-preload helper, which reads `document`, would wrap the `import()` if Vite bundled that worker as part of the page graph. Creating a client inside a worker is not a documented use; the documented hostings create the worker themselves.
 - The time saved on a real network or a slow device: the bench runs over loopback after the page loaded.
 
+## Round 1 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R1-1 | P1 | `scripts/size.ts` gave a row with no committed budget a budget derived from its own size, so a new lazy chunk (say `worker:lazy` without an entry in `budgets.json`) passed whatever its size, bypassing the reviewed budget | accepted | Fixed by the director: the budget comparison moved to `scripts/size-budget.ts` (`checkRow`), which reports a row without a committed budget as `missing`; outside `--update`, `size.ts` prints it as **no budget** and exits 1 with the instruction to add a reviewed budget. Regression test `scripts/size-budget.test.ts` (missing budgets for a new lazy key and an empty table, plus the ok/over and `--update` paths). Checked end to end: with `index:lazy` removed from `budgets.json`, the check fails with "no committed budget for index:lazy"; restored, it passes. The same `size.ts` is on feat/38 (copied unchanged); it receives this fix when main is merged into it |
+
 ## Decision concerns
 
 None.

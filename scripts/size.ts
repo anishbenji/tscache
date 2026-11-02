@@ -25,6 +25,7 @@ import {
 } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import { budgetFor, checkRow } from "./size-budget";
 
 const ROOT = new URL("../packages/tscache/", import.meta.url);
 const BUDGETS = fileURLToPath(new URL("bench/budgets.json", ROOT));
@@ -170,11 +171,6 @@ async function measure(
   return { initial, lazy: total(lazy) };
 }
 
-/** The budget for a size measured now: room for small changes. */
-function budgetFor(bytes: number): number {
-  return Math.ceil((bytes + Math.max(512, bytes * 0.03)) / 16) * 16;
-}
-
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(2)} kB`;
 
 const update = process.argv.includes("--update");
@@ -188,13 +184,21 @@ const rows: string[] = [
 ];
 const measured: Record<string, number> = {};
 let over = 0;
+const missing: string[] = [];
 function row(label: string, key: string, size: Size): void {
   measured[key] = size.brotli;
-  const budget = budgets?.brotli[key] ?? budgetFor(size.brotli);
-  const fits = size.brotli <= budget;
-  if (!fits) over++;
+  const check = checkRow(budgets?.brotli, key, size.brotli);
+  if (check.status === "over") over++;
+  if (check.status === "missing") missing.push(key);
+  const budget = check.status === "missing" ? "none" : kb(check.budget);
+  const verdict =
+    check.status === "ok"
+      ? "ok"
+      : check.status === "over"
+        ? "**over**"
+        : "**no budget**";
   rows.push(
-    `| \`${label}\` | ${kb(size.minified)} | ${kb(size.gzip)} | ${kb(size.brotli)} | ${kb(budget)} | ${fits ? "ok" : "**over**"} |`,
+    `| \`${label}\` | ${kb(size.minified)} | ${kb(size.gzip)} | ${kb(size.brotli)} | ${budget} | ${verdict} |`,
   );
 }
 checkEntryImports();
@@ -224,6 +228,11 @@ if (update) {
   };
   writeFileSync(BUDGETS, `${JSON.stringify(next, null, 2)}\n`);
   console.log(`\nbudgets written to ${BUDGETS}`);
+} else if (missing.length > 0) {
+  console.error(
+    `\nno committed budget for ${missing.join(", ")}: add one to packages/tscache/bench/budgets.json (bun scripts/size.ts --update, then review it), with the reason in the commit (docs/benchmarking.md).`,
+  );
+  process.exit(1);
 } else if (over > 0) {
   console.error(
     `\n${over} entr${over === 1 ? "y is" : "ies are"} over budget: shrink it, or raise the budget in packages/tscache/bench/budgets.json with the reason in the commit (docs/benchmarking.md).`,
