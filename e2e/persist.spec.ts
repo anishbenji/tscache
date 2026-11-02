@@ -91,7 +91,7 @@ test("after clearAll resolves, both stores are empty", async ({
 // empties the database too, so what a SharedWorker session stored cannot
 // come back after a logout from any hosting (§4.10.7, N66).
 for (const mode of ["dedicated", "in-process"] as const) {
-  test(`clearAll from a ${mode} page empties what the SharedWorker stored; a reload fetches again`, async ({
+  test(`clearAll from a page hosted ${mode} empties what the SharedWorker stored; a reload fetches again`, async ({
     context,
     backend,
   }) => {
@@ -114,7 +114,7 @@ for (const mode of ["dedicated", "in-process"] as const) {
     expect((await backend.state()).requests).toEqual({ "3-63": 2 });
   });
 
-  test(`clearAll from a ${mode} page creates no database`, async ({
+  test(`clearAll from a page hosted ${mode} creates no database`, async ({
     context,
     backend,
   }) => {
