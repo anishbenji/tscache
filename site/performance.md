@@ -19,8 +19,8 @@ summarises them.
 
 These are exact budgets: they count rather than time, and a pull request that exceeds one fails. So
 does one that grows an entry past its compressed size budget: `tscache` is about 4.4 kB, plus
-11.9 kB for the in-process hosting it loads only when a client runs in the page (and 5.4 kB more only
-when that client calls `clearAll`, to empty the database), `tscache/worker` 13.0 kB, plus 5.4 kB of
+11.9 kB for the in-process hosting it loads only when a client runs in the page (and 5.3 kB more only
+when that client calls `clearAll`, to empty the database), `tscache/worker` 13.0 kB, plus 5.3 kB of
 persistence code it loads only once a cache persists or `clearAll` runs, `tscache/engine` 9.5 kB,
 `tscache/fetcher` 0.14 kB and `tscache/vite` 0.95 kB (Brotli, minified, measured 2026-11-02).
 
