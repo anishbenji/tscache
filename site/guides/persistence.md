@@ -75,7 +75,9 @@ until it ends.
 
 A client hosted in a dedicated worker or in-process persists nothing, but its `clearAll` empties the
 database too, so a logout from any page removes what a SharedWorker session stored. It loads the
-clearing code only then, and never creates a database where there is none. It cannot reach the memory of
+clearing code only then, and creates no database where there is none, except in a browser without
+`indexedDB.databases()` (Firefox before 126), where it cannot tell and leaves an empty database behind.
+It cannot reach the memory of
 a SharedWorker that other tabs still use: that worker writes back what it changes, so to clear it as
 well, call `clearAll` from one of its tabs. When the clear fails (IndexedDB unavailable, or refusing the
 clear for five seconds), the call still resolves, nothing else changes, and the next `clearAll` tries

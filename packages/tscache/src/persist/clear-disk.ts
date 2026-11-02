@@ -22,8 +22,9 @@ export interface ClearDiskOptions {
 /**
  * Empties the database, as the persister's `clearAll` job does (§4.10.6),
  * without a persister: opens it only if it exists (`ifExists`, so a browser
- * without one gets none), runs `store.clearAll()` (every record, strict),
- * and closes the connection. A rejected clear is retried after
+ * without one gets none, except one without `IDBFactory.databases()`, where
+ * the opening creates it empty), runs `store.clearAll()` (every record,
+ * strict), and closes the connection. A rejected clear is retried after
  * `debounceMs` while the retry is due before the deadline, `timeoutMs`
  * after `startedAt`; a database that fails to open fails the clear at
  * once. A call still pending at the deadline is abandoned.
