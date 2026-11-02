@@ -87,6 +87,46 @@ test("after clearAll resolves, both stores are empty", async ({
   expect(await stored(a)).toEqual({ caches: 0, pages: 0 });
 });
 
+// A dedicated-worker or in-process page persists nothing, but its clearAll
+// empties the database too, so what a SharedWorker session stored cannot
+// come back after a logout from any hosting (§4.10.7, N66).
+for (const mode of ["dedicated", "in-process"] as const) {
+  test(`clearAll from a ${mode} page empties what the SharedWorker stored; a reload fetches again`, async ({
+    context,
+    backend,
+  }) => {
+    const config = cacheConfig({ persist: true });
+    const a = await open(context);
+    expect((await connect(a, backend.clientOptions())).mode).toBe("shared");
+    await read(a, config, bars);
+    await expect
+      .poll(() => stored(a, config.id))
+      .toEqual({ caches: 1, pages: 1 });
+    const b = await open(context);
+    expect((await connect(b, { ...backend.clientOptions(), mode })).mode).toBe(
+      mode,
+    );
+    await clearAll(b);
+    expect(await stored(b)).toEqual({ caches: 0, pages: 0 });
+    const c = await open(context);
+    await connect(c, { ...backend.clientOptions(), workerUrl: reloaded });
+    expect((await read(c, config, bars)).misses).toEqual([]);
+    expect((await backend.state()).requests).toEqual({ "3-63": 2 });
+  });
+
+  test(`clearAll from a ${mode} page creates no database`, async ({
+    context,
+    backend,
+  }) => {
+    const b = await open(context);
+    expect((await connect(b, { ...backend.clientOptions(), mode })).mode).toBe(
+      mode,
+    );
+    await clearAll(b);
+    expect(await stored(b)).toBeUndefined();
+  });
+}
+
 test("a reload whose config names another version fetches again", async ({
   context,
   backend,

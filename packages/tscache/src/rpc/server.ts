@@ -62,9 +62,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * The SharedWorker hosting's persistence, as the server uses it (§4.10.8):
- * `persist/hosted.ts`, which loads the persister lazily. The other hostings
- * pass none.
+ * The hosting's persistence, as the server uses it (§4.10.8): in the
+ * SharedWorker `persist/hosted.ts`, which loads the persister lazily; in
+ * the dedicated-worker and in-process hostings, where the realm has
+ * IndexedDB, `persist/clear-only.ts`, which persists nothing and only
+ * empties the disk at `clearAll` (§4.10.7, N66). Without one, `clearAll`
+ * clears memory only.
  */
 export interface Persistence {
   /** Starts persisting a cache; settles once its load has settled. */

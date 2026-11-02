@@ -97,8 +97,8 @@ async function dedicatedWorker(): Promise<MessagePortLike> {
   return channel.port2 as MessagePortLike;
 }
 
-/** Every op on a persisted cache, then clearAll. */
-async function exercise(c: PortClient): Promise<void> {
+/** Every op on a persisted cache, then clearAll unless told not to. */
+async function exercise(c: PortClient, clearAll = true): Promise<void> {
   await c.request("cache", config());
   await c.request("put", { cacheId: "persist", batch: batch([0, 3, 7]) });
   await c.request("get", {
@@ -112,7 +112,73 @@ async function exercise(c: PortClient): Promise<void> {
   });
   await c.request("setFinalizedUntil", { cacheId: "persist", t: 5 });
   await c.request("clear", { cacheId: "persist" });
-  await c.request("clearAll", {});
+  if (clearAll) await c.request("clearAll", {});
+}
+
+/** Persists one page through a SharedWorker session over `factory`. */
+async function persistThroughSharedWorker(factory: IDBFactory): Promise<void> {
+  vi.stubGlobal("indexedDB", factory);
+  const first = await client((await sharedWorker())());
+  await first.client.request("cache", config());
+  await first.client.request("put", {
+    cacheId: "persist",
+    batch: batch([0, 3]),
+  });
+  await first.client.request("dispose", {});
+  await until(async () => {
+    expect((await stored(factory)).pages).toHaveLength(1);
+  });
+  // The next hosting starts from a clean global scope, IndexedDB included.
+  vi.unstubAllGlobals();
+  vi.stubGlobal("indexedDB", factory);
+}
+
+/** What the database of `factory` holds for the persisted cache. */
+async function stored(
+  factory: IDBFactory,
+): Promise<{ cache: unknown; pages: unknown[] }> {
+  const store = await openIdbStore(factory, { ifExists: true });
+  const records = (await store?.read("persist")) ?? {
+    cache: undefined,
+    pages: [],
+  };
+  store?.close();
+  return records;
+}
+
+/** A new SharedWorker over `factory` reads nothing stored for the cache. */
+async function expectNothingLoaded(factory: IDBFactory): Promise<void> {
+  vi.unstubAllGlobals();
+  vi.stubGlobal("indexedDB", factory);
+  const next = await client((await sharedWorker())());
+  await next.client.request("cache", config());
+  const got = (await next.client.request("get", {
+    cacheId: "persist",
+    range: { start: 0, end: 3 },
+    options: { cacheOnly: true },
+  })) as GetResult;
+  expect(got.timestamps).toEqual(new Float64Array([]));
+}
+
+/** An `indexedDB` whose every use fails, its uses counted. */
+function failingIndexedDB(): { uses: string[] } {
+  const uses: string[] = [];
+  const fail = (key: string) => () => {
+    uses.push(key);
+    return Promise.reject(
+      Object.assign(new Error("planted failure"), { name: "UnknownError" }),
+    );
+  };
+  vi.stubGlobal("indexedDB", {
+    databases: fail("databases"),
+    open: () => {
+      uses.push("open");
+      throw Object.assign(new Error("planted failure"), {
+        name: "UnknownError",
+      });
+    },
+  });
+  return { uses };
 }
 
 describe("which hosting persists (§4.10.8)", () => {
@@ -152,17 +218,17 @@ describe("which hosting persists (§4.10.8)", () => {
     expect(events.map((e) => e.event)).not.toContain("persistStopped");
   });
 
-  it("the dedicated entry builds no persister: nothing opened, read, written or cleared", async () => {
+  it("the dedicated entry persists nothing: no op but clearAll opens, reads or writes IndexedDB", async () => {
     const { uses } = recordingIndexedDB();
     const { client: c, events } = await client(await dedicatedWorker());
-    await exercise(c);
+    await exercise(c, false);
     // The server drops the global "port" while its stubs are still in place.
     await c.request("dispose", {});
     expect(uses).toEqual([]);
     expect(events.map((e) => e.event)).not.toContain("persistStopped");
   });
 
-  it("the in-process hosting builds no persister: nothing opened, read, written or cleared", async () => {
+  it("the in-process hosting persists nothing: no op but clearAll opens, reads or writes IndexedDB", async () => {
     const { uses } = recordingIndexedDB();
     const c = await createClient({ mode: "in-process" });
     cleanup.push(() => void c.dispose());
@@ -174,9 +240,77 @@ describe("which hosting persists (§4.10.8)", () => {
     await handle.invalidate({ start: 3, end: 3 });
     await handle.setFinalizedUntil(5);
     await handle.clear();
-    await c.clearAll();
     expect(c.mode).toBe("in-process");
     expect(uses).toEqual([]);
+    expect(stopped).toEqual([]);
+  });
+});
+
+describe("clearAll in the hostings that do not persist (§4.10.7, N66)", () => {
+  it("a dedicated client's clearAll empties what a SharedWorker session stored; the next SharedWorker loads nothing", async () => {
+    const factory = new IDBFactory();
+    await persistThroughSharedWorker(factory);
+    const { client: c, events } = await client(await dedicatedWorker());
+    await c.request("cache", config());
+    await c.request("put", { cacheId: "persist", batch: batch([7]) });
+    await c.request("clearAll", {});
+    expect(await stored(factory)).toEqual({ cache: undefined, pages: [] });
+    expect(events.map((e) => e.event)).not.toContain("persistStopped");
+    await c.request("dispose", {});
+    await expectNothingLoaded(factory);
+  });
+
+  it("an in-process client's clearAll empties what a SharedWorker session stored; the next SharedWorker loads nothing", async () => {
+    const factory = new IDBFactory();
+    await persistThroughSharedWorker(factory);
+    const c = await createClient({ mode: "in-process" });
+    cleanup.push(() => void c.dispose());
+    const stopped: ClientEvents["persistStopped"][] = [];
+    c.on("persistStopped", (e) => stopped.push(e));
+    await c.clearAll();
+    expect(c.mode).toBe("in-process");
+    expect(await stored(factory)).toEqual({ cache: undefined, pages: [] });
+    expect(stopped).toEqual([]);
+    await expectNothingLoaded(factory);
+  });
+
+  it("without a database, clearAll from either hosting creates none", async () => {
+    const factory = new IDBFactory();
+    vi.stubGlobal("indexedDB", factory);
+    const c = await createClient({ mode: "in-process" });
+    cleanup.push(() => void c.dispose());
+    await c.clearAll();
+    const { client: d } = await client(await dedicatedWorker());
+    await d.request("clearAll", {});
+    await d.request("dispose", {});
+    expect(await factory.databases()).toEqual([]);
+  });
+
+  it("an IndexedDB that fails: clearAll still answers, memory cleared, nothing emitted, and the next clearAll tries again", async () => {
+    const { uses } = failingIndexedDB();
+    const { client: d, events } = await client(await dedicatedWorker());
+    await d.request("cache", config());
+    await d.request("put", { cacheId: "persist", batch: batch([0, 3]) });
+    await d.request("clearAll", {});
+    const got = (await d.request("get", {
+      cacheId: "persist",
+      range: { start: 0, end: 3 },
+      options: { cacheOnly: true },
+    })) as GetResult;
+    expect(got.timestamps).toEqual(new Float64Array([]));
+    expect(uses).toEqual(["databases"]);
+    await d.request("clearAll", {});
+    expect(uses).toEqual(["databases", "databases"]);
+    expect(events.map((e) => e.event)).not.toContain("persistStopped");
+    await d.request("dispose", {});
+
+    const c = await createClient({ mode: "in-process" });
+    cleanup.push(() => void c.dispose());
+    const stopped: ClientEvents["persistStopped"][] = [];
+    c.on("persistStopped", (e) => stopped.push(e));
+    await c.clearAll();
+    await c.clearAll();
+    expect(uses).toEqual(["databases", "databases", "databases", "databases"]);
     expect(stopped).toEqual([]);
   });
 });

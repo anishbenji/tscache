@@ -77,7 +77,8 @@ export interface CacheConfig {
    * and for an `Engine` used directly it is accepted and ignored, without an
    * event (N45); `client.mode` tells which case applies. Stored records are
    * readable by every script of the origin and outlive the session until
-   * `clearAll`, so keep per-user or sensitive caches in memory.
+   * `clearAll` (from a client of any hosting, N66), so keep per-user or
+   * sensitive caches in memory.
    */
   persist?: boolean;
 }
