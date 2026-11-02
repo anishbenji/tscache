@@ -101,6 +101,10 @@ Every interval contains 1: no change, as expected. The scenarios run over the lo
 |---|---|---|---|---|
 | R2-1 | P1 | R1-1 remained when the whole budget table was absent: with `budgets.json` holding `{}` (or the `brotli` key renamed), the check passed `undefined` to `checkRow`, which meant update mode, so every row got a self-derived budget and passed (999,999 B against a derived 1,030,000 B) | accepted | Fixed by the director: deriving a budget now needs the explicit mode `"update"` (`checkRow(mode, budgets, key, brotli)`); in a check, `size.ts` reads the file through `parseBudgets`, which throws on an absent or malformed `brotli` table (not an object of numbers), so the check fails instead of falling back. Tests: `parseBudgets` rejects `{}`, a renamed key, `null`, an array and string values; a parsed empty table checks 999,999 B as `missing`; the earlier R1-1 cases kept. End to end: with `budgets.json` set to `{}` the check fails with "budgets.json has no \"brotli\" table of numbers"; restored, it passes. Same area two rounds running: the class is now closed at its root (no implicit derivation in check mode, one parser for the file) |
 
+## Round 3 — reviewer verdict: merge
+
+No findings; R1-1 and R2-1 confirmed fixed. Settled after three rounds.
+
 ## Decision concerns
 
 None.
