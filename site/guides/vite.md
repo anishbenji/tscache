@@ -40,6 +40,10 @@ Give Vite a logger of its own, `createLogger()`, with the filter applied:
 
 <<< @/snippets/vite-config.ts#iife{ts}
 
+A `customLogger` replaces the logger Vite would build itself, so `logLevel` and `clearScreen` in the config
+(and `--logLevel`, `--clearScreen` on the command line) no longer reach it. Set them on the logger you
+create instead, for example `createLogger("warn", { allowClearScreen: false })`.
+
 The warning's opening words, `[tscache] Vite builds workers as IIFE`, are a stable contract: changing
 them would break such filters, so tscache treats any change to them as a breaking change. The filter
 matches the start of the message, not the words anywhere in it, so a message that merely quotes them is

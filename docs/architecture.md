@@ -590,6 +590,9 @@ vite/
                     and, when a browser environment builds with worker format 'iife', one
                     warning through Vite's logger (the worker cannot split off §4.10.8's
                     chunk); it never changes the worker format (step 54, within N41's scope)
+                    The warning's opening words, `[tscache] Vite builds workers as IIFE`,
+                    are a stable contract: apps filter it with a customLogger (site/guides/
+                    vite.md); changing them is a breaking change (step 56, user decision #18)
 ```
 
 `package.json` exports: `.`, `./worker`, `./engine` (locked) + `./fetcher` (N6, accepted 2026-06-11) + `./vite` (N40, 2026-10-23; `vite ^8.0.0` as an optional peer dependency, the one major the tests build with). ESM-only (resolved decision #6). `tsconfig` strict with `isolatedDeclarations: true`.
