@@ -76,6 +76,11 @@ const QUERY = "?fetcher";
 /**
  * The build warning for an IIFE worker (step 54): it cannot code-split, so
  * the worker's `import()` of its persistence code (§4.10.8) is inlined.
+ *
+ * Its opening words, "[tscache] Vite builds workers as IIFE", are a stable
+ * contract (step 56): an app that keeps `'iife'` on purpose drops the
+ * warning with a logger filter matching them (site/guides/vite.md).
+ * Changing them breaks those filters, so it is a breaking change.
  */
 const IIFE_WARNING =
   "[tscache] Vite builds workers as IIFE (worker.format 'iife'), which cannot code-split: the tscache worker's persistence code is inlined into the worker file, so every app downloads it, persisting or not. Set worker: { format: 'es' } in vite.config.ts to make it a chunk the worker loads only when a cache persists. See https://github.com/anishbenji/tscache/blob/main/site/guides/vite.md";
