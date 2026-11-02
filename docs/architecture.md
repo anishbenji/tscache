@@ -84,7 +84,7 @@ interface TscacheClient {
 }
 ```
 
-The in-process engine has zero DOM/worker imports at module top level (lazy construction), so `'in-process'` is SSR/Node-safe and is the mode used by the SSR examples.
+The in-process engine has zero DOM/worker imports at module top level (lazy construction), so `'in-process'` is SSR/Node-safe and is the mode used by the SSR examples. The `'.'` entry loads the in-process hosting, with the engine, by `import()` only when the chain reaches it or the client is pinned to it, so a page served by a worker never downloads the engine; `createClient` resolves after that load and the handshake, as before.
 
 ### 2.2 Cache configuration
 
@@ -546,7 +546,10 @@ rpc/
                     shared-mode clients (N32)
 client/
   client.ts         createClient: fallback chain (shared → dedicated → in-process), pinning
-  hosting.ts        the three hostings: each a connected PortClient or a HostingError
+  hosting.ts        the three hostings: each a connected PortClient or a HostingError;
+                    loads in-process.ts with import() when the chain reaches it
+  in-process.ts     the in-process hosting: RpcServer(new Engine()) over a MessageChannel;
+                    a chunk of its own, so a worker-hosted page never loads the engine
   cache.ts          CacheHandle facade
   events.ts         typed emitter
 entries/
@@ -980,7 +983,11 @@ function createClient(options?: ClientOptions): Promise<TscacheClient>;
 // PortClient or throwing a HostingError the chain treats as "step down".
 function openShared(url: string | URL, timeoutMs: number): Promise<PortClient>;
 function openDedicated(url: string | URL, timeoutMs: number): Promise<PortClient>;
-/** MessageChannel pair with RpcServer(new Engine()) in this realm (N27). */
+/**
+ * MessageChannel pair with RpcServer(new Engine()) in this realm (N27).
+ * Loads client/in-process.ts with import(), its own chunk (step 48); a load
+ * that fails is a HostingError like any other failed hosting.
+ */
 function openInProcess(): Promise<PortClient>;
 
 // client/cache.ts — CacheHandle facade over PortClient.request.
