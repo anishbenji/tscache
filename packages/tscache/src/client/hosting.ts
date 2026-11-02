@@ -4,16 +4,11 @@
  * treats as "step down". Any other error propagates as is.
  */
 
-import { Engine } from "../engine/engine";
 import { TscacheError } from "../errors";
 import { lockManager, watchLifetimeLock } from "../rpc/lifetime";
 import { PortClient } from "../rpc/port-client";
 import type { FetcherConfig, MessagePortLike } from "../rpc/protocol";
-import { RpcServer } from "../rpc/server";
 import type { HostingMode } from "../types";
-
-/** Library version reported by the in-process server. */
-const LIB_VERSION = "0.0.0";
 
 /** A hosting could not be established; the chain may step down (N25). */
 export class HostingError extends TscacheError {}
@@ -173,20 +168,23 @@ export async function openDedicated(
   };
 }
 
-/** A MessageChannel pair with its own Engine in this realm (N27, §3.2). */
+/**
+ * The in-process hosting (N27), loaded on first use: the engine is a chunk
+ * of its own, which a page served by a worker never fetches. A chunk that
+ * fails to load fails this hosting like any other, so `createClient`
+ * rejects with this HostingError (it is the last of the chain).
+ */
 export async function openInProcess(
   fetcher: FetcherConfig | undefined,
 ): Promise<Hosting> {
-  const channel = new MessageChannel();
-  const server = new RpcServer(new Engine(), LIB_VERSION);
-  server.attach(channel.port1 as MessagePortLike);
-  const client = await PortClient.connect(
-    channel.port2 as MessagePortLike,
-    fetcher === undefined ? {} : { fetcher },
-  );
-  return {
-    mode: "in-process",
-    client,
-    terminate: () => server.detach(channel.port1 as MessagePortLike),
-  };
+  let connect: (fetcher: FetcherConfig | undefined) => Promise<Hosting>;
+  try {
+    const { connectInProcess } = await import("./in-process");
+    connect = connectInProcess;
+  } catch (error) {
+    throw new HostingError(
+      `the in-process hosting could not be loaded: ${String(error)}`,
+    );
+  }
+  return connect(fetcher);
 }
