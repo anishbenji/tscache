@@ -8,9 +8,11 @@
  * The clear-only call is `clearDisk` in the lazily loaded persistence chunk
  * (`persist/lazy.ts`): it is imported at the first `clearAll`, so a page
  * that never calls `clearAll` never loads it. The import counts against the
- * clear's deadline (`timeoutMs`, as for a load, §4.10.8). A failed clear
- * changes nothing else: this hosting never reads or writes the disk, so
- * there is nothing in it to turn off, and the next `clearAll` tries again.
+ * clear's deadline (`timeoutMs`, as for a load, §4.10.8); an import that
+ * arrives after the deadline starts no disk work, since `clearDisk` checks
+ * the deadline before it opens the database. A failed clear changes
+ * nothing else: this hosting never reads or writes the disk, so there is
+ * nothing in it to turn off, and the next `clearAll` tries again.
  */
 
 import type { Engine } from "../engine/engine";

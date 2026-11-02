@@ -150,6 +150,34 @@ describe("clear-only persistence (§4.10.7, N66)", () => {
     expect(h.openStore).not.toHaveBeenCalled();
   });
 
+  it("an import that arrives after the deadline starts no disk work", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = clearOnly();
+    const cleared = tracked(h.persistence.clearAll() as Promise<void>);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cleared.done).toBe(true);
+    h.release();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(h.openStore).not.toHaveBeenCalled();
+    expect(h.store.log).toEqual([]);
+    expect(h.store.records("persist").pages).toHaveLength(1);
+  });
+
+  it("a clear still pending when clearAll answers has its connection closed by then", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = clearOnly();
+    h.release();
+    const gate = h.store.gate("clearAll");
+    const cleared = tracked(h.persistence.clearAll() as Promise<void>);
+    await gate.entered;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cleared.done).toBe(true);
+    expect(h.closed).toEqual([true]);
+    gate.release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.closed).toEqual([true]);
+  });
+
   it("the import counts against the clear's deadline", async () => {
     vi.useFakeTimers({ now: 0 });
     const h = clearOnly();

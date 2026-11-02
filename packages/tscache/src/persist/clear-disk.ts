@@ -26,8 +26,14 @@ export interface ClearDiskOptions {
  * and closes the connection. A rejected clear is retried after
  * `debounceMs` while the retry is due before the deadline, `timeoutMs`
  * after `startedAt`; a database that fails to open fails the clear at
- * once. A call still pending at the deadline is abandoned, and no call
- * starts after it.
+ * once. A call still pending at the deadline is abandoned.
+ *
+ * No disk operation starts at or after the deadline: the opening and every
+ * attempt check the clock first, since the deadline's timer may run after a
+ * late continuation (a chunk imported late, a database opened at the
+ * deadline). Every connection that opens is closed exactly once: when the
+ * call ends, also at the deadline with an attempt still pending, or, for a
+ * database that opens after the end, as soon as it opens.
  *
  * Resolves once the disk is empty, or once the clear has failed, at the
  * latest at the deadline. Never rejects: a hosting that persists nothing
@@ -40,42 +46,44 @@ export function clearDisk(
   const debounceMs = options.debounceMs ?? 1000;
   const timeoutMs = options.timeoutMs ?? 5000;
   const deadline = (options.startedAt ?? performance.now()) + timeoutMs;
-  let late = false;
+  const due = () => performance.now() < deadline;
 
-  const attempts = async (store: PersistStore): Promise<void> => {
-    try {
+  return new Promise((resolve) => {
+    let ended = false;
+    let store: PersistStore | undefined;
+    // The one end of the call: closes the connection it holds, if any.
+    const end = () => {
+      if (ended) return;
+      ended = true;
+      clearTimeout(timer);
+      store?.close();
+      resolve();
+    };
+
+    const run = async (): Promise<void> => {
+      if (!due()) return;
+      const opened = await openStore({ ifExists: true });
+      if (opened === undefined) return;
+      if (ended || !due()) {
+        // Opened after the end, or at the deadline: closed unused.
+        opened.close();
+        return;
+      }
+      store = opened;
       for (;;) {
-        if (late) return;
         try {
-          await store.clearAll();
+          await opened.clearAll();
           return;
         } catch {
           // Retried below while the retry is due before the deadline.
         }
         if (performance.now() + debounceMs >= deadline) return;
         await new Promise((retry) => setTimeout(retry, debounceMs));
+        if (ended || !due()) return;
       }
-    } finally {
-      store.close();
-    }
-  };
-
-  return new Promise((resolve) => {
-    const timer = setTimeout(
-      () => {
-        late = true;
-        resolve();
-      },
-      Math.max(0, deadline - performance.now()),
-    );
-    const done = () => {
-      clearTimeout(timer);
-      resolve();
     };
-    new Promise<PersistStore | undefined>((opened) =>
-      opened(openStore({ ifExists: true })),
-    )
-      .then((store) => (store === undefined ? undefined : attempts(store)))
-      .then(done, done);
+
+    const timer = setTimeout(end, Math.max(0, deadline - performance.now()));
+    run().then(end, end);
   });
 }

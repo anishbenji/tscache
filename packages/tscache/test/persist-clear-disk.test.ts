@@ -103,10 +103,54 @@ describe("clearDisk (§4.10.7, N66)", () => {
     expect(cleared.done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(cleared.done).toBe(true);
+    // Closed when the call answers, while the clear is still unresolved.
+    expect(close).toHaveBeenCalledTimes(1);
     gate.reject(Object.assign(new Error("late"), { name: "AbortError" }));
     await vi.advanceTimersByTimeAsync(10_000);
     expect(clearCalls(store)).toBe(1);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("a clear that commits after the deadline leaves the connection closed once", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const { store, close } = seeded();
+    const gate = store.gate("clearAll");
+    const cleared = tracked(clearDisk(async () => store));
+    await gate.entered;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cleared.done).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
+    gate.release();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(clearCalls(store)).toBe(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("a call made after its deadline opens nothing", async () => {
+    vi.useFakeTimers({ now: 0 });
+    await vi.advanceTimersByTimeAsync(5000);
+    const { store } = seeded();
+    const openStore = vi.fn(async () => store);
+    const cleared = tracked(clearDisk(openStore, { startedAt: 0 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cleared.done).toBe(true);
+    expect(openStore).not.toHaveBeenCalled();
+    expect(store.log).toEqual([]);
+  });
+
+  it("a database that opens at the deadline, before the deadline's timer runs, is closed without a clear", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const { store, close } = seeded();
+    const opening = deferred<PersistStore | undefined>();
+    // Created before clearDisk's own timer, so it runs first at 5000 ms.
+    // clock-ok: a timer of Vitest's fake clock, run by advanceTimersByTimeAsync; no real time passes.
+    setTimeout(() => opening.resolve(store), 5000);
+    const cleared = tracked(clearDisk(() => opening.promise));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cleared.done).toBe(true);
+    expect(clearCalls(store)).toBe(0);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(store.records("persist").pages).toHaveLength(1);
   });
 
   it("a database that opens after the deadline is closed without a clear", async () => {
