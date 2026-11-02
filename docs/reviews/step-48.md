@@ -95,6 +95,12 @@ Every interval contains 1: no change, as expected. The scenarios run over the lo
 |---|---|---|---|---|
 | R1-1 | P1 | `scripts/size.ts` gave a row with no committed budget a budget derived from its own size, so a new lazy chunk (say `worker:lazy` without an entry in `budgets.json`) passed whatever its size, bypassing the reviewed budget | accepted | Fixed by the director: the budget comparison moved to `scripts/size-budget.ts` (`checkRow`), which reports a row without a committed budget as `missing`; outside `--update`, `size.ts` prints it as **no budget** and exits 1 with the instruction to add a reviewed budget. Regression test `scripts/size-budget.test.ts` (missing budgets for a new lazy key and an empty table, plus the ok/over and `--update` paths). Checked end to end: with `index:lazy` removed from `budgets.json`, the check fails with "no committed budget for index:lazy"; restored, it passes. The same `size.ts` is on feat/38 (copied unchanged); it receives this fix when main is merged into it |
 
+## Round 2 — reviewer verdict: merge after fixes
+
+| # | Sev | Finding | Decision | Resolution |
+|---|---|---|---|---|
+| R2-1 | P1 | R1-1 remained when the whole budget table was absent: with `budgets.json` holding `{}` (or the `brotli` key renamed), the check passed `undefined` to `checkRow`, which meant update mode, so every row got a self-derived budget and passed (999,999 B against a derived 1,030,000 B) | accepted | Fixed by the director: deriving a budget now needs the explicit mode `"update"` (`checkRow(mode, budgets, key, brotli)`); in a check, `size.ts` reads the file through `parseBudgets`, which throws on an absent or malformed `brotli` table (not an object of numbers), so the check fails instead of falling back. Tests: `parseBudgets` rejects `{}`, a renamed key, `null`, an array and string values; a parsed empty table checks 999,999 B as `missing`; the earlier R1-1 cases kept. End to end: with `budgets.json` set to `{}` the check fails with "budgets.json has no \"brotli\" table of numbers"; restored, it passes. Same area two rounds running: the class is now closed at its root (no implicit derivation in check mode, one parser for the file) |
+
 ## Decision concerns
 
 None.

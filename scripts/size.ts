@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
-import { budgetFor, checkRow } from "./size-budget";
+import { budgetFor, checkRow, parseBudgets } from "./size-budget";
 
 const ROOT = new URL("../packages/tscache/", import.meta.url);
 const BUDGETS = fileURLToPath(new URL("bench/budgets.json", ROOT));
@@ -174,9 +174,9 @@ async function measure(
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(2)} kB`;
 
 const update = process.argv.includes("--update");
-const budgets: Budgets | undefined = update
-  ? undefined
-  : JSON.parse(readFileSync(BUDGETS, "utf8"));
+const budgets: Readonly<Record<string, number>> = update
+  ? {}
+  : parseBudgets(readFileSync(BUDGETS, "utf8"));
 
 const rows: string[] = [
   "| Entry | Minified | Gzip | Brotli | Budget (brotli) | |",
@@ -187,7 +187,12 @@ let over = 0;
 const missing: string[] = [];
 function row(label: string, key: string, size: Size): void {
   measured[key] = size.brotli;
-  const check = checkRow(budgets?.brotli, key, size.brotli);
+  const check = checkRow(
+    update ? "update" : "check",
+    budgets,
+    key,
+    size.brotli,
+  );
   if (check.status === "over") over++;
   if (check.status === "missing") missing.push(key);
   const budget = check.status === "missing" ? "none" : kb(check.budget);
