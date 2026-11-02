@@ -67,9 +67,9 @@
       "name": "@examples/solid-lwcharts",
       "dependencies": {
         "@examples/mock-backend": "workspace:*",
-        "@solidjs/web": "2.0.0-rc.14",
+        "@solidjs/web": "2.0.0-rc.19",
         "lightweight-charts": "^5.2.1",
-        "solid-js": "2.0.0-rc.14",
+        "solid-js": "2.0.0-rc.19",
         "tscache": "workspace:*",
       },
       "devDependencies": {
@@ -81,8 +81,8 @@
       "name": "@examples/solid-ssr",
       "dependencies": {
         "@examples/mock-backend": "workspace:*",
-        "@solidjs/web": "2.0.0-rc.14",
-        "solid-js": "2.0.0-rc.14",
+        "@solidjs/web": "2.0.0-rc.19",
+        "solid-js": "2.0.0-rc.19",
         "tscache": "workspace:*",
         "uplot": "^1.6.32",
       },
@@ -95,8 +95,8 @@
       "name": "@examples/solid-uplot",
       "dependencies": {
         "@examples/mock-backend": "workspace:*",
-        "@solidjs/web": "2.0.0-rc.14",
-        "solid-js": "2.0.0-rc.14",
+        "@solidjs/web": "2.0.0-rc.19",
+        "solid-js": "2.0.0-rc.19",
         "tscache": "workspace:*",
         "uplot": "^1.6.32",
       },
@@ -124,13 +124,13 @@
       "devDependencies": {
         "@angular/common": "^22.2.3",
         "@angular/core": "^22.2.3",
-        "@solidjs/web": "2.0.0-rc.14",
+        "@solidjs/web": "2.0.0-rc.19",
         "@types/react": "^19.3.0",
         "@types/react-dom": "^19.3.0",
         "react": "^19.3.1",
         "react-dom": "^19.3.1",
         "rxjs": "^7.8.2",
-        "solid-js": "2.0.0-rc.14",
+        "solid-js": "2.0.0-rc.19",
         "svelte": "^5.57.2",
         "vue": "^3.5.44",
       },
@@ -183,9 +183,9 @@
       "dependencies": {
         "@examples/mock-backend": "workspace:*",
         "@reference/shared": "workspace:*",
-        "@solidjs/web": "2.0.0-rc.14",
+        "@solidjs/web": "2.0.0-rc.19",
         "@tscache/integrations": "workspace:*",
-        "solid-js": "2.0.0-rc.14",
+        "solid-js": "2.0.0-rc.19",
         "tscache": "workspace:*",
       },
       "devDependencies": {
@@ -560,11 +560,11 @@
 
     "@solidjs/compiler-win32-x64-msvc": ["@solidjs/compiler-win32-x64-msvc@2.0.0-rc.14", "", { "os": "win32", "cpu": "x64" }, "sha512-JosTalJd6Pgb8mjNgPCEauQSOi647Vlm2mS0qvO3hYLvzcrODmrYsHIY1/DqbI1FxQdc9vUOKJ5zCHvhjlScuA=="],
 
-    "@solidjs/signals": ["@solidjs/signals@2.0.0-rc.14", "", {}, "sha512-s3v1wpPcX3wfNO0WUERrPrXS+qqJ4ylzH9QTIRKqrgcMVeLEOXgFa3hZrhEoVTp+lVAgido2NH6GCI79twe2fg=="],
+    "@solidjs/signals": ["@solidjs/signals@2.0.0-rc.20", "", {}, "sha512-BIL5dKm0dAtPGsCEuLSNw60spDbmYG5QFK+aHUxPIgPLweA8IeJKd62DiqqqU/jqX0x39ty31GoP1n+ZINkrcg=="],
 
     "@solidjs/vite-plugin": ["@solidjs/vite-plugin@3.0.0-next.49", "", { "dependencies": { "@ampproject/remapping": "^2.3.0", "@babel/core": "^7.23.3", "@solidjs/babel-plugin": "^2.0.0-rc.14", "@solidjs/compiler": "^2.0.0-rc.14", "@types/babel__core": "^7.20.4", "merge-anything": "^5.1.7", "vitefu": "^1.0.4" }, "peerDependencies": { "@solidjs/start-devtools": "^1.0.0-next.2", "@solidjs/web": "^2.0.0-rc.14", "@testing-library/jest-dom": "^5.16.6 || ^5.17.0 || ^6.0.0 || ^7.0.0", "solid-js": "^2.0.0-rc.14", "vite": "^8.0.0 || ^9.0.0" }, "optionalPeers": ["@solidjs/start-devtools", "@testing-library/jest-dom"] }, "sha512-s50Tz24Nh061/lTSvG6VyVIAraQ4gYnnwjUCe2XfDAHY2jD85vYIckJiH1XV4ZnF4I79PaOsSoa7HhzZGO99+w=="],
 
-    "@solidjs/web": ["@solidjs/web@2.0.0-rc.14", "", { "dependencies": { "seroval": "~1.6.7", "seroval-plugins": "~1.6.7" }, "peerDependencies": { "solid-js": "^2.0.0-rc.14" } }, "sha512-MhHqUoVBdgAG7EZOANx7Y5SuCFH7sBxzt9uBSYLpJxE503tqoi7pX1UhV7PWxw4LvmPe1PZkdkSOZ8BLchZkhQ=="],
+    "@solidjs/web": ["@solidjs/web@2.0.0-rc.19", "", { "dependencies": { "seroval": "1.7.0", "seroval-plugins": "1.7.0" }, "peerDependencies": { "solid-js": "^2.0.0-rc.19" } }, "sha512-FTHxQ8aE+vSHWc1exWw2Y+Brb727I4hCiWi+Y0DURbaqCou8xjCTzn8uiPi7mwC1tqpKSWfkn1Iq1ya/Bl9vYQ=="],
 
     "@sveltejs/acorn-typescript": ["@sveltejs/acorn-typescript@1.0.13", "", { "peerDependencies": { "acorn": "^8.9.0" } }, "sha512-wgKggnhZVL9Bfx1OaKKTrYY9BFRk6C8UAkQNUcIv1+llzYrIqy+RZm5HPKzn0NpEBvTVhTqB4kQyllZywsRBRQ=="],
 
@@ -1158,9 +1158,9 @@
 
     "semver": ["semver@7.8.4", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-rUCObTnP32Q08R2uuIrt7r9PlEonuTmtuXYcW6s5kjdlj3xbnwe+21yXptAUYcMAABLkYYTtnmzb3w3EDZfueA=="],
 
-    "seroval": ["seroval@1.6.9", "", {}, "sha512-UeEzHwAK+yl0YLbsvROV1t5yMYEwZZ0CfKYxDvUgS2fO9Vxdf8djqVIB+OuVpuawRNPqw68LE1Du/GMsW2ZPqA=="],
+    "seroval": ["seroval@1.7.0", "", {}, "sha512-FU+LUkmDzWNsJ6oubZFN3dGPKny53DRhPJG6nftEaXDL8MIn19+kEE1Gvc+63Go+qPOwVUlKIdKhsu2HN6tksw=="],
 
-    "seroval-plugins": ["seroval-plugins@1.6.9", "", { "peerDependencies": { "seroval": "^1.0" } }, "sha512-kiDK/Tb8IWZ61WEU8pA2PDmAuw37gKph9Y77OZlD56mg0Y2g0Bg7gZ1HeHhs5d40w+nRoUq/wj08V26ilbez9g=="],
+    "seroval-plugins": ["seroval-plugins@1.7.0", "", { "peerDependencies": { "seroval": "^1.0" } }, "sha512-WM4rArfPtLZriTuxC5DBvNulEwAaRcjNe/dkMOEesOcuvXf5nEwKf5Bw3AT92WHohqcc45+57GdtsCuBTI0mjw=="],
 
     "shebang-command": ["shebang-command@2.0.0", "", { "dependencies": { "shebang-regex": "^3.0.0" } }, "sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA=="],
 
@@ -1174,7 +1174,7 @@
 
     "smol-toml": ["smol-toml@1.9.0", "", {}, "sha512-hpd+HLON7HdZXqYchMM/+LaTTbdK0AU3NngIJ4KVyWbY9bfQqdL9cD+4yf6dUoU2Ap4VsU0JkQi6FxAI1B2mXQ=="],
 
-    "solid-js": ["solid-js@2.0.0-rc.14", "", { "dependencies": { "@solidjs/signals": "^2.0.0-rc.14", "csstype": "^3.1.0", "seroval": "~1.6.7", "seroval-plugins": "~1.6.7" } }, "sha512-fmaqUHgbITf18Hedur6gPnaPE4GrdPgkTbLujHqM5Vl5jxWf9rxwFh6hZMXQs+Kg1pu8KYuOMfqnuSizFQ9I6Q=="],
+    "solid-js": ["solid-js@2.0.0-rc.19", "", { "dependencies": { "@solidjs/signals": "^2.0.0-rc.19", "csstype": "^3.1.0", "seroval": "1.7.0", "seroval-plugins": "1.7.0" } }, "sha512-tlA+rZT1n3XkuxW0sMIoRf/QpOa0H9N9ZDrZLQFueUkZp+hElG+EXWBojBYYi4lVBKV8l03RTNgv+lfVCYkp9w=="],
 
     "source-map-js": ["source-map-js@1.2.2", "", {}, "sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw=="],
 
