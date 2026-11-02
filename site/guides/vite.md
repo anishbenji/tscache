@@ -13,6 +13,9 @@ worker's persistence code is inlined into the worker file, and with `'es'` it is
 only when a cache persists ([Workers and fallback](/guides/workers#vite)). It applies to every worker
 the app builds: a worker of your own that you create from a `?worker&url` import must then be a
 module worker (`{ type: 'module' }`); a `?worker` constructor import sets that itself.
+The plugin does not set the format for you, since it would change your own workers too; instead,
+`vite build` with the format left at `'iife'` prints one warning that names this setting. The dev
+server never warns.
 
 For TypeScript, declare the import once:
 
