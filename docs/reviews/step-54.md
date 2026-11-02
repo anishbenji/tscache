@@ -80,3 +80,7 @@ After the pre-review fixes, `~/code/tscache-reports/bin/heavy-run.sh "child: ci 
 ### Pre-review 2 (Claude), not the gate
 
 A second Opus pre-reviewer read the branch at 8c4074c: no P0 or P1. It confirmed PR-1 to PR-3 fixed in code, TSDoc, architecture and guides; a real Vite 8.3.5 dev server calls `buildStart` with `mode === "dev"` and the plugin stays quiet; worker bundles never run the app's plugins, so they cannot repeat the warning. Its one nit (this file's sizes table and one bullet still showed the first version's numbers and hook) is fixed here. Its decision concern (no way to silence the warning for an app that keeps `'iife'` on purpose) is parked for the user as decision #18; this step ships without an opt-out.
+
+## Round 1 — reviewer verdict: merge
+
+Review of the branch at 1cae92c (`.reviews/step-54/round-1.md`), with the host `bun run ci` passing under the machine lock. No findings; the pre-review findings PR-1, PR-2 and PR-3 are confirmed fixed. Settled after one round. The opt-out question was decided by the user as decision #18, option A (no option; a documented customLogger filter follows as step 56).
