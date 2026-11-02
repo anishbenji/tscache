@@ -10,9 +10,9 @@
   "dependencies": {
     "@examples/mock-backend": "workspace:*",
     "@reference/shared": "workspace:*",
-    "@solidjs/web": "2.0.0-rc.19",
+    "@solidjs/web": "2.0.0-rc.20",
     "@tscache/integrations": "workspace:*",
-    "solid-js": "2.0.0-rc.19",
+    "solid-js": "2.0.0-rc.20",
     "tscache": "workspace:*"
   },
   "devDependencies": {

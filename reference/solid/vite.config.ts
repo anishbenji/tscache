@@ -7,6 +7,9 @@ import solid from "vite-plugin-solid";
 // Two pages: the client-only page at /, and the same page rendered on the
 // server at /ssr. The mock backend requires a token, as a real one would.
 export default defineConfig({
+  // An ES worker can code-split: the persistence code the worker loads with
+  // import() stays a chunk of its own instead of being inlined.
+  worker: { format: "es" },
   plugins: [
     solid({ ssr: true }),
     mockBackend({ auth: true, serviceToken: SERVICE_TOKEN }),

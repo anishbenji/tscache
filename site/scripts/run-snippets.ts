@@ -503,6 +503,10 @@ const RUNS: Record<string, Run> = {
       config.plugins?.[0]?.name === "tscache:fetcher-url",
       "the plugin is not configured",
     );
+    check(
+      config.worker?.format === "es",
+      "the worker is not built as an ES module",
+    );
   },
   async "snapshots-server.ts, snapshots-browser.ts, snapshots-page.ts"(logs) {
     const { createRenderer } = await load("snapshots-server.ts");
