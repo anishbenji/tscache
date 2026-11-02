@@ -40,7 +40,12 @@ export interface FetcherUrlPlugin {
   name: string;
   enforce: "pre";
   config(): { ssr: { noExternal: string[] } };
-  configResolved(config: { command: "build" | "serve"; base: string }): void;
+  configResolved(config: {
+    command: "build" | "serve";
+    base: string;
+    worker: { format: "es" | "iife" };
+    logger: { warn(message: string): void };
+  }): void;
   resolveId(
     this: Context,
     source: string,
@@ -59,6 +64,13 @@ export interface FetcherUrlPlugin {
 }
 
 const QUERY = "?fetcher";
+
+/**
+ * The build warning for an IIFE worker (step 54): it cannot code-split, so
+ * the worker's `import()` of its persistence code (§4.10.8) is inlined.
+ */
+const IIFE_WARNING =
+  "[tscache] Vite builds workers as IIFE ('iife', its default), which cannot code-split: the tscache worker's persistence code is inlined into the worker file, so every app downloads it, persisting or not. Set worker: { format: 'es' } in vite.config.ts to make it a chunk the worker loads only when a cache persists. See https://github.com/anishbenji/tscache/blob/main/site/guides/vite.md";
 /** A virtual id: the `\0` prefix keeps other plugins off it. */
 const PREFIX = "\0tscache-fetcher-url:";
 
@@ -81,12 +93,18 @@ const PREFIX = "\0tscache-fetcher-url:";
  * needs `import()` is built on its own instead (library mode or another
  * bundler; the worker setup guide) and passed by URL, without `?fetcher`.
  *
+ * A build whose worker format is `'iife'` (Vite's default) logs a warning
+ * once: the tscache worker cannot split its persistence code off then. The
+ * plugin never changes the format, which applies to every worker the app
+ * builds.
+ *
  * TypeScript needs the import's type once per project:
  * `declare module "*?fetcher" { const url: string; export default url; }`.
  */
 export function fetcherUrl(): FetcherUrlPlugin {
   let serve = false;
   let base = "/";
+  let warned = false;
   // Virtual ids carry a number, never the path: Vite puts an id into a URL
   // unencoded and decodes the request, so a `%` in a path would not match.
   const files: string[] = [];
@@ -102,6 +120,10 @@ export function fetcherUrl(): FetcherUrlPlugin {
     configResolved(config) {
       serve = config.command === "serve";
       base = config.base;
+      if (!serve && config.worker.format === "iife" && !warned) {
+        warned = true;
+        config.logger.warn(IIFE_WARNING);
+      }
     },
     async resolveId(source, importer) {
       if (!source.endsWith(QUERY)) return undefined;
