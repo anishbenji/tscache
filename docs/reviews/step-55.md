@@ -86,3 +86,7 @@ Before Codex round 1, an Opus pre-reviewer read the branch. No P0 or P1.
 | ---- | --- | ------------------------------------------------------------------------------------------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | PR-1 | P2  | The flake fix had no before/after flake-hunt counts, which `docs/testing.md` asks the step's review file to record | accepted | The director ran the hunt under the machine lock: 1 of 20 loaded runs failed before, 0 of 20 after ("Flake hunt, before and after") |
 | PR-2 | nit | The two sets of "run alone" timings for the old case read as one set                                               | accepted | Each set now says who measured it and when; the 5.3 s run is marked as a failure                                                    |
+
+## Round 1 — reviewer verdict: merge
+
+Review of the branch at 4b14fbb (`.reviews/step-55/round-1.md`), with the host `bun run ci` passing under the machine lock. No findings; the pre-review findings PR-1 and PR-2 are confirmed fixed. Settled after one round.
