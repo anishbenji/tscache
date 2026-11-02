@@ -6,11 +6,11 @@ Item 2 of the performance plan of 2026-10-30 (experiment E2): a put of a few bar
 
 ## Scope
 
-| Commit | What |
-|---|---|
+| Commit  | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | c00d225 | `test(put)`: `test/put-path-checks.test.ts` (9 tests), written before the code it guards and passing on the base. They pin, on both `SegmentStore.put` and `DenseSegment.mergeFrom`, what the field-name check must still reject: a schema field hidden behind a non-enumerable property, one that is only inherited, one given only under a symbol key, the right count of names with one wrong (`toString`); with and without an authority, each leaving the store and the segment unchanged. They also pin that a put keeps no array of its batch: one chunk and several, views at a nonzero offset into larger buffers, and a batch already in the store's dtypes |
-| 3c4bd09 | `perf(put)`: `SegmentStore` hands a chunk that is the whole batch to the segment as the batch's own arrays instead of building views (the segment copies what it is given, §4.2); `assertFields` checks the field names without building a `Set`: as many enumerable own names as the schema has, with every schema name among them (same rule, same messages); `assertAscending` loops by index instead of `for…of` |
-| 10a5871 | `perf(segment)`: an indexed loop instead of `for…of` in `DenseSegment.#write`, and an indexed fill instead of `Float64Array.from` in `presentPoints` (payload decoding) |
+| 3c4bd09 | `perf(put)`: `SegmentStore` hands a chunk that is the whole batch to the segment as the batch's own arrays instead of building views (the segment copies what it is given, §4.2); `assertFields` checks the field names without building a `Set`: as many enumerable own names as the schema has, with every schema name among them (same rule, same messages); `assertAscending` loops by index instead of `for…of`                                                                                                                                                                                                                                                  |
+| 10a5871 | `perf(segment)`: an indexed loop instead of `for…of` in `DenseSegment.#write`, and an indexed fill instead of `Float64Array.from` in `presentPoints` (payload decoding)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## Decisions
 
@@ -31,17 +31,17 @@ Item 2 of the performance plan of 2026-10-30 (experiment E2): a put of a few bar
 
 Head/base median of 20 paired rounds, with the 95 % interval. A/A controls: Bun 1.007 [0.995, 1.026], Chromium 0.989 [0.984, 0.998], both inside [0.95, 1.05].
 
-| Case | Bun base → head | Bun ratio | Chromium base → head | Chromium ratio |
-|---|---|---|---|---|
-| `put-page` | 629 → 571 µs | 0.911 [0.899, 0.916] | 168 → 127 µs | 0.758 [0.754, 0.762] |
-| `put-live-bar` | 2.1 → 1.4 µs | 0.660 [0.654, 0.666] | 3.4 → 2.6 µs | 0.758 [0.754, 0.762] |
-| `append-bars` | 52.5 → 28.3 ms | 0.537 [0.501, 0.552] | 77.5 → 45.3 ms | 0.585 [0.580, 0.590] |
-| `fill-month` | 5.75 → 5.25 ms | 0.916 [0.896, 0.939] | 2.06 → 1.68 ms | 0.816 [0.808, 0.823] |
-| `snapshot-roundtrip` | 20.7 → 19.3 ms | 0.940 [0.918, 0.950] | 27.5 → 25.5 ms | 0.923 [0.920, 0.929] |
-| `read-viewport` | 10.1 → 10.2 µs | 1.021 [0.995, 1.036] | 13.8 → 13.7 µs | 0.998 [0.979, 1.002] |
-| `read-viewport-sessions` | 2.9 → 2.9 µs | 1.012 [1.001, 1.028] | 5.8 → 5.7 µs | 0.985 [0.973, 1.000] |
-| `read-year` | 2.33 → 2.40 ms | 1.043 [0.991, 1.089] | 3.07 → 3.07 ms | 0.998 [0.994, 1.008] |
-| `read-transfer` | 15.2 → 15.0 µs | 0.988 [0.980, 1.019] | 19.5 → 19.5 µs | 1.003 [0.978, 1.007] |
+| Case                     | Bun base → head | Bun ratio            | Chromium base → head | Chromium ratio       |
+| ------------------------ | --------------- | -------------------- | -------------------- | -------------------- |
+| `put-page`               | 629 → 571 µs    | 0.911 [0.899, 0.916] | 168 → 127 µs         | 0.758 [0.754, 0.762] |
+| `put-live-bar`           | 2.1 → 1.4 µs    | 0.660 [0.654, 0.666] | 3.4 → 2.6 µs         | 0.758 [0.754, 0.762] |
+| `append-bars`            | 52.5 → 28.3 ms  | 0.537 [0.501, 0.552] | 77.5 → 45.3 ms       | 0.585 [0.580, 0.590] |
+| `fill-month`             | 5.75 → 5.25 ms  | 0.916 [0.896, 0.939] | 2.06 → 1.68 ms       | 0.816 [0.808, 0.823] |
+| `snapshot-roundtrip`     | 20.7 → 19.3 ms  | 0.940 [0.918, 0.950] | 27.5 → 25.5 ms       | 0.923 [0.920, 0.929] |
+| `read-viewport`          | 10.1 → 10.2 µs  | 1.021 [0.995, 1.036] | 13.8 → 13.7 µs       | 0.998 [0.979, 1.002] |
+| `read-viewport-sessions` | 2.9 → 2.9 µs    | 1.012 [1.001, 1.028] | 5.8 → 5.7 µs         | 0.985 [0.973, 1.000] |
+| `read-year`              | 2.33 → 2.40 ms  | 1.043 [0.991, 1.089] | 3.07 → 3.07 ms       | 0.998 [0.994, 1.008] |
+| `read-transfer`          | 15.2 → 15.0 µs  | 0.988 [0.980, 1.019] | 19.5 → 19.5 µs       | 1.003 [0.978, 1.007] |
 
 The put cases match the scratch experiment (plan §4: `append-bars` 0.538 Bun, 0.569 Chromium; `put-live-bar` 0.621 and 0.617, which also carried part of the read change of step 33). The read cases run code this step does not touch; the largest, Bun's `read-year` at 1.043, has an interval holding 1 and stays far below the gate's 1.10.
 

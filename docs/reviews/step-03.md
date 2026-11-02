@@ -12,12 +12,12 @@ Step ③ of the commit plan: `grid.ts`, the single site for ms↔slot conversion
 
 ### Commits
 
-| Group | Commits |
-|---|---|
-| Contract | fce08d7 N9 and architecture §4.1 · 6fe0d2e exact alignment and range ownership |
-| Code with contract tests | d361ff0 grid · b580165 coverage index |
-| Review fixes | df5827e exact `msOf` · 64fd28a safe-integer domain · 4be7fa2 non-number endpoints |
-| Triage | fab5cac, d75f623, 92acf06, this file |
+| Group                    | Commits                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| Contract                 | fce08d7 N9 and architecture §4.1 · 6fe0d2e exact alignment and range ownership    |
+| Code with contract tests | d361ff0 grid · b580165 coverage index                                             |
+| Review fixes             | df5827e exact `msOf` · 64fd28a safe-integer domain · 4be7fa2 non-number endpoints |
+| Triage                   | fab5cac, d75f623, 92acf06, this file                                              |
 
 ### Decisions taken with the user (2026-10-03)
 
@@ -45,10 +45,10 @@ High. The contract tests were written by Codex from §4.1 before the code and ar
 
 No coverage tool is installed. By inspection:
 
-| Module | Covered | Not covered |
-|---|---|---|
-| `grid.ts` | Alignment and conversion on epoch and offset grids, negative slots, snap-outward fenceposts just below and above grid points, `start === end`, every rejection (non-finite, non-number, non-object, inverted, out of domain, snap past the bound), exactness against BigInt near ±2^53 | `toMs`/`msOf` do not validate their input (internal; callers pass slots produced by this module) |
-| `coverage.ts` | Merge of adjacent, touching, overlapping, nested and bridging ranges; one-slot gaps preserved; subtraction that splits, clips and removes; clipped covered/gaps partitions; malformed ranges on all four methods; snapshot copying and ownership; the safe-integer extremes; seeded property checks | Performance is unmeasured (bench files start at step ⑥ per `scripts/ci.sh`) |
+| Module        | Covered                                                                                                                                                                                                                                                                                             | Not covered                                                                                      |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `grid.ts`     | Alignment and conversion on epoch and offset grids, negative slots, snap-outward fenceposts just below and above grid points, `start === end`, every rejection (non-finite, non-number, non-object, inverted, out of domain, snap past the bound), exactness against BigInt near ±2^53              | `toMs`/`msOf` do not validate their input (internal; callers pass slots produced by this module) |
+| `coverage.ts` | Merge of adjacent, touching, overlapping, nested and bridging ranges; one-slot gaps preserved; subtraction that splits, clips and removes; clipped covered/gaps partitions; malformed ranges on all four methods; snapshot copying and ownership; the safe-integer extremes; seeded property checks | Performance is unmeasured (bench files start at step ⑥ per `scripts/ci.sh`)                      |
 
 The "one conversion site" rule holds by inspection: `coverage.ts` has no interval arithmetic. `engine/validate.ts` uses `% interval` only to normalize `alignmentOffset` in the config, which is not a ms↔slot conversion.
 
@@ -63,10 +63,10 @@ git switch main && git merge --no-ff feat/03-coverage-index
 
 Host `bun run ci` passed (199 tests).
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R1-1 | P0 | `msOf` rounds for negative slots near -2^53, so `toMs(snapOut(t))` excludes `t` | accepted | Reproduced: interval 3, offset 2, t = -(2^53 − 1) round-tripped to t + 1. The product `slot * interval` left exact range before the offset was added. The negative case is regrouped so no intermediate exceeds the result. Fixed in df5827e with round-trip tests against BigInt. |
-| R1-2 | P0 | `gaps` reports a covered slot at 2^53 as missing (`end + 1` rounds) | accepted | Reproduced. The user chose safe integers as the supported domain rather than patching each `± 1` site: `isAligned` is false outside it, `snapOut` rejects endpoints or outward snaps beyond ±(2^53 − 1), and `CoverageIndex` rejects unsafe slots. Architecture §4.1 records the domain. Fixed in 64fd28a with boundary tests at both extremes. |
+| #    | Sev | Finding                                                                         | Decision | Resolution                                                                                                                                                                                                                                                                                                                                      |
+| ---- | --- | ------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1-1 | P0  | `msOf` rounds for negative slots near -2^53, so `toMs(snapOut(t))` excludes `t` | accepted | Reproduced: interval 3, offset 2, t = -(2^53 − 1) round-tripped to t + 1. The product `slot * interval` left exact range before the offset was added. The negative case is regrouped so no intermediate exceeds the result. Fixed in df5827e with round-trip tests against BigInt.                                                              |
+| R1-2 | P0  | `gaps` reports a covered slot at 2^53 as missing (`end + 1` rounds)             | accepted | Reproduced. The user chose safe integers as the supported domain rather than patching each `± 1` site: `isAligned` is false outside it, `snapOut` rejects endpoints or outward snaps beyond ±(2^53 − 1), and `CoverageIndex` rejects unsafe slots. Architecture §4.1 records the domain. Fixed in 64fd28a with boundary tests at both extremes. |
 
 ## Round 2 — reviewer verdict: merge
 
@@ -76,9 +76,9 @@ Host `bun run ci` passed. No findings. The reviewer confirmed R1-1 and R1-2 fixe
 
 Focus from the workflow schedule (fenceposts and snap-outward, single conversion site, adjacent/touching/nested ranges) plus arithmetic exactness in the safe-integer domain. Host `bun run ci` passed. The reviewer found nothing in range operations, conversion placement or domain arithmetic, and reported 540,322 exact arithmetic comparisons and 6,000 coverage operations near the integer limits passing in its own probes.
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| A1-1 | P1 | `snapOut` coerces non-number endpoints (`"10"`, `null`, booleans) instead of rejecting | accepted | Reproduced: `Math.abs` coerced them, so `{start: "10", end: "10"}` snapped to real slots. Endpoints are now checked with `Number.isFinite`, which does not coerce, and a non-object range is rejected too (found while fixing). Fixed in 4be7fa2 with rejection tests. |
+| #    | Sev | Finding                                                                                | Decision | Resolution                                                                                                                                                                                                                                                             |
+| ---- | --- | -------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1-1 | P1  | `snapOut` coerces non-number endpoints (`"10"`, `null`, booleans) instead of rejecting | accepted | Reproduced: `Math.abs` coerced them, so `{start: "10", end: "10"}` snapped to real slots. Endpoints are now checked with `Number.isFinite`, which does not coerce, and a non-object range is rejected too (found while fixing). Fixed in 4be7fa2 with rejection tests. |
 
 ## Round 3 — reviewer verdict: merge
 

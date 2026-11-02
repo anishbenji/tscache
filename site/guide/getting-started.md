@@ -8,13 +8,13 @@ npm install tscache   # or: bun add tscache, pnpm add tscache
 
 The package is ESM-only and has no runtime dependencies. Its entries:
 
-| Import | For |
-|---|---|
-| `tscache` | the page: `createClient`, the types, the errors, `encodeSnapshot` and `decodeSnapshot` |
-| `tscache/worker` | the worker script; you serve it, you never import it into the page |
-| `tscache/fetcher` | your fetcher module: its types and `AuthInvalidError`, nothing else |
-| `tscache/engine` | the engine without a worker, for Node and tests |
-| `tscache/vite` | `fetcherUrl()`, the Vite plugin for the fetcher module (`vite` 8 is an optional peer) |
+| Import            | For                                                                                    |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `tscache`         | the page: `createClient`, the types, the errors, `encodeSnapshot` and `decodeSnapshot` |
+| `tscache/worker`  | the worker script; you serve it, you never import it into the page                     |
+| `tscache/fetcher` | your fetcher module: its types and `AuthInvalidError`, nothing else                    |
+| `tscache/engine`  | the engine without a worker, for Node and tests                                        |
+| `tscache/vite`    | `fetcherUrl()`, the Vite plugin for the fetcher module (`vite` 8 is an optional peer)  |
 
 ## 1. Serve the worker
 

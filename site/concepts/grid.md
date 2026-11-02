@@ -34,11 +34,11 @@ A `Range` is `{ start, end }` in milliseconds, **inclusive at both ends**. That 
 report a visible range (Lightweight Charts' `setVisibleRange`, uPlot's scale `min`/`max`), so a chart's
 range feeds `get` directly.
 
-| Call | Range on the grid? | What happens |
-|---|---|---|
-| `get`, `invalidate` | need not be | snapped **outward**: `start` down to the slot at or before it, `end` up to the slot at or after it; reading or forgetting a little more is safe |
-| `put`'s `options.range` | need not be | snapped **inward**: it claims the grid points inside it and no others, since claiming a slot nobody named would record a confirmed gap |
-| `put`'s timestamps | must be | a timestamp off the grid rejects the whole batch with `PutError` `'misaligned'` |
+| Call                    | Range on the grid? | What happens                                                                                                                                    |
+| ----------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get`, `invalidate`     | need not be        | snapped **outward**: `start` down to the slot at or before it, `end` up to the slot at or after it; reading or forgetting a little more is safe |
+| `put`'s `options.range` | need not be        | snapped **inward**: it claims the grid points inside it and no others, since claiming a slot nobody named would record a confirmed gap          |
+| `put`'s timestamps      | must be            | a timestamp off the grid rejects the whole batch with `PutError` `'misaligned'`                                                                 |
 
 `start === end` is legal: one slot when it is aligned, two when it is not (outward snap). A range whose
 endpoints are not finite numbers within ±(2^53 − 1), or with `start > end`, rejects with

@@ -106,7 +106,10 @@ import { createClient } from "tscache";
 import workerUrl from "tscache/worker?worker&url";
 import fetcherUrl from "./fetcher.ts?fetcher";
 
-const client = await createClient({ workerUrl, fetcher: { module: fetcherUrl } });
+const client = await createClient({
+  workerUrl,
+  fetcher: { module: fetcherUrl },
+});
 ```
 
 For TypeScript, declare the import once:
@@ -140,7 +143,11 @@ export default defineConfig({
   build: {
     outDir: "public/fetcher",
     // A fixed name: a string gets `.mjs` outside a `"type": "module"` package.
-    lib: { entry: "src/fetcher.ts", formats: ["es"], fileName: () => "fetcher.js" },
+    lib: {
+      entry: "src/fetcher.ts",
+      formats: ["es"],
+      fileName: () => "fetcher.js",
+    },
   },
 });
 ```
@@ -205,12 +212,17 @@ render, and the snapshot for the cache, encoded for JSON:
 // Server: one read gives the page's data and the cache's snapshot.
 const { snapshot, ...result } = await cache.get(range, { snapshot: true });
 const html = render(result); // your framework's renderer
-const json = JSON.stringify(encodeSnapshot(snapshot!)).replaceAll("<", "\\u003c");
+const json = JSON.stringify(encodeSnapshot(snapshot!)).replaceAll(
+  "<",
+  "\\u003c",
+);
 page.head += `<script id="tscache-snapshot" type="application/json">${json}</script>`;
 
 // Browser: before the first live read.
 const text = document.getElementById("tscache-snapshot")!.textContent!;
-const { applied, skipped } = await cache.hydrate(decodeSnapshot(JSON.parse(text)));
+const { applied, skipped } = await cache.hydrate(
+  decodeSnapshot(JSON.parse(text)),
+);
 ```
 
 `hydrate` writes only where the browser's cache neither covers anything nor

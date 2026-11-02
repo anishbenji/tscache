@@ -19,11 +19,11 @@ provisional point, that point is still uncovered and is fetched once more: it ma
 
 How the watermark moves:
 
-| Source | Direction |
-|---|---|
-| `CacheConfig.finalizedUntil` | the initial value, when the cache is created |
+| Source                                              | Direction                                                                                              |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `CacheConfig.finalizedUntil`                        | the initial value, when the cache is created                                                           |
 | a put's or a fetch response's `meta.finalizedUntil` | **forwards only**: a lower value is ignored, so responses that arrive out of order cannot pull it back |
-| `cache.setFinalizedUntil(t)` | sets it exactly, either way; moving it back withdraws coverage from there on |
+| `cache.setFinalizedUntil(t)`                        | sets it exactly, either way; moving it back withdraws coverage from there on                           |
 
 <<< @/snippets/cache.ts#watermark{ts}
 

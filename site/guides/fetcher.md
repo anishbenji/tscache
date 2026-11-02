@@ -45,10 +45,10 @@ one interval into it.
 
 ## Errors
 
-| You throw | The `get` sees | Then |
-|---|---|---|
-| `AuthInvalidError` | the range as `'auth-pending'` | every tab hears `authInvalid`; no fetch runs until `updateAuth` ([Credentials](/guides/auth)) |
-| anything else | the range as `'fetch-failed'`, with the error's `name` and `message` | nothing is cached; the next `get` tries again |
+| You throw          | The `get` sees                                                       | Then                                                                                          |
+| ------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `AuthInvalidError` | the range as `'auth-pending'`                                        | every tab hears `authInvalid`; no fetch runs until `updateAuth` ([Credentials](/guides/auth)) |
+| anything else      | the range as `'fetch-failed'`, with the error's `name` and `message` | nothing is cached; the next `get` tries again                                                 |
 
 Retries, backoff and timeouts are yours: tscache retries nothing on behalf of a `get` that already
 returned.
@@ -65,13 +65,13 @@ largest cost in a fetch after the network: every number is parsed from text, and
 copied into a typed array. A binary page of typed columns needs neither. Measured in Chromium 153 on an
 Apple Silicon Mac, for one 5,000-bar OHLCV page:
 
-| Decoding | Body | Time |
-|---|---:|---:|
-| Row JSON (`[{ t, o, h, l, c, v }]`), `JSON.parse` | 382 KB | 533 µs |
-| Columnar JSON through `Response.json()`, then `Float64Array.from` per column | 252 KB | 443 µs |
-| The same with `JSON.parse` on text already read | 252 KB | 321 µs |
-| Binary columns through `Response.arrayBuffer()`, viewed in place | 220 KB | 93 µs |
-| Binary columns already in memory: views only / copied into new arrays | 220 KB | 0.13 µs / 10.4 µs |
+| Decoding                                                                     |   Body |              Time |
+| ---------------------------------------------------------------------------- | -----: | ----------------: |
+| Row JSON (`[{ t, o, h, l, c, v }]`), `JSON.parse`                            | 382 KB |            533 µs |
+| Columnar JSON through `Response.json()`, then `Float64Array.from` per column | 252 KB |            443 µs |
+| The same with `JSON.parse` on text already read                              | 252 KB |            321 µs |
+| Binary columns through `Response.arrayBuffer()`, viewed in place             | 220 KB |             93 µs |
+| Binary columns already in memory: views only / copied into new arrays        | 220 KB | 0.13 µs / 10.4 µs |
 
 The decode runs in the worker, so it delays every fetch's data, in every tab the worker serves. The
 fetcher contract already accepts typed arrays (`FetchResponse` takes `Float64Array` timestamps and any
@@ -84,13 +84,13 @@ The examples define one, in [`examples/mock-backend/src/columns.ts`](https://git
 a short JSON header, then the timestamps and one column per field, each in its field's dtype. Every
 number is little-endian, the byte order of every platform a browser runs on.
 
-| Bytes | Holds |
-|---|---|
-| 4 | the magic `TSC` and the format version, 1 (`54 53 43 01`) |
-| 4 | `H`, the header's length, as a u32 |
-| `H` | the header, UTF-8 JSON: a `ColumnsHeader` |
-| to a multiple of 8 | zero padding |
-| `count` × 8 | the timestamps, as f64 |
+| Bytes                            | Holds                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------- |
+| 4                                | the magic `TSC` and the format version, 1 (`54 53 43 01`)                 |
+| 4                                | `H`, the header's length, as a u32                                        |
+| `H`                              | the header, UTF-8 JSON: a `ColumnsHeader`                                 |
+| to a multiple of 8               | zero padding                                                              |
+| `count` × 8                      | the timestamps, as f64                                                    |
 | per field, in the header's order | zero padding to a multiple of 8, then `count` values of the field's dtype |
 
 <<< ../../examples/mock-backend/src/columns.ts#format{ts}
@@ -130,10 +130,10 @@ The fetcher therefore joins in two steps. It normalizes each page as it arrives 
 `fromJson`), so that every column is either a typed array of a known dtype or a list of JSON numbers,
 then joins the normalized pages (`joinPages`) by one rule:
 
-| The pages hold | Joined as |
-|---|---|
-| one dtype throughout (columns bodies) | that dtype |
-| JSON numbers throughout | `number[]` |
+| The pages hold                                                  | Joined as                                                                                 |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| one dtype throughout (columns bodies)                           | that dtype                                                                                |
+| JSON numbers throughout                                         | `number[]`                                                                                |
 | anything else: columns and JSON, or columns of different dtypes | `Float64Array`, when every dtype involved is exact in float64; otherwise a `ColumnsError` |
 
 Nothing is narrowed or rounded. Joining into the first page's array instead would convert silently: a

@@ -6,17 +6,17 @@ Outside CI, Playwright reuses a server it finds on its port (`reuseExistingServe
 
 ## Scope
 
-| Commit | What |
-|---|---|
+| Commit  | What                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | f0a5736 | `chore(e2e)`: `portOffset()` in `e2e/examples/apps.ts`: a hash of the checkout's path picks an offset in steps of 1000, below the ephemeral range; `E2E_PORT_OFFSET` overrides it, CI uses none. `appPort()`, `serverPort`, and `appUrl()` carry it; `playwright.config.ts` passes `E2E_PORT` to `scripts/e2e-server.ts`. `e2e/tsconfig.json` gets Bun's type definitions for the Node side |
-| 64b5135 | `chore(e2e)`: hashed offsets are never 0, which CI and a checkout without offsets use; an empty `E2E_PORT_OFFSET` counts as unset |
+| 64b5135 | `chore(e2e)`: hashed offsets are never 0, which CI and a checkout without offsets use; an empty `E2E_PORT_OFFSET` counts as unset                                                                                                                                                                                                                                                           |
 
 ## Decisions made in the step
 
-| # | Decision | Why | Alternatives |
-|---|---|---|---|
-| D1 | Offset from a hash of the checkout's path, 1 to 39 thousand | Automatic: an agent starting a worktree need not remember a variable. Below 49152 for every port (the highest is 5203 + 39 000). One pair of checkouts in 39 still collides | An explicit variable only; `reuseExistingServer: false` (a second run then fails on the busy port instead of sharing it, and local reruns lose the reuse) |
-| D2 | Bun's type definitions for `e2e/`, as for the scripts | The specs' Node side needs `process` and `node:crypto`; `@types/node` is not a direct dependency | Computing the offset in `playwright.config.ts` and passing it to the workers through the environment (the specs still read `process.env`) |
+| #   | Decision                                                    | Why                                                                                                                                                                         | Alternatives                                                                                                                                              |
+| --- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Offset from a hash of the checkout's path, 1 to 39 thousand | Automatic: an agent starting a worktree need not remember a variable. Below 49152 for every port (the highest is 5203 + 39 000). One pair of checkouts in 39 still collides | An explicit variable only; `reuseExistingServer: false` (a second run then fails on the busy port instead of sharing it, and local reruns lose the reuse) |
+| D2  | Bun's type definitions for `e2e/`, as for the scripts       | The specs' Node side needs `process` and `node:crypto`; `@types/node` is not a direct dependency                                                                            | Computing the offset in `playwright.config.ts` and passing it to the workers through the environment (the specs still read `process.env`)                 |
 
 ## Verification
 
@@ -27,9 +27,9 @@ Outside CI, Playwright reuses a server it finds on its port (`reuseExistingServe
 
 ## Round 1 — reviewer verdict: merge after fixes
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R1-1 | P1 | No test covers the offset's CI precedence, override bounds, invalid values, empty or unset values, or nonzero hashes; a regression to 0 would pass CI, which uses 0 | Accept. Valid: `portOffset` had no unit test | `e2e/examples/apps.test.ts` (run by Vitest; Playwright's projects skip it) covers each case. Writing it found a bug: `Number()` read `" "` as 0, and `"0x1"` and `"1e1"` as numbers, so a blank or hex override was accepted; the override is now digits only. A test that two sample paths get different offsets was dropped: the hash can collide by design (one pair in 39, D1), and those two did |
+| #    | Sev | Finding                                                                                                                                                             | Decision                                     | Resolution                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1-1 | P1  | No test covers the offset's CI precedence, override bounds, invalid values, empty or unset values, or nonzero hashes; a regression to 0 would pass CI, which uses 0 | Accept. Valid: `portOffset` had no unit test | `e2e/examples/apps.test.ts` (run by Vitest; Playwright's projects skip it) covers each case. Writing it found a bug: `Number()` read `" "` as 0, and `"0x1"` and `"1e1"` as numbers, so a blank or hex override was accepted; the override is now digits only. A test that two sample paths get different offsets was dropped: the hash can collide by design (one pair in 39, D1), and those two did |
 
 ## Round 2 — reviewer verdict: merge
 

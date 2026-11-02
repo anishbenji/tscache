@@ -11,7 +11,9 @@ previous answer while the next one loads; `pending`; and `error`, set when
 the client cannot connect or a read fails on a live client.
 
 ```ts
-createApp(App).use(createTscache(() => createClient(options))).mount("#app");
+createApp(App)
+  .use(createTscache(() => createClient(options)))
+  .mount("#app");
 
 // In a component's setup:
 const visible = shallowRef(lastDays(90, Date.now()));

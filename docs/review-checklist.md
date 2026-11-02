@@ -4,12 +4,12 @@ Every review of a step branch checks the diff against this list. Section referen
 
 ## Severity
 
-| Level | Meaning |
-|---|---|
-| **P0** | Violates a locked decision or invariant below, corrupts or loses data, returns wrong results, or ships out-of-scope behaviour. Blocks merge. |
-| **P1** | Bug with a concrete failure scenario, or a specified behaviour with no test. Fix before merge. |
-| **P2** | Maintainability or clarity problem with real cost (oversized function, misleading name, missing TSDoc on public API). |
-| **nit** | Optional. Report only if it breaks a rule in `AGENTS.md`. |
+| Level   | Meaning                                                                                                                                      |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **P0**  | Violates a locked decision or invariant below, corrupts or loses data, returns wrong results, or ships out-of-scope behaviour. Blocks merge. |
+| **P1**  | Bug with a concrete failure scenario, or a specified behaviour with no test. Fix before merge.                                               |
+| **P2**  | Maintainability or clarity problem with real cost (oversized function, misleading name, missing TSDoc on public API).                        |
+| **nit** | Optional. Report only if it breaks a rule in `AGENTS.md`.                                                                                    |
 
 ## 1. Locked decisions and scope
 
@@ -86,7 +86,7 @@ Every review of a step branch checks the diff against this list. Section referen
 ## 11. Toolchain and code quality (AGENTS.md)
 
 - [ ] No `bun test`, no tsup, ESM-only.
-- [ ] Exported declarations satisfy `isolatedDeclarations` (explicit types on exports); public API has TSDoc explaining *why*.
+- [ ] Exported declarations satisfy `isolatedDeclarations` (explicit types on exports); public API has TSDoc explaining _why_.
 - [ ] Small functions and modules; no new dependency without recorded user approval.
 - [ ] Documentation debts (S§8) touched by this step ship with it.
 

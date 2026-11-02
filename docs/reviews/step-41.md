@@ -6,13 +6,13 @@ Item 8 of the performance plan of 2026-10-30: each live tick handed the chart a 
 
 ## Scope
 
-| Commit | What |
-|---|---|
-| b60c568 | `feat(reference)`: `appendedFrom(before, after)` in `reference/shared/src/chart/view.ts`, the pure decision. It returns the index of the first bar to draw (the last drawn bar when that bar, the forming one, changed; the drawn count when only new bars did), or `undefined` when every bar must be drawn again. Tests: `reference/shared/test/appended.test.ts` (15), written first |
-| 6d3de70 | `perf(reference)`: the Lightweight Charts view draws by `update()` when `appendedFrom` allows it; the uPlot view keeps its one `setData` (below). Both count their draws of each kind on their element (`countDraw`: `data-draws-full`, `data-draws-appended`). E2E: three tests per client in `e2e/reference/clients.spec.ts` |
-| 3ad5b92 | `reference/README.md` (the chart bullet), and this file |
-| e3d81c1 | `test(reference)`, R1-1: each chart view against a stand-in for its library, `reference/shared/test/lightweight-view.test.ts` (7) and `uplot-view.test.ts` (4); the test answers move to `test/answers.ts` |
-| (this commit) | Round 1 triage |
+| Commit        | What                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| b60c568       | `feat(reference)`: `appendedFrom(before, after)` in `reference/shared/src/chart/view.ts`, the pure decision. It returns the index of the first bar to draw (the last drawn bar when that bar, the forming one, changed; the drawn count when only new bars did), or `undefined` when every bar must be drawn again. Tests: `reference/shared/test/appended.test.ts` (15), written first |
+| 6d3de70       | `perf(reference)`: the Lightweight Charts view draws by `update()` when `appendedFrom` allows it; the uPlot view keeps its one `setData` (below). Both count their draws of each kind on their element (`countDraw`: `data-draws-full`, `data-draws-appended`). E2E: three tests per client in `e2e/reference/clients.spec.ts`                                                          |
+| 3ad5b92       | `reference/README.md` (the chart bullet), and this file                                                                                                                                                                                                                                                                                                                                 |
+| e3d81c1       | `test(reference)`, R1-1: each chart view against a stand-in for its library, `reference/shared/test/lightweight-view.test.ts` (7) and `uplot-view.test.ts` (4); the test answers move to `test/answers.ts`                                                                                                                                                                              |
+| (this commit) | Round 1 triage                                                                                                                                                                                                                                                                                                                                                                          |
 
 The branch was rebased onto `main` at `15fa506` after the first three commits; their measurements below name the hashes they were taken at, before the rebase (`e0bcf85`, `fcfc1be`, `22d381c`).
 
@@ -49,12 +49,12 @@ On fcfc1be the whole reference suite passed, the 53 existing tests unchanged and
 ~/code/tscache-reports/bin/heavy-run.sh "live child: trace" bash -c 'T=.reviews/step-41/trace-live.ts; for r in 1 2 3; do bun $T /tmp/tscache-live41-base 24141 30 lightweight; bun $T $PWD 24142 30 lightweight; done; bun $T /tmp/tscache-live41-base 24141 30 uplot; bun $T $PWD 24142 30 uplot'
 ```
 
-| Chart | Build | Scripting per tick (ms), three runs | Median | Main-thread tasks per tick (ms) | Median |
-|---|---|---|---:|---|---:|
-| Lightweight Charts | base | 4.77, 5.09, 5.42 | 5.09 | 9.61, 10.17, 10.69 | 10.17 |
-| Lightweight Charts | head | 4.29, 4.04, 4.22 | 4.22 | 9.73, 9.47, 9.13 | 9.47 |
-| uPlot | base | 1.44 | | 24.36 | |
-| uPlot | head | 1.51 | | 24.91 | |
+| Chart              | Build | Scripting per tick (ms), three runs | Median | Main-thread tasks per tick (ms) | Median |
+| ------------------ | ----- | ----------------------------------- | -----: | ------------------------------- | -----: |
+| Lightweight Charts | base  | 4.77, 5.09, 5.42                    |   5.09 | 9.61, 10.17, 10.69              |  10.17 |
+| Lightweight Charts | head  | 4.29, 4.04, 4.22                    |   4.22 | 9.73, 9.47, 9.13                |   9.47 |
+| uPlot              | base  | 1.44                                |        | 24.36                           |        |
+| uPlot              | head  | 1.51                                |        | 24.91                           |        |
 
 On Lightweight Charts a tick costs about 0.9 ms (17 %) less script and 0.7 ms (7 %) less main-thread time; every head run is below every base run. The gain is in the handler that draws the answer: an earlier pass whose filter left out `v8.callFunction` (so counted mostly the chart's animation-frame render) showed no difference (base 2.83 and 3.32 ms, head 3.41 and 3.43 ms), since Lightweight Charts still repaints its visible canvas each frame. uPlot is unchanged, as expected. Its main-thread tasks are mostly time the trace does not attribute to any child event; that is outside this step.
 
@@ -208,7 +208,9 @@ try {
   };
   // The page's main thread: the CrRendererMain with the most events.
   const mains = traceEvents
-    .filter((e) => e.name === "thread_name" && e.args?.name === "CrRendererMain")
+    .filter(
+      (e) => e.name === "thread_name" && e.args?.name === "CrRendererMain",
+    )
     .map((e) => `${e.pid}:${e.tid}`);
   const count = (key: string) =>
     traceEvents.filter((e) => `${e.pid}:${e.tid}` === key).length;
@@ -218,9 +220,12 @@ try {
   );
   if (process.env.DUMP) {
     const by = new Map<string, number>();
-    for (const e of onMain) by.set(e.name, (by.get(e.name) ?? 0) + (e.dur ?? 0));
+    for (const e of onMain)
+      by.set(e.name, (by.get(e.name) ?? 0) + (e.dur ?? 0));
     const top = [...by].sort((a, b) => b[1] - a[1]).slice(0, 25);
-    console.error(top.map(([n, d]) => `${n} ${(d / 1000).toFixed(1)}`).join("\n"));
+    console.error(
+      top.map(([n, d]) => `${n} ${(d / 1000).toFixed(1)}`).join("\n"),
+    );
   }
   const scripting = union(onMain.filter((e) => SCRIPTING.has(e.name)));
   const tasks = union(onMain.filter((e) => e.name === "RunTask"));
@@ -246,9 +251,9 @@ try {
 
 ## Round 1 — reviewer verdict: merge after fixes
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R1-1 | P1 | The new e2e tests do not show that the series get the bars: removing both `series.update()` loops leaves them passing, since the draw counters record `appendedFrom`'s verdict and `nextDraw` watches the answer's time | accepted | fixed in e3d81c1 |
+| #    | Sev | Finding                                                                                                                                                                                                                 | Decision | Resolution       |
+| ---- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------- |
+| R1-1 | P1  | The new e2e tests do not show that the series get the bars: removing both `series.update()` loops leaves them passing, since the draw counters record `appendedFrom`'s verdict and `nextDraw` watches the answer's time | accepted | fixed in e3d81c1 |
 
 **R1-1, validated.** With both loops deleted from `lightweight.ts`, `~/code/tscache-reports/bin/heavy-run.sh "live child: r1 validate" env E2E_EXAMPLES=reference-vanilla,reference-react,reference-solid bunx playwright test e2e/reference --project examples -g "step 41"` passed 9 of 9. The finding holds: the counters prove the decision is wired, not the drawing.
 

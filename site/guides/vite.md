@@ -17,11 +17,11 @@ Vite at runtime.
 
 ## What it does
 
-| Where | `?fetcher` gives |
-|---|---|
-| a client build | the URL of a chunk of its own, with its signature preserved |
-| the dev server, in the browser | the URL of the module, served from source |
-| a server build | a `file:` URL of the chunk, which server code can `import()` |
+| Where                          | `?fetcher` gives                                              |
+| ------------------------------ | ------------------------------------------------------------- |
+| a client build                 | the URL of a chunk of its own, with its signature preserved   |
+| the dev server, in the browser | the URL of the module, served from source                     |
+| a server build                 | a `file:` URL of the chunk, which server code can `import()`  |
 | the dev server, in server code | the file's absolute path, which Vite's module runner resolves |
 
 It also adds `tscache` to `ssr.noExternal`, so in dev the library's `import()` of the fetcher goes

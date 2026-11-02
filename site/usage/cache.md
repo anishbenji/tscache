@@ -7,18 +7,18 @@ with the cache id filled in; `cache.id` is that id.
 
 <<< @/snippets/cache.ts#config{ts}
 
-| Field | Default | Meaning |
-|---|---|---|
-| `id` | required | any non-empty string; tabs that use the same id share the cache |
-| `interval` | required | milliseconds between grid points ([the grid](/concepts/grid)) |
-| `alignmentOffset` | `0` | shifts the grid; normalised into `[0, interval)` |
-| `fields` | required | field name → dtype, at least one ([dtypes](/concepts/segments)) |
-| `gapSplitK` | `4` | segments split where more than K slots in a row are empty |
-| `segmentSlotCap` | `32768` | most slots per segment, at most 2^31 − 1 |
-| `version` | none | dataset version; a different one reported by a put clears the cache |
-| `finalizedUntil` | none | initial watermark; points at or after it are provisional |
-| `warnOnOverlapDiff` | `false` | report writes that change held values ([events](/concepts/events)) |
-| `persist` | `false` | keep the cache in IndexedDB across sessions, in the SharedWorker hosting only ([Persistence](/guides/persistence)) |
+| Field               | Default  | Meaning                                                                                                            |
+| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `id`                | required | any non-empty string; tabs that use the same id share the cache                                                    |
+| `interval`          | required | milliseconds between grid points ([the grid](/concepts/grid))                                                      |
+| `alignmentOffset`   | `0`      | shifts the grid; normalised into `[0, interval)`                                                                   |
+| `fields`            | required | field name → dtype, at least one ([dtypes](/concepts/segments))                                                    |
+| `gapSplitK`         | `4`      | segments split where more than K slots in a row are empty                                                          |
+| `segmentSlotCap`    | `32768`  | most slots per segment, at most 2^31 − 1                                                                           |
+| `version`           | none     | dataset version; a different one reported by a put clears the cache                                                |
+| `finalizedUntil`    | none     | initial watermark; points at or after it are provisional                                                           |
+| `warnOnOverlapDiff` | `false`  | report writes that change held values ([events](/concepts/events))                                                 |
+| `persist`           | `false`  | keep the cache in IndexedDB across sessions, in the SharedWorker hosting only ([Persistence](/guides/persistence)) |
 
 An invalid config rejects with `ConfigError` naming the field.
 
@@ -30,10 +30,10 @@ Resolves with every present point in the range, its `coverage` and its `misses`
 ([Coverage and gaps](/concepts/coverage)). With a fetcher, it first awaits the fetches for what the
 cache lacks.
 
-| Option | Default | Meaning |
-|---|---|---|
-| `cacheOnly` | `false` | do not fetch; answer from the cache as it is |
-| `snapshot` | `false` | also return a `snapshot` of the range, from the same state ([Snapshots](/usage/snapshots)) |
+| Option      | Default | Meaning                                                                                    |
+| ----------- | ------- | ------------------------------------------------------------------------------------------ |
+| `cacheOnly` | `false` | do not fetch; answer from the cache as it is                                               |
+| `snapshot`  | `false` | also return a `snapshot` of the range, from the same state ([Snapshots](/usage/snapshots)) |
 
 ## put(batch, options?)
 

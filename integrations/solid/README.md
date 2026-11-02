@@ -18,7 +18,11 @@ function Chart() {
   const [range, setRange] = createSignal(lastDays(90, Date.now()));
   const answer = createSeries(useContext(ConnectionContext), candles, range);
   // The chart library takes answer().result and calls setRange on scroll.
-  return <p aria-busy={isPending(answer) ? "true" : undefined}>{describe(answer().result)}</p>;
+  return (
+    <p aria-busy={isPending(answer) ? "true" : undefined}>
+      {describe(answer().result)}
+    </p>
+  );
 }
 ```
 
