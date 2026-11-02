@@ -12,13 +12,13 @@ serves agrees with every other, and history never changes until the
 version does. That matches the use tscache is built for, data that is
 final once published, while still exercising its other paths.
 
-| Dataset | Fields | Behaviour |
-|---|---|---|
-| `candles` | `open`, `high`, `low`, `close` (f64), `volume` (u32) | Bars only in weekday sessions (13:30 to 20:00 UTC); daily bars on weekdays. The bar forming now is provisional |
-| `crypto` | as `candles` | Bars around the clock, every day; for the live feeds |
-| `metrics` | `cpu`, `p95` (f32), `requests` (u32) | A point in every slot. Request counts for the last 30 seconds are still arriving, so those points are provisional |
-| `sensor` | `temperature`, `humidity` (f32), `battery` (u8) | Drops about 2 % of readings and goes offline for 15-minute blocks |
-| `events` | `count` (u16) | Mostly empty slots, with bursts |
+| Dataset   | Fields                                               | Behaviour                                                                                                         |
+| --------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `candles` | `open`, `high`, `low`, `close` (f64), `volume` (u32) | Bars only in weekday sessions (13:30 to 20:00 UTC); daily bars on weekdays. The bar forming now is provisional    |
+| `crypto`  | as `candles`                                         | Bars around the clock, every day; for the live feeds                                                              |
+| `metrics` | `cpu`, `p95` (f32), `requests` (u32)                 | A point in every slot. Request counts for the last 30 seconds are still arriving, so those points are provisional |
+| `sensor`  | `temperature`, `humidity` (f32), `battery` (u8)      | Drops about 2 % of readings and goes offline for 15-minute blocks                                                 |
+| `events`  | `count` (u16)                                        | Mostly empty slots, with bursts                                                                                   |
 
 The field specs are exported (`@examples/mock-backend/datasets`), so an
 example's cache config uses the same dtypes the backend serves.
@@ -68,14 +68,14 @@ by `ws` on the dev and preview servers' HTTP server.
 `src/columns.ts` defines a binary page format and its encoder and decoder,
 for a fetcher that should not parse JSON. Every number is little-endian:
 
-| Bytes | Holds |
-|---|---|
-| 4 | the magic `TSC` and the format version, 1 (`54 53 43 01`) |
-| 4 | `H`, the header's length, as a u32 |
-| `H` | the header, UTF-8 JSON: `{ count, fields: [{ name, dtype }], ...members }`, where the members are the JSON answer's other members (`meta`, `next`) |
-| to a multiple of 8 | zero padding |
-| `count` × 8 | the timestamps, as f64 |
-| per field | zero padding to a multiple of 8, then `count` values of the field's dtype |
+| Bytes              | Holds                                                                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4                  | the magic `TSC` and the format version, 1 (`54 53 43 01`)                                                                                          |
+| 4                  | `H`, the header's length, as a u32                                                                                                                 |
+| `H`                | the header, UTF-8 JSON: `{ count, fields: [{ name, dtype }], ...members }`, where the members are the JSON answer's other members (`meta`, `next`) |
+| to a multiple of 8 | zero padding                                                                                                                                       |
+| `count` × 8        | the timestamps, as f64                                                                                                                             |
+| per field          | zero padding to a multiple of 8, then `count` values of the field's dtype                                                                          |
 
 The body ends with the last column. Because every column starts on an
 8-byte boundary, `decodeColumns` returns typed-array views over the one

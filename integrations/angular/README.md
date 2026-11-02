@@ -11,13 +11,24 @@ next one loads, and sets `error()` when the client cannot connect or a read
 fails on a live client.
 
 ```ts
-bootstrapApplication(CandlesChart, clientConfig(options));          // client-only
-bootstrapApplication(CandlesChart, mergeApplicationConfig(browserConfig(options),
-  { providers: [provideClientHydration()] }));                       // hydrating
-const server = { providers: [provideServerRendering(), provideClientHydration(),
-  provideTscacheServer({ fetcherModule, origin })] };                // once per process
-renderApplication((context) => bootstrapApplication(CandlesChart, server, context),
-  { document, url, allowedHosts });                                  // per request
+bootstrapApplication(CandlesChart, clientConfig(options)); // client-only
+bootstrapApplication(
+  CandlesChart,
+  mergeApplicationConfig(browserConfig(options), {
+    providers: [provideClientHydration()],
+  }),
+); // hydrating
+const server = {
+  providers: [
+    provideServerRendering(),
+    provideClientHydration(),
+    provideTscacheServer({ fetcherModule, origin }),
+  ],
+}; // once per process
+renderApplication(
+  (context) => bootstrapApplication(CandlesChart, server, context),
+  { document, url, allowedHosts },
+); // per request
 ```
 
 `candles-chart.ts` is the component every variant renders, unchanged. Only

@@ -18,9 +18,17 @@ updates:
       interval: monthly
     commit-message:
       prefix: chore
-    # Patch and minor bumps arrive together; a major bump gets its own pull
-    # request, so it can be judged against its changelog on its own.
+    # A dependency joins the first group it matches, so the lockstep groups
+    # come first. React and react-dom must move together (react-dom's server
+    # build fails against an older react), as must Solid and its @solidjs/*
+    # packages; each pair arrives as one pull request at any update type.
+    # Other patch and minor bumps arrive together; a major bump gets its own
+    # pull request, so it can be judged against its changelog on its own.
     groups:
+      react:
+        patterns: ["react", "react-dom"]
+      solid:
+        patterns: ["solid-js", "@solidjs/*"]
       dev-dependencies:
         dependency-type: development
         update-types: ["minor", "patch"]

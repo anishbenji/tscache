@@ -5,14 +5,14 @@ event of that type, or with `cache.on(event, fn)`, which hears the cache- and re
 that cache only. Both return the unsubscribe function; `client.off(event, fn)` also works. Listeners run
 on the page; one that throws does not stop the others.
 
-| Event | Scope | Payload | When |
-|---|---|---|---|
-| `authInvalid` | client | `{ error: { name, message }, context }` | the fetcher threw `AuthInvalidError`; sent to every tab, with the fetcher context the refused fetch was issued with |
-| `modeFallback` | client | `{ from, to, reason }` | a hosting failed while connecting and the chain stepped down |
-| `workerLost` | client | `{ reason }` | the worker behind this client is gone; at most once per client, never after `dispose()` |
-| `cacheCleared` | cache | `{ cacheId, reason }` | the cache was emptied: `'manual'`, `'clear-all'` or `'version-mismatch'` |
-| `persistStopped` | cache | `{ cacheId, reason, error? }` | a persisted cache stopped persisting: `'unavailable'` or `'error'` (with the failure); it goes on in memory ([Persistence](/guides/persistence)) |
-| `mergeWarning` | request | `{ cacheId, requestId, range, fields }` | with `warnOnOverlapDiff`, a write changed values the cache already held outside the volatile region |
+| Event            | Scope   | Payload                                 | When                                                                                                                                             |
+| ---------------- | ------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `authInvalid`    | client  | `{ error: { name, message }, context }` | the fetcher threw `AuthInvalidError`; sent to every tab, with the fetcher context the refused fetch was issued with                              |
+| `modeFallback`   | client  | `{ from, to, reason }`                  | a hosting failed while connecting and the chain stepped down                                                                                     |
+| `workerLost`     | client  | `{ reason }`                            | the worker behind this client is gone; at most once per client, never after `dispose()`                                                          |
+| `cacheCleared`   | cache   | `{ cacheId, reason }`                   | the cache was emptied: `'manual'`, `'clear-all'` or `'version-mismatch'`                                                                         |
+| `persistStopped` | cache   | `{ cacheId, reason, error? }`           | a persisted cache stopped persisting: `'unavailable'` or `'error'` (with the failure); it goes on in memory ([Persistence](/guides/persistence)) |
+| `mergeWarning`   | request | `{ cacheId, requestId, range, fields }` | with `warnOnOverlapDiff`, a write changed values the cache already held outside the volatile region                                              |
 
 ## Request ids
 

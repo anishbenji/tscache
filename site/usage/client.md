@@ -7,13 +7,13 @@ handshake passed. Create one per page, at startup, and keep it for the page's li
 
 ## Options
 
-| Option | Default | Meaning |
-|---|---|---|
-| `workerUrl` | none | the `tscache/worker` script as your setup serves it ([Workers](/guides/workers)); required unless `mode` is `'in-process'`, else `ConfigError` |
-| `mode` | `'shared'` | where the fallback chain starts: `'shared'` → `'dedicated'` → `'in-process'` |
-| `handshakeTimeoutMs` | `5000` | how long a hosting may take to say hello before the chain steps down |
-| `fetcher.module` | none | URL of your fetcher module, which the worker `import()`s ([Writing a fetcher](/guides/fetcher)) |
-| `fetcher.context` | none | structured-cloneable material handed to every fetch: a token, an origin |
+| Option               | Default    | Meaning                                                                                                                                        |
+| -------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workerUrl`          | none       | the `tscache/worker` script as your setup serves it ([Workers](/guides/workers)); required unless `mode` is `'in-process'`, else `ConfigError` |
+| `mode`               | `'shared'` | where the fallback chain starts: `'shared'` → `'dedicated'` → `'in-process'`                                                                   |
+| `handshakeTimeoutMs` | `5000`     | how long a hosting may take to say hello before the chain steps down                                                                           |
+| `fetcher.module`     | none       | URL of your fetcher module, which the worker `import()`s ([Writing a fetcher](/guides/fetcher))                                                |
+| `fetcher.context`    | none       | structured-cloneable material handed to every fetch: a token, an origin                                                                        |
 
 Without `fetcher`, the cache holds only what you `put`.
 

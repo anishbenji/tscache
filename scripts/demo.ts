@@ -125,7 +125,7 @@ async function start(): Promise<void> {
 }
 
 /** The error and its code (EADDRINUSE for a port in use), on one line. */
-function describe(error: unknown): string {
+function describeError(error: unknown): string {
   const code = (error as { code?: unknown } | undefined)?.code;
   return typeof code === "string" ? `${error} (${code})` : String(error);
 }
@@ -135,7 +135,7 @@ try {
 } catch (error) {
   await shutdown(
     1,
-    `demo hub on port ${port} failed to start: ${describe(error)}`,
+    `demo hub on port ${port} failed to start: ${describeError(error)}`,
   );
 }
 console.log(`\ntscache demo hub: http://127.0.0.1:${port}/`);

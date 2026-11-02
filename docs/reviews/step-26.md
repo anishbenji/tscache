@@ -10,8 +10,8 @@ The Playwright test `e2e/reference/clients.spec.ts` "one tab polls, fetching onl
 
 ## Scope
 
-| Commit | What |
-|---|---|
+| Commit  | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | c68f5f3 | `fix(reference)`: `polling(everyMs, config)` computes the start of the bar forming now from the market's `interval` and `alignmentOffset`, and both the first `since` and each poll's end use it, so both ends of every span lie on the grid. `startSession` passes the market config. Unit test with fake timers across a minute boundary: fails before the fix (the spans end at 59 000, 61 000 and 63 000, between grid points), passes after. The e2e assertion is unchanged |
 
 ## Evidence

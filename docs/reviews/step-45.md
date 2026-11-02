@@ -6,8 +6,8 @@ Chore 43's calibration on main `89efd15` found Chromium meeting the gate's bar i
 
 ## Scope
 
-| Commit | What |
-|---|---|
+| Commit        | What                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------ |
 | (this commit) | Calibration log rows, verdict and the "Next" item in `docs/benchmarking.md`, and this file |
 
 No code, test or `gated.json` change: no Chromium case qualified.
@@ -23,10 +23,10 @@ No code, test or `gated.json` change: no Chromium case qualified.
 
 Dispatches of `bench-calibrate.yml` on GitHub's `ubuntu-24.04` runner, branch at `cd4f892` (main after #61), setup `default` (100 ms batches, 30 rounds), 20 jobs each; both runs concluded `success`. Tallies from `bun scripts/bench-calibration.ts <artifacts> <slowdown>` over the downloaded `calibration-*` artifacts; noisy controls read from each job's `<runtime>.json`.
 
-| Run | Slowdown | Bun | Chromium |
-|---|---|---|---|
-| 41126635817 | 0 | 19 quiet (1 noisy, job 8: control 1.044 [1.037, 1.055]); no case fired | 18 quiet (2 noisy: job 3, 0.986 [0.937, 1.017]; job 16, 1.013 [0.992, 1.055]); no case fired |
-| 41126649937 | 0.25 | 20 quiet: 20 in eight cases, 14 in `read-year` | 20 quiet: 20 in all nine cases |
+| Run         | Slowdown | Bun                                                                    | Chromium                                                                                     |
+| ----------- | -------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 41126635817 | 0        | 19 quiet (1 noisy, job 8: control 1.044 [1.037, 1.055]); no case fired | 18 quiet (2 noisy: job 3, 0.986 [0.937, 1.017]; job 16, 1.013 [0.992, 1.055]); no case fired |
+| 41126649937 | 0.25     | 20 quiet: 20 in eight cases, 14 in `read-year`                         | 20 quiet: 20 in all nine cases                                                               |
 
 Chromium's quiet count at slowdown 0 with the current default timing: 19 of 20 (chore 39, run 40995981693), 19 of 20 (chore 43, run 41077561504), 18 of 20 (this run).
 
@@ -41,6 +41,6 @@ None.
 
 ## Review rounds
 
-| Round | Verdict | Findings | Triage |
-|---|---|---|---|
-| 1 | merge | none | Settled after one round. The decision concern above (Chromium's bar of 19 of 20) is taken as recommended: the bar stays, and Chromium is calibrated again later. It is listed for the user with the `bench` required-check question. |
+| Round | Verdict | Findings | Triage                                                                                                                                                                                                                               |
+| ----- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1     | merge   | none     | Settled after one round. The decision concern above (Chromium's bar of 19 of 20) is taken as recommended: the bar stays, and Chromium is calibrated again later. It is listed for the user with the `bench` required-check question. |

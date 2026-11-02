@@ -30,17 +30,17 @@ the RPC layer runs on every path.
 
 ## Layers in `packages/tscache/src`
 
-| Module | Role |
-|---|---|
-| `grid.ts` | every millisecond ↔ slot conversion: the one place for fencepost logic |
-| `coverage.ts` | the coverage index on slot ranges: sorted, disjoint, merged, subtracted |
-| `segment/` | the `Segment` interface, `DenseSegment`, and the payload format |
-| `engine/` | config and batch validation, the put path (segment layout, merge), the read path, per-cache state (watermark, version), snapshots, and `Engine` |
-| `orchestrator/` | the fetcher: loading, miss coalescing, in-flight dedup, the version fence, auth state |
-| `rpc/` | the wire protocol, the worker-side server, the client-side port, the lifetime lock |
-| `client/` | `createClient`, the fallback chain, `CacheHandle`, events |
-| `entries/` | the five package entries |
-| `vite/` | the `fetcherUrl()` plugin |
+| Module          | Role                                                                                                                                            |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `grid.ts`       | every millisecond ↔ slot conversion: the one place for fencepost logic                                                                          |
+| `coverage.ts`   | the coverage index on slot ranges: sorted, disjoint, merged, subtracted                                                                         |
+| `segment/`      | the `Segment` interface, `DenseSegment`, and the payload format                                                                                 |
+| `engine/`       | config and batch validation, the put path (segment layout, merge), the read path, per-cache state (watermark, version), snapshots, and `Engine` |
+| `orchestrator/` | the fetcher: loading, miss coalescing, in-flight dedup, the version fence, auth state                                                           |
+| `rpc/`          | the wire protocol, the worker-side server, the client-side port, the lifetime lock                                                              |
+| `client/`       | `createClient`, the fallback chain, `CacheHandle`, events                                                                                       |
+| `entries/`      | the five package entries                                                                                                                        |
+| `vite/`         | the `fetcherUrl()` plugin                                                                                                                       |
 
 The dependency rule: `grid`, `coverage`, `segment/` and `engine/` import nothing from `rpc/`, `client/`
 or `orchestrator/`, and touch no DOM or worker API, which keeps the engine usable in Node.

@@ -6,21 +6,21 @@ The entry-size row of the measurement table in `docs/benchmarking.md` still show
 
 ## Scope
 
-| Commit | What |
-|---|---|
+| Commit        | What                                                        |
+| ------------- | ----------------------------------------------------------- |
 | (this commit) | The entry-size row in `docs/benchmarking.md`, and this file |
 
 ## Verification
 
 `bun run --cwd packages/tscache build` then `bun scripts/size.ts` on `a212cba`, under the heavy-job lock:
 
-| Entry | Brotli | Budget |
-|---|---:|---:|
-| `index` | 14.74 kB | 14.80 kB |
-| `worker` | 11.81 kB | 12.28 kB |
-| `engine` | 9.11 kB | 9.27 kB |
-| `fetcher` | 0.14 kB | 0.64 kB |
-| `vite` | 0.95 kB | 1.45 kB |
+| Entry     |   Brotli |   Budget |
+| --------- | -------: | -------: |
+| `index`   | 14.74 kB | 14.80 kB |
+| `worker`  | 11.81 kB | 12.28 kB |
+| `engine`  |  9.11 kB |  9.27 kB |
+| `fetcher` |  0.14 kB |  0.64 kB |
+| `vite`    |  0.95 kB |  1.45 kB |
 
 ## Notes
 
@@ -29,8 +29,8 @@ The `index` entry has 60 B of headroom against its budget. The next change that 
 ## Review rounds
 
 | Round | Verdict | Findings |
-|---|---|---|
-| 1 | merge | none |
+| ----- | ------- | -------- |
+| 1     | merge   | none     |
 
 ## Contract-test changes
 

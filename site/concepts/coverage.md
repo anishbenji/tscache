@@ -3,7 +3,7 @@
 A cache keeps two things apart:
 
 - **Data**: the points that exist, each with a value for every field.
-- **Coverage**: the time ranges the cache *knows* about, because the backend answered for them.
+- **Coverage**: the time ranges the cache _knows_ about, because the backend answered for them.
 
 A slot inside coverage without a point is a **confirmed gap**: a weekend, a night between trading
 sessions, an hour a sensor was offline. It is never fetched again. A slot outside coverage is simply not
@@ -13,13 +13,13 @@ known yet, whether or not a point happens to be there.
 
 `get(range)` resolves with a `GetResult`:
 
-| Field | Holds |
-|---|---|
-| `timestamps` | the timestamps of every present point in the range, ascending (`Float64Array`) |
-| `fields` | one typed array per field, of the field's dtype, as long as `timestamps` |
-| `coverage` | the authoritative sub-ranges of the request, ascending |
-| `misses` | the rest of the request, each `{ range, reason, error? }`; always present, possibly empty |
-| `snapshot` | only when asked for with `{ snapshot: true }` ([Snapshots](/usage/snapshots)) |
+| Field        | Holds                                                                                     |
+| ------------ | ----------------------------------------------------------------------------------------- |
+| `timestamps` | the timestamps of every present point in the range, ascending (`Float64Array`)            |
+| `fields`     | one typed array per field, of the field's dtype, as long as `timestamps`                  |
+| `coverage`   | the authoritative sub-ranges of the request, ascending                                    |
+| `misses`     | the rest of the request, each `{ range, reason, error? }`; always present, possibly empty |
+| `snapshot`   | only when asked for with `{ snapshot: true }` ([Snapshots](/usage/snapshots))             |
 
 `coverage` and `misses` tile the request exactly: every slot is in one of them. The arrays hold
 present points only: no holes, no mask, the same shape whatever the cache's internal layout.
@@ -34,11 +34,11 @@ copy, and you own them.
 
 ## Miss reasons
 
-| Reason | Means | What to do |
-|---|---|---|
-| `'uncached'` | not known: no fetcher is configured, you read with `cacheOnly`, the cache was cleared while the read waited and again while it asked once more ([versions](/concepts/freshness)), or it is the provisional tail, which is never covered and so stays a miss even right after its fetch returned its points | fetch and `put` it yourself, or read without `cacheOnly`; for the tail, nothing: its points are in the result |
-| `'fetch-failed'` | the fetch threw, or its response failed validation; `error` has its `name` and `message` | read again later; nothing about the failure is cached |
-| `'auth-pending'` | credentials are invalid, so the fetch was not made, or it was refused | refresh, call `updateAuth`, read again ([Credentials](/guides/auth)) |
+| Reason           | Means                                                                                                                                                                                                                                                                                                      | What to do                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `'uncached'`     | not known: no fetcher is configured, you read with `cacheOnly`, the cache was cleared while the read waited and again while it asked once more ([versions](/concepts/freshness)), or it is the provisional tail, which is never covered and so stays a miss even right after its fetch returned its points | fetch and `put` it yourself, or read without `cacheOnly`; for the tail, nothing: its points are in the result |
+| `'fetch-failed'` | the fetch threw, or its response failed validation; `error` has its `name` and `message`                                                                                                                                                                                                                   | read again later; nothing about the failure is cached                                                         |
+| `'auth-pending'` | credentials are invalid, so the fetch was not made, or it was refused                                                                                                                                                                                                                                      | refresh, call `updateAuth`, read again ([Credentials](/guides/auth))                                          |
 
 `get` never rejects because data is unavailable. It rejects only for programmer errors: an invalid
 range, an unknown cache, a disposed client ([Errors](/usage/errors)).

@@ -12,10 +12,10 @@ The test at the former line 273 ("switching the chart library after scrolling ke
 
 ## Scope
 
-| Commit | What |
-|---|---|
+| Commit  | What                                                                                                                                                                                                                                                                                                                                     |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | fcf914e | `fix(reference)`: `formingBar(now, config = market)` in `market.ts` gives the start of the bar forming at a time on the grid. `readRange` ends there at the latest, so the server renders and a scroll near now end on the grid; the feed's catch-up reads up to `formingBar(Date.now())`; `polling()` uses the same helper. Tests below |
-| d443a24 | `test(e2e)`: the new server-rendered test first has the server render once (see "Found while verifying") |
+| d443a24 | `test(e2e)`: the new server-rendered test first has the server render once (see "Found while verifying")                                                                                                                                                                                                                                 |
 
 ## Tests
 
@@ -29,20 +29,20 @@ The test at the former line 273 ("switching the chart library after scrolling ke
 
 All Playwright runs used `E2E_EXAMPLES=reference-vanilla,reference-react,reference-solid` and ran under the machine's heavy-job lock.
 
-| Run | Command | Result |
-|---|---|---|
-| Before the fix, server-rendered test | `bunx playwright test e2e/reference/clients.spec.ts --project examples -g "minute passes before its feed opens" --repeat-each 3` | 9 of 9 failed: a fetch of 180 000 ms against 120 000 |
-| Before the fix, catch-up test | `… -g "feed opens a minute after" --repeat-each 5 --workers 1` | 15 of 15 failed, same span |
-| After the fix, both | `… -g "minute passes before its feed opens\|feed opens a minute after" --repeat-each 5 --workers 1` | 30 of 30 passed |
-| After the fix, the whole spec | `bunx playwright test e2e/reference/clients.spec.ts --project examples` | 59 of 59 passed |
-| Stress, after the fix | `stress-load.sh bash -c 'bunx playwright test e2e/reference/clients.spec.ts --project examples --repeat-each 5 --workers 1 --grep-invert "shows the server.s read and fetches only the forming bar"'` (a `yes` per core, ten cores) | 280 of 280 passed in 17.1 min |
+| Run                                  | Command                                                                                                                                                                                                                             | Result                                               |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Before the fix, server-rendered test | `bunx playwright test e2e/reference/clients.spec.ts --project examples -g "minute passes before its feed opens" --repeat-each 3`                                                                                                    | 9 of 9 failed: a fetch of 180 000 ms against 120 000 |
+| Before the fix, catch-up test        | `… -g "feed opens a minute after" --repeat-each 5 --workers 1`                                                                                                                                                                      | 15 of 15 failed, same span                           |
+| After the fix, both                  | `… -g "minute passes before its feed opens\|feed opens a minute after" --repeat-each 5 --workers 1`                                                                                                                                 | 30 of 30 passed                                      |
+| After the fix, the whole spec        | `bunx playwright test e2e/reference/clients.spec.ts --project examples`                                                                                                                                                             | 59 of 59 passed                                      |
+| Stress, after the fix                | `stress-load.sh bash -c 'bunx playwright test e2e/reference/clients.spec.ts --project examples --repeat-each 5 --workers 1 --grep-invert "shows the server.s read and fetches only the forming bar"'` (a `yes` per core, ten cores) | 280 of 280 passed in 17.1 min                        |
 
 `bunx vitest run reference/shared`: 14 passed. `tsc -p reference/shared`, `tsc -p e2e` and Biome clean. `bun run ci` (under the heavy-job lock) passed on d443a24 and again on this file's commit: 1511 Vitest tests, 107 Playwright tests, sizes and both bench smokes.
 
 ## Found while verifying
 
 - **Parallel copies under `--repeat-each`.** Without `--workers 1`, copies of a test ran side by side against one app's mock backend and its clock, so one copy's `advanceMs` moved the other's backend too: one run of nine passed before the fix that way. A test-harness effect, not a client one; chore 28 records it and its flake-hunt script repeats with one worker.
-- **The server's cache after a restatement.** The stress run (`/tmp/…/stress-load.sh bash -c 'bunx playwright test e2e/reference/clients.spec.ts --project examples --repeat-each 5 --workers 1'`, a `yes` per core) failed the *existing* server-rendered test on repeats 1 and 3 of each client, 6 of 15, with a fetch of almost twelve hours. Cause: the app's server keeps one in-process cache across tests; after a test bumps the dataset version, the next render finds the new version only while reading, clears its cache (by design, N29) and serves almost nothing, so the page fetches everything. In a single run that test comes before any version bump, so it never failed in CI. It is a shared-state flake of the test, not of this fix, and chore 28 fixes it. The new server-rendered test here first has the server render once, so it does not depend on test order. In the same stress run every other test passed, the new ones included, wherever serial mode let them run (82 tests did not run after the failures). The stress run in the table leaves that one test out and covers the rest of the spec, five times each.
+- **The server's cache after a restatement.** The stress run (`/tmp/…/stress-load.sh bash -c 'bunx playwright test e2e/reference/clients.spec.ts --project examples --repeat-each 5 --workers 1'`, a `yes` per core) failed the _existing_ server-rendered test on repeats 1 and 3 of each client, 6 of 15, with a fetch of almost twelve hours. Cause: the app's server keeps one in-process cache across tests; after a test bumps the dataset version, the next render finds the new version only while reading, clears its cache (by design, N29) and serves almost nothing, so the page fetches everything. In a single run that test comes before any version bump, so it never failed in CI. It is a shared-state flake of the test, not of this fix, and chore 28 fixes it. The new server-rendered test here first has the server render once, so it does not depend on test order. In the same stress run every other test passed, the new ones included, wherever serial mode let them run (82 tests did not run after the failures). The stress run in the table leaves that one test out and covers the rest of the spec, five times each.
 
 ## Round 1 — reviewer verdict: pending
 
@@ -56,9 +56,9 @@ None.
 
 ## Round 1 — reviewer verdict: merge after fixes
 
-| # | Sev | Finding | Decision | Resolution |
-|---|---|---|---|---|
-| R1-1 | P1 | The host `bun run ci` failed: `packages/tscache/test/perf/gate.test.ts:108` measured `sample(work, work)` at 1.518 against `< 1.4` | Accept as valid, not caused by this branch | The failure is the known sampler flake (step 22 R3-1, fix 26 pre-push), which this branch does not touch. Fix 32 removes its root cause (a virtual-clock sampler test; 48 of 120 parallel-load failures before, 0 of 120 after). This branch is rebased onto `main` once fix 32 merges, and round 2 confirms CI is green |
+| #    | Sev | Finding                                                                                                                            | Decision                                   | Resolution                                                                                                                                                                                                                                                                                                               |
+| ---- | --- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1-1 | P1  | The host `bun run ci` failed: `packages/tscache/test/perf/gate.test.ts:108` measured `sample(work, work)` at 1.518 against `< 1.4` | Accept as valid, not caused by this branch | The failure is the known sampler flake (step 22 R3-1, fix 26 pre-push), which this branch does not touch. Fix 32 removes its root cause (a virtual-clock sampler test; 48 of 120 parallel-load failures before, 0 of 120 after). This branch is rebased onto `main` once fix 32 merges, and round 2 confirms CI is green |
 
 ## Round 2 — reviewer verdict: merge
 

@@ -1,10 +1,10 @@
 # Invalidation and clearing
 
-| Call | Coverage | Points | Config, version, watermark | Event |
-|---|---|---|---|---|
-| `cache.invalidate(range)` | removed over the range, snapped outward | kept | kept | none |
-| `cache.clear()` | all removed | all removed | kept | `cacheCleared`, `'manual'` |
-| `client.clearAll()` | all removed, every cache | all removed | kept | `cacheCleared`, `'clear-all'`, per cache |
+| Call                      | Coverage                                | Points      | Config, version, watermark | Event                                    |
+| ------------------------- | --------------------------------------- | ----------- | -------------------------- | ---------------------------------------- |
+| `cache.invalidate(range)` | removed over the range, snapped outward | kept        | kept                       | none                                     |
+| `cache.clear()`           | all removed                             | all removed | kept                       | `cacheCleared`, `'manual'`               |
+| `client.clearAll()`       | all removed, every cache                | all removed | kept                       | `cacheCleared`, `'clear-all'`, per cache |
 
 ## invalidate
 

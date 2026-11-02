@@ -16,12 +16,12 @@ The module's **default export**: an object with
 
 ## FetchRequest
 
-| Field | Holds |
-|---|---|
-| `cacheId` | the cache the fetch is for |
-| `range` | the inclusive range to fetch, on the grid, already coalesced |
-| `interval`, `alignmentOffset` | the cache's grid |
-| `context` | a copy of the latest context from `createClient` or `updateAuth` |
+| Field                         | Holds                                                            |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `cacheId`                     | the cache the fetch is for                                       |
+| `range`                       | the inclusive range to fetch, on the grid, already coalesced     |
+| `interval`, `alignmentOffset` | the cache's grid                                                 |
+| `context`                     | a copy of the latest context from `createClient` or `updateAuth` |
 
 ## FetchResponse
 
