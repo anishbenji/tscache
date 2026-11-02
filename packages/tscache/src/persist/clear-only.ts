@@ -8,11 +8,14 @@
  * The clear-only call is `clearDisk` in the lazily loaded persistence chunk
  * (`persist/lazy.ts`): it is imported at the first `clearAll`, so a page
  * that never calls `clearAll` never loads it. The import counts against the
- * clear's deadline (`timeoutMs`, as for a load, §4.10.8); an import that
- * arrives after the deadline starts no disk work, since `clearDisk` checks
- * the deadline before it opens the database. A failed clear changes
- * nothing else: this hosting never reads or writes the disk, so there is
- * nothing in it to turn off, and the next `clearAll` tries again.
+ * clear's deadline (`timeoutMs`, as for a load, §4.10.8), and the deadline
+ * has one owner at a time: a timer while the chunk is loading, `clearDisk`
+ * once it has arrived, so the call answers after any connection it opened
+ * is closed. An import that arrives after the deadline is dropped and starts
+ * no disk work (and `clearDisk` checks the deadline before it opens the
+ * database in any case). A failed clear changes nothing else: this hosting
+ * never reads or writes the disk, so there is nothing in it to turn off,
+ * and the next `clearAll` tries again.
  */
 
 import type { Engine } from "../engine/engine";
@@ -73,17 +76,28 @@ export class ClearOnlyPersistence implements Persistence {
       failure = { error };
     }
     const startedAt = performance.now();
+    // One owner of the deadline at a time. Until the chunk arrives, the
+    // import timer owns it; no connection can exist yet, so answering at it
+    // leaves nothing open. When the chunk arrives in time, the timer is
+    // cleared and `clearDisk` owns the deadline: the call answers when it
+    // resolves, which is after it has closed its connection. A chunk that
+    // arrives after the timer fired is dropped: that call has ended.
     const cleared = new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, this.#timeoutMs);
-      const done = () => {
-        clearTimeout(timer);
+      let timedOut = false;
+      const importTimer = setTimeout(() => {
+        timedOut = true;
         resolve();
-      };
+      }, this.#timeoutMs);
       this.#load()
-        .then((chunk) =>
-          chunk.clearDisk(this.#openStore, { ...this.#options, startedAt }),
-        )
-        .then(done, done);
+        .then((chunk) => {
+          if (timedOut) return;
+          clearTimeout(importTimer);
+          return chunk.clearDisk(this.#openStore, {
+            ...this.#options,
+            startedAt,
+          });
+        })
+        .then(resolve, resolve);
     });
     return cleared.then(() => {
       if (failure !== undefined) throw failure.error;

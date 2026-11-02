@@ -53,7 +53,7 @@ function clearOnly(timeoutMs?: number) {
     openStore,
     closed,
     persistence,
-    release: () => chunk.resolve(lazy),
+    release: (loaded: ClearChunk = lazy) => chunk.resolve(loaded),
     fail: (error: unknown) => chunk.reject(error),
   };
 }
@@ -176,6 +176,40 @@ describe("clear-only persistence (§4.10.7, N66)", () => {
     gate.release();
     await vi.advanceTimersByTimeAsync(0);
     expect(h.closed).toEqual([true]);
+  });
+
+  it("a clear still pending at the deadline: its connection is closed at the moment clearAll answers", async () => {
+    // Pre-review PR-1: the answer must not precede the close, even by one
+    // task; the state is read in the continuation of the call's promise.
+    vi.useFakeTimers({ now: 0 });
+    const h = clearOnly();
+    h.release();
+    const gate = h.store.gate("clearAll");
+    const atAnswer: boolean[][] = [];
+    const cleared = tracked(
+      (h.persistence.clearAll() as Promise<void>).then(() => {
+        atAnswer.push([...h.closed]);
+      }),
+    );
+    await gate.entered;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cleared.done).toBe(true);
+    expect(atAnswer).toEqual([[true]]);
+    gate.release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.closed).toEqual([true]);
+  });
+
+  it("an import that arrives after the deadline does not reach clearDisk", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = clearOnly();
+    const clearDisk = vi.fn(lazy.clearDisk);
+    const cleared = tracked(h.persistence.clearAll() as Promise<void>);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cleared.done).toBe(true);
+    h.release({ clearDisk });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(clearDisk).not.toHaveBeenCalled();
   });
 
   it("the import counts against the clear's deadline", async () => {
