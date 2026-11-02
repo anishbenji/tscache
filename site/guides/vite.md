@@ -15,7 +15,8 @@ the app builds: a worker of your own that you create from a `?worker&url` import
 module worker (`{ type: 'module' }`); a `?worker` constructor import sets that itself.
 The plugin does not set the format for you, since it would change your own workers too; instead,
 `vite build` with the format left at `'iife'` prints one warning that names this setting. The dev
-server never warns.
+server never warns. An app that keeps `'iife'` on purpose can
+[silence the warning](#keeping-iife-workers).
 
 For TypeScript, declare the import once:
 
@@ -23,6 +24,30 @@ For TypeScript, declare the import once:
 
 It needs Vite 8; `vite` is an optional peer dependency of tscache, and the plugin imports nothing from
 Vite at runtime.
+
+## Keeping IIFE workers
+
+An app that keeps `worker: { format: 'iife' }` on purpose, and accepts the persistence code in its
+worker file, can silence that one warning with a filter on Vite's logger. The plugin has no option for
+it. The filter replaces `warn` on the logger it is given, not on a copy, since Vite records on that
+object (`hasWarned`) that a warning was logged. It drops a message that starts with
+`[tscache] Vite builds workers as IIFE` and passes every other message, with its options, to the
+original `warn`:
+
+<<< @/snippets/vite-logger.ts#filter{ts}
+
+Give Vite a logger of its own, `createLogger()`, with the filter applied:
+
+<<< @/snippets/vite-config.ts#iife{ts}
+
+A `customLogger` replaces the logger Vite would build itself, so `logLevel` and `clearScreen` in the config
+(and `--logLevel`, `--clearScreen` on the command line) no longer reach it. Set them on the logger you
+create instead, for example `createLogger("warn", { allowClearScreen: false })`.
+
+The warning's opening words, `[tscache] Vite builds workers as IIFE`, are a stable contract: changing
+them would break such filters, so tscache treats any change to them as a breaking change. The filter
+matches the start of the message, not the words anywhere in it, so a message that merely quotes them is
+still logged.
 
 ## What it does
 

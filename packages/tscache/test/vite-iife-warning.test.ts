@@ -225,3 +225,154 @@ describe("fetcherUrl's IIFE warning with a config file (step 54)", () => {
     expect(warnings.filter((m) => m.startsWith("[tscache]"))).toEqual([]);
   });
 });
+
+// Step 56 (user decision #18): an app that keeps worker.format 'iife' on
+// purpose silences the warning with the guide's logger filter
+// (site/snippets/vite-logger.ts), which drops messages that start with the
+// warning's opening words. Those words are a stable contract: changing them
+// breaks apps' filters, so it is a breaking change. The snippet is loaded by
+// a computed path, so neither Vite's types nor Node's enter this package's
+// type check; `docs:check` type-checks it.
+const OPENING = "[tscache] Vite builds workers as IIFE";
+
+interface Options {
+  timestamp?: boolean;
+}
+
+/** One call of a recorded logger. */
+interface Call {
+  method: "warn" | "warnOnce";
+  message: string;
+  options?: Options | undefined;
+}
+
+/** The part of Vite's Logger the filter and these tests use. */
+interface RecordedLogger {
+  info(message: string, options?: Options): void;
+  warn(message: string, options?: Options): void;
+  warnOnce(message: string, options?: Options): void;
+  error(message: string, options?: Options): void;
+  clearScreen(type: string): void;
+  hasErrorLogged(error: unknown): boolean;
+  hasWarned: boolean;
+}
+
+describe("the IIFE warning's opening words are a stable contract (step 56)", () => {
+  let root = "";
+  const snippet = new URL(
+    ["..", "..", "..", "site", "snippets", "vite-logger.ts"].join("/"),
+    import.meta.url,
+  ).href;
+  beforeAll(async () => {
+    root = await realpath(await mkdtemp(join(tmpdir(), "tscache-iife-log-")));
+    await writeFile(join(root, "main.js"), "export const page = 1;\n");
+  });
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  /** A logger recording every warn and warnOnce call, options included. */
+  function recording(): { logger: RecordedLogger; calls: Call[] } {
+    const calls: Call[] = [];
+    const ignore = () => undefined;
+    const logger: RecordedLogger = {
+      info: ignore,
+      warn: (message, options) =>
+        calls.push({ method: "warn", message, options }),
+      warnOnce: (message, options) =>
+        calls.push({ method: "warnOnce", message, options }),
+      error: ignore,
+      clearScreen: ignore,
+      hasErrorLogged: () => false,
+      hasWarned: false,
+    };
+    return { logger, calls };
+  }
+
+  /**
+   * Another plugin's warning, with options, from the same build and through
+   * the same logger as tscache's: the resolved config's.
+   */
+  const other = {
+    name: "test:other-warning",
+    buildStart(this: {
+      environment: {
+        config: { logger: { warn(m: string, o?: Options): void } };
+      };
+    }) {
+      this.environment.config.logger.warn("another warning", {
+        timestamp: true,
+      });
+    },
+  };
+
+  /** Builds the app with worker.format 'iife' and the given logger. */
+  async function buildWith(customLogger: RecordedLogger): Promise<void> {
+    await build({
+      root,
+      configFile: false,
+      plugins: [fetcherUrl(), other],
+      worker: { format: "iife" },
+      customLogger,
+      build: {
+        write: false,
+        rollupOptions: { input: join(root, "main.js") },
+      },
+    });
+  }
+
+  it(`without a filter, the warning reaches customLogger.warn and starts with "${OPENING}"`, async () => {
+    const { logger, calls } = recording();
+    await buildWith(logger);
+    const tscache = calls.filter((call) => call.message.includes("tscache"));
+    expect(tscache).toHaveLength(1);
+    expect(tscache[0]?.method).toBe("warn");
+    expect(tscache[0]?.message.startsWith(OPENING)).toBe(true);
+  });
+
+  it("with the guide's filter, the build logs no IIFE warning and passes another warning through unchanged", async () => {
+    const { withoutTscacheIifeWarning } = await load<{
+      withoutTscacheIifeWarning(logger: RecordedLogger): RecordedLogger;
+    }>(snippet);
+    // The call the logger gets with no filter: Vite's environment logger
+    // adds its own `environment` option to the plugin's.
+    const unfiltered = recording();
+    await buildWith(unfiltered.logger);
+    const another = unfiltered.calls.find(
+      (call) => call.message === "another warning",
+    );
+    expect(another).toMatchObject({
+      method: "warn",
+      options: { timestamp: true },
+    });
+    const { logger, calls } = recording();
+    await buildWith(withoutTscacheIifeWarning(logger));
+    expect(calls.filter((call) => call.message.includes("IIFE"))).toEqual([]);
+    expect(calls).toContainEqual(another);
+  });
+
+  it("the filter drops only messages that start with the opening words", async () => {
+    const { withoutTscacheIifeWarning } = await load<{
+      withoutTscacheIifeWarning(logger: RecordedLogger): RecordedLogger;
+    }>(snippet);
+    const { logger, calls } = recording();
+    const filtered = withoutTscacheIifeWarning(logger);
+    filtered.warn(`${OPENING} (worker.format 'iife')`);
+    filtered.warn(`quoted: ${OPENING}`, { timestamp: true });
+    expect(calls).toEqual([
+      {
+        method: "warn",
+        message: `quoted: ${OPENING}`,
+        options: { timestamp: true },
+      },
+    ]);
+  });
+
+  it("the filter returns the logger it was given, not a copy", async () => {
+    const { withoutTscacheIifeWarning } = await load<{
+      withoutTscacheIifeWarning(logger: RecordedLogger): RecordedLogger;
+    }>(snippet);
+    const { logger } = recording();
+    expect(withoutTscacheIifeWarning(logger)).toBe(logger);
+  });
+});

@@ -9,4 +9,21 @@ export default defineConfig({
   // only by a worker that persists (Vite's default 'iife' inlines it).
   worker: { format: "es" },
 });
+
 // #endregion config
+
+// #region iife
+// vite.config.ts of an app that keeps IIFE workers on purpose: the imports
+// of the config above, these two, and this config as the default export
+import { createLogger } from "vite";
+import { withoutTscacheIifeWarning } from "./vite-logger";
+
+export const iifeConfig = defineConfig({
+  plugins: [fetcherUrl()],
+  // Logs every message except tscache's IIFE warning. A customLogger replaces
+  // Vite's own logger, so logLevel and clearScreen (and their CLI flags) no
+  // longer apply: pass them to createLogger instead, for example
+  // createLogger("warn", { allowClearScreen: false }).
+  customLogger: withoutTscacheIifeWarning(createLogger()),
+});
+// #endregion iife

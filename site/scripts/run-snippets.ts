@@ -497,8 +497,8 @@ const RUNS: Record<string, Run> = {
     unsubscribe();
     check(logs.length === 0, `unexpected output: ${JSON.stringify(logs)}`);
   },
-  async "vite-config.ts"() {
-    const { default: config } = await load("vite-config.ts");
+  async "vite-config.ts, vite-logger.ts"(logs) {
+    const { default: config, iifeConfig } = await load("vite-config.ts");
     check(
       config.plugins?.[0]?.name === "tscache:fetcher-url",
       "the plugin is not configured",
@@ -507,6 +507,22 @@ const RUNS: Record<string, Run> = {
       config.worker?.format === "es",
       "the worker is not built as an ES module",
     );
+    // The IIFE app's logger is Vite's own, which writes to the console: it
+    // drops tscache's IIFE warning and logs every other message.
+    check(
+      iifeConfig.plugins?.[0]?.name === "tscache:fetcher-url",
+      "the IIFE app's plugin is not configured",
+    );
+    const logger = iifeConfig.customLogger;
+    logger.warn("[tscache] Vite builds workers as IIFE (worker.format 'iife')");
+    const dropped = logs.length;
+    check(dropped === 0, `logged ${JSON.stringify(logs)}`);
+    logger.warn("another warning");
+    check(
+      logs.length === 1 && String(logs[0]?.[0]).includes("another warning"),
+      `logged ${JSON.stringify(logs)}`,
+    );
+    check(logger.hasWarned, "the logger does not record that it warned");
   },
   async "snapshots-server.ts, snapshots-browser.ts, snapshots-page.ts"(logs) {
     const { createRenderer } = await load("snapshots-server.ts");
