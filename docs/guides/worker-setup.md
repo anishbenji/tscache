@@ -22,7 +22,8 @@ const client = await createClient({ workerUrl });
 
 The worker loads its persistence code (the persister and the IndexedDB
 adapter) with `import()`, only once a cache with `persist: true` opens or
-`clearAll` runs. Vite's default worker format, `'iife'`, inlines that code
+`clearAll` runs (in a dedicated worker or in-process, at `clearAll` only,
+to empty the database). Vite's default worker format, `'iife'`, inlines that code
 into the worker file, where it is downloaded with the worker but not run.
 With `worker: { format: "es" }` in `vite.config.ts`, it becomes a chunk of
 its own that an app persisting nothing never downloads. Pass the URL as Vite

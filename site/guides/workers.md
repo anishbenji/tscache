@@ -35,7 +35,7 @@ must be same-origin: a worker script on another origin is refused.
 <<< @/snippets/getting-started.ts#client{ts}
 
 The worker loads its persistence code with `import()`, only once a cache with `persist: true` opens or
-`clearAll` runs. Vite's default worker format, `'iife'`, inlines it into the worker file, where it is
+`clearAll` runs (in a dedicated worker or in-process, at `clearAll` only, to empty the database). Vite's default worker format, `'iife'`, inlines it into the worker file, where it is
 downloaded but not run; with `worker: { format: "es" }` in `vite.config.ts` it is a chunk of its own,
 which an app that persists nothing never downloads. Pass the URL as Vite gives it: the chunks import the
 worker file by that URL, so a query added to it would load the worker twice.

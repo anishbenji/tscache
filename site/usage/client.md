@@ -47,7 +47,9 @@ came back `'auth-pending'` are not retried for you: read again.
 
 ## client.clearAll()
 
-Empties every cache, keeping their configs ([Invalidation and clearing](/concepts/invalidation)).
+Empties every cache, keeping their configs ([Invalidation and clearing](/concepts/invalidation)). Where
+the browser has IndexedDB it also empties the [persisted](/guides/persistence) records, from a client of
+any hosting, and resolves once they are gone or the clear gave up; it never rejects for a disk failure.
 
 <<< @/snippets/client.ts#clear-all{ts}
 

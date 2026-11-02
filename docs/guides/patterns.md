@@ -135,6 +135,9 @@ const candles = await client.cache({
   Keep per-user or sensitive caches in memory; that is why `persist` is per cache.
 - **Logout.** One `client.clearAll()` from a tab of the SharedWorker empties every cache and the database,
   and resolves once the records are gone (or persistence has stopped). It does not reach the records of
-  another deploy's worker that is still running (the next clear or that worker's end removes them), and a
-  client hosted in a dedicated worker or in-process leaves the disk alone: call it from a shared-hosted
-  tab.
+  another deploy's worker that is still running (the next clear or that worker's end removes them).
+  A client hosted in a dedicated worker or in-process persists nothing, but its `clearAll` empties the
+  database too, so a logout from any page removes what a SharedWorker session stored. It cannot reach
+  the memory of a SharedWorker other tabs still use, which writes back what it changes; to clear that
+  worker as well, call `clearAll` from one of its tabs. When the clear fails (IndexedDB unavailable or
+  refusing it for five seconds), the call still resolves, and the next `clearAll` tries again.

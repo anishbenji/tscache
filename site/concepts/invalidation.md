@@ -19,9 +19,10 @@ The range snaps outward, like a read's, so it may forget a little more than you 
 
 ## clear and clearAll
 
-`clear` empties one cache; `clearAll` empties every cache of the worker. The caches themselves stay:
-their configs, versions and watermarks describe the dataset, not its contents, and every handle in every
-tab stays valid.
+`clear` empties one cache; `clearAll` empties every cache of the worker, and the
+[persisted](/guides/persistence) records of the origin from a client of any hosting. The caches
+themselves stay: their configs, versions and watermarks describe the dataset, not its contents, and
+every handle in every tab stays valid.
 
 ::: warning With a SharedWorker, a clear reaches every tab
 Every same-origin tab reads the same caches. `clear()` and `clearAll()` empty them for all tabs, and

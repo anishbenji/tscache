@@ -38,8 +38,8 @@ export async function keepStorage(): Promise<boolean> {
 
 // #region logout
 export async function logout(client: TscacheClient): Promise<void> {
-  // Empties every cache and, from a shared-hosted tab, the database too:
-  // resolves once the records are gone, or persistence has stopped.
+  // Empties every cache and, from a client of any hosting, the database
+  // too: resolves once the records are gone, or the clear gave up.
   await client.clearAll();
 }
 // #endregion logout
