@@ -119,6 +119,15 @@ describe("clear-only persistence (§4.10.7, N66)", () => {
     expect(h.store.records("persist")).toEqual(empty);
   });
 
+  it("a chunk that fails to load leaves no import timer behind", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = clearOnly();
+    const first = h.persistence.clearAll() as Promise<void>;
+    h.fail(new TypeError("Failed to fetch dynamically imported module"));
+    await first;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("a clear that fails changes nothing else: no store is kept, and a later clearAll runs again", async () => {
     vi.useFakeTimers({ now: 0 });
     const h = clearOnly();

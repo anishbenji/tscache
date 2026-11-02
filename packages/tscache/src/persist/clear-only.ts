@@ -89,14 +89,18 @@ export class ClearOnlyPersistence implements Persistence {
         resolve();
       }, this.#timeoutMs);
       this.#load()
-        .then((chunk) => {
-          if (timedOut) return;
-          clearTimeout(importTimer);
-          return chunk.clearDisk(this.#openStore, {
-            ...this.#options,
-            startedAt,
-          });
-        })
+        .then(
+          (chunk) => {
+            if (timedOut) return;
+            clearTimeout(importTimer);
+            return chunk.clearDisk(this.#openStore, {
+              ...this.#options,
+              startedAt,
+            });
+          },
+          // A failed import ends the call now; its timer goes with it.
+          () => clearTimeout(importTimer),
+        )
         .then(resolve, resolve);
     });
     return cleared.then(() => {
