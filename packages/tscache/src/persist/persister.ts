@@ -890,16 +890,30 @@ export class Persister {
     this.#pump();
   }
 
+  /**
+   * Takes the dirty state and builds the plan in the step that starts the
+   * attempt, before its first await (round 9, R9-1): what changes later,
+   * while the attempt waits for the store's opening or its write, is dirty
+   * for the next flush. So the attempt running at a clearAll() call writes
+   * only state that predates the call, and never a change the barrier holds.
+   */
   async #attemptFlush(job: Job, cache: Tracked): Promise<void> {
-    const store = await this.#ensureStore();
-    if (store === undefined || this.#current !== job) return;
     const taken = this.#take(cache);
     if (taken === undefined) {
       this.#finish(job);
       return;
     }
+    let plan: WritePlan;
     try {
-      await store.write(cache.id, this.#plan(cache, taken));
+      plan = this.#plan(cache, taken);
+    } catch (error) {
+      this.#rejected(job, cache, taken, error);
+      return;
+    }
+    const store = await this.#ensureStore();
+    if (store === undefined || this.#current !== job) return;
+    try {
+      await store.write(cache.id, plan);
     } catch (error) {
       if (this.#current === job) this.#rejected(job, cache, taken, error);
       return;

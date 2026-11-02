@@ -1505,7 +1505,7 @@ None of these rejects for a persistence failure; failures stop the cache (below)
 
 A `clearAll` settles removals too, and keeps that bound (`clearAll`, below). On success it makes every removal recorded until its job settled durable, those recorded during the barrier included; on failure its stops release them, since the failed clear was their deletion. A removal recorded during the barrier is therefore answered when the job settles, under one deadline after the removal, since the job's deadline is `timeoutMs` after its call. A removal whose flush job is queued or running at the call is answered when that job's attempt succeeds or when the `clearAll` job settles; the call came before that flush job's deadline, so this is within two deadlines of the removal. A removal of a cache stopped before the call waits for its cleanup, which keeps its place ahead of the `clearAll` job.
 
-**Flush.** In one synchronous step at the start of the job's attempt, the dirty state is taken (and reset) and the plan built from the cache's state `S` at that instant, so the transaction writes one state:
+**Flush.** In the synchronous step that starts the job's attempt, before the attempt waits for anything (the store's opening included), the dirty state is taken (and reset) and the plan built from the cache's state `S` at that instant. The transaction therefore writes one state, and the attempt running at a `clearAll()` call writes only state that predates the call (round 9, R9-1). The plan:
 
 - `rewrite` → `deletePages: [{ start: -Infinity, end: Infinity }]` and `putPages`: every page record of `recordsOf(S)`.
 - Otherwise → `deletePages`: the dirty page ranges, merged and ascending; `putPages`: the page records of `recordsOf(S)` whose page lies in one of them.

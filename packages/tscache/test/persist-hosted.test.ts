@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Engine } from "../src/engine/engine";
 import { HostedPersistence, type LazyPersist } from "../src/persist/hosted";
 import * as lazy from "../src/persist/lazy";
+import type { Persister } from "../src/persist/persister";
 import type { ClientEvents } from "../src/types";
 import { deferred, MemoryStore } from "./persist-memory-store";
 import {
@@ -253,6 +254,57 @@ describe("lazily loaded persistence (§4.10.8)", () => {
     await opening.promise;
     expect(h.stops).toEqual([{ cacheId: "persist", reason: "unavailable" }]);
     read.release();
+  });
+
+  it("a flush waiting for the database to open writes no change made during a later clearAll (review round 9, R9-1)", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const engine = new Engine();
+    const store = new MemoryStore();
+    const opening = deferred<MemoryStore>();
+    const openStore = vi.fn((options?: { ifExists?: boolean }) =>
+      options?.ifExists === true ? Promise.resolve(undefined) : opening.promise,
+    );
+    const stops: Stop[] = [];
+    const persistence = new HostedPersistence(
+      engine,
+      async () => lazy,
+      openStore,
+      { onStopped: (event) => stops.push(event) },
+    );
+    // The first clearAll finds no database; a cache opened during its
+    // barrier starts cold.
+    const first = persistence.clearAll();
+    engine.cache(config());
+    const cold = persistence.open("persist");
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.all([first, cold]);
+    expect(openStore.mock.calls).toEqual([[{ ifExists: true }]]);
+    // Its flush, due after the quiet spell, waits for the database to open.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(openStore.mock.calls).toEqual([[{ ifExists: true }], []]);
+    // A second clearAll begins; slot 0 is put during its barrier.
+    const second = persistence.clearAll();
+    await persistence.durably("persist", () =>
+      engine.put("persist", batch([0])),
+    );
+    opening.resolve(store);
+    await vi.advanceTimersByTimeAsync(0);
+    await second;
+    const flushed = (persistence.persister as Persister).flush();
+    await vi.advanceTimersByTimeAsync(0);
+    await flushed;
+    expect(engine.coverage("persist", all)).toEqual([{ start: 0, end: 0 }]);
+    // The attempt running at the second call wrote the state it took
+    // before the call (the cold cache: nothing); the clear deleted it, and
+    // the held put was written after the clear.
+    expect(store.log.map((call) => call.kind)).toEqual([
+      "write",
+      "clearAll",
+      "write",
+    ]);
+    expect(store.log[0]).toMatchObject({ plan: { putPages: [] } });
+    expect(store.records("persist")).toEqual(recordsOf(engine));
+    expect(stops).toEqual([]);
   });
 
   it("a flush while the chunk loads reaches the persister after the waiting opens", async () => {
