@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Grid, SlotRange } from "../src/grid";
 import { DenseSegment } from "../src/segment/dense";
 import type { Columns, Segment } from "../src/segment/types";
-import type { Dtype } from "../src/types";
+import type { Dtype, FieldArray } from "../src/types";
 
 // Architecture §4.2: `countIn` and `sliceInto`, the read path's
 // single-copy pair. Every case is checked against `slice`, whose contract
@@ -52,6 +52,47 @@ function expected(selected: number[], at: number, length: number): Columns {
 }
 
 /**
+ * Checks two typed arrays as `toEqual` does: the same constructor and length,
+ * and every element the same by `Object.is`. Vitest's `toEqual` takes seconds
+ * over arrays at the slot cap of 32 768: it compares a typed array element by
+ * element through its generic equality and then again through
+ * `Object.entries` (docs/reviews/step-55.md).
+ */
+function expectSameArray(
+  actual: FieldArray | undefined,
+  wanted: FieldArray | undefined,
+): void {
+  expect(actual?.constructor).toBe(wanted?.constructor);
+  expect(actual?.length).toBe(wanted?.length);
+  if (actual === undefined || wanted === undefined) return;
+  let index = -1;
+  for (let i = 0; i < wanted.length; i++) {
+    if (!Object.is(actual[i], wanted[i])) {
+      index = i;
+      break;
+    }
+  }
+  // The first differing element, if any, with both values.
+  expect(
+    index === -1
+      ? undefined
+      : { index, actual: actual[index], wanted: wanted[index] },
+  ).toBeUndefined();
+}
+
+/** Checks two column sets as `toEqual` does, array by array. */
+function expectSameColumns(actual: Columns, wanted: Columns): void {
+  expect(Object.keys(actual).sort()).toEqual(Object.keys(wanted).sort());
+  expect(Object.keys(actual.fields).sort()).toEqual(
+    Object.keys(wanted.fields).sort(),
+  );
+  expectSameArray(actual.slots, wanted.slots);
+  for (const name of Object.keys(wanted.fields)) {
+    expectSameArray(actual.fields[name], wanted.fields[name]);
+  }
+}
+
+/**
  * Reads `range` with countIn and sliceInto at offset `at`, with `pad` spare
  * elements after the points, and checks both against `selected` and slice.
  */
@@ -67,13 +108,15 @@ function expectRead(
   const length = at + count + pad;
   const out = target(length);
   expect(segment.sliceInto(range, out, at)).toBe(count);
-  expect(out).toEqual(expected(selected, at, length));
+  expectSameColumns(out, expected(selected, at, length));
   const slice = segment.slice(range);
-  expect(out.slots.subarray(at, at + count)).toEqual(slice.slots);
-  expect(out.fields.price?.subarray(at, at + count)).toEqual(
+  expectSameArray(out.slots.subarray(at, at + count), slice.slots);
+  expectSameArray(
+    out.fields.price?.subarray(at, at + count),
     slice.fields.price,
   );
-  expect(out.fields.volume?.subarray(at, at + count)).toEqual(
+  expectSameArray(
+    out.fields.volume?.subarray(at, at + count),
     slice.fields.volume,
   );
 }
