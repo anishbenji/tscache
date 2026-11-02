@@ -32,6 +32,29 @@ function span(segment: Segment): number {
   return end - start;
 }
 
+/**
+ * floor(slot / cap), exactly: the float division could round across a page
+ * edge for slots near ±2^53, so it is built from the exact remainder. The
+ * persisted page records use the same pages (§4.10.2).
+ */
+export function pageOf(slot: number, cap: number): number {
+  const r = slot % cap;
+  const q = (slot - r) / cap;
+  return r < 0 ? q - 1 : q;
+}
+
+/**
+ * The page's slots, clamped to safe integers. Each product is formed on
+ * the side where it cannot leave exact-integer range before the clamp.
+ */
+export function pageRange(page: number, cap: number): SlotRange {
+  const end = page < 0 ? (page + 1) * cap - 1 : page * cap + (cap - 1);
+  return {
+    start: Math.max(page * cap, Number.MIN_SAFE_INTEGER),
+    end: Math.min(end, Number.MAX_SAFE_INTEGER),
+  };
+}
+
 export class SegmentStore {
   readonly #options: SegmentOptions;
   readonly #names: string[];
@@ -155,27 +178,12 @@ export class SegmentStore {
     return { slots: whole ? slots : slots.subarray(from, to), fields };
   }
 
-  /**
-   * floor(slot / cap), exactly: the float division could round across a page
-   * edge for slots near ±2^53, so it is built from the exact remainder.
-   */
   #page(slot: number): number {
-    const r = slot % this.#cap;
-    const q = (slot - r) / this.#cap;
-    return r < 0 ? q - 1 : q;
+    return pageOf(slot, this.#cap);
   }
 
-  /**
-   * The page's slots, clamped to safe integers. Each product is formed on
-   * the side where it cannot leave exact-integer range before the clamp.
-   */
   #pageRange(page: number): SlotRange {
-    const cap = this.#cap;
-    const end = page < 0 ? (page + 1) * cap - 1 : page * cap + (cap - 1);
-    return {
-      start: Math.max(page * cap, Number.MIN_SAFE_INTEGER),
-      end: Math.min(end, Number.MAX_SAFE_INTEGER),
-    };
+    return pageRange(page, this.#cap);
   }
 
   /**

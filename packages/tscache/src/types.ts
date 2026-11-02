@@ -67,6 +67,19 @@ export interface CacheConfig {
    * console.warn in development builds by the page that made the write.
    */
   warnOnOverlapDiff?: boolean;
+  /**
+   * Keep this cache in IndexedDB across sessions, so a reload or a new tab
+   * starts from what earlier sessions fetched (docs/architecture.md §4.10).
+   * Default false. Structural (N20): every tab must pass the same value.
+   *
+   * Acts only when the client's mode is 'shared' and the browser has
+   * IndexedDB (N52). In the dedicated-worker and in-process hostings, in Node
+   * and for an `Engine` used directly it is accepted and ignored, without an
+   * event (N45); `client.mode` tells which case applies. Stored records are
+   * readable by every script of the origin and outlive the session until
+   * `clearAll`, so keep per-user or sensitive caches in memory.
+   */
+  persist?: boolean;
 }
 
 /** {@link CacheConfig} with defaults applied; frozen. Internal currency. */
@@ -79,6 +92,7 @@ export interface ResolvedCacheConfig {
   gapSplitK: number;
   segmentSlotCap: number;
   warnOnOverlapDiff: boolean;
+  persist: boolean;
   version?: string;
   finalizedUntil?: number;
 }
@@ -287,6 +301,19 @@ export interface ClientEvents {
     requestId: RequestId;
     range: Range;
     fields: string[];
+  };
+  /**
+   * Persistence of this cache stopped (N47): the cache goes on in memory,
+   * and nothing more is written for it while its worker lives. A failure
+   * never rejects a call; this event reports it. A stop while `cache()`
+   * loads is emitted before the handle exists, so subscribe with
+   * `client.on` to hear it.
+   */
+  persistStopped: {
+    cacheId: string;
+    reason: "quota-exceeded" | "unavailable" | "error";
+    /** The underlying failure, when there is one. */
+    error?: { name: string; message: string };
   };
 }
 

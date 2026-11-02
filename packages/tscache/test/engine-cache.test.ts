@@ -21,6 +21,7 @@ describe("Engine cache get-or-create — architecture §2.2, §4.6, N4, N20", ()
       gapSplitK: 4,
       segmentSlotCap: 32_768,
       warnOnOverlapDiff: false,
+      persist: false,
     });
     expect(engine.has("fresh")).toBe(true);
     expect(engine.get("fresh", { start: 0, end: 20 })).toEqual(
@@ -40,6 +41,7 @@ describe("Engine cache get-or-create — architecture §2.2, §4.6, N4, N20", ()
       gapSplitK: 4,
       segmentSlotCap: 32_768,
       warnOnOverlapDiff: false,
+      persist: false,
       version: "v1",
       finalizedUntil: 23,
     });

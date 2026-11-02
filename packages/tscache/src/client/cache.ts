@@ -20,7 +20,7 @@ import { warnMerges } from "./dev";
 import type { ClientEmitter } from "./events";
 
 /** The cache-scoped and request-scoped events, filterable by cacheId. */
-export type CacheEvent = "cacheCleared" | "mergeWarning";
+export type CacheEvent = "cacheCleared" | "mergeWarning" | "persistStopped";
 
 export class CacheHandle {
   readonly id: string;

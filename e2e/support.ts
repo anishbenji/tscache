@@ -137,6 +137,7 @@ export async function connect(
       "cacheCleared",
       "mergeWarning",
       "workerLost",
+      "persistStopped",
     ] as const;
     for (const event of events) {
       w.client.on(event, (payload) => w.log.push({ event, payload }));
@@ -265,6 +266,63 @@ export async function read(
   const key = crypto.randomUUID();
   await start(page, key, config, range, options);
   return settle(page, key);
+}
+
+/** Empties every cache, and in the SharedWorker hosting the disk (N54). */
+export async function clearAll(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await (window as unknown as E2EWindow).client.clearAll();
+  });
+}
+
+/** Records in the origin's persistence database (architecture §4.10.2). */
+export interface Stored {
+  caches: number;
+  pages: number;
+}
+
+/**
+ * Counts the records the origin's `tscache` database holds, for one cache
+ * or, without `cacheId`, for all; undefined when there is no database. It
+ * never creates one: an empty database at version 1 would have no object
+ * stores, and the worker's own opening would then not create them.
+ */
+export function stored(
+  page: Page,
+  cacheId?: string,
+): Promise<Stored | undefined> {
+  return page.evaluate(async (id) => {
+    const listed = await indexedDB.databases();
+    if (!listed.some((info) => info.name === "tscache")) return undefined;
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("tscache");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const count = (request: IDBRequest<number>) =>
+      new Promise<number>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    try {
+      const tx = db.transaction(["caches", "pages"]);
+      const caches = tx.objectStore("caches");
+      const pages = tx.objectStore("pages");
+      if (id === undefined) {
+        return {
+          caches: await count(caches.count()),
+          pages: await count(pages.count()),
+        };
+      }
+      const range = IDBKeyRange.bound([id, -Infinity], [id, Infinity]);
+      return {
+        caches: await count(caches.count(id)),
+        pages: await count(pages.count(range)),
+      };
+    } finally {
+      db.close();
+    }
+  }, cacheId);
 }
 
 /** Clears the cache, for every tab of a SharedWorker. */

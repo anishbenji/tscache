@@ -61,6 +61,13 @@ and settled their differences with experiments; method and reasoning in `docs/be
 
 ## Design sketch: IndexedDB persistence
 
+**Specified in `docs/architecture.md` §4.10 (step 38, decisions N45–N61); where this sketch and §4.10
+differ, §4.10 governs.** The main differences: only the SharedWorker hosting persists (N52, user
+decision of 2026-10-31); coverage is stored in each page record rather than in the cache record (N55);
+and removals are written at once rather than debounced (N58). It ships as slice (a), records, loading
+and write-behind in the SharedWorker, then optionally slice (c), the quota event and the worker's
+extended lifetime.
+
 **Goal.** A reload or a new tab starts from what an earlier session fetched. Immutable history, the
 primary use (N11), is then fetched once per device rather than once per session.
 
@@ -88,11 +95,10 @@ missing (an interrupted write, a partial clear) is subtracted from it, so a lost
 never as a confirmed gap. Browsers evict best-effort storage for a whole origin at once, which the same
 rule handles.
 
-**One writer per page at a time.** In a SharedWorker one engine owns the database. With dedicated workers
-(Chrome on Android) and in-process clients each tab has its own engine, so a flush takes a Web Lock per
-database and merges under it: it reads the stored page and cache record, unions the coverage and merges
-the points new-wins, then writes. Without the read-merge-write, one tab's flush would erase coverage
-another tab had written.
+**One writer per origin.** In a SharedWorker one engine owns the database, and only that hosting
+persists. With dedicated workers (Chrome on Android before 148, pinned dedicated modes) and in-process
+clients each tab has its own engine, and one tab's flush would replace pages another tab had written;
+those hostings do not persist until combining several engines' records is designed (§4.10.10).
 
 **Clearing.** `clear`, `clearAll` and a version-mismatch clear delete the cache's records in the next
 flush; `invalidate` reaches disk through the cache record's coverage. Logging out on a shared device is a

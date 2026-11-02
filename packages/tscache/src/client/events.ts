@@ -18,6 +18,11 @@ export class ClientEmitter extends Emitter<ClientEvents> {
             "cacheCleared",
             evt.payload as ClientEvents["cacheCleared"],
           );
+        } else if (evt.event === "persistStopped") {
+          this.emit(
+            "persistStopped",
+            evt.payload as ClientEvents["persistStopped"],
+          );
         }
         return;
       case "request":

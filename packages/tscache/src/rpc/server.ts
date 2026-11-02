@@ -9,6 +9,8 @@ import type { Engine } from "../engine/engine";
 import { ProtocolMismatchError, show, TscacheError } from "../errors";
 import { Orchestrator } from "../orchestrator/orchestrator";
 import type {
+  CacheConfig,
+  ClientEvents,
   GetOptions,
   GetResult,
   PutBatch,
@@ -59,19 +61,54 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/**
+ * The SharedWorker hosting's persistence, as the server uses it (§4.10.8):
+ * `persist/hosted.ts`, which loads the persister lazily. The other hostings
+ * pass none.
+ */
+export interface Persistence {
+  /** Starts persisting a cache; settles once its load has settled. */
+  open(cacheId: string): Promise<void>;
+  /**
+   * Runs an op that names a cache. When it recorded a removal, or another
+   * op did meanwhile, it answers, success or failure, only once that
+   * removal is durable or the cache's persistence stopped (N58).
+   */
+  durably(cacheId: string, op: () => unknown): unknown;
+  /**
+   * Empties every cache and the disk in one synchronous step (N54);
+   * answers once the disk is empty or every persisted cache has stopped.
+   */
+  clearAll(): unknown;
+  /** The last connection went: writes what the debounce still holds. */
+  flush(): void;
+}
+
 export class RpcServer {
   readonly #engine: Engine;
   readonly #orchestrator: Orchestrator;
   readonly #lib: string;
   readonly #lock: string | undefined;
+  readonly #persistence: Persistence | undefined;
   readonly #connections = new Set<Connection>();
   #nextClient = 0;
 
-  /** `lock`: the Web Lock the worker holds for its lifetime, sent in hello (N32). */
-  constructor(engine: Engine, lib: string, lock?: string) {
+  /**
+   * `lock`: the Web Lock the worker holds for its lifetime, sent in hello
+   * (N32). `persistence`: the SharedWorker hosting's (§4.10.8); without
+   * it, `persist: true` does nothing and every op answers as before
+   * persistence.
+   */
+  constructor(
+    engine: Engine,
+    lib: string,
+    lock?: string,
+    persistence?: Persistence,
+  ) {
     this.#engine = engine;
     this.#lib = lib;
     this.#lock = lock;
+    this.#persistence = persistence;
     this.#orchestrator = new Orchestrator(engine, (evt) =>
       this.#broadcast(evt),
     );
@@ -110,6 +147,20 @@ export class RpcServer {
     this.#send(connection, hello);
   }
 
+  /**
+   * Tells every ready port that a cache's persistence stopped (§4.10.8):
+   * the persistence's `onStopped`.
+   */
+  persistStopped(payload: ClientEvents["persistStopped"]): void {
+    this.#broadcast({
+      t: "evt",
+      scope: "cache",
+      cacheId: payload.cacheId,
+      event: "persistStopped",
+      payload,
+    });
+  }
+
   /** Attached ports still alive (for tests and diagnostics). */
   get connections(): number {
     return this.#connections.size;
@@ -137,6 +188,8 @@ export class RpcServer {
     }
     connection.unlisten();
     connection.port.close?.();
+    // The last tab is gone: write what the debounce still holds (§4.10.8).
+    if (this.#connections.size === 0) this.#persistence?.flush();
   }
 
   /**
@@ -263,27 +316,66 @@ export class RpcServer {
     Op,
     (connection: Connection, req: Req, p: Params) => unknown
   > = {
-    cache: (_c, req) => this.#engine.cache(req.params as never),
+    cache: (_c, req) => this.#cache(req.params as CacheConfig),
     get: (c, req, p) =>
-      this.#orchestrator.get(
-        p.cacheId as string,
-        p.range as Range,
-        p.options,
-        `${c.clientId}:${req.id}`,
+      this.#durably(p.cacheId, () =>
+        this.#orchestrator.get(
+          p.cacheId as string,
+          p.range as Range,
+          p.options,
+          `${c.clientId}:${req.id}`,
+        ),
       ),
-    put: (c, req, p) => this.#put(c, req.id, p.cacheId as string, p),
+    put: (c, req, p) =>
+      this.#durably(p.cacheId, () =>
+        this.#put(c, req.id, p.cacheId as string, p),
+      ),
     invalidate: (_c, _r, p) =>
-      this.#orchestrator.invalidate(p.cacheId as string, p.range as Range),
-    clear: (_c, _r, p) => this.#engine.clear(p.cacheId as string),
-    clearAll: () => this.#engine.clearAll(),
+      this.#durably(p.cacheId, () =>
+        this.#orchestrator.invalidate(p.cacheId as string, p.range as Range),
+      ),
+    clear: (_c, _r, p) =>
+      this.#durably(p.cacheId, () => this.#engine.clear(p.cacheId as string)),
+    clearAll: () => this.#clearAll(),
     setFinalizedUntil: (_c, _r, p) =>
-      this.#engine.setFinalizedUntil(p.cacheId as string, p.t as number),
+      this.#durably(p.cacheId, () =>
+        this.#engine.setFinalizedUntil(p.cacheId as string, p.t as number),
+      ),
     hydrate: (_c, _r, p) =>
-      this.#engine.hydrate(p.cacheId as string, p.snapshot as Snapshot),
+      this.#durably(p.cacheId, () =>
+        this.#engine.hydrate(p.cacheId as string, p.snapshot as Snapshot),
+      ),
     updateAuth: (_c, _r, p) => this.#orchestrator.updateAuth(p.context),
     // Acknowledged first; #request detaches the port afterwards.
     dispose: () => undefined,
   };
+
+  /**
+   * Get-or-create; a persisted cache answers once its load settled, so no
+   * call through a handle reaches a cache whose load is pending (§4.10.5).
+   * `open` is called in the same synchronous step that creates the cache.
+   */
+  #cache(config: CacheConfig): unknown {
+    const resolved = this.#engine.cache(config);
+    const persistence = this.#persistence;
+    if (persistence === undefined || !resolved.persist) return resolved;
+    return persistence.open(resolved.id).then(() => resolved);
+  }
+
+  /** Runs an op that names a cache, through the persistence when there is one (N58). */
+  #durably(cacheId: unknown, op: () => unknown): unknown {
+    const persistence = this.#persistence;
+    if (persistence === undefined || typeof cacheId !== "string") return op();
+    return persistence.durably(cacheId, op);
+  }
+
+  /** Empties every cache, and with persistence the disk (N54). */
+  #clearAll(): unknown {
+    const persistence = this.#persistence;
+    return persistence === undefined
+      ? this.#engine.clearAll()
+      : persistence.clearAll();
+  }
 
   /** put, then the request-scoped mergeWarning events (N21). */
   #put(

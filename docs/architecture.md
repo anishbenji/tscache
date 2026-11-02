@@ -23,7 +23,7 @@ Status: **draft for review** (starter-prompt §12 deliverable). All decisions fr
         └────────────────────────┘
 ```
 
-Out of scope for v1 (roadmap): aggregation/resampling, ColumnarSegment, subscriptions, IndexedDB persistence, eviction, SharedArrayBuffer, per-field presence masks, irregular timestamps, elected auth handler, Node `worker_threads`.
+Out of scope for v1 (roadmap): aggregation/resampling, ColumnarSegment, subscriptions, eviction, SharedArrayBuffer, per-field presence masks, irregular timestamps, elected auth handler, Node `worker_threads`. IndexedDB persistence, once on that list, is specified in §4.10 (step 38).
 
 ## 2. Public API surface
 
@@ -110,6 +110,10 @@ interface CacheConfig {
   finalizedUntil?: number;
   /** Opt-in differs-on-overlap warning (O(overlap) cost). Default false. */
   warnOnOverlapDiff?: boolean;
+  /** Keep the cache in IndexedDB across sessions; structural (N20). Default
+   *  false. Acts in the SharedWorker hosting only (N52); elsewhere a no-op.
+   *  Additive (§4.10.1, N45). */
+  persist?: boolean;
 }
 ```
 
@@ -312,6 +316,10 @@ interface ClientEvents {
   // ── cache-scoped ──
   /** Cache was cleared. In SharedWorker mode one tab's clear affects all tabs. */
   cacheCleared: { cacheId: string; reason: 'manual' | 'clear-all' | 'version-mismatch' };
+  /** Persistence of the cache stopped; it goes on in memory. Additive
+      (§4.10.1, N47). */
+  persistStopped: { cacheId: string; reason: 'quota-exceeded' | 'unavailable' | 'error';
+                    error?: { name: string; message: string } };
 
   // ── request-scoped (carries originating request's id) ──
   /** Opt-in (warnOnOverlapDiff): overlapping put differed outside volatile region.
@@ -476,7 +484,7 @@ interface DenseSegmentPayload {
 
 A `Snapshot` (§2.8, N34) is a set of these payloads, clipped to a request, in an envelope naming the grid, the schema, the dataset version, the watermark and the coverage: the SSR hydration payload of this invariant, and the cache record of the persistence sketch in `docs/roadmap.md`.
 
-Settled persistence notes (roadmap §3.7): write-behind only (dirty-segment set, debounce + `pagehide` flush), volatile region excluded, coverage reconciled against actual segment presence on hydrate, `format` field mandatory.
+Settled persistence notes (roadmap §3.7): write-behind only (dirty-segment set, debounce + `pagehide` flush), volatile region excluded, coverage reconciled against actual segment presence on hydrate, `format` field mandatory. Specified in §4.10: the dirty set is kept per page, the stable container of segments (N15); a page record is a `Snapshot` of its page's covered ranges, so its coverage is stored with exactly the points a load applies (N55).
 
 ## 4. Module layout — `packages/tscache/src`
 
@@ -508,11 +516,24 @@ engine/
   snapshot.ts       snapshots: payloads clipped to a request, validation of an incoming
                     snapshot, and the hydrate plan in slot terms (N34–N36)
   cache.ts          CacheState: one cache's store, coverage, watermark and version;
-                    put/get/invalidate/clear/setFinalizedUntil in ms
+                    put/get/invalidate/clear/setFinalizedUntil in ms; the internal seam
+                    persistence reaches it through (§4.10.5)
+  restore.ts        CacheState.restore's implementation, installed by the persister, so
+                    only the lazily loaded persistence chunk carries it (§4.10.5, §4.10.8)
   emitter.ts        minimal typed emitter for engine events (engine/ must not import client/)
   engine.ts         Engine: caches map keyed by id, get-or-create with config conflicts (N4,
                     N20), cacheId-first ops, cacheCleared events; pure in-process API —
                     unit-test target, './engine' export surface
+persist/            IndexedDB persistence (§4.10); imports engine/, never imported by it
+  records.ts        CacheRecord, PageRecord; the canonical records of a cache state
+  store.ts          PersistStore, StoredCache, WritePlan, PageRange: the test seam
+  idb-store.ts      openIdbStore: the IndexedDB adapter
+  persister.ts      Persister: load at open (abandoned by any change), change tracking, the
+                    writer (one job at a time, one deadline each), flush, clearAll
+  lazy.ts           the chunk the SharedWorker loads with import(): the persister and the
+                    IndexedDB adapter (§4.10.8)
+  hosted.ts         HostedPersistence: the RPC server's persistence in the SharedWorker,
+                    loading lazy.ts at the first persisted cache or clearAll (§4.10.8)
 orchestrator/
   orchestrator.ts   fetcher loading, miss coalescing, in-flight subtraction (§4.9.1), version
                     fence, orchestrated get, updateAuth
@@ -1116,12 +1137,500 @@ Rules:
 
 13. **Budgets.** Exact, in `test/perf/counters.test.ts`: a fast scroll, each read issued before the earlier fetches resolve, fetches what its reads need plus the one-interval flank and nothing more, with one fetch and one engine read per read; and a round over thousands of in-flight entries and coverage fragments reads each of them a few times. The end-to-end scenario `fast-scroll` counts the bars the backend serves for the same scroll in Chromium, checked; its timing is report-only. The numbers and setups are in `docs/reviews/step-44.md`.
 
+### 4.10 Internal contracts — IndexedDB persistence (N45–N61, 2026-10-30; redesigned after review round 2; narrowed to the SharedWorker hosting 2026-10-31)
+
+Persistence keeps a cache's authoritative data in IndexedDB, so a reload or a new tab starts from what earlier sessions fetched: immutable history, the primary use (N11), is fetched once per device instead of once per session. It realises the settled notes of starter §3.7 (write-behind, volatile region excluded, coverage reconciled against what is stored, a schema version on every record) and the sketch in `docs/roadmap.md`, through decisions N45–N61. **Only the SharedWorker hosting persists** (user decision of 2026-10-31, N52): one engine then owns the database of its origin and is its only writer. In the dedicated-worker and in-process hostings, where each tab has an engine of its own, `persist: true` does nothing (§4.10.1, §4.10.7). It is built in one slice and an optional later one (`docs/reviews/step-38.md`): (a) records, loading and write-behind in the SharedWorker hosting; (c) the quota stop and the SharedWorker's extended lifetime. Slice (b), which let several engines share the database, was retired on 2026-10-31 (N52).
+
+Two rules carry the design, and every later paragraph follows from them. **Memory is canonical:** the disk is never merged with live memory slot by slot. A load applies records only into a cache that knows nothing yet, and a cache that changed while its load was pending starts without the records and rewrites them from memory (§4.10.5); a flush writes what memory holds and never reads the disk (§4.10.6). **One deadline:** every write transaction is a job of one writer per persister, due at a known time and failed for good `timeoutMs` later, whatever it was waiting for: the queue, a store call or a retry (§4.10.6). A call that waits for a removal therefore waits for at most two deadlines.
+
+Strict test-first applies to `CacheState.restore`, the `Persister` and the store contract (§4.10.3–§4.10.6): their contract tests are written from this section before the code. The hosting wiring (§4.10.8) is tested with the code.
+
+Dependency rule, extended: `persist/` imports `engine/`, `grid`, `coverage`, `segment/` and `types`; nothing under `engine/`, `grid`, `coverage` or `segment/` imports `persist/`, and none of them gains a DOM, worker or timer reference (§4.6). Timers and IndexedDB live in `persist/` and in the hostings. Nothing an application loads without a persisted cache carries the persistence code (§4.10.8): `engine/restore.ts` is imported only by the persister, and the persister, the record builder and the IndexedDB adapter are a chunk the SharedWorker loads on demand.
+
+#### 4.10.1 Public surface (all additive)
+
+```ts
+interface CacheConfig {
+  // …§2.2, plus:
+  /**
+   * Keep this cache in IndexedDB across sessions (§4.10). Structural (N20):
+   * every tab must pass the same value. Default false. Acts only when the
+   * client's mode is 'shared' (N52); elsewhere accepted and ignored (N45).
+   */
+  persist?: boolean;
+}
+
+interface ResolvedCacheConfig {
+  // …plus:
+  persist: boolean;
+}
+
+interface ClientEvents {
+  // ── cache-scoped ──, plus:
+  /**
+   * Persistence of this cache stopped (N47). The cache goes on in memory;
+   * nothing more is written for it while its worker (or page) lives.
+   */
+  persistStopped: {
+    cacheId: string;
+    reason: 'quota-exceeded' | 'unavailable' | 'error';
+    /** The underlying failure, when there is one. */
+    error?: { name: string; message: string };
+  };
+}
+
+// client/cache.ts
+type CacheEvent = 'cacheCleared' | 'mergeWarning' | 'persistStopped';
+```
+
+Rules:
+
+- **Validation.** `persist` resolves to `false` when omitted; a value that is not a boolean throws `ConfigError` (`persist must be a boolean when set, got …`). It is structural under N20's rule (every resolved field except `version` and `finalizedUntil`): joining a live cache with another value throws `ConfigError` naming `persist`, and the live cache is untouched. There is no new error class or code: a persistence failure never rejects a call (below).
+- **Where it acts.** A persisted cache is loaded and written by the SharedWorker's persister, the only hosting that has one (N52). Everywhere else `persist: true` is accepted, validated and kept structural, and does nothing, without an event (N45): in the dedicated-worker and in-process hostings (on a browser without `SharedWorker`, after a fallback, or when `ClientOptions.mode` pins them), where the realm has no IndexedDB (Node, so every server render), and for an `Engine` used directly through `./engine`. A consumer tells the cases apart by `client.mode` (§2.1): a persisted cache persists when it is `'shared'` and the browser has IndexedDB. Where it does not, `cache()` does not wait for a load, nothing is written, and `clearAll` leaves the disk as it is (§4.10.7). No event is emitted, as in Node: the configuration is not a failure, and an event at every open in every such tab would only be noise.
+- **What persists.** The covered ranges below the watermark and the points inside them (§4.10.2). The volatile region never reaches the disk (starter §3.7); after a reload the provisional tail is fetched again, as in a running session. A cache opened with `persist: true` starts from the stored records, unless something changed it before they were applied (§4.10.5). A range the stored records do not cover, including one whose record the browser evicted, reads as uncached, never as a confirmed gap.
+- **When calls wait for the disk.** `cache()` of a persisted cache resolves after its records are loaded and applied, after the load gave up (5000 ms, §4.10.6), or after the load was abandoned because the cache changed meanwhile, so the first `get` through its handle sees the records. A call that removes coverage of a persisted cache resolves only once the removal is durable (N58): `invalidate`, `clear`, `clearAll`, a `setFinalizedUntil` that moves the watermark back or sets the first one, and also a `put`, `hydrate` or orchestrated `get` whose data cleared the cache for a newer version or set its first watermark. Durable means written with strict durability, or else persistence of the cache has stopped and the deletion of its records has settled. The wait is bounded by one deadline (§4.10.6): the write has `timeoutMs` (5000 ms) from the removal to land, retries included; then the cache stops, and the deletion that follows is bounded the same way. A `clearAll` pending at the removal, or called after it, settles the removal itself within the same bound (§4.10.6, `clearAll`). On a failing disk such a call therefore takes at most about 10 s, and it never rejects. Nothing else waits: additions are written behind (§4.10.6), and a persistence failure emits `persistStopped` instead of rejecting. A stop during `cache()` is emitted before the handle exists: subscribe with `client.on('persistStopped', …)` to hear it.
+- **What can outlive a removal.** Only a disk that refuses every write: when the removal's write has not landed by its deadline and the deletion that follows the stop fails or times out too, the records written before the removal stay, and a later session that can read them loads them. The same holds for a `clearAll` whose job fails at its deadline: every record stays. `persistStopped` reports the stop; nothing in a later session can tell. The worker that failed to clear loads nothing more for the rest of its life (§4.10.6), so the data a failed logout left on disk comes back only in a later worker.
+- **Version honesty across sessions** (§2.4). A restatement without a version signal is undetectable, and persistence carries that across reloads: a stored range is served without asking the backend in every later session. Set `CacheConfig.version` when the dataset has one, and stored records of another version are never loaded (N56). TTL stays a consumer pattern: `invalidate` or `clear` on your own clock removes stored ranges too.
+- **One writer.** Every tab of a deploy reaches one SharedWorker, so one engine writes the database, and a `clearAll` from any of those tabs clears that engine's memory and the disk together. Two SharedWorkers write it only for a moment: during a deploy skew (two worker URLs), or while a worker that lost its last tab is still closing as a new tab starts the next. Each writes from its own memory, and page records are self-contained, so the overlap costs coverage, never a wrong point; what one engine removed, the other may still hold and write back once (§4.10.7).
+- **Durable storage is the app's call (N48).** Browsers evict best-effort storage under pressure, an origin at a time, and the load rule absorbs it. An app that wants its cache kept calls `navigator.storage.persist()` itself; the library never does, since some browsers prompt the user.
+- **Sensitive data.** Stored records are readable by every script of the origin and outlive the session until `clearAll`. Keep per-user or sensitive caches in memory; that is why `persist` is per cache (N45).
+- **Protocol.** No new op. `persistStopped` travels as `{ t: 'evt', scope: 'cache', cacheId, event: 'persistStopped', payload }`. `PROTOCOL_VERSION` stays 1 (as N37): an older worker ignores `persist` (config validation keeps only the fields it knows, `engine/validate.ts`) and never emits the event; an older client ignores the unknown event name (`ClientEmitter.receive`, `client/events.ts`).
+
+#### 4.10.2 Database and records (N51, N53, N55)
+
+One database per origin, named `tscache`, at IndexedDB version 1. Its upgrade from version 0 creates two object stores without indexes: `caches`, key path `'cacheId'`, and `pages`, key path `['cacheId', 'page']`. Keys sort by cache id, then numerically by page, so one key range reads or deletes every page of a cache, or a run of its pages (lazy loading, later, §4.10.10).
+
+```ts
+// persist/records.ts
+/** Store 'caches': one per persisted cache. */
+interface CacheRecord {
+  cacheId: string;
+  /** Schema version of the persisted records. */
+  format: 1;
+  /** The structural config (N20) the records were written under. */
+  config: {
+    interval: number;
+    alignmentOffset: number;
+    fields: Record<string, Dtype>;
+    gapSplitK: number;
+    segmentSlotCap: number;
+    warnOnOverlapDiff: boolean;
+  };
+  /** The dataset version and the watermark when written; each omitted when unset. */
+  version?: string;
+  finalizedUntil?: number;
+}
+
+/** Store 'pages': one per page that holds coverage. */
+interface PageRecord {
+  cacheId: string;
+  /** floor(slot / segmentSlotCap) of every slot of `snapshot` (N15); may be negative. */
+  page: number;
+  /** The page's covered slots and the points inside them (§2.8). */
+  snapshot: Snapshot;
+}
+```
+
+**Canonical records.** `recordsOf(S)`, for the state `S` of a persisted cache, is what a flush writes and, with a single writer, what the disk holds after it (§4.10.6); it has the shape of a `StoredCache` (§4.10.3), pages ascending. When `S` covers nothing, it is empty (`{ cache: undefined, pages: [] }`), so a cleared cache leaves nothing on disk. Otherwise:
+
+- One cache record: `cacheId`; `format: 1`; `config`, the six fields of `S.config` (`fields` a fresh object in schema order); `version` and `finalizedUntil` as `S` reports them, each omitted when undefined.
+- One page record for each page `p` that holds coverage. Page `p` spans slots `[p · cap, p · cap + cap − 1]` with `cap = segmentSlotCap`: the pages of the segment store (§4.3, N15). Let `cov_p` be `S`'s covered slot ranges clipped to page `p`. When it is not empty, its *hull* runs from its first slot to its last, and the record's `snapshot` is the *page snapshot*: the envelope of `S.snapshot(toMs(hull))` (§4.5) without its `finalizedUntil`, whose `segments` are the payloads of `S.snapshot(toMs(r))` for each range `r` of `cov_p`, in order. Its `range` is therefore the hull in ms, its `coverage` is `cov_p` in ms, its `segments` hold exactly the present points inside `cov_p` (one payload per store segment per covered range; a segment never crosses a page edge, N15), and its `version` is `S`'s.
+- Nothing else: a page without coverage has no record.
+
+Consequences the tests rely on:
+
+- **A record holds exactly what a load applies.** No point outside coverage is stored: not a point whose coverage was invalidated, not one that was provisional when fetched, not one at or after the watermark (coverage never reaches the volatile region, §4.5, so no hull does). Restoring `recordsOf(S)` into a cache that knows nothing (§4.10.5) therefore gives a cache whose records are `recordsOf(S)` again.
+- A covered page without points, a confirmed gap, is a record with `segments: []`, so the gap survives a reload.
+- Equal states have equal records (§2.8: a snapshot is a function of the state and the range).
+- The buffers are fresh copies and IndexedDB clones them on write; cache-owned memory never leaves (§3.3).
+- A page record is self-contained: it names its grid, schema, version, range and coverage, so it is checked and applied on its own, whoever wrote it (§4.10.5). This is why coverage is stored per page rather than in the cache record (N55).
+
+The page snapshot omits `finalizedUntil` so that a watermark change rewrites the cache record only; a load applies the cache record's watermark.
+
+**Format and versioning.** Each layer carries its own version, and each mismatch has one outcome:
+
+| Layer | Version | On a mismatch at load |
+|---|---|---|
+| Database layout | IndexedDB version 1 | A database at a higher version (a newer deploy) cannot be opened: persistence is `'unavailable'` for this engine. A later layout bumps the version and migrates in its upgrade |
+| Records | `CacheRecord.format: 1` | The cache's records are not applied; the cache rewrites them at its next flush |
+| Structure | `CacheRecord.config` against the cache's N20 fields (`fields` by names and dtypes, key order irrelevant) | Not applied; rewritten |
+| Dataset | `CacheRecord.version` against the cache's version (N56) | Not applied; rewritten |
+| Snapshot and payloads | `Snapshot.format: 1` and each payload's `format: 1` (§2.8, §3.4) | That page is skipped; the cache is rewritten |
+
+A mismatch clears nothing in memory and emits nothing: the cache starts without the stored records, and its own records replace them at its next flush, a full rewrite (§4.10.6).
+
+#### 4.10.3 Store interface and test seam (N60)
+
+Persistence reaches IndexedDB through one narrow interface. The logic above it is tested against an in-memory fake; the IndexedDB adapter is held to the same contract by a conformance suite.
+
+```ts
+// persist/store.ts
+/** Inclusive range of page indices; ±Infinity allowed. */
+interface PageRange { start: number; end: number }
+
+/** The stored records of one cache. */
+interface StoredCache {
+  cache: CacheRecord | undefined;
+  /** Ascending by page. */
+  pages: PageRecord[];
+}
+
+/** One atomic write: deletions, then page puts, then the cache record. */
+interface WritePlan {
+  /** Every page record of the cache whose page lies in one of these ranges goes. */
+  deletePages: PageRange[];
+  /** Each replaces the record under its key; every cacheId is the write's. */
+  putPages: PageRecord[];
+  /** The cache record to put, or null to delete it. */
+  putCache: CacheRecord | null;
+  /** Strict durability: set when the plan carries a removal (N49, N58). */
+  strict: boolean;
+}
+
+interface PersistStore {
+  /** One read-only transaction: the cache record and its page records, all of them or those in `pages`. */
+  read(cacheId: string, pages?: PageRange[]): Promise<StoredCache>;
+  /**
+   * One read-write transaction, with strict durability when `plan.strict`
+   * and relaxed otherwise (N49): all of the plan or none of it. Resolves when
+   * the transaction completed. Rejects with the transaction's error, whose
+   * `name` is 'QuotaExceededError' when the origin's quota is exceeded.
+   */
+  write(cacheId: string, plan: WritePlan): Promise<void>;
+  /** One read-write transaction with strict durability: every record of every cache goes. */
+  clearAll(): Promise<void>;
+  /** Releases the connection; every later call rejects with an error named 'InvalidStateError'. */
+  close(): void;
+}
+
+// persist/idb-store.ts
+/**
+ * Opens the database through `factory`, creating or upgrading it (§4.10.2).
+ * With `ifExists`, resolves undefined and creates nothing when
+ * `factory.databases()` does not list it. Rejects when it cannot be opened.
+ */
+function openIdbStore(
+  factory: IDBFactory,
+  options?: { name?: string; ifExists?: boolean },
+): Promise<PersistStore | undefined>;
+```
+
+The store takes no signal and no timeout: a call the persister has given up on (§4.10.6) is left to settle on its own, and its result is ignored. The store contract, which the conformance suite checks against `MemoryStore` and against `openIdbStore` over `fake-indexeddb`:
+
+- **Copies.** Records are structured-cloned in and out: changing a record after `write`, or a result of `read`, changes nothing stored. `ArrayBuffer`, `Uint8Array` and `NaN` survive with their types and bytes.
+- **Read.** An unknown cache reads `{ cache: undefined, pages: [] }`. Pages come ascending by page number, negative ones first. With `pages`, only records whose page lies in one of the inclusive ranges, ascending, each once even where ranges overlap.
+- **Write.** Deletions, then page puts, then the cache record; records of other caches are never touched. Atomic: when any part fails (a record that cannot be cloned, say), nothing of the plan is stored and the promise rejects with an error whose `name` is the failure's (`DataCloneError` in that example).
+- **Clear all.** Afterwards every cache reads empty.
+- **Close.** Later calls reject with an error named `'InvalidStateError'`. The IndexedDB store also closes itself on its database's `versionchange` event, so a newer deploy's upgrade is not blocked.
+- **`openIdbStore` alone.** The database it creates has the name, version, stores and key paths of §4.10.2. With `ifExists`, against a factory without the database, it resolves `undefined` and the factory still lists no such database.
+
+`MemoryStore` (`packages/tscache/test/persist-memory-store.ts`, a test helper) implements the interface over maps, cloning with `structuredClone`, and adds what the tests need: a log of every `read`, `write` (with its plan, `strict` included, since durability itself cannot be observed) and `clearAll`; failure injection (the next `n` calls of a kind reject with an error of a given `name`, or every call does); gates that hold a call pending until the test releases it; and direct access to the stored records, to inspect them or to plant foreign, corrupt or other-version records.
+
+Why this seam: the logic under test (the load and its abandon rule, scheduling, the writer's deadlines, failure handling) needs what a real or emulated IndexedDB does not give: failing a chosen transaction with a chosen error (`fake-indexeddb` has no quota to exceed), holding a transaction open while engine calls run, and counting transactions, all deterministic under Vitest's fake timers, which would also capture the `setImmediate` that `fake-indexeddb` schedules its work with. `fake-indexeddb` (a dev dependency, first imported in slice (a)) tests the adapter only: compound keys, key ranges with ±Infinity bounds, atomic abort and clone semantics. Playwright covers Chromium's own IndexedDB (`docs/reviews/step-38.md`).
+
+#### 4.10.4 What a change marks (N57, N58)
+
+`CacheStateHooks` (§4.5) gains `onChange`, called synchronously after each change to what persistence stores, in slot terms. It reports; it never alters the operation.
+
+```ts
+// engine/cache.ts
+type CacheChange =
+  /** Points or coverage below the watermark may have changed in these slots. */
+  | { kind: 'write'; slots: SlotRange }
+  /** Coverage was subtracted over these slots. */
+  | { kind: 'remove'; slots: SlotRange }
+  /** Every point and all coverage went. */
+  | { kind: 'clear' }
+  | { kind: 'version' }
+  | { kind: 'watermark' };
+
+interface CacheStateHooks {
+  onVersionClear?: () => void;
+  onChange?: (change: CacheChange) => void;
+  /**
+   * Called once at the end of every mutating call (put, hydrate, invalidate,
+   * clear, setFinalizedUntil) that passed validation, after that call's
+   * onChange calls and before it returns or rethrows; never by get, snapshot,
+   * coverage or restore. The load's abandon signal (§4.10.5), independent of
+   * whether the call changed anything the disk holds.
+   */
+  onMutate?: () => void;
+}
+```
+
+| Operation | Changes reported, in order |
+|---|---|
+| `put` | A version-mismatch clear: `clear`, then `version`; a first version adopted (N18): `version`. The write: `write` over the touched slots (the authority, N13, or else the batch's span, N3) clipped below `volatileFrom` after the put, when anything remains. A watermark advance: `watermark`, and `remove [volatileFrom, MAX_SAFE_INTEGER]` when the advance subtracted coverage (the cache had no watermark: `#setWatermark` in `engine/cache.ts`) |
+| `put` whose write fails (§4.3) | `remove` over the withdrawn slots |
+| `hydrate` | `version` when adopted; `watermark` (and `remove`, as for `put`) on an advance; `write` for each applied part |
+| `invalidate` | `remove` over the snapped range, covered or not |
+| `clear`, `clearAll` (each cache) | `clear` |
+| `setFinalizedUntil` | `watermark`; `remove [volatileFrom, MAX_SAFE_INTEGER]` when it subtracted coverage (moved back, or the first watermark) |
+| `restore` (§4.10.5) | `watermark` when the watermark after it differs from the record's; nothing for what it applied, which is what the disk holds |
+| `get`, `snapshot`, `coverage` | nothing |
+
+`onMutate` is independent of the table: it fires for every mutating call that passed validation, including one that reports no change (a put wholly inside the volatile region, with or without a range; an empty put; a `setFinalizedUntil` to the current value; a `hydrate` that applies nothing, skipped for its version or not). It exists so that a pending load observes every mutation of its cache, not only those the disk cares about (round 3, R3-2); for a running cache the persister ignores it.
+
+The persister maps slots to pages (`floor(slot / segmentSlotCap)`, computed exactly as the segment store does) and keeps, per cache: whether it is *loading*, *running* or *stopped*; the dirty pages; a `rewrite` flag; and the number of removals (`remove` and `clear` changes) recorded and the number of them durable (§4.10.6). A `write` or `watermark` change makes the cache's flush due after a quiet spell; a `remove` or `clear` at once (N58); a `clear` or `version` change also sets `rewrite`, since every page record names the version (§4.10.2) and a cleared cache leaves nothing on disk. The first `onChange` or `onMutate` of a cache whose load is pending abandons the load (§4.10.5). A put wholly inside the volatile region marks nothing, so a live tail costs no disk write.
+
+The persister reaches a cache's `CacheState` and its change hook through an internal accessor of `engine/engine.ts` that no package entry exports; the surface of `./engine` does not change.
+
+#### 4.10.5 Loading: memory is canonical (N56, N57)
+
+A load reads a cache's records in one read-only transaction (every page, at open: N46) and applies them in one synchronous call, `CacheState.restore`, into a cache that knows nothing yet. The disk is never merged with live memory:
+
+1. **Handles wait.** `cache()` of a persisted cache resolves only after its load has settled (§4.10.8), so no call through a handle reaches the cache while its load is pending; a second tab opening the same cache waits for the same load.
+2. **A mutating call abandons the load.** Any mutating call on the cache while its load is pending, `put`, `hydrate`, `invalidate`, `clear` or `setFinalizedUntil`, whatever it changed and whether or not the disk would care (a put wholly inside the volatile region included; round 3, R3-2), abandons it: the persister hears the call through `onChange` or `onMutate` (§4.10.4), nothing stored is applied, the read's result is ignored when it comes, and the cache is marked for a full rewrite, so its next flush replaces the stored records with its own (§4.10.6). What reaches a loading cache this way is a `clearAll` from another tab, whose `clear` reaches every cache; a raw request by cache id without a handle; or anything an `Engine` driven directly does. Memory is canonical; the cost is a cold start, in a case that handles make unreachable in ordinary use.
+3. **A load never starts during a `clearAll` barrier.** From a `clearAll()` call until its job settles, through every retry, the writer holds every flush and the disk is not read for a load: the barrier (§4.10.6, N54). A cache opened in that time reads nothing: its `open` resolves at once, it starts cold, and it is marked for a full rewrite, which the barrier holds until the clear has settled. Otherwise its read transaction, created before the clear's write transaction, would see the records the clear is about to delete, and the cache would serve and later persist data the `clearAll` removed (round 5, R5-1). A load already pending at the call is abandoned by the engine's `clear` (rule 2). When the clear succeeds, the rewrite then writes the cache's own records; when it fails, the cache stops with every other tracked cache, and no later open of this persister loads (§4.10.6). Either way the cold cache holds nothing from before the call.
+4. **`restore` applies records only into a cache that knows nothing**: one that covers nothing and holds no point. It throws `TscacheError` before anything changes when the cache holds either, a programming error: every mutation abandons the load first (rule 2), so the persister calls it in no other state, and treats a throw as a stop with `'error'` (§4.10.6). No path therefore exists on which stored and live data of one slot are reconciled.
+
+```ts
+// engine/cache.ts
+interface RestoreResult {
+  /** The ranges covered by the load, in ms: ascending, disjoint, adjacent ones merged. */
+  applied: Range[];
+  /** The stored records are not what the cache now holds (a record invalid,
+   *  skipped, of another version or clipped, or an orphan page): the next
+   *  flush rewrites the cache. */
+  rewrite: boolean;
+}
+
+class CacheState {
+  // …§4.5, plus:
+  /** Applies stored (untrusted) records into a cache that knows nothing; one synchronous call. */
+  restore(stored: { cache: unknown; pages: readonly unknown[] }): RestoreResult;
+}
+```
+
+`restore` takes the records as `unknown`, since they come from disk, and `engine/` imports no type from `persist/`. Its implementation is `engine/restore.ts`, which reaches the cache's store, coverage, version and watermark through an internal seam of `engine/cache.ts` (`cacheInternals`, exported by no entry) and which the persister installs when it is built (`installRestore`), so `index`, `engine` and the worker's initial load do not carry it (§4.10.8). Called before that, `restore` throws `TscacheError`. Its steps, in order:
+
+1. **Precondition.** The cache covers nothing and holds no point (provisional or not); otherwise `TscacheError` whose message starts with `restore:`, and nothing changes.
+2. **Cache record.** Absent (`undefined`) → nothing is applied, and `rewrite` is true when `pages` is not empty (orphans). Otherwise it must be an object with `format === 1`; a `config` whose six fields equal the cache's (`fields` naming exactly the schema's fields with equal dtypes, key order irrelevant); `version` absent or a non-empty string; `finalizedUntil` absent or accepted by `slotAtOrAfter`. Any failure → nothing is applied; `rewrite: true`.
+3. **Version (N56).** With `C` the cache's version now and `R` the record's: when `C` is set and `R !== C` (an unversioned record included) → nothing is applied; `rewrite: true`. When `C` is unset and `R` is set, the cache adopts `R` without clearing (as N18). This is stricter than `hydrate`, which applies an unversioned snapshot to a versioned cache (N35): a record written without a version may hold any version's data, while a server's snapshot is as fresh as its page.
+4. **Watermark.** The record's `finalizedUntil` advances the watermark as a put's `meta.finalizedUntil` does (N17: forwards only; a value at or below the cache's is ignored). The cache covers nothing, so the advance subtracts nothing. When the watermark after this step differs from the record's (`finalizedUntil` absent counting as a value of its own), `restore` reports a `watermark` change through `onChange` (§4.10.4), so the next flush writes the cache record; it reports nothing else.
+5. **Pages,** ascending. A page record is valid when it is an object whose `cacheId` is the cache's, whose `page` is a safe integer, and whose `snapshot` passes `hydrate`'s validation (§4.5, steps (1)–(5)) against this cache, with every slot of its `range` in page `page`, `snapshot.version` equal to `R` (both absent counts as equal), and no `snapshot.finalizedUntil` (a page snapshot never carries one, §4.10.2). An invalid page is skipped and sets `rewrite: true`; the others are still applied. Only the cache record moves the watermark (step 4): nothing a page record holds can.
+6. **Parts.** For each valid page, ascending: its coverage ranges in slots, minus the slots at or after `volatileFrom` (after step 4) when the cache has a watermark, are the parts. Each part is written with the page's decoded points inside it as authority (`store.put(points, part)`, a replace, N11) and then covered, exactly as `hydrate` applies a part (§4.5, application steps (3)–(4)); since the cache covers nothing and pages are disjoint, nothing else is subtracted. A part clipped by the volatile region (a record written by a session without a watermark, under a config that sets one) sets `rewrite: true`: memory refuses coverage the record claims. Points outside every part are not written; warnings are dropped.
+7. **Result.** `applied` lists every part in ms, ascending, with adjacent ones (on neighbouring pages) merged. `rewrite` is false exactly when every record was applied in full, and then `recordsOf(S)` (§4.10.2) equals `stored`, apart from the cache record's `finalizedUntil` where step 4 reported a change.
+
+A write that fails part-way (an allocation failure, §4.3) withdraws its part's coverage and rethrows, as in `hydrate` (§4.5); the persister then stops the cache with `'error'`.
+
+**Atomicity.** The read is asynchronous; the apply is one synchronous call, so under the RPC server's one-call-per-message dispatch (§4.7) no other write runs inside it, and rule 2 covers everything that happened between the read and the apply: whatever changed the cache meanwhile, by whatever path, made the load moot. `hydrate` from a page runs after `cache()` resolved, so after the load, and fills only what the load left unknown (N35).
+
+Properties the contract tests pin:
+
+- (a) **Round trip.** For any state `S` of a persisted cache that covers something, and records `recordsOf(S)`, restoring them into a fresh cache `E` of the same structural config, created without a version or watermark: for every range `R`, `E.coverage(R)` equals `S.coverage(R)` and `E`'s points inside it are `S`'s; `E.version` is `S.version`; `E.finalizedUntil` is `S.finalizedUntil`; `rewrite` is false; no change is reported; and `recordsOf(E)` deep-equals `recordsOf(S)`.
+- (b) **Knows nothing, or throws.** `restore` into a cache with a covered slot, or with a point, covered or not, provisional or not, throws `TscacheError` and changes nothing. That includes the state of review round 1 (R1-1): watermark 100, a provisional point at 150 with value 20, stored records with watermark 200 covering 150 with value 10: afterwards the point is 20, slot 150 is uncovered, and the watermark is 100.
+- (c) **Versions.** The cases of step 3: equal; both unset; cache unset (adopts); cache set and record unset or different (nothing applied, `rewrite`).
+- (d) **Robustness.** A cache record failing any check of step 2, a differing structural field included, applies nothing; a page record failing any check of step 5 (a snapshot carrying `finalizedUntil` included: with the cache record at watermark 100 and a page snapshot saying 200 over coverage of 150, slot 150 stays uncovered and the watermark stays 100) is skipped, the others are applied, and `rewrite` is true; orphan pages without a cache record give `rewrite` with nothing applied.
+- (e) **Gaps.** A page whose snapshot has coverage and no segments restores a confirmed gap: `get` over it returns coverage, no point and no miss.
+- (f) **Watermarks.** A cache created with `finalizedUntil` above the record's keeps its own, and `restore` reports `watermark`; one created below the record's advances to the record's and reports nothing; a record without a watermark restored into a cache with one applies no coverage at or after it, and `rewrite` is true.
+- (g) **Convergence** (with the persister, §4.10.6): after `open` and one flush, the store holds `recordsOf(S)` in every case above.
+
+#### 4.10.6 The persister: open, the writer, write-behind and flush (N46, N49, N50, N54, N58, N59, N61)
+
+```ts
+// persist/persister.ts
+interface PersisterOptions {
+  /** Quiet time before a flush is due, and the delay before a retry. Default 1000 ms. */
+  debounceMs?: number;
+  /** Longest a change waits before its flush is due. Default 5000 ms. */
+  maxDelayMs?: number;
+  /**
+   * The one deadline (N61): how long a load may take from open(), and how
+   * long a job of the writer (a flush, a clearAll, a cleanup) has from the
+   * moment it is due, whatever it waits for. Default 5000 ms.
+   */
+  timeoutMs?: number;
+  /** Called once for each cache whose persistence stops. */
+  onStopped?: (event: ClientEvents['persistStopped']) => void;
+}
+
+class Persister {
+  /**
+   * `openStore` is called lazily: by the first open(), or by a clearAll()
+   * before any open(), which passes { ifExists: true }. A store it returns is
+   * kept for the persister's life; an `undefined` result (no database yet)
+   * lets a later open() call it again.
+   */
+  constructor(
+    engine: Engine,
+    openStore: (options?: { ifExists?: boolean }) => Promise<PersistStore | undefined>,
+    options?: PersisterOptions,
+  );
+  /**
+   * Starts persisting a cache: loads and applies its records. Idempotent.
+   * `startedAt` (a `performance.now()` time, default now) starts the load's
+   * deadline earlier: the hosting's lazy loading of the persister counts
+   * against it (§4.10.8).
+   */
+  open(cacheId: string, startedAt?: number): Promise<void>;
+  /** Makes the flush of one cache, or of every running cache with dirty state, due now; resolves when those jobs settled. */
+  flush(cacheId?: string): Promise<void>;
+  /** How many removals (`remove` and `clear` changes) have been recorded for the cache; 0 when untracked. */
+  removals(cacheId: string): number;
+  /**
+   * Resolves once every removal recorded for the cache so far is durable, or
+   * once its persistence has stopped and its cleanup has settled (N58).
+   */
+  durable(cacheId: string): Promise<void>;
+  /**
+   * Empties the disk (N54), holding every flush and load until its job
+   * settles; resolves once the disk is empty, or once every tracked cache
+   * has stopped.
+   */
+  clearAll(): Promise<void>;
+  /** Flushes, then closes the store. */
+  close(): Promise<void>;
+}
+```
+
+None of these rejects for a persistence failure; failures stop the cache (below). `open` rejects with `UnknownCacheError` for an id the engine has no cache under, a programming error.
+
+**Open.**
+
+- For a cache whose `persist` is false, `open` resolves at once and does nothing.
+- The first call for a cache starts tracking it: the cache is *loading*, and from then on its changes (§4.10.4) are observed. The hosting calls `open` in the same synchronous step that creates the cache (§4.10.8), so no change precedes it.
+- During a `clearAll` barrier (below), a new cache reads nothing (§4.10.5, rule 3): it is *running* at once with `rewrite` set, and `open` resolves. It starts no store opening of its own, and its first flush, due after the quiet spell like any change, is held until the barrier settles. After a `clearAll` that failed, a new cache stops at once with that job's reason, reads nothing and has no cleanup (below).
+- Otherwise the store is opened, once per persister (concurrent opens share the attempt; `open` never passes `ifExists`). When `openStore` rejects, or resolves `undefined`, this cache and every persisted cache opened later stop with `'unavailable'`.
+- Then one `store.read(id)` for every page; a rejection stops the cache with `'error'`. On success, if the cache is still loading, `restore(stored)` in one synchronous step: the cache is *running*; `rewrite: true` sets the cache's `rewrite` flag and makes its flush due at once; a `watermark` change it reports is dirty state as any other. An error thrown by `restore` (an allocation failure, §4.3, or its precondition) stops the cache with `'error'`.
+- **A mutating call abandons the load.** The first `onChange` or `onMutate` of a loading cache (§4.10.5, rule 2) makes it *running* at once with `rewrite` set, cancels its load timer, and resolves `open`; the changes of that call and of later ones are recorded as for a running cache. The abandonment itself makes the cache's flush due as a `write` change would, after the quiet spell; a `remove` or `clear` among the call's changes makes it due at once, strict. A read not yet issued is not issued; a pending store opening or read goes on, and its result for this cache is ignored.
+- `open` resolves after the restore, or when `timeoutMs` passes first (the store's opening and the read counted together): the cache then stops with `'unavailable'` and the read's result, should it come, is ignored.
+- A later call for the same id returns the first call's promise, so a cache is read once per persister. For a stopped cache it resolves at once.
+
+**The writer (N61).** One per persister. It runs the persister's write transactions one at a time: flushes, `clearAll`, and the cleanup that follows a stop. Each is a *job* with a due time and a deadline `timeoutMs` after it. Jobs run in order of due time, except that a job carrying a removal (a flush whose dirty state holds a removal not yet durable, a `clearAll`, a cleanup) runs before any queued job that carries none. A pending `clearAll` job is also a barrier: from its call until it settles, no flush job starts, and the job running at the call makes a final attempt, with no retry and no stop (`clearAll`, below); the rules that follow hold apart from that. The writer takes no lock: it is the database's only writer (§4.10.7). An attempt waits for the store's opening, counted against its deadline; when the persister has no store and none is opening, which happens only after a `clearAll` found no database, a flush's attempt opens it as `open` does (Open, above). An attempt whose store call rejects puts its dirty state back and schedules a retry: a request for the same cache due `debounceMs` later, coalesced into the cache's one queued job like any other request (Scheduling, below) and keeping the failed job's deadline; when that retry would be due after the deadline, the job fails at the deadline instead. A store call still pending at the deadline is abandoned: its result is ignored, and a transaction that completes later is harmless, since the cleanup queued after it runs after it (IndexedDB runs overlapping read-write transactions in creation order). At the deadline the job fails for good: a flush or a cleanup job stops its cache, with `'error'` and the last rejection's name and message when an attempt was rejected, else `'unavailable'`; a `clearAll` job stops every tracked cache the same way. Queue wait, store calls and retries all count against the one deadline, so every job settles within `timeoutMs` of being due, and no call waits for the disk longer than two deadlines: a job, and the cleanup after its stop.
+
+**Scheduling.**
+
+- A `write`, `version` or `watermark` change of a running cache makes its flush due `debounceMs` after the latest such change, and no later than `maxDelayMs` after the first change not yet flushed: a feed pushing every 500 ms is still written every 5 s.
+- A `remove` or `clear` makes it due at once (a zero-delay timer, so the operation's own call completes first; N58), and the job carries a removal.
+- A loading cache has nothing dirty, since a change abandons its load; no flush runs during a load.
+- During a `clearAll` barrier every request (from a change, `flush` or `close`) is held. When the barrier settles, a held request becomes due at the later of its own due time and the settling, and its deadline is `timeoutMs` after that, so time spent behind the barrier never counts against it (`clearAll`, below).
+- At most one queued flush job per cache: a request while one is queued joins it (the earlier due time, the earlier deadline, and the removal when either had one); a request while the cache's job is running queues the next, which runs after it. One flush per cache at a time. A retry is such a request (The writer, above), so a failed job and a removal that arrived meanwhile become one job, bounded by the earlier of the two deadlines.
+- `flush(id)` makes the cache's flush due now and resolves when that job settled, success or failure at its deadline, and at once when nothing is dirty, the cache is stopped, or it was never opened; `flush()` does so for every running cache with dirty state. A resolved `flush` acknowledges nothing: acknowledging a removal is `durable`'s job (below).
+
+**Durability of removals (N58).** Each `remove` or `clear` change increments the cache's removal count. A flush job takes the count when it builds its plan, and a successful write makes every removal up to that count durable; a failed attempt makes none durable, and its retry carries them on. `durable(id)` resolves when the durable count reaches the count recorded at the call, or when the cache's persistence has stopped and its cleanup (below) has settled, whichever comes first; at once when the cache is not tracked, or nothing is pending. It never rejects. The removal's flush is due at once and settles within `timeoutMs`; a stop's cleanup settles within another; so a call waits at most about 10 s with the defaults, through any number of retries or queued jobs.
+
+A `clearAll` settles removals too, and keeps that bound (`clearAll`, below). On success it makes every removal recorded until its job settled durable, those recorded during the barrier included; on failure its stops release them, since the failed clear was their deletion. A removal recorded during the barrier is therefore answered when the job settles, under one deadline after the removal, since the job's deadline is `timeoutMs` after its call. A removal whose flush job is queued or running at the call is answered when that job's attempt succeeds or when the `clearAll` job settles; the call came before that flush job's deadline, so this is within two deadlines of the removal. A removal of a cache stopped before the call waits for its cleanup, which keeps its place ahead of the `clearAll` job.
+
+**Flush.** In the synchronous step that starts the job's attempt, before the attempt waits for anything (the store's opening included), the dirty state is taken (and reset) and the plan built from the cache's state `S` at that instant. The transaction therefore writes one state, and the attempt running at a `clearAll()` call writes only state that predates the call (round 9, R9-1). The plan:
+
+- `rewrite` → `deletePages: [{ start: -Infinity, end: Infinity }]` and `putPages`: every page record of `recordsOf(S)`.
+- Otherwise → `deletePages`: the dirty page ranges, merged and ascending; `putPages`: the page records of `recordsOf(S)` whose page lies in one of them.
+- `putCache`: the cache record of `recordsOf(S)`, or `null` when there is none (`S` covers nothing).
+- `strict`: true when the removal count taken exceeds the durable count; false otherwise.
+
+Then one `store.write(id, plan)`. The plan comes from memory alone: a flush never reads the disk, so nothing stored can reach the next write. With nothing dirty there is no job. Changes made during the transaction are dirty for the next flush. A failed attempt puts the taken dirty state back, merged with what changed meanwhile, so that the retry writes the union; the one exception is the attempt running when a `clearAll` is called, which is final (`clearAll`, below).
+
+**Failures (N59).**
+
+- A `write` that rejects with `name === 'QuotaExceededError'` stops the cache at once with `'quota-exceeded'` (slice (c); before it, a quota error takes the next rule).
+- Any other rejection is retried after `debounceMs`, until the job's deadline (the writer, above).
+- **Stopping** a cache, for any reason: its dirty state is dropped and its timers cancelled, its queued or running job is abandoned, and the persister never writes for it again (later changes are ignored, `flush` resolves at once); `onStopped` is called once with `{ cacheId, reason, error? }`; and, when a store is open, one *cleanup* job follows: a `write` of `{ deletePages: [{ start: -Infinity, end: Infinity }], putPages: [], putCache: null, strict: true }`, due at once, with its own deadline and no retry. Its failure is ignored, and its settling releases the cache's pending `durable` calls. The disk may still cover what memory has withdrawn (a removal that never landed), and a later session must not load that; a deletion needs no quota. When it fails too, the records stay: the one way a removal can outlive its call (§4.10.1).
+
+**`clearAll` (N54): a barrier.** The caller runs `Engine.clearAll()` and calls `clearAll()` in the same synchronous step, so the engine's `clear` changes have marked every tracked cache and abandoned any pending load (§4.10.5 rule 2). From the call until its job settles, through every retry, the `clearAll` job is a *barrier*: no flush is written and no load reads the disk, for any cache. Nothing the clear deletes can then be loaded before it (round 5, R5-1), and nothing written after the call can be deleted by it (round 6, R6-1).
+
+- **The job.** `clearAll()` queues one `clearAll` job, due now, carrying a removal. It opens the store if no `open` did, with `{ ifExists: true }`: an origin without the database has nothing to clear and is given none, and the job then succeeds at once. Then it runs `store.clearAll()`: every record of every cache goes, those of caches this engine never opened included, with strict durability. A failed attempt is retried after `debounceMs`, until the job's deadline; a store that fails to open fails the job at once, with `'unavailable'`.
+- **At the call.** `clearAll()` takes over the dirty state of every tracked cache (its dirty pages, its `rewrite` flag and its removal count at that instant), so no cache has anything dirty. Every queued flush job is absorbed: it never runs, a scheduled retry included, and a `flush` waiting for it resolves when the `clearAll` job settles. The job running at the call, whose plan predates the call, finishes its attempt first, and that attempt is final: when it is rejected, for any reason (a quota error included), or is still pending at its deadline, the job ends without a retry and without a stop, and its taken state is not put back, since the clear holds it. Cleanup jobs queued before the call keep their place ahead of the `clearAll` job, as their earlier due time and their removal give them: a cleanup only deletes the records of a stopped cache, which writes nothing again, so it cannot put back what the clear removes. The queue then holds those cleanups and the `clearAll` job, and nothing else.
+- **During the barrier.** The writer starts no flush. A request made meanwhile is held, and becomes due when the barrier settles (Scheduling, above). A cache opened meanwhile reads nothing (§4.10.5 rule 3): it is *running* at once with `rewrite` set, its `open` resolves, and its flush request is held like any other. A second `clearAll()` joins the pending job: it takes over the dirty state again, and its call resolves when the job settles; the job keeps its attempts, its retry time and its deadline. Nothing has been written since the first call, so the attempt that empties the disk serves both calls, and later calls cannot extend the barrier. No cache stops during the barrier except through a store that fails to open (Open, above) or through the job's own failure; neither leaves a store to clean, so no cleanup job is created.
+- **Success.** The dirty state taken over is dropped. Every removal recorded for a tracked cache until the job settled is durable: the clear left the disk empty with strict durability, and nothing has been written since its transaction was created. The held requests become due, and loads read the disk again. The flushes that follow write `recordsOf(S)` from memory as always, and carry no removal recorded before the settling.
+- **Failure,** at the job's deadline, or at once when the store fails to open: every tracked cache stops (`'error'` with the last rejection's name and message, or `'unavailable'` when no attempt settled), those opened during the barrier included, without a cleanup of its own. The failed `clearAll` was the cleanup, and a disk that refused it for a deadline would refuse per-cache deletions too. Held requests go with their caches, and the `flush` calls waiting for them resolve. The persister then persists nothing for the rest of its life: every persisted cache opened later stops at once with the same reason, reads nothing and has no cleanup, since the disk still holds what the clear was to delete and a load would serve it back; the failed clear was its cleanup too. A later `clearAll()` still runs a job, which may empty the disk, and stops nothing more. A store call still pending at the deadline is abandoned; should it commit later, it empties the disk then, and nothing this persister writes follows it.
+- `clearAll()` resolves when the job settles: on success, or once the failure's stops are done, when the records of every cache stay. Every call answers within `timeoutMs` of the first call of its barrier. It never rejects.
+
+**Close.** `close()` makes every running cache's flush due, waits for the writer's queue to drain, then closes the store; later calls resolve at once.
+
+Properties the contract tests pin (one engine per store):
+
+- (a) After `await flush()`, `store.read(id)` deep-equals `recordsOf(S)` for every running persisted cache, over random sequences of `put` (with and without a range, with `meta`), `hydrate`, `invalidate`, `clear`, `clearAll` and `setFinalizedUntil` both ways. The test derives `recordsOf(S)` from public calls: `Engine.coverage` for the covered ranges, and `Engine.snapshot` for each covered range of each page.
+- (b) **Reload.** A second `Engine` and `Persister` over the same store, the cache created with the same structural config: after `await open(id)`, every range reads the coverage and the covered points the first engine had at its last flush, and `recordsOf` the second engine's state equals the store.
+- (c) **Incremental.** A flush puts only the page records of the pages that changed: a put inside one page puts that page's record and the cache record; a put wholly inside the volatile region writes nothing.
+- (d) **Removals are acknowledged only when durable** (round 1, R1-3). With the store failing the next `k` writes, `k` small enough for a retry to fit before the deadline: `durable(id)` after an `invalidate` stays pending through the failures and resolves after the successful write, which is `strict`, holds the removal, and leaves the store not covering the range. With every write failing, it resolves only after the deadline stop and the cleanup settled, and the store then holds no record of the cache. With the write held past the deadline, after the `'unavailable'` stop and the cleanup. With the cleanup failing too, it still resolves, and the records stay. The same holds for `clearAll()`, except that no cleanup follows its stop.
+- (e) **Strict when it matters.** A plan is `strict` exactly when it carries a removal or a clear; a flush of additions alone is relaxed.
+- (f) **One deadline** (round 2, R2-2). Under fake timers, a removal's `durable` resolves within `2 × timeoutMs` of the removal whatever the store does: writes rejected, a write held forever, ten addition flushes of other caches due ahead of it, one of them held forever; a `clearAll` pending at the removal, or called after it, its attempts rejected or held (round 6). A removal-carrying job runs before queued jobs that carry none.
+- (g) **Convergence.** After `open` and one `flush`, the store holds `recordsOf(S)`, for every load outcome of §4.10.5: records applied in full, a skipped page, a cache record of another version or config, orphan pages, a clipped part, a watermark above or below the record's.
+- (h2) **No load during the barrier** (round 5, R5-1; changed at round 6). With the `clearAll` write held by a gate and the store holding records of caches B and C, which this engine has not opened: `open(B)` resolves at once without a `store.read` and without a store opening of its own, B starts cold, and a `get` through B's handle never returns a stored point. When the gate is released and the clear succeeds, B's first flush, which runs only after that, writes `recordsOf(S)` with a full rewrite, and a later `open(C)` loads as usual. When the clear fails until its deadline instead, B stops with every other tracked cache, nothing of B is ever written, and a later `open(C)` stops at once with the same reason and issues no `store.read`.
+- (h) **Abandon.** With the read held by a gate, any mutating call on the cache (a `put` below the watermark, a `put` wholly inside the volatile region with and without a range, an empty `put`, a `hydrate` that applies something and one that applies nothing, an `invalidate`, a `setFinalizedUntil` forwards, backwards and to the current value, a `clear`, a `clearAll`) resolves `open` at once, applies nothing from the read when it is released, and the next flush writes `recordsOf(S)` with a full rewrite (for a cache holding only a provisional point: every stored record deleted, so the round 3 state R3-2 leaves no stored authority behind); a removal among those changes makes that flush due at once and strict, is durable only after it, and its call waits for it; a mutation that reports no change makes it due after the quiet spell. For a `clearAll`, its job takes that flush's place: once it succeeds the store holds `recordsOf(S)`, which is nothing, and the removal is durable then (property (j)). The same mutating calls on a running cache that reports no change write nothing (property (c)).
+- (i) **The barrier** (round 6, R6-1). R6-1's interleaving, under fake timers with the defaults: the store fails the first `clearAll` call, so the job's retry is due at 1000 ms and its deadline is 5000 ms; at 100 ms an open cache A takes a `put` covering slot 0 and then an `invalidate` of slot 1. The store's log holds no `write` between the `clearAll()` call and the retry's successful `clearAll`; the `invalidate`'s `durable` resolves when the retry succeeds, before any write for A; after `await flush()` the store holds `recordsOf(S)` of A, which covers slot 0, and a reload (property (b)) reads slot 0. With every attempt failing instead, the log holds no `write` for any cache after the call, A stops at 5000 ms with every tracked cache and no cleanup, and the `invalidate` answers then. Over random sequences of operations, `flush`, `clearAll`, failure injection and gates, the log never holds a `write` started between a `clearAll()` call and its job's settling, other than the attempt running at the call and cleanups queued before it, nor a `read` started in that time.
+- (j) **Jobs at the call.** A flush attempt running at the call finishes and is final: when it is rejected, or held past its deadline, its cache does not stop on its account, and no second write of its taken state follows; when it succeeds, its removals are durable as usual. Queued flush jobs, a scheduled retry included, never run, and a `flush(id)` waiting for one resolves when the `clearAll` job settles. A cleanup queued before the call runs before the job's first attempt. Every removal recorded before the call, queued or running, is durable once the clear succeeds.
+- (k) **Deadlines across the barrier.** With the clear held for `timeoutMs − 1` ms and then succeeding, a `put` made 10 ms after the call has its flush due at the settling and its deadline `timeoutMs` after that: with that flush's write then held for 2000 ms and released, the cache does not stop. With `maxDelayMs: 2000`, a put every 500 ms from 10 ms after the call, through a clear held for 4999 ms, makes its flush due at the settling, not at its cap.
+- (l) **Removals during the barrier.** A removal recorded during the barrier (`invalidate`, `clear`, `setFinalizedUntil` back, a version-mismatch clear) is durable when the job settles: on success with no write of its own, the next write for its cache being relaxed, and on failure through the stop; in both cases within `timeoutMs` of the `clearAll()` call.
+- (m) **A second `clearAll()`.** Called while the job is queued, between attempts or during an attempt, it joins the job: one sequence of `store.clearAll` attempts, both calls resolve when the job settles, the job's deadline is the first call's, and on success every removal recorded before the settling is durable.
+- (n) **After a failed `clearAll`.** Every tracked cache has stopped, those opened during the barrier included, each with one `onStopped` call and no cleanup write; every persisted cache opened later stops at once with the same reason and issues no `read` and no cleanup write; a later `clearAll()` calls `store.clearAll()` again and resolves when its job settles.
+
+#### 4.10.7 One writer per origin (N52)
+
+Every tab of a deploy that reaches the SharedWorker hosting shares one worker, one engine and one persister, so one writer owns the database: what it writes is what its memory holds (§4.10.6), and no rule here reads the disk to combine it with another engine's state. That is why persistence is confined to this hosting (user decision of 2026-10-31). The dedicated-worker and in-process hostings give each tab an engine of its own; were they to persist, each flush would replace page records another tab had written, and combining them correctly means reading, merging and writing across engines, which four design rounds did not settle (`docs/reviews/step-38.md`). They have no persister: they neither load, nor write, nor clear the database, and `persist: true` does nothing there (§4.10.1).
+
+Two SharedWorkers can still write the database for a short while:
+
+- **Deploy skew.** Tabs of two deploys load different worker URLs, so each deploy has its own SharedWorker until the older tabs are gone. With the same database layout both write; a newer layout's upgrade closes the older worker's connection (§4.10.3), whose persistence then stops.
+- **A worker that is closing.** When a worker's last tab goes, the browser may close it while a new tab of the same deploy already starts the next one, and the closing worker's final flush can land after its successor's load.
+
+In both cases each writer writes plainly from its own memory, and the rules above keep the result correct: every page record is self-contained and checked on its own at load (N55, §4.10.5), only the cache record moves the watermark (§4.10.5 step 4), and a record of another version or config is never applied (§4.10.2). What the overlap can cost is coverage: a full rewrite by one engine deletes the other's pages. At worst it also brings back a range one engine removed, when the other engine still covers it in memory and flushes that page before it goes; its own tabs are served that range from memory meanwhile anyway. A dataset whose restatements carry a `version` loses nothing this way, since a record of another version is never applied (N56). Nothing is locked for this: a lock would only order two writes that each stand on their own.
+
+Persistence for the dedicated-worker and in-process hostings is later work (§4.10.10).
+
+#### 4.10.8 Hosting wiring
+
+| Hosting | Persister | Final flush |
+|---|---|---|
+| SharedWorker | One per worker, when `indexedDB` exists | When the last connection goes (its `dispose`, or its port closing). From slice (c) the worker is created with `extendedLifetime: true`, which keeps it about 30 s after its last tab so that flush can land |
+| Dedicated worker | None: `persist: true` does nothing (§4.10.7) | — |
+| In-process | None: `persist: true` does nothing (§4.10.7) | — |
+| `./engine`, Node | None | — |
+
+A flush that never ran loses the last debounce window: the disk still holds an earlier consistent state, and what was not written is not covered on disk either. Removals are not exposed to this: their calls answer only once they are durable (N58).
+
+`RpcServer` (§4.7) takes an optional persistence, `new RpcServer(engine, lib, lock?, persistence?)`, through a narrow interface of four calls, `open`, `durably`, `clearAll` and `flush`, which the SharedWorker hosting implements around its persister (`HostedPersistence`, below); the rules each call follows are these:
+
+- `cache`: `engine.cache(config)`; when the resolved config has `persist` and there is a persister, it awaits `persister.open(id)` before answering. No call through a handle therefore reaches a cache whose load is pending (§4.10.5).
+- Every op that names a cache (`put`, `get`, `hydrate`, `invalidate`, `clear`, `setFinalizedUntil`): the server reads `persister.removals(cacheId)` before it, and when the count has grown by the time the op is done, success or failure, it awaits `persister.durable(cacheId)` before answering (N58). So an `invalidate`, a `clear` and a `setFinalizedUntil` that moved the watermark back answer after their removal is durable, as do a `put`, a `hydrate` or an orchestrated `get` whose data cleared the cache for a new version or set its first watermark; any other op answers as before. A removal another op made meanwhile is waited for too; removals are rare. `clearAll`: `engine.clearAll()`, then `await persister.clearAll()`.
+- A connection dropped (its `dispose`, its port closing, a detach) that leaves none: `void persister.flush()`.
+- `onStopped` broadcasts `{ t: 'evt', scope: 'cache', cacheId, event: 'persistStopped', payload }` to every ready port, as `cacheCleared` is.
+
+Client side: `ClientEmitter.receive` re-emits a cache-scoped `persistStopped`, and `CacheHandle.on` filters it by cache id like the other cache-scoped events. Slice (c): `openShared` passes `{ type: 'module', extendedLifetime: true }`. A browser without the option ignores the unknown dictionary member, and every tab of a deploy passes the same options, so they reach one worker.
+
+Entries: the SharedWorker path of `entries/worker.ts` builds a `HostedPersistence` when `indexedDB` exists (a presence check: the factory is read when the store first opens) and passes it to its `RpcServer`. Its dedicated path and `openInProcess` (`client/hosting.ts`) build none and pass none, so their servers behave exactly as before persistence.
+
+**Lazy loading** (clarified 2026-10-31, step 38: the persistence code is paid for only by an application that persists). The persister, `restore`, the record builder and the IndexedDB adapter are `persist/lazy.ts`, which `entries/worker.ts` imports with `import()`, so the build emits them as a chunk of their own. `HostedPersistence` (`persist/hosted.ts`, in the worker's initial load) imports it once, at the first `open` of a persisted cache or the first `clearAll` (which must empty the disk of earlier sessions even when this one persists nothing), then builds `new Persister(engine, (o) => openIdbStore(indexedDB, o))` and forwards every call to it. Until the chunk has loaded:
+
+- `open` waits for it, and passes its own call time to `Persister.open(cacheId, startedAt)`: the import and the load share the load's deadline (N61), so `cache()` of a persisted cache still answers within `timeoutMs`.
+- An op on a cache whose open waits for the chunk is held, and so, once one op is held, is every later op and `clearAll`; they reach the persister in arrival order once it exists, so it sees each where it would have seen it had it been loaded all along (a held mutation abandons the pending load, §4.10.5 rule 2). Ops on other caches run at once: no persisted cache is tracked yet, so they concern nothing on disk.
+- `clearAll` clears memory at once and holds its disk part; `flush` is held.
+- A chunk that fails to load, or has not loaded `timeoutMs` after its import started, turns persistence off for the worker's life, as a store that fails to open does (§4.10.6): every waiting and later open stops with `'unavailable'` (with the import's error when it failed), held ops run as they come, and `clearAll` clears memory only.
+
+With a bundler that inlines dynamic imports (Vite's default worker format, `'iife'`), the chunk is part of the worker file and only its evaluation waits; with `worker.format: 'es'`, or `dist/` served as it is, it is a file of its own, loaded only by a worker that persists (`docs/guides/worker-setup.md`).
+
+#### 4.10.9 Interactions
+
+| Operation | On disk |
+|---|---|
+| `put`, an orchestrated fetch | The changed pages below the watermark, at the next debounced flush |
+| `invalidate(range)` | At once, strict, and the call resolves once that is durable: the range's pages are deleted and rewritten with what is still covered |
+| `clear()` | At once, strict, and the call resolves once that is durable: every record of the cache goes (a cache without coverage has none, §4.10.2) |
+| `clearAll()` | At once, strict, and the call resolves once the disk is empty, or once every tracked cache has stopped (N54). Until then no cache is flushed or loaded; changes made meanwhile are written after the clear. When the clear fails, the worker persists nothing more |
+| A cache opened while a `clearAll` is pending | Nothing is loaded; its own records are written after the clear, or, when the clear fails, it stops with every other cache |
+| Version-mismatch clear (a put or a fetch reporting a newer `meta.version`) | At once, strict: every page goes and the new version's records follow; the `put`, or the `get` whose fetch it was, answers once that is durable |
+| A first version adopted (N18) | The whole cache is rewritten at the next flush, so every page names the version |
+| A stored version that is not the cache's, at load | Nothing is loaded; the cache's own records replace the stored ones at its next flush |
+| A cache changed while its load was pending | Nothing is loaded; the cache's own records replace the stored ones at its next flush, at once when the change was a removal |
+| `setFinalizedUntil` back, or the first watermark (by any call) | At once, strict, and the call answers once that is durable: the pages from the watermark on lose their coverage |
+| The watermark forwards (`meta`, `hydrate`, `setFinalizedUntil`) | The cache record at the next flush. It promotes nothing (§4.5), so no page changes |
+| `hydrate` | The applied parts at the next flush: a seeded range is persisted like a fetched one |
+| Server rendering | The server runs in Node and persists nothing. In the browser the load runs inside `cache()`, before the app's `hydrate`, which then fills only what the disk did not cover |
+| Quota exceeded (slice (c)) | The cache stops (`persistStopped`, `'quota-exceeded'`) and its records are deleted |
+| Eviction (roadmap) | Must neither mark a page dirty nor count as a removal: the record stays and is loaded again on demand, which needs lazy loading first; and a full rewrite must then keep the records of evicted pages |
+
+#### 4.10.10 Later
+
+Not in these slices: persistence in the dedicated-worker and in-process hostings, which needs several engines to share one database (designed as slice (b) and retired on 2026-10-31 after four review rounds without converging, N52 and `docs/reviews/step-38.md`; Chrome for Android before version 148 and pinned dedicated modes are the hostings it would serve); lazy loading of pages on first read (needed by eviction; `read(id, pages)` and the page keys already serve it, but an asynchronous step inside `get` needs its own atomicity design, and the abandon rule of §4.10.5 does not carry over to a cache that already holds data); a byte budget for the eager load; compression; and encryption at rest.
+
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
 - Vitest/Node against `engine/`, `coverage`, `segment/` directly (~90% of logic), plus RPC protocol over an in-memory port pair; property-style tests for coverage merge/subtraction and segment merge.
 - Vitest browser mode (single page): worker construction, fallback chain, transferable round-trips.
 - Playwright (one `BrowserContext`, multiple pages → shared SharedWorker): cross-tab dedup of identical and of overlapping ranges (§4.9.1), `authInvalid` broadcast + Web Locks recovery, version-mismatch clear propagation, tab death mid-fetch, loss of the SharedWorker with its host tab (N32).
 - mitata micro-benches: coverage binary search, dense merge, payload transfer; Vitest bench for regression gating.
+- Persistence (§4.10): Vitest/Node against `CacheState.restore` and the `Persister` over an in-memory `PersistStore` fake, under fake timers, plus a conformance suite that holds the IndexedDB adapter to the same contract over `fake-indexeddb` (N60); Playwright for reloads, `clearAll` and the quota in Chromium's IndexedDB.
 
 ## 6. Decision register — locked (starter §3, unchanged)
 
@@ -1158,7 +1667,7 @@ Summary pointers only; the starter text is normative: coverage separated from da
 
 ## 8. New decision points — RESOLVED (user-confirmed 2026-06-11)
 
-These emerged while making the API concrete (N9–N33 later, at steps ③–⑫; N34–N44 at the post-build architecture review, `docs/architecture-review.md`, 2026-10-23; N62–N65 with in-flight subtraction at step 44, 2026-10-30, numbered after N45–N61, which the persistence design on `feat/38-persistence` holds) (working process §2.3: alternatives presented, user decided).
+These emerged while making the API concrete (N9–N33 later, at steps ③–⑫; N34–N44 at the post-build architecture review, `docs/architecture-review.md`, 2026-10-23; N62–N65 with in-flight subtraction at step 44, 2026-10-30, numbered after N45–N61) (working process §2.3: alternatives presented, user decided). N45–N61 cover IndexedDB persistence (§4.10, step 38, 2026-10-30) and were taken while the user was away, under the user's grant of 2026-10-30: N45–N54 are the performance plan's decision points P1–P10, settled by the director with the recommended options; N55–N60 were taken by the step 38 design with its recommended options and confirmed by the user on 2026-10-30 (`docs/reviews/step-38.md`). After design review round 2 the concurrency core was redesigned (`docs/reviews/step-38.md`, convergence check): N52, N55, N57, N58 and N59 changed in substance, N60 was amended, and N61 was added; the user has not confirmed those changes yet. On 2026-10-31 the user narrowed persistence to the SharedWorker hosting (decision #8): N52 changed, the parts of N54, N60 and N61 that served several engines were retired, and N45 widened to the hostings that no longer persist.
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -1206,6 +1715,23 @@ These emerged while making the API concrete (N9–N33 later, at steps ③–⑫;
 | N42 | Refresh snippet with an access token renewed in place (DC-1, step ⑫) | **State the precondition**: a refresh must issue a new access token; otherwise each tab that heard the refusal may refresh once, always with the current refresh token, so no session is revoked and the cost is one redundant refresh per extra tab. Stated in the snippet header (`e2e/pages/auth-refresh.js`), its copy in `examples/react-lwcharts/src/auth-refresh.ts` and `docs/guides/patterns.md`. Rejected: a rotation stamp in the fetcher context (every app's `toContext`/`accessOf` pair grows and the context carries a value the fetcher does not need; the upgrade if a backend needs it); an auth generation number in `authInvalid` (considered at N33; a library change for a snippet concern). User-confirmed 2026-10-23 |
 | N43 | A stolen lifetime lock (DC-2 i, step ⑫) | **Same-origin scripts are inside the trust boundary**; recorded as an assumption of loss detection in §4.8 and `docs/guides/worker-setup.md`. A script that steals the lock and releases it causes false `workerLost` events, and a recovery loop then reconnects until the worker closes. Rejected: verifying with a `ping` op before declaring loss (a new op and a timeout constant, which N32 avoided; a wedged worker that still answers is called alive); a `navigator.locks.query()` check before watching (one query per connection, and a thief that holds and then releases still causes one false loss per client). User-confirmed 2026-10-23 |
 | N44 | A dedicated worker closed by its fetcher (DC-2 ii, step ⑫) | **A fetcher must not close its worker**; recorded in the fetcher contract (§2.5) and as an assumption in §4.8. Only the fetcher module runs app code inside the worker, so this is a programming error with an obvious cause. Rejected: a lifetime lock for dedicated workers too (extends N32 beyond its approved scope and holds one Web Lock per tab to catch a bug in the app's own module); request timeouts (rejected under N32: a guess at what counts as dead, and an orchestrated `get` can legitimately take long). User-confirmed 2026-10-23 |
+| N45 | Opting in to persistence (P1) | **Per cache: `CacheConfig.persist`, default false, structural under N20**, so every tab agrees and one tab cannot turn persistence off under another, and per-user or sensitive caches stay in memory. Inert, without an event, where there is no IndexedDB or no persister (Node, `./engine`, and since 2026-10-31 the dedicated-worker and in-process hostings, N52), so a server render and a tab in any hosting can share one config; `client.mode` tells a consumer whether it persists (§4.10.1). Rejected: `ClientOptions.persist` (all or nothing per client); always on (sensitive data on disk by default). Director, 2026-10-30 |
+| N46 | When stored records load (P2) | **Eagerly, when the cache opens**: one read-only transaction for the cache record and every page, and `cache()` resolves after they are applied (at most 5 s), so a reload's first `get` is served from them. The page keys `[cacheId, page]` and `PersistStore.read(id, pages)` leave room for lazy loading. Rejected for now: lazy loading on first read (an asynchronous step inside `get`, which needs its own atomicity design); a byte budget for the eager part (needed with eviction). Measured: `getAll` of 16 pages, a year at one minute, 6.8 ms. Director, 2026-10-30 |
+| N47 | Quota exceeded (P3) | **Stop persisting that cache and emit the cache-scoped `persistStopped { cacheId, reason, error? }`**, `reason` one of `'quota-exceeded'`, `'unavailable'`, `'error'`; the cache goes on in memory and its records are deleted. The optional `error` (name and message) was added by the design, for diagnosis. Rejected: evicting the oldest pages (eviction is roadmap); failing the put (persistence must never fail a write). Director, 2026-10-30 |
+| N48 | `navigator.storage.persist()` (P4) | **The app calls it**, documented in §4.10.1; the library never does, since some browsers prompt the user. Rejected: the library requesting it; never. Director, 2026-10-30 |
+| N49 | Durability (P5) | **Relaxed for flushes**: a lost flush loses only what is not covered on disk either (measured 0.50 ms against 0.57 ms per page; Chrome reports 3–30× in real workloads). **Strict for every write that carries a removal** (`clearAll`, an `invalidate`, a `clear`, a watermark moved back, a stop's deletion), added by the design: a removal is acknowledged as durable (N58), and a relaxed commit can be lost to a power failure, which would let a withdrawn range or a logged-out user's data come back. Widened from `clearAll` only at review round 1. Rejected: strict everywhere (additions do not need it). Director, 2026-10-30 |
+| N50 | Flush triggers (P6) | **About 1 s of quiet, at most 5 s after the first unflushed change, plus a flush when the last connection goes; the SharedWorker is created with `extendedLifetime: true`**, which gives that last flush about 30 s to land. A worker sees no `pagehide`; the client's `dispose` on `pagehide` (§4.8) drops its connection. The 5 s cap was added by the design so a steady live feed is still written; removals are not debounced (N58). Rejected: a debounce only; a flush on every change. Director, 2026-10-30 |
+| N51 | Database layout (P7) | **One database `tscache` at IndexedDB version 1, stores `caches` (key `cacheId`) and `pages` (key `[cacheId, page]`)**, so one transaction writes a cache record and its pages together. Rejected: a database per cache (no transaction across them, a connection each). Director, 2026-10-30 |
+| N52 | Which hostings persist (P8; first "One engine per tab") | **Only the SharedWorker hosting, where one engine owns the database of its origin and writes it plainly from memory, with no lock (§4.10.7). In the dedicated-worker and in-process hostings there is no persister and `persist: true` does nothing (N45).** Two SharedWorkers overlap only briefly (a deploy skew; a closing worker and its successor); page records are self-contained (N55) and only the cache record moves the watermark, so the overlap costs coverage, and at worst one engine writes back a range the other removed while it still holds it. User decision #8, 2026-10-31 (Option A of `pending-user-decisions.md`), after four design rounds whose last two found every issue in the several-engine path (`docs/reviews/step-38.md`). Rejected: keeping the first resolution below (four rounds did not converge); parking persistence entirely (loses the main reload win). Cost accepted: Chrome for Android before 148 and pinned dedicated modes get no persistence until the several-engine case is designed again (§4.10.10). **The first resolution, retired 2026-10-31 (user decision #8: SharedWorker only):** dedicated and in-process hostings read, merge and write under the per-database Web Lock `tscache-persist:tscache` (§4.10.7 before 2026-10-31), the SharedWorker writing plainly and taking the lock from slice (b); changed after review round 2 to build the merged page with `hydrate` in a scratch state, with the lock requested under an `AbortSignal` at the writer's deadline (R1-2, R2-2), and at round 3 to keep removals per page (R3-1). Round 4 found two more issues in it (R4-1, R4-2). Director, 2026-10-30; redesign, 2026-10-30 |
+| N53 | Record format (P9) | **Records mirror the `Snapshot` envelope and the §3.4 payloads**: a page record holds the `Snapshot` of its page, and the cache record the envelope's dataset fields with the N20 config, so `validateSnapshot` checks a page and the `hydrate` rules apply it (one format, three uses, starter §3.7). Rejected: a format of its own. Director, 2026-10-30 |
+| N54 | Clearing on logout (P10) | **`clearAll` empties the disk**: both stores, the caches this engine never opened included, with strict durability (N49), and the call resolves after. In the SharedWorker hosting that engine serves every tab, so one call clears memory and disk for all of them; a SharedWorker of another deploy may write its own state back (§4.10.7). The sentence "With one engine per tab another tab writes its own state back, so a logout clears every tab" was retired 2026-10-31 (user decision #8: SharedWorker only): those hostings no longer touch the disk, so their `clearAll` clears their memory only. Rejected: a separate `purge`. Director, 2026-10-30. **Changed 2026-10-31 (design round 6, R6-1):** the `clearAll` job is a barrier for the writer (§4.10.6). From the call until the job settles, through every retry, no flush is written and no load reads the disk, for any cache: the job running at the call makes a final attempt; queued flushes are absorbed into the clear; changes made meanwhile are held and flushed after it; a cache opened meanwhile starts cold and is rewritten after it (round 5's rule for R5-1, folded in); a second `clearAll()` joins the job and keeps its deadline. A clear that succeeds makes every removal recorded until it settled durable. A clear that fails stops every tracked cache, those opened during the barrier included, and the persister then persists nothing for its life: a cache opened later stops at once and reads nothing, so data a failed logout left on disk is not served back by the same worker. Round 5 found a load reading what a pending clear was about to delete, and round 6 a flush landing before the clear's retry, which then deleted it; both are the disk being used while a clear is pending, and the barrier excludes every such use. Rejected: ordering the jobs by priority alone (R6-1); letting flushes run during a pending clear and rewriting their caches after it succeeds (a second write of the same data, and the load race needs a rule of its own); later opens loading after a failed clear (serves what the logout was to delete); restarting the deadline at a second call (repeated calls could hold every flush indefinitely). |
+| N55 | Where stored coverage lives | **With its page: each page record is the snapshot of its page's covered ranges**, carrying coverage, the points inside that coverage, grid, schema and version; the cache record carries the config, version and watermark only. A record is then valid on its own whoever wrote it, a lost page takes its coverage with it (starter §3.7's reconcile rule by construction), and lazy loading and eviction get self-contained pages. Rejected: coverage in the cache record (the roadmap sketch), where with two writers one engine's coverage list can describe pages the other wrote, confirming gaps where points exist unless every hosting read-merges-writes the whole list. Design, 2026-10-30; user-confirmed 2026-10-30. **Changed in substance after review round 2:** the record's segments hold only the points inside its coverage, where the first design stored every present point of the hull (invalidated or provisional ones included) and never loaded those. A record now holds exactly what a load applies, so "the disk equals `recordsOf(S)`" is a mechanical check (§4.10.5 property (a), §4.10.6 property (g)) and no stored point exists that memory would refuse. Redesign, 2026-10-30 |
+| N56 | A stored version at load | **Applied only when it equals the cache's version, or when the cache has none, which then adopts it (as N18).** An unversioned record is not loaded into a versioned cache; a mismatch clears nothing, emits nothing, and the stored records are replaced at the next flush. Stricter than `hydrate` (N35), because a record written without a version may hold any version's data. Rejected: `hydrate`'s rule (loads unversioned records into a versioned cache); deleting mismatched records at load (destroys a still-running deploy's records for nothing). Design, 2026-10-30 |
+| N57 | Load atomicity | **Memory is canonical: a load applies records only into a cache that knows nothing, and any change while the load is pending abandons it.** `cache()` resolves after the load, so no handle reaches the cache before it (unchanged, user-confirmed 2026-10-30). What arrives by cache id meanwhile (another tab's `clearAll`, a raw request, an `Engine` driven directly) abandons the load: nothing stored is applied, and the cache's next flush rewrites its records from memory. `CacheState.restore` throws when the cache holds any coverage or point, so no path reconciles stored and live data of one slot. Round 3 (R3-2) found the abandon signal incomplete, since a put wholly inside the volatile region reports no change: a separate hook, `onMutate`, now fires for every mutating call that passed validation, so the rule reads "any mutating call abandons the load". **Changed in substance after review round 2.** The first design filled only what memory did not know, behind a fence of what changed meanwhile; round 1 (R1-1) found it overwriting a provisional point under a higher stored watermark, and round 2 (R2-1) found the patched skip leaving the skipped authority on disk, since nothing marked it dirty. Both are the same cause: a slot-level merge of two authorities while one of them keeps changing, whose result is never written back. Weighed and rejected: holding every op on the cache in the RPC server until the load ends (a per-cache queue in the server for a case handles already prevent; `clearAll` would wait up to 5 s and then still have to undo what the load wrote; the load of about 16 pages takes 6.8 ms, so the handle wait of `cache()` already costs nothing noticeable); a monotonic epoch in the cache record with pages ignored unless their epoch matches (one more field and rule to get what the full rewrite's single transaction, which deletes and puts atomically, already gives); applying stored records as a ranged `put` (overwrites newer data). Cost accepted: a cold start when a cache is changed during its load, which ordinary use cannot reach. Redesign, 2026-10-30 |
+| N58 | Removals reach the disk at once | **Every removal (an `invalidate`, a `clear`, a `clearAll`, a watermark moved back or set first, a version-mismatch clear) is flushed at once with strict durability, and the call that made it answers only once it is durable, or once persistence of the cache stopped and the deletion of its records settled.** That includes a `put`, `hydrate` or orchestrated `get` whose data caused the removal. A debounced addition that is lost is harmless, but a lost removal is not: after a crash the next session would load what the app had withdrawn. Review round 1 (R1-3) made the call wait through retries rather than for the first attempt, and extended it to every call that causes a removal. Rejected: debouncing removals like puts (the sketch's "harmless" holds for additions only); answering after the first attempt (acknowledges a removal that may never land). Design, 2026-10-30; user-confirmed 2026-10-30. **Changed in substance after review round 2:** the wait is bounded by the writer's one deadline (N61) instead of a sum of per-call bounds: the removal's flush job is due at once, runs before jobs that carry no removal, and succeeds or stops the cache within `timeoutMs` of the removal, whatever it waited for; the cleanup after a stop has one more. About 10 s at most with the defaults, down from about 30 s, and no longer dependent on how many jobs or lock holders are ahead (round 2, R2-2). `durable(cacheId)` lost its `mark` parameter: it waits for every removal recorded so far. Redesign, 2026-10-30. **Changed 2026-10-31 (design round 6, R6-1):** a `clearAll` settles removals and keeps the bound of two deadlines. When it succeeds, every removal recorded until its job settled is durable, since the disk is then empty and the barrier lets nothing be written after the clear's transaction; when it fails, its stops release them. A removal recorded during the barrier is answered when the job settles, under one deadline after the removal; one whose flush job is queued or running at the `clearAll()` call is answered by that job's successful attempt or by the clear, within two deadlines of the removal. Rejected: answering a removal recorded during the barrier only after its own flush, which runs after the barrier (the bound would grow to the rest of the clear's deadline plus two deadlines, under 15 s, for a write that adds nothing to what the clear made durable). |
+| N59 | Persistence failures | **Never a rejected call.** The store failing to open, or a load beyond 5 s, stops the cache with `'unavailable'`; a failed read with `'error'`; a quota error stops it at once (N47). A failed write is retried after a second with the union of the dirty state, until the job's deadline (N61): then the cache stops, with `'error'` and the last error when an attempt was rejected, or `'unavailable'` when none settled. A stopped cache's records are deleted with one strict write under its own deadline, since the disk may cover what memory withdrew; when that deletion fails as well, the records stay, the one way a removal can outlive its call. Rejected: retrying forever (a silent failure); stopping on the first transient failure. Design, 2026-10-30; user-confirmed 2026-10-30. **Changed in substance after review round 2:** the first design bounded each store call at 5 s, retried three times 5 s apart and gave lock acquisition no bound, so the "bounded" wait of a removal was the sum of an unbounded number of bounded parts (round 2, R2-2). Now one deadline per job of the writer, `timeoutMs` (5 s) from the moment it is due, covers queue, lock, store calls and retries together; the retry count and the per-call timeout are gone. The 5 s bound on `cache()` (N46) is the same option. Redesign, 2026-10-30. **Clarified 2026-10-31 (step 38, lazy loading, §4.10.8):** in the SharedWorker the persister is a chunk loaded at the first persisted open or `clearAll`; a chunk that fails to load, or does not load within the load's 5 s, stops every waiting and later open with `'unavailable'` and turns persistence off for the worker's life, as a store that fails to open does. |
+| N60 | Test seam | **A narrow `PersistStore` interface.** The logic is contract-tested against `MemoryStore`, a test helper with failure injection, gates and a call log, deterministic under fake timers; the IndexedDB adapter is held to the same contract by a conformance suite over `fake-indexeddb` (dev dependency; Apache-2.0, no dependencies). Rejected: `fake-indexeddb` under every test (it has no quota to exceed and no way to hold a transaction, and its `setImmediate` scheduling is captured by fake timers); the fake alone (the adapter's key ranges and atomic abort would first run in a browser). Design, 2026-10-30; user-confirmed 2026-10-30. **Amended after review round 2:** a `FakeLockManager` beside `MemoryStore`, with a log, a way for the test to hold the lock, and the Web Locks abort rule, so the deadline on lock acquisition (N61) is pinned by the contract tests. Redesign, 2026-10-30. **That amendment was retired 2026-10-31 (user decision #8: SharedWorker only):** the persister takes no lock (N52, N61). |
+| N61 | The writer and its one deadline | **One writer per persister runs every write transaction (a flush, a `clearAll`, a stop's cleanup) as a job with one deadline, `timeoutMs` after it is due; jobs carrying a removal run before queued jobs that carry none; a store call still pending at the deadline is abandoned; at the deadline the job stops its cache (or, for `clearAll`, every tracked cache).** Queue wait, store calls and retries count against the one deadline, so every job settles within `timeoutMs` of being due and a removal's call waits at most two deadlines (the job and the cleanup). A retry is a request coalesced into the cache's one queued job, which keeps the earliest deadline of what it absorbed, so a failed addition job and a removal that arrives meanwhile become one job bounded by the earlier deadline (round 3). Added by the redesign after review round 2, as the mechanism behind N58 and N59. Weighed and rejected: one writer per cache (a removal would still wait behind the running job of its cache; a single queue with priority needs no second mechanism); a deadline per attempt with a retry count (what round 2 found unbounded); per-cache deletions after a failed `clearAll` (a disk that refused the clear for a deadline refuses them too, and they would cost one deadline per cache). Redesign, 2026-10-30. The Web Lock the first form requested for each job, under an `AbortSignal` that fired at the deadline, was retired 2026-10-31 (user decision #8: SharedWorker only): the writer is its database's only writer (N52). **Changed 2026-10-31 (design round 6, R6-1):** a `clearAll` job is also a barrier. From its call until it settles, through every retry, no flush job starts. The job running at the call finishes its attempt, which is final: a rejection or a pending store call at its deadline ends the job without a retry or a stop, and its taken state is not put back, since the clear holds it. Queued flush jobs, retries included, are absorbed into the clear; cleanups queued before the call keep their place ahead of it; a request made during the barrier becomes due at the later of its own due time and the settling, with its deadline `timeoutMs` after that, so no job is starved into a stop by time spent behind the barrier. A flush attempt that finds no store opens it, which happens only after a `clearAll` found no database. Every job still settles within `timeoutMs` of being due, and a removal's call still waits at most two deadlines (N58). **Clarified 2026-10-31 (step 38, lazy loading, §4.10.8):** a load's deadline counts from the hosting's `open`, the persistence chunk's import included. A removal on a cache whose open waits for the chunk, and a `clearAll` before the chunk has loaded, first wait for the import, itself bounded by `timeoutMs`, and then for at most the two deadlines above. Round 6 found that ordering removal-carrying jobs by due time let a flush due before a failed clear's retry run first; the retry then deleted what it wrote. Rejected: priority ordering alone (R6-1); giving the clear precedence over every other job (between two attempts the clear is not due, so a flush due in that gap still runs first). |
 | N62 | The in-flight list, and what a `get` awaits | **Per cache, the fetches in flight in start order; a round awaits the joinable ones that meet the slots it needs, with no cap** (§4.9.1 rules 1, 2, 12). An entry is joinable while its cache and auth generations are current and no `invalidate` has fenced it. It leaves the list in the step that decides its outcome, so no `get` joins a fetch that has already failed. A round scans the list linearly beside the step 36 sweeps, since ends are not ordered by start. Rejected: an interval tree (the objections of §6.1, for a list as long as the fetches outstanding); keeping the exact-range map beside the list (two structures to keep consistent); a cap on awaited fetches (its fallback is the duplicate fetch); awaiting fetches that meet only covered slots of the request (latency for nothing). Director, 2026-10-30 |
 | N63 | Subtraction and the flank rule | **Subtract before coalescing; extend into coverage only** (§4.9.1 rule 3). The locked flank and bridge extension applies to covered slots, a covered slot inside a fetch in flight included. A piece abutting an in-flight range meets it edge to edge, and the coverage index merges the two when both have landed. Pieces separated by in-flight slots are separate requests. Rejected: extending into in-flight ranges (one slot fetched twice at every boundary, and in-flight slots are not coverage); coalescing first and subtracting after (a remainder could lose its locked flank); fetching through a short in-flight stretch to save a request (a double fetch, and a threshold to defend). Director, 2026-10-30 |
 | N64 | `invalidate` and fetches in flight | **`invalidate` fences joins over its range**: fetches in flight that meet it can no longer be joined, so a `get` issued after an invalidate fetches the range anew (§4.9.1 rule 9). Their responses are still applied, as before. Rejected: no fence (with subtraction, a `get` after a restatement would rely on any overlapping fetch issued before it, where exact-range dedup exposed only the identical range); fencing the responses as well (a second fence beside N29 for a window that predates N31; decision concern DC-2 of step 44). Director, 2026-10-30 |

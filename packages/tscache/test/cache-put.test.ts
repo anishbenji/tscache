@@ -23,6 +23,7 @@ describe("CacheState put and config — architecture §2.2–§2.4, §4.5, N3, N
       gapSplitK: 4,
       segmentSlotCap: 32_768,
       warnOnOverlapDiff: false,
+      persist: false,
       version: "initial",
       finalizedUntil: 23,
     });

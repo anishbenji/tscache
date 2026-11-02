@@ -92,3 +92,49 @@ Chromium runs a SharedWorker in the process of the tab that created it; if that 
 goes with it and every other tab's client emits `workerLost` once. Create a new client to go on.
 [`integrations/shared/connection.ts`](../../integrations/shared/connection.ts) does this for every
 framework, and [`worker-setup.md`](worker-setup.md) shows the bare pattern.
+
+## Persistence across sessions
+
+A cache created with `persist: true` keeps its covered history in IndexedDB, so a reload or a new tab
+starts from what earlier sessions fetched, and immutable history is fetched once per device instead of
+once per session (architecture §4.10). It is off by default and set per cache, and it is structural:
+every tab must pass the same value.
+
+```ts
+const candles = await client.cache({
+  id: "candles/ACME/1m",
+  interval: 60_000,
+  fields: { open: "f64", high: "f64", low: "f64", close: "f64", volume: "f64" },
+  version: "2026-10", // stored records of another version are never loaded
+  persist: true,
+});
+```
+
+- **Where it acts.** Only the SharedWorker hosting persists: one worker then owns its origin's database
+  and is its only writer. In the dedicated-worker and in-process hostings (a browser without
+  `SharedWorker`, a fallback, or a pinned `mode`), in Node and for an `Engine` used directly, the flag is
+  accepted and does nothing, without an event. `client.mode === 'shared'` in a browser with IndexedDB
+  tells you that the cache persists.
+- **What is stored.** The covered ranges below the finalized watermark and the points inside them,
+  written behind about a second after the last change (at most five seconds). The provisional tail is
+  never stored, so a reload fetches it again. A removal (`invalidate`, `clear`, a watermark moved back, a
+  version change) is written at once, and its call resolves only once the removal is durable, or once
+  persistence of the cache has stopped and its records were deleted.
+- **Loading.** `cache()` of a persisted cache resolves once its records are loaded (at most five seconds),
+  so the first `get` sees them. A range the records do not cover reads as uncached, never as a gap.
+- **Failures never reject.** When the disk refuses, persistence of that cache stops, its records are
+  deleted, and every tab hears `persistStopped` with the reason; the cache goes on in memory. A stop
+  during `cache()` comes before the handle exists, so listen with `client.on`.
+- **Restatements need a version, across sessions too.** A stored range is served in every later session
+  without asking the backend. Set `version` when the dataset has one: records of another version are
+  never loaded. Without one, `invalidate` or `clear` on your own clock removes stored ranges as well.
+- **Durable storage is your call.** Browsers evict best-effort storage under pressure, and a range whose
+  record was evicted is simply fetched again. To keep the cache, call `navigator.storage.persist()` from
+  the page; tscache never does, since some browsers prompt the user.
+- **Sensitive data.** The records are readable by every script of the origin and outlive the session.
+  Keep per-user or sensitive caches in memory; that is why `persist` is per cache.
+- **Logout.** One `client.clearAll()` from a tab of the SharedWorker empties every cache and the database,
+  and resolves once the records are gone (or persistence has stopped). It does not reach the records of
+  another deploy's worker that is still running (the next clear or that worker's end removes them), and a
+  client hosted in a dedicated worker or in-process leaves the disk alone: call it from a shared-hosted
+  tab.
