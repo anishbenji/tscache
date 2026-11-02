@@ -50,7 +50,7 @@ Mutation checks on the snippet, each undone afterwards: `startsWith` replaced by
 
 ## CI
 
-See below.
+`~/code/tscache-reports/bin/heavy-run.sh "child: ci 56" bun run ci` on c730e82: exit 0. Vitest: 110 files, 2,127 tests passed. Playwright: 162 passed (2.0 min). `docs:run` reports `ok vite-config.ts, vite-logger.ts`; size and bench smoke rows ok. The package's code is unchanged apart from a comment, so the entry sizes are unchanged.
 
 ## Not verified
 
