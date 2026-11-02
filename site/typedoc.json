@@ -25,7 +25,12 @@
   "interfacePropertiesFormat": "table",
   // Internal shapes the public signatures name: CacheHandle.on's event
   // union, and the parts of Vite's plugin context the plugin declares.
-  "intentionallyNotExported": ["CacheEvent", "Context", "OutputChunkLike"],
+  "intentionallyNotExported": [
+    "BuildStartContext",
+    "CacheEvent",
+    "Context",
+    "OutputChunkLike"
+  ],
   "treatWarningsAsErrors": true,
   "validation": {
     "notExported": true,

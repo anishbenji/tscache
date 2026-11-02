@@ -26,6 +26,18 @@ interface Context {
   environment: { config: { consumer: "client" | "server" } };
 }
 
+/** The parts of Vite's plugin context `buildStart` reads, per environment. */
+interface BuildStartContext {
+  environment: {
+    mode: string;
+    config: {
+      consumer: "client" | "server";
+      worker: { format: "es" | "iife" };
+      logger: { warn(message: string): void };
+    };
+  };
+}
+
 /** The parts of an output chunk the bundle check reads. */
 interface OutputChunkLike {
   type: string;
@@ -40,12 +52,8 @@ export interface FetcherUrlPlugin {
   name: string;
   enforce: "pre";
   config(): { ssr: { noExternal: string[] } };
-  configResolved(config: {
-    command: "build" | "serve";
-    base: string;
-    worker: { format: "es" | "iife" };
-    logger: { warn(message: string): void };
-  }): void;
+  configResolved(config: { command: "build" | "serve"; base: string }): void;
+  buildStart(this: BuildStartContext): void;
   resolveId(
     this: Context,
     source: string,
@@ -70,7 +78,7 @@ const QUERY = "?fetcher";
  * the worker's `import()` of its persistence code (§4.10.8) is inlined.
  */
 const IIFE_WARNING =
-  "[tscache] Vite builds workers as IIFE ('iife', its default), which cannot code-split: the tscache worker's persistence code is inlined into the worker file, so every app downloads it, persisting or not. Set worker: { format: 'es' } in vite.config.ts to make it a chunk the worker loads only when a cache persists. See https://github.com/anishbenji/tscache/blob/main/site/guides/vite.md";
+  "[tscache] Vite builds workers as IIFE (worker.format 'iife'), which cannot code-split: the tscache worker's persistence code is inlined into the worker file, so every app downloads it, persisting or not. Set worker: { format: 'es' } in vite.config.ts to make it a chunk the worker loads only when a cache persists. See https://github.com/anishbenji/tscache/blob/main/site/guides/vite.md";
 /** A virtual id: the `\0` prefix keeps other plugins off it. */
 const PREFIX = "\0tscache-fetcher-url:";
 
@@ -93,8 +101,11 @@ const PREFIX = "\0tscache-fetcher-url:";
  * needs `import()` is built on its own instead (library mode or another
  * bundler; the worker setup guide) and passed by URL, without `?fetcher`.
  *
- * A build whose worker format is `'iife'` (Vite's default) logs a warning
- * once: the tscache worker cannot split its persistence code off then. The
+ * A build of a browser environment whose worker format is `'iife'` (Vite's
+ * default) logs a warning once: the tscache worker cannot split its
+ * persistence code off then. A server environment builds no worker, so it
+ * never warns, and `vite build --app` warns once, though it resolves the
+ * config, and so calls `fetcherUrl()`, again for each environment. The
  * plugin never changes the format, which applies to every worker the app
  * builds.
  *
@@ -120,10 +131,17 @@ export function fetcherUrl(): FetcherUrlPlugin {
     configResolved(config) {
       serve = config.command === "serve";
       base = config.base;
-      if (!serve && config.worker.format === "iife" && !warned) {
-        warned = true;
-        config.logger.warn(IIFE_WARNING);
-      }
+    },
+    // Per environment build, unlike configResolved: `vite build --app`
+    // resolves the config, and so calls fetcherUrl(), once more for each
+    // environment, but only the browser one builds workers. The flag keeps a
+    // watch build's rebuilds to one warning.
+    buildStart() {
+      const { mode, config } = this.environment;
+      if (warned || mode !== "build" || config.consumer !== "client") return;
+      if (config.worker.format !== "iife") return;
+      warned = true;
+      config.logger.warn(IIFE_WARNING);
     },
     async resolveId(source, importer) {
       if (!source.endsWith(QUERY)) return undefined;
