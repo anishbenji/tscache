@@ -106,4 +106,6 @@ fetch counters.
 Each example loads the fetcher with `fetcherUrl()` from `tscache/vite`,
 which makes `import url from "…?fetcher"` give the fetcher's URL with its
 default export intact; Vite's `?worker&url` drops it.
-`docs/guides/worker-setup.md` explains why.
+`docs/guides/worker-setup.md` explains why. Each example and reference
+client also sets `worker: { format: "es" }`, so the worker's persistence
+code is a chunk of its own rather than inlined into the worker file.
