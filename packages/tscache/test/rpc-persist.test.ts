@@ -326,6 +326,38 @@ describe("persistence over RPC (§4.10.8)", () => {
     expect(b.events).toEqual([expected]);
   });
 
+  it("a quota error stops the cache: persistStopped 'quota-exceeded' reaches the port and its records go", async () => {
+    const { server, store } = persisting({ debounceMs: 1 });
+    store.seed("persist", fixture());
+    const a = await connect(server);
+    await a.client.request("cache", config());
+    store.fail("write", 1, "QuotaExceededError", "quota exceeded");
+    await a.client.request("put", { cacheId: "persist", batch: batch([0]) });
+    await until(() =>
+      expect(a.events).toEqual([
+        {
+          t: "evt",
+          scope: "cache",
+          cacheId: "persist",
+          event: "persistStopped",
+          payload: {
+            cacheId: "persist",
+            reason: "quota-exceeded",
+            error: { name: "QuotaExceededError", message: "quota exceeded" },
+          },
+        },
+      ]),
+    );
+    await until(() =>
+      expect(store.records("persist")).toEqual({ cache: undefined, pages: [] }),
+    );
+    const writes = store.log.filter((c) => c.kind === "write");
+    expect(writes).toHaveLength(2);
+    expect(writes[1]).toMatchObject({
+      plan: { deletePages: allPages, putPages: [], putCache: null },
+    });
+  });
+
   it("a cache that is not persisted never touches the store", async () => {
     const { server, store, openStore } = persisting({ debounceMs: 1 });
     const { client } = await connect(server);

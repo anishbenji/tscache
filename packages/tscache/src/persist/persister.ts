@@ -952,12 +952,20 @@ export class Persister {
     };
   }
 
-  /** A rejected attempt: put the state back and retry after debounceMs, under the same deadline. */
+  /**
+   * A rejected attempt: put the state back and retry after debounceMs, under
+   * the same deadline. A quota error stops the cache at once instead (N47).
+   */
   #rejected(job: Job, cache: Tracked, taken: Taken, error: unknown): void {
     job.error = failureOf(error);
     if (job.final) {
       // The clear holds this state now; no retry, no stop.
       this.#finish(job);
+      return;
+    }
+    if (job.error.name === "QuotaExceededError") {
+      // A retry would meet the same full disk; the cleanup needs no quota.
+      this.#stop(cache, "quota-exceeded", job.error);
       return;
     }
     for (const range of taken.pages) cache.pages = addRange(cache.pages, range);
