@@ -27,7 +27,7 @@ export interface Hosting {
 interface WorkerGlobals {
   SharedWorker?: new (
     url: string | URL,
-    options?: { type?: "module" },
+    options?: { type?: "module"; extendedLifetime?: boolean },
   ) => { port: MessagePortLike } & ErrorSource;
   Worker?: new (
     url: string | URL,
@@ -101,7 +101,10 @@ export async function openShared(
   }
   let worker: InstanceType<NonNullable<WorkerGlobals["SharedWorker"]>>;
   try {
-    worker = new Ctor(url, { type: "module" });
+    // extendedLifetime keeps the worker about 30 s after its last tab, so the
+    // final flush can land (§4.10.8, N50); a browser without the option
+    // ignores it. Every tab passes the same options, so they reach one worker.
+    worker = new Ctor(url, { type: "module", extendedLifetime: true });
   } catch (error) {
     throw new HostingError(
       `SharedWorker could not be created: ${String(error)}`,

@@ -25,7 +25,11 @@ browser with IndexedDB tells you that the cache persists.
 - A removal (`invalidate`, `clear`, a watermark moved back, a version change, `clearAll`) is written at
   once, and the call that made it resolves only once it is durable, or once persistence of the cache has
   stopped and its records were deleted. Such a call takes at most about ten seconds on a failing disk.
-- When the last tab closes, the worker writes what was still waiting.
+- When the last tab closes, the worker writes what was still waiting. Where the browser supports it
+  (Chromium), tscache creates the worker with `extendedLifetime`, which keeps it running about 30 seconds
+  after its last tab so that write can land. Elsewhere the option is ignored, and a worker that ends
+  first loses the additions still waiting, at most five seconds of them; the disk keeps the earlier state.
+  A removal is not exposed to this, since its call resolves only once it is durable.
 
 ## Loading
 
@@ -38,11 +42,11 @@ another `version` are not loaded, and the cache writes its own over them.
 ## Failures
 
 A persistence failure never rejects a call. The cache stops persisting, its records are deleted, and every
-tab hears `persistStopped` with `reason` `'unavailable'` (the database cannot be opened, or a write or the
-load did not finish in time) or `'error'` (a write or the load failed, with the error); the cache goes on in
-memory. (`'quota-exceeded'` is reserved for a later release; an exceeded quota is reported today as
-`'error'` with the `QuotaExceededError`.) A stop while `cache()` loads is emitted before the handle
-exists, so listen on the client:
+tab hears `persistStopped` with `reason` `'quota-exceeded'` (the origin's storage quota is full: the cache
+stops at the first refused write, without retrying, with the `QuotaExceededError`), `'unavailable'` (the
+database cannot be opened, or a write or the load did not finish in time) or `'error'` (a write or the load
+failed, with the error); the cache goes on in memory. A stop while `cache()` loads is emitted before the
+handle exists, so listen on the client:
 
 <<< @/snippets/persistence.ts#stopped{ts}
 

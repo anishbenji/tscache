@@ -325,6 +325,26 @@ export function stored(
   }, cacheId);
 }
 
+/**
+ * Whether the browser reads the `extendedLifetime` member of SharedWorker
+ * options: a getter on the options object is called only by a browser that
+ * knows the member. The probe worker is a new one, under its own URL.
+ */
+export function knowsExtendedLifetime(page: Page): Promise<boolean> {
+  return page.evaluate((url) => {
+    let read = false;
+    const options = {
+      type: "module" as const,
+      get extendedLifetime() {
+        read = true;
+        return false;
+      },
+    };
+    new SharedWorker(`${url}?probe=extended-lifetime`, options);
+    return read;
+  }, workerUrl);
+}
+
 /** Clears the cache, for every tab of a SharedWorker. */
 export async function clear(page: Page, config: CacheConfig): Promise<void> {
   await page.evaluate(async (cfg) => {

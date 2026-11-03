@@ -123,7 +123,8 @@ const candles = await client.cache({
 - **Loading.** `cache()` of a persisted cache resolves once its records are loaded (at most five seconds),
   so the first `get` sees them. A range the records do not cover reads as uncached, never as a gap.
 - **Failures never reject.** When the disk refuses, persistence of that cache stops, its records are
-  deleted, and every tab hears `persistStopped` with the reason; the cache goes on in memory. A stop
+  deleted, and every tab hears `persistStopped` with the reason (`'quota-exceeded'` at once when the
+  origin's quota is full); the cache goes on in memory. A stop
   during `cache()` comes before the handle exists, so listen with `client.on`.
 - **Restatements need a version, across sessions too.** A stored range is served in every later session
   without asking the backend. Set `version` when the dataset has one: records of another version are
