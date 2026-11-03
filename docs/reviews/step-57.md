@@ -99,7 +99,7 @@ The persister is in the lazy persistence chunk (`worker (lazy)`, and `index (laz
 
 ## CI
 
-See the final section, added after the run.
+- **`bun run ci`** at `78d2b5a`, under the machine's lock (`~/code/tscache-reports/bin/heavy-run.sh "child: ci 57" bun run ci`): exit 0; Vitest 111 files, 2,142 tests passed; Playwright 163 passed (the new `persist-lifetime.spec.ts` among them); bench smoke passed; the size check passed every row. The `[WebServer] … terminated by signal SIGTERM` lines in the log are the preview servers stopped at the end of the Playwright run.
 
 ## Not verified
 
