@@ -64,9 +64,9 @@ and settled their differences with experiments; method and reasoning in `docs/be
 **Specified in `docs/architecture.md` §4.10 (step 38, decisions N45–N61); where this sketch and §4.10
 differ, §4.10 governs.** The main differences: only the SharedWorker hosting persists (N52, user
 decision of 2026-10-31); coverage is stored in each page record rather than in the cache record (N55);
-and removals are written at once rather than debounced (N58). It ships as slice (a), records, loading
-and write-behind in the SharedWorker, then optionally slice (c), the quota event and the worker's
-extended lifetime.
+and removals are written at once rather than debounced (N58). It shipped as slice (a), records, loading
+and write-behind in the SharedWorker, then slice (c), the quota stop and the worker's extended lifetime
+(step 57).
 
 **Goal.** A reload or a new tab starts from what an earlier session fetched. Immutable history, the
 primary use (N11), is then fetched once per device rather than once per session.
