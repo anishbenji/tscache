@@ -79,7 +79,15 @@ see why.
 
 The worker reports its protocol version on connect, and the client refuses a mismatch with
 `ProtocolMismatchError`. This catches a stale worker script, cached or kept alive by a tab opened before
-an upgrade. Reloading the page fixes it once the old tabs are closed.
+an upgrade. Reloading the page fixes it once the old tabs are closed and the old worker has stopped: in
+Chromium a SharedWorker lingers about 30 seconds after its last tab, so a reload within that window can still
+reach it.
+
+If your worker is served at a fixed URL (no content hash in the file name), the first upgrade to a release
+that creates the SharedWorker with `extendedLifetime` (persistence slice (c)) also changes the worker's
+creation options. A browser refuses to connect a tab to a running SharedWorker created with different
+options, so tabs opened after that upgrade fall back to a dedicated worker (`modeFallback`) until the tabs
+from before it are closed. Bundlers that hash worker file names give each release its own URL and avoid this.
 
 ## Losing the worker
 
