@@ -225,6 +225,32 @@ describe("fallback chain", () => {
     });
   });
 
+  it("creates the SharedWorker as a module with extendedLifetime, with the same options in every tab (§4.10.8)", async () => {
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const created: { url: string; options: unknown }[] = [];
+    vi.stubGlobal(
+      "SharedWorker",
+      class {
+        port: unknown;
+        constructor(workerUrl: string | URL, options?: unknown) {
+          created.push({ url: String(workerUrl), options });
+          const channel = new MessageChannel();
+          server.attach(channel.port1 as MessagePortLike);
+          this.port = channel.port2;
+        }
+        addEventListener() {}
+        removeEventListener() {}
+      },
+    );
+    const a = await make({ workerUrl: url });
+    const b = await make({ workerUrl: url });
+    expect([a.mode, b.mode]).toEqual(["shared", "shared"]);
+    expect(created).toEqual([
+      { url, options: { type: "module", extendedLifetime: true } },
+      { url, options: { type: "module", extendedLifetime: true } },
+    ]);
+  });
+
   it("falls back when the worker constructor throws or the script fails to start", async () => {
     vi.stubGlobal(
       "SharedWorker",
