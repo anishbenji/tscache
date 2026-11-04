@@ -15,8 +15,11 @@ export default defineConfig({
   // resolve to the source instead, as the package's own tests do.
   resolve: {
     alias: [
-      { find: /^tscache$/, replacement: entry("index") },
-      { find: /^tscache\/fetcher$/, replacement: entry("fetcher") },
+      { find: /^@anishbenji\/tscache$/, replacement: entry("index") },
+      {
+        find: /^@anishbenji\/tscache\/fetcher$/,
+        replacement: entry("fetcher"),
+      },
     ],
   },
   test: {
