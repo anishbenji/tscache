@@ -47,7 +47,9 @@ import CopyPlugin from "copy-webpack-plugin";
 export default {
   plugins: [
     new CopyPlugin({
-      patterns: [{ from: "node_modules/tscache/dist", to: "vendor/tscache" }],
+      patterns: [
+        { from: "node_modules/@anishbenji/tscache/dist", to: "vendor/tscache" },
+      ],
     }),
   ],
 };
@@ -59,7 +61,7 @@ const client = await createClient({ workerUrl: "/vendor/tscache/worker.js" });
 
 ## No bundler
 
-Serve `node_modules/tscache/dist/worker.js` (and the chunks next to it) from
+Serve `node_modules/@anishbenji/tscache/dist/worker.js` (and the chunks next to it) from
 your origin, or copy `dist/` into your static assets, and pass that path:
 
 ```ts
