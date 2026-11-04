@@ -35,7 +35,7 @@ The per-step pipeline, the review loop, copy-paste prompts and the adversarial-r
 
 ## Resolved decisions (user-confirmed 2026-06-11)
 
-Name `tscache` unscoped, MIT · `interval` **required, no default** (deviation from starter §9.2 proposal, deliberate) · `alignmentOffset` included (default 0) · K=4, slot cap 32 768 · git-cliff · ESM-only · examples mapping per starter §7 · overlap warning = event + dev console. New decision points **N1–N8 all resolved 2026-06-11** — register in `docs/architecture.md` §8. Highlights: ranges inclusive both ends, unaligned get/invalidate snap outward, internal math on slot indices; three-scope events (client/cache/request, requestId `clientId:seq`); `put()` returns warnings; `./fetcher` subpath; auth error detected by marker `code === 'tscache:auth-invalid'`, never instanceof.
+Name `tscache` unscoped, MIT (scope superseded 2026-11-04 by N67: published as `@anishbenji/tscache`; the IndexedDB name, log prefix and auth marker stay `tscache`) · `interval` **required, no default** (deviation from starter §9.2 proposal, deliberate) · `alignmentOffset` included (default 0) · K=4, slot cap 32 768 · git-cliff · ESM-only · examples mapping per starter §7 · overlap warning = event + dev console. New decision points **N1–N8 all resolved 2026-06-11** — register in `docs/architecture.md` §8. Highlights: ranges inclusive both ends, unaligned get/invalidate snap outward, internal math on slot indices; three-scope events (client/cache/request, requestId `clientId:seq`); `put()` returns warnings; `./fetcher` subpath; auth error detected by marker `code === 'tscache:auth-invalid'`, never instanceof.
 
 ## Code Review Rules
 
