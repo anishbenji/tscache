@@ -1,6 +1,6 @@
 # Step 58 — Publish under the @anishbenji scope
 
-Branch: `chore/58-npm-scope` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: re-review pending · Verdict after triage: pending
+Branch: `chore/58-npm-scope` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: settled · Verdict after triage: merge
 
 The package is renamed from `tscache` to `@anishbenji/tscache`. npm refuses the unscoped name: it strips punctuation before comparing names, so `tscache` collides with the existing `ts-cache`. The user chose the personal scope on 2026-11-04 and deferred an organisation scope (`docs/architecture.md` N67, superseding §7 #1).
 
@@ -39,6 +39,10 @@ Review of the branch at 16b4e41 (`.reviews/step-58/round-1.md`, high), with the 
 | R1-2 | P1  | The copy recipes name `node_modules/tscache/dist`    | accepted | Confirmed by reading: a scoped install lives under `node_modules/@anishbenji/`. Fixed in 135694a, all four paths; the served `/vendor/tscache` stays.                                 |
 
 Both misses were regex literals and paths, which the codemod's specifier rules did not cover; the codemod now has rules for both and changes nothing further on this branch.
+
+## Round 2 — reviewer verdict: merge
+
+Review of the branch at 22faf17 (`.reviews/step-58/round-2.md`, high), with the host `bun run ci` passing. No findings; the fixes for R1-1 and R1-2 are confirmed. Settled.
 
 ## Contract-test changes
 
