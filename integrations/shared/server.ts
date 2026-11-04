@@ -8,7 +8,7 @@ import {
   createClient,
   type Range,
   type TscacheClient,
-} from "tscache";
+} from "@anishbenji/tscache";
 import type { ServerRead } from "./hydration";
 
 /**

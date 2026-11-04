@@ -5,6 +5,7 @@
 // only what it does not cover is fetched: the older fortnight, and the
 // provisional slot at the right edge.
 
+import type { CacheConfig, GetResult } from "@anishbenji/tscache";
 import { datasets } from "@examples/mock-backend/datasets";
 import { render } from "@solidjs/web";
 import {
@@ -16,7 +17,6 @@ import {
   Loading,
   onSettled,
 } from "solid-js";
-import type { CacheConfig, GetResult } from "tscache";
 import { type CandleChart, createCandleChart } from "./chart";
 import { createTscacheClient, fetches, lines, log } from "./session";
 import "./style.css";

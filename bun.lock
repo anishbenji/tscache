@@ -24,7 +24,7 @@
     "examples/mock-backend": {
       "name": "@examples/mock-backend",
       "dependencies": {
-        "tscache": "workspace:*",
+        "@anishbenji/tscache": "workspace:*",
       },
       "devDependencies": {
         "vite": "^8.3.5",
@@ -34,11 +34,11 @@
     "examples/react-lwcharts": {
       "name": "@examples/react-lwcharts",
       "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
         "@examples/mock-backend": "workspace:*",
         "lightweight-charts": "^5.2.1",
         "react": "^19.3.1",
         "react-dom": "^19.3.1",
-        "tscache": "workspace:*",
       },
       "devDependencies": {
         "@types/react": "^19.3.0",
@@ -50,11 +50,11 @@
     "examples/react-ssr": {
       "name": "@examples/react-ssr",
       "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
         "@examples/mock-backend": "workspace:*",
         "lightweight-charts": "^5.2.1",
         "react": "^19.3.1",
         "react-dom": "^19.3.1",
-        "tscache": "workspace:*",
       },
       "devDependencies": {
         "@types/react": "^19.3.0",
@@ -66,11 +66,11 @@
     "examples/solid-lwcharts": {
       "name": "@examples/solid-lwcharts",
       "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
         "@examples/mock-backend": "workspace:*",
         "@solidjs/web": "2.0.0-rc.20",
         "lightweight-charts": "^5.2.1",
         "solid-js": "2.0.0-rc.20",
-        "tscache": "workspace:*",
       },
       "devDependencies": {
         "vite": "^8.3.5",
@@ -80,10 +80,10 @@
     "examples/solid-ssr": {
       "name": "@examples/solid-ssr",
       "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
         "@examples/mock-backend": "workspace:*",
         "@solidjs/web": "2.0.0-rc.20",
         "solid-js": "2.0.0-rc.20",
-        "tscache": "workspace:*",
         "uplot": "^1.6.32",
       },
       "devDependencies": {
@@ -94,10 +94,10 @@
     "examples/solid-uplot": {
       "name": "@examples/solid-uplot",
       "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
         "@examples/mock-backend": "workspace:*",
         "@solidjs/web": "2.0.0-rc.20",
         "solid-js": "2.0.0-rc.20",
-        "tscache": "workspace:*",
         "uplot": "^1.6.32",
       },
       "devDependencies": {
@@ -108,8 +108,8 @@
     "examples/vanilla-uplot": {
       "name": "@examples/vanilla-uplot",
       "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
         "@examples/mock-backend": "workspace:*",
-        "tscache": "workspace:*",
         "uplot": "^1.6.32",
       },
       "devDependencies": {
@@ -119,7 +119,7 @@
     "integrations": {
       "name": "@tscache/integrations",
       "dependencies": {
-        "tscache": "workspace:*",
+        "@anishbenji/tscache": "workspace:*",
       },
       "devDependencies": {
         "@angular/common": "^22.2.4",
@@ -136,7 +136,7 @@
       },
     },
     "packages/tscache": {
-      "name": "tscache",
+      "name": "@anishbenji/tscache",
       "version": "0.0.0",
       "devDependencies": {
         "fake-indexeddb": "^6.2.7",
@@ -152,12 +152,12 @@
     "reference/react": {
       "name": "@reference/react",
       "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
         "@examples/mock-backend": "workspace:*",
         "@reference/shared": "workspace:*",
         "@tscache/integrations": "workspace:*",
         "react": "^19.3.1",
         "react-dom": "^19.3.1",
-        "tscache": "workspace:*",
       },
       "devDependencies": {
         "@types/react": "^19.3.0",
@@ -169,10 +169,10 @@
     "reference/shared": {
       "name": "@reference/shared",
       "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
         "@examples/mock-backend": "workspace:*",
         "@tscache/integrations": "workspace:*",
         "lightweight-charts": "^5.2.1",
-        "tscache": "workspace:*",
         "uplot": "^1.6.32",
       },
       "devDependencies": {
@@ -182,12 +182,12 @@
     "reference/solid": {
       "name": "@reference/solid",
       "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
         "@examples/mock-backend": "workspace:*",
         "@reference/shared": "workspace:*",
         "@solidjs/web": "2.0.0-rc.20",
         "@tscache/integrations": "workspace:*",
         "solid-js": "2.0.0-rc.20",
-        "tscache": "workspace:*",
       },
       "devDependencies": {
         "vite": "^8.3.5",
@@ -197,10 +197,10 @@
     "reference/vanilla": {
       "name": "@reference/vanilla",
       "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
         "@examples/mock-backend": "workspace:*",
         "@reference/shared": "workspace:*",
         "@tscache/integrations": "workspace:*",
-        "tscache": "workspace:*",
       },
       "devDependencies": {
         "vite": "^8.3.5",
@@ -209,7 +209,7 @@
     "site": {
       "name": "@tscache/site",
       "dependencies": {
-        "tscache": "workspace:*",
+        "@anishbenji/tscache": "workspace:*",
       },
       "devDependencies": {
         "@examples/mock-backend": "workspace:*",
@@ -230,6 +230,8 @@
     "@angular/common": ["@angular/common@22.2.4", "", { "dependencies": { "tslib": "^2.3.0" }, "peerDependencies": { "@angular/core": "22.2.4", "rxjs": "^6.5.3 || ^7.4.0" } }, "sha512-i5oosToLSAXumbkOF5pZyti0W0jrfRppj4y6a913f+AY4Em+iHT87JIOKrfybR7vkHs0eceZnpS0CpzylVAvgA=="],
 
     "@angular/core": ["@angular/core@22.2.4", "", { "dependencies": { "tslib": "^2.3.0" }, "peerDependencies": { "@angular/compiler": "22.2.4", "rxjs": "^6.5.3 || ^7.4.0", "zone.js": "~0.15.0 || ~0.16.0" }, "optionalPeers": ["@angular/compiler", "zone.js"] }, "sha512-FME4hPQ6+RbOkaRtUHWytwyAFXZYjIQ81TDJ3Dj7tx+vzKs0StpH9g/0AoZwQUDmhPlN84IazBimQ7II7lmwVw=="],
+
+    "@anishbenji/tscache": ["@anishbenji/tscache@workspace:packages/tscache"],
 
     "@arethetypeswrong/cli": ["@arethetypeswrong/cli@0.18.5", "", { "dependencies": { "@arethetypeswrong/core": "0.18.5", "chalk": "^4.1.2", "cli-table3": "^0.6.3", "commander": "^10.0.1", "marked": "^9.1.2", "marked-terminal": "^7.1.0", "semver": "^7.5.4" }, "bin": { "attw": "./dist/index.js" } }, "sha512-gM+8vRsQOD/Uc7EnBedUhkG5OCsDWE4uoak5QvomGpMpaky0Eh41p04nIMgrWb8EOmqZUJGc6zz9hsP6E56R7g=="],
 
@@ -1196,8 +1198,6 @@
     "tinyps": ["tinyps@0.5.1", "", {}, "sha512-B6Ykif5HflC3AdDkS4Zst/2muYVfeXoVMy+KorqH80s/1x4vunIORpNySH681X7fjj+dFM9MDKD6/Hsccjb87Q=="],
 
     "trim-lines": ["trim-lines@3.0.1", "", {}, "sha512-kRj8B+YHZCc9kQYdWfJB2/oUl9rA99qbowYYBtr4ui4mZyAQ2JpvVBd/6U2YloATfqBhBTSMhTpgBHtU0Mf3Rg=="],
-
-    "tscache": ["tscache@workspace:packages/tscache"],
 
     "tsdown": ["tsdown@0.23.4", "", { "dependencies": { "cac": "^7.1.0", "defu": "^6.1.7", "empathic": "^2.1.0", "hookable": "^6.1.2", "import-without-cache": "^0.4.1", "obug": "^3.0.0", "picomatch": "^4.0.7", "rolldown": "~1.2.15", "rolldown-plugin-dts": "^0.28.8", "tinyexec": "^1.3.1", "tinyglobby": "^0.2.17", "tinyps": "^0.5.1", "unconfig-core": "^7.5.0", "verkit": "^0.5.0" }, "peerDependencies": { "@arethetypeswrong/core": "^0.18.1", "@tsdown/css": "0.23.4", "@tsdown/exe": "0.23.4", "@vitejs/devtools": "*", "publint": "^0.3.8", "tsx": "*", "typescript": "^5.0.0 || ^6.0.0 || ^7.0.0", "unplugin-unused": ">=0.5.0", "unrun": "*" }, "optionalPeers": ["@arethetypeswrong/core", "@tsdown/css", "@tsdown/exe", "@vitejs/devtools", "publint", "tsx", "typescript", "unplugin-unused", "unrun"], "bin": { "tsdown": "./dist/run.mjs" } }, "sha512-AQQ/2Y7KBnf15GL4Ynjdltc94PkbKRI+arStyrp7inSQkRmTWNiXgfv50ESsjhBEsoVtiSloCAO2VyrqojWIOQ=="],
 

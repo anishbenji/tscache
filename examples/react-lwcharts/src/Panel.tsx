@@ -2,9 +2,9 @@
 // token recovery, next to the backend's own counters. Open a second tab and
 // both count the same fetches, because one SharedWorker serves them all.
 
+import type { HostingMode } from "@anishbenji/tscache";
 import { onFetchNotice } from "@examples/mock-backend/notices";
 import { useEffect, useState } from "react";
-import type { HostingMode } from "tscache";
 import { log, message } from "./log";
 
 /** The fields of the backend's GET /api/stats this page shows. */

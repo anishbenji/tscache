@@ -6,7 +6,7 @@
  * What a fetcher module needs: its types and `AuthInvalidError`, with no
  * other imports, so a fetcher bundle stays small.
  *
- * @module tscache/fetcher
+ * @module @anishbenji/tscache/fetcher
  */
 export { AUTH_INVALID_CODE, AuthInvalidError } from "../errors";
 export type { Fetcher, FetchRequest, FetchResponse, Range } from "../types";

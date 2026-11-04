@@ -4,7 +4,11 @@
 // store, a signal, a ref) and reads through `cache()`; the rest of its job
 // is turning the read's promise into that reactivity too.
 
-import type { CacheConfig, CacheHandle, TscacheClient } from "tscache";
+import type {
+  CacheConfig,
+  CacheHandle,
+  TscacheClient,
+} from "@anishbenji/tscache";
 import { hydrateRead, type ServerRead } from "./hydration";
 
 /**

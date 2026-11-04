@@ -1,7 +1,7 @@
 {
   "$schema": "https://typedoc.org/schema.json",
   // The API reference, generated from the package's TSDoc into api/
-  // (gitignored), which VitePress renders. tscache/worker is left out: it
+  // (gitignored), which VitePress renders. @anishbenji/tscache/worker is left out: it
   // is a worker script, and its one export serves the package's tests.
   "entryPoints": [
     "../packages/tscache/src/entries/index.ts",

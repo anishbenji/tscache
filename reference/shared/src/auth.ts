@@ -29,8 +29,8 @@
 // Only the access token goes into the fetcher's context and the socket's
 // subscription; the refresh token never leaves the page.
 
+import type { TscacheClient } from "@anishbenji/tscache";
 import type { ExampleContext } from "@examples/mock-backend/fetcher";
-import type { TscacheClient } from "tscache";
 
 interface Tokens {
   access: string;

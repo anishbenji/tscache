@@ -4,9 +4,9 @@
 // After that the figures come from the browser's own cache, which starts
 // from the server's snapshot.
 
+import type { Range } from "@anishbenji/tscache";
 import type { Hydration } from "@examples/mock-backend/hydration";
 import { useState, useSyncExternalStore } from "react";
-import type { Range } from "tscache";
 import { CandleChart } from "./Chart";
 import { type Bar, HALF_YEAR, type Summary, utcDay } from "./candles";
 import { useLog } from "./log";

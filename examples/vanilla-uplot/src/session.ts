@@ -1,10 +1,10 @@
 // What both pages share: a tscache client that is replaced when its worker
 // is lost, and a log of what the backend and the cache did.
 
+import { createClient, type TscacheClient } from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import { onFetchNotice } from "@examples/mock-backend/notices";
-import { createClient, type TscacheClient } from "tscache";
-import workerUrl from "tscache/worker?worker&url";
 
 /**
  * Calls `use` with a connected client, and again with a new one whenever

@@ -2,9 +2,9 @@
 // once and provides the connection; the chart reads its range through it.
 // Disposing the app disposes the client.
 
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { render } from "@solidjs/web";
 import { Errored, isPending, Loading, useContext } from "solid-js";
-import { type ClientOptions, createClient } from "tscache";
 import { candles, describe, lastDays } from "../shared/candles";
 import { ConnectionContext, createConnection, createSeries } from "./series";
 

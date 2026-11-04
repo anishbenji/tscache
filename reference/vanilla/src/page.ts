@@ -3,6 +3,8 @@
 // chart. Two charts can show it, Lightweight Charts and uPlot; the page
 // switches between them and loads only the one it shows.
 
+import { createClient } from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import { fetcherContext } from "@reference/shared/auth";
 import {
@@ -25,8 +27,6 @@ import {
   utc,
 } from "@reference/shared/session";
 import type { ServerRead } from "@tscache/integrations/shared/hydration";
-import { createClient } from "tscache";
-import workerUrl from "tscache/worker?worker&url";
 
 /**
  * The page's markup, as the server renders it and the client-only page

@@ -2,18 +2,18 @@
 // server read, replaced when its worker is lost; the cache's answers for the
 // shown window; and the fetches the backend received.
 
-import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
-import { type Hydration, seed } from "@examples/mock-backend/hydration";
-import { onFetchNotice } from "@examples/mock-backend/notices";
-import { useEffect, useState } from "react";
 import {
   type CacheHandle,
   createClient,
   type GetResult,
   type Range,
   type TscacheClient,
-} from "tscache";
-import workerUrl from "tscache/worker?worker&url";
+} from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
+import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
+import { type Hydration, seed } from "@examples/mock-backend/hydration";
+import { onFetchNotice } from "@examples/mock-backend/notices";
+import { useEffect, useState } from "react";
 import { candles, type Summary, summarize, utcDay } from "./candles";
 import { log, message } from "./log";
 

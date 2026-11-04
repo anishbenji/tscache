@@ -8,7 +8,7 @@ import {
   type Fetcher,
   type FetchRequest,
   type FetchResponse,
-} from "tscache/fetcher";
+} from "@anishbenji/tscache/fetcher";
 
 /** What this app passes as `context` to createClient and updateAuth. */
 export interface Context {

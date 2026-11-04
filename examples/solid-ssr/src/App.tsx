@@ -3,6 +3,7 @@
 // server read; then the browser's live panel takes over, created only now,
 // so nothing it does can make the hydrating render differ from the server's.
 
+import type { GetResult, HostingMode, Range } from "@anishbenji/tscache";
 import {
   type FetchNotice,
   onFetchNotice,
@@ -16,7 +17,6 @@ import {
   onSettled,
   Show,
 } from "solid-js";
-import type { GetResult, HostingMode, Range } from "tscache";
 import { SensorChart } from "./chart";
 import { type LogLine, Panel, type Status, utc } from "./panel";
 import { DAY, type Figures, figuresOf, type ServerRead } from "./sensor";

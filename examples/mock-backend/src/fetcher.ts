@@ -13,7 +13,7 @@ import {
   type Fetcher,
   type FetchRequest,
   type FetchResponse,
-} from "tscache/fetcher";
+} from "@anishbenji/tscache/fetcher";
 import {
   COLUMNS_TYPE,
   decodeColumns,

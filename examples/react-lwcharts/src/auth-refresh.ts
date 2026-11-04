@@ -25,7 +25,7 @@
 // without one. The refused token is then unknown, so the tab refreshes: tabs
 // may rotate once each, always with the current refresh token.
 
-import type { TscacheClient } from "tscache";
+import type { TscacheClient } from "@anishbenji/tscache";
 
 export interface StoredTokens {
   access: string;

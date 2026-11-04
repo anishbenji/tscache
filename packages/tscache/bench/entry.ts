@@ -1,5 +1,5 @@
 // The bench bundle's entry. scripts/bench.ts resolves the specifiers below
-// to the `tscache/engine` source of the base and of the head revision, and
+// to the `@anishbenji/tscache/engine` source of the base and of the head revision, and
 // of a second copy of the head, which the A/A control times against the
 // head: two copies of the same code, as base and head are when a pull
 // request leaves the engine alone. It installs `tscacheBench` on the

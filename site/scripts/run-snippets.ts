@@ -13,6 +13,13 @@
 // where workers are missing.
 
 import { readdirSync } from "node:fs";
+import {
+  type Dtype,
+  decodeSnapshot,
+  type EncodedSnapshot,
+  type GetResult,
+} from "@anishbenji/tscache";
+import type { FetchRequest } from "@anishbenji/tscache/fetcher";
 import { createBackend } from "@examples/mock-backend/backend";
 import {
   COLUMNS_TYPE,
@@ -20,13 +27,6 @@ import {
   decodeColumns,
   encodeColumns,
 } from "@examples/mock-backend/columns";
-import {
-  type Dtype,
-  decodeSnapshot,
-  type EncodedSnapshot,
-  type GetResult,
-} from "tscache";
-import type { FetchRequest } from "tscache/fetcher";
 
 const SNIPPETS = new URL("../snippets/", import.meta.url);
 const FETCHER = new URL("fetcher.ts", SNIPPETS).href;
@@ -467,7 +467,7 @@ const RUNS: Record<string, Run> = {
   },
   async "patterns.ts"() {
     const { forgetYesterday, readWithRetry } = await load("patterns.ts");
-    const { createClient } = await import("tscache");
+    const { createClient } = await import("@anishbenji/tscache");
     const client = await createClient({
       mode: "in-process",
       fetcher: { module: FETCHER, context: { origin } },
@@ -485,7 +485,7 @@ const RUNS: Record<string, Run> = {
   async "persistence.ts"(logs) {
     const { keepStorage, logout, openCandles, watchPersistence } =
       await load("persistence.ts");
-    const { createClient } = await import("tscache");
+    const { createClient } = await import("@anishbenji/tscache");
     // No workers here: the client is in-process, where persist does nothing.
     const client = await createClient({ mode: "in-process" });
     const unsubscribe = watchPersistence(client);

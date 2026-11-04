@@ -1,7 +1,7 @@
 // A page with one chart, client-only. Connect once, give the chart a
 // series, show the range on screen.
 
-import { type ClientOptions, createClient } from "tscache";
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { candles, describe, lastDays } from "../shared/candles";
 import { connect } from "../shared/connection";
 import { series } from "./series";

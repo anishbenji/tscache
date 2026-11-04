@@ -1,7 +1,7 @@
+import { fetcherUrl } from "@anishbenji/tscache/vite";
 import { mockBackend, ssrPage } from "@examples/mock-backend/vite";
 import { SERVICE_TOKEN } from "@reference/shared/server";
 import react from "@vitejs/plugin-react";
-import { fetcherUrl } from "tscache/vite";
 import { defineConfig } from "vite";
 
 // Two pages: the client-only page at /, and the same page rendered on the

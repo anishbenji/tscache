@@ -2,8 +2,13 @@
 // the figures the page shows of a cache answer. Pure functions, so the
 // server and the browser compute the same figures from the same answer.
 
+import type {
+  CacheConfig,
+  FieldArray,
+  GetResult,
+  Range,
+} from "@anishbenji/tscache";
 import { datasets } from "@examples/mock-backend/datasets";
-import type { CacheConfig, FieldArray, GetResult, Range } from "tscache";
 
 const DAY = 86_400_000;
 /** The window the page opens on, and each step of scroll-back. */

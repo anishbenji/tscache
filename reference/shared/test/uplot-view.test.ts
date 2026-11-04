@@ -2,7 +2,7 @@
 // hands uPlot every bar of the answer, as the cache's own arrays, with the
 // time first and the columns in the order the series are declared.
 
-import type { GetResult } from "tscache";
+import type { GetResult } from "@anishbenji/tscache";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createUplotChart } from "../src/chart/uplot";
 import type { ChartView } from "../src/chart/view";

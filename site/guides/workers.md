@@ -26,7 +26,7 @@ in its tab, and a range is fetched once per tab.
 
 ## Serving the worker script
 
-`workerUrl` is the `tscache/worker` script as your setup serves it. The browser resolves it at runtime,
+`workerUrl` is the `@anishbenji/tscache/worker` script as your setup serves it. The browser resolves it at runtime,
 so a bare package specifier does not work. The worker is an ES module worker (`{ type: 'module' }`) and
 must be same-origin: a worker script on another origin is refused.
 
@@ -44,7 +44,7 @@ worker file by that URL, so a query added to it would load the worker twice.
 ### webpack 5 and Rspack
 
 webpack bundles a worker only when it sees `new Worker(new URL(...))` in your code, and `createClient`
-creates the worker itself; a bare `new URL("tscache/worker", import.meta.url)` emits the entry file
+creates the worker itself; a bare `new URL("@anishbenji/tscache/worker", import.meta.url)` emits the entry file
 without the chunks it imports. Serve the whole `dist/` directory instead, for example with
 `copy-webpack-plugin`:
 
@@ -54,7 +54,9 @@ import CopyPlugin from "copy-webpack-plugin";
 export default {
   plugins: [
     new CopyPlugin({
-      patterns: [{ from: "node_modules/tscache/dist", to: "vendor/tscache" }],
+      patterns: [
+        { from: "node_modules/@anishbenji/tscache/dist", to: "vendor/tscache" },
+      ],
     }),
   ],
 };
@@ -66,7 +68,7 @@ const client = await createClient({ workerUrl: "/vendor/tscache/worker.js" });
 
 ### No bundler
 
-Serve `node_modules/tscache/dist/` (the worker and the chunks beside it) from your origin and pass
+Serve `node_modules/@anishbenji/tscache/dist/` (the worker and the chunks beside it) from your origin and pass
 `/vendor/tscache/worker.js`, as above.
 
 ### Checking the setup

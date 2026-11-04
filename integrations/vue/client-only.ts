@@ -1,7 +1,7 @@
 // A page with one chart, client-only. The plugin connects once for the app;
 // the chart shows the last 90 days.
 
-import { type ClientOptions, createClient } from "tscache";
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { type App, createApp } from "vue";
 import { lastDays } from "../shared/candles";
 import { Chart } from "./chart";

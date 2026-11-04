@@ -1,5 +1,5 @@
 // `?fetcher` imports, served by tscache's fetcherUrl plugin
-// (tscache/vite).
+// (@anishbenji/tscache/vite).
 declare module "*?fetcher" {
   const url: string;
   export default url;

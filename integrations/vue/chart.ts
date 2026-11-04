@@ -3,7 +3,7 @@
 // browser's hydration render from that same read, so the two agree. A
 // render function rather than a .vue file, so tsc checks it as it is.
 
-import type { Range } from "tscache";
+import type { Range } from "@anishbenji/tscache";
 import { defineComponent, h, shallowRef } from "vue";
 import { candles, describe } from "../shared/candles";
 import { type Answer, useSeries } from "./series";

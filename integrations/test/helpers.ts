@@ -3,7 +3,7 @@ import {
   type ClientEvents,
   createClient,
   type TscacheClient,
-} from "tscache";
+} from "@anishbenji/tscache";
 import { vi } from "vitest";
 
 export const config: CacheConfig = {

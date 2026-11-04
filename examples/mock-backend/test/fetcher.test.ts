@@ -1,6 +1,6 @@
-import type { Dtype } from "tscache";
-import { isAuthInvalidError } from "tscache";
-import type { FetchRequest } from "tscache/fetcher";
+import type { Dtype } from "@anishbenji/tscache";
+import { isAuthInvalidError } from "@anishbenji/tscache";
+import type { FetchRequest } from "@anishbenji/tscache/fetcher";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type Backend, createBackend } from "../src/backend";
 import { COLUMNS_TYPE, ColumnsError, encodeColumns } from "../src/columns";

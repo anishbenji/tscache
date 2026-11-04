@@ -1,4 +1,4 @@
-import { createClient, PutError } from "tscache";
+import { createClient, PutError } from "@anishbenji/tscache";
 
 const client = await createClient({ mode: "in-process" });
 const MINUTE = 60_000;

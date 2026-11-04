@@ -2,8 +2,8 @@
 // connection: it connects before it mounts the app, gives the app the
 // connection as root context, and disposes it after unmounting the app.
 
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { type Component, mount, unmount } from "svelte";
-import { type ClientOptions, createClient } from "tscache";
 import { connect } from "../shared/connection";
 import { tscacheContext } from "./series.svelte";
 

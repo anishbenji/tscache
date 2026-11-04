@@ -1,4 +1,4 @@
-import type { GetOptions, Range } from "tscache";
+import type { GetOptions, Range } from "@anishbenji/tscache";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Connection, connect } from "../shared/connection";
 import { type Answer, series } from "../vanilla/series";

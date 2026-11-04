@@ -2,7 +2,7 @@
 // the sensor sent no reading. An empty slot inside coverage is a confirmed
 // gap; one outside coverage is not loaded, and nothing is known about it.
 
-import type { GetResult, Miss, Range } from "tscache";
+import type { GetResult, Miss, Range } from "@anishbenji/tscache";
 
 export interface Frame {
   /** The range the charts show. */

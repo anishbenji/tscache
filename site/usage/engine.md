@@ -1,6 +1,6 @@
 # The engine
 
-`tscache/engine` exports `Engine`, the engine every hosting runs, without a worker, a port or a fetcher.
+`@anishbenji/tscache/engine` exports `Engine`, the engine every hosting runs, without a worker, a port or a fetcher.
 Its methods are synchronous and take the cache id first. Use it in Node, in tests, or to build
 persistence; in a page, use `createClient`, which runs this engine in a worker for you.
 

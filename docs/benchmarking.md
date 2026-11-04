@@ -36,7 +36,7 @@ These are exact on any machine, so the gate is the number. A deliberate change e
 
 ### Timings (`packages/tscache/bench/cases.ts`)
 
-Every case drives the public engine (`tscache/engine`), the one engine all three hostings run, so the base and the head of a pull request expose the same API to it. Fixtures are seeded one-minute OHLCV candles (`bench/fixtures.ts`): a year of 24/7 bars (525,600), a year of weekday sessions (101,790 bars across about 260 segments), and a year with dropouts.
+Every case drives the public engine (`@anishbenji/tscache/engine`), the one engine all three hostings run, so the base and the head of a pull request expose the same API to it. Fixtures are seeded one-minute OHLCV candles (`bench/fixtures.ts`): a year of 24/7 bars (525,600), a year of weekday sessions (101,790 bars across about 260 segments), and a year with dropouts.
 
 | Case                     | What a chart does                                                             | Base, Chromium | Base, Bun |
 | ------------------------ | ----------------------------------------------------------------------------- | -------------: | --------: |

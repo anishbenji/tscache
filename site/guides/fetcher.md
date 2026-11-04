@@ -13,7 +13,7 @@ with `import()`, and calls its default export's `fetch` for every range a `get` 
 - **Self-contained.** It closes over nothing on the page. What it needs (a token, an API origin) arrives
   as `context`, a structured-cloneable value from `createClient` or `updateAuth`; each fetch gets a copy
   of the latest.
-- **Imports from `tscache/fetcher`**, which holds the types and `AuthInvalidError` and nothing else.
+- **Imports from `@anishbenji/tscache/fetcher`**, which holds the types and `AuthInvalidError` and nothing else.
 - **Loaded at startup.** A module that fails to import, or whose default export has no `fetch`, makes
   `createClient` reject with a `TscacheError` naming it, so a broken fetcher does not look like a flaky
   backend.

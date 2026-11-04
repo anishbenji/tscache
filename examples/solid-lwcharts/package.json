@@ -12,7 +12,7 @@
     "@solidjs/web": "2.0.0-rc.20",
     "lightweight-charts": "^5.2.1",
     "solid-js": "2.0.0-rc.20",
-    "tscache": "workspace:*"
+    "@anishbenji/tscache": "workspace:*"
   },
   "devDependencies": {
     "vite": "^8.3.5",

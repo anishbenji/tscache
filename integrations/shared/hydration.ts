@@ -20,7 +20,7 @@ import {
   type Range,
   type Snapshot,
   TscacheError,
-} from "tscache";
+} from "@anishbenji/tscache";
 
 /**
  * What a server read: the range it asked for, the cache's answer and the

@@ -4,7 +4,7 @@
 /**
  * The Vite plugin that serves a fetcher module with its exports intact.
  *
- * @module tscache/vite
+ * @module @anishbenji/tscache/vite
  */
 
 export type { FetcherUrlPlugin } from "../vite/fetcher-url";

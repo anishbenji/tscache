@@ -6,6 +6,12 @@
 // flashes a fallback. One connection (shared/connection.ts) serves every
 // series of the app.
 
+import type {
+  CacheConfig,
+  GetResult,
+  Range,
+  TscacheClient,
+} from "@anishbenji/tscache";
 import {
   type Accessor,
   createContext,
@@ -13,7 +19,6 @@ import {
   createSignal,
   onCleanup,
 } from "solid-js";
-import type { CacheConfig, GetResult, Range, TscacheClient } from "tscache";
 import { type Connection, connect, type Seed } from "../shared/connection";
 
 /** The cache's answer for a range. */

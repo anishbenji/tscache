@@ -21,13 +21,6 @@
 // signal. Drawing the chart stays with the page; the session only asks the
 // chart which time it shows (attachChart).
 
-import {
-  type Connection,
-  type ConnectionState,
-  connect,
-} from "@tscache/integrations/shared/connection";
-import type { ServerRead } from "@tscache/integrations/shared/hydration";
-import { series } from "@tscache/integrations/vanilla/series";
 import type {
   GetResult,
   HostingMode,
@@ -35,7 +28,14 @@ import type {
   MissReason,
   Range,
   TscacheClient,
-} from "tscache";
+} from "@anishbenji/tscache";
+import {
+  type Connection,
+  type ConnectionState,
+  connect,
+} from "@tscache/integrations/shared/connection";
+import type { ServerRead } from "@tscache/integrations/shared/hydration";
+import { series } from "@tscache/integrations/vanilla/series";
 import {
   accessToken,
   onTokensStored,

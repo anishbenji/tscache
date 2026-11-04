@@ -4,8 +4,8 @@
 // server's read, so the live answer that follows fetches only what the read
 // did not cover (the provisional last day, say).
 
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { type Component, hydrate, unmount } from "svelte";
-import { type ClientOptions, createClient } from "tscache";
 import { candles } from "../shared/candles";
 import { connect } from "../shared/connection";
 import {

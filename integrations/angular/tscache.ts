@@ -35,7 +35,7 @@ import type {
   GetResult,
   Range,
   TscacheClient,
-} from "tscache";
+} from "@anishbenji/tscache";
 import {
   type Connection,
   type ConnectionState,

@@ -2,6 +2,7 @@
 // own below. Bars are placed by index, so weekends take no room on the time
 // axis.
 
+import type { GetResult } from "@anishbenji/tscache";
 import {
   type CandlestickData,
   CandlestickSeries,
@@ -10,7 +11,6 @@ import {
   HistogramSeries,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { GetResult } from "tscache";
 import { columnsOf, valueAt } from "./candles";
 
 export interface CandlePlot {

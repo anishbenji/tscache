@@ -1,4 +1,4 @@
-import type { CacheHandle } from "tscache";
+import type { CacheHandle } from "@anishbenji/tscache";
 
 // #region expiry
 // A one-minute series whose previous UTC day a batch rewrites at 02:00:

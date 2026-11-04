@@ -9,7 +9,7 @@ import {
   type GetResult,
   type Range,
   TscacheError,
-} from "tscache";
+} from "@anishbenji/tscache";
 import { candles } from "./snapshots-server";
 
 /**

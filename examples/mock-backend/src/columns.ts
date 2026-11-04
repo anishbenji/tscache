@@ -22,7 +22,7 @@
 // The module imports only types, so it adds nothing to a fetcher bundle
 // but itself.
 // #region format
-import type { Dtype } from "tscache";
+import type { Dtype } from "@anishbenji/tscache";
 
 /** The media type of a columns body, for Accept and Content-Type. */
 export const COLUMNS_TYPE = "application/vnd.tscache.columns";
