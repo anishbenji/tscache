@@ -6,7 +6,12 @@
 // subscribes to nothing, and a hydration render changes no ref, so it
 // shows what the server rendered.
 
-import type { CacheConfig, GetResult, Range, TscacheClient } from "tscache";
+import type {
+  CacheConfig,
+  GetResult,
+  Range,
+  TscacheClient,
+} from "@anishbenji/tscache";
 import {
   type InjectionKey,
   inject,

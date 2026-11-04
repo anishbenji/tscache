@@ -4,6 +4,7 @@
 // it and writes the covered parts of the answer into the page, for the
 // browser's cache to start from.
 
+import { createClient, type TscacheClient } from "@anishbenji/tscache";
 import type { ExampleContext } from "@examples/mock-backend/fetcher";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import {
@@ -14,7 +15,6 @@ import {
 } from "@examples/mock-backend/hydration";
 import type { RenderedPage, RenderRequest } from "@examples/mock-backend/vite";
 import { renderToString } from "react-dom/server";
-import { createClient, type TscacheClient } from "tscache";
 import { APP_PROPS, App, type AppProps } from "./App";
 import { candles, coveredBars, HALF_YEAR, summarize } from "./candles";
 

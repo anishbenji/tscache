@@ -247,7 +247,7 @@ export type HostingMode = "shared" | "dedicated" | "in-process";
 
 export interface ClientOptions {
   /**
-   * URL of the worker script (the package's `tscache/worker` entry) as your
+   * URL of the worker script (the package's `@anishbenji/tscache/worker` entry) as your
    * bundler serves it; see docs/guides/worker-setup.md for Vite, webpack and
    * no-bundler setups. Required unless `mode` is 'in-process'.
    */

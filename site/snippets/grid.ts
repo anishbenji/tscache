@@ -1,4 +1,4 @@
-import { createClient } from "tscache";
+import { createClient } from "@anishbenji/tscache";
 
 // No fetcher: nothing loads, so a read returns its snapped range as a miss.
 const client = await createClient({ mode: "in-process" });

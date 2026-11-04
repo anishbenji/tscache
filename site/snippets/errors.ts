@@ -4,8 +4,8 @@ import {
   InvalidRangeError,
   isAuthInvalidError,
   ProtocolMismatchError,
-} from "tscache";
-import workerUrl from "tscache/worker?worker&url";
+} from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 
 // #region connect
 try {

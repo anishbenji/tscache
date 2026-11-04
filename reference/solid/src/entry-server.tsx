@@ -5,6 +5,7 @@
 // finished markup in one pass. The read goes into the page a second time
 // as data, for the browser's half (entry-client.tsx).
 
+import type { CacheConfig, Range } from "@anishbenji/tscache";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import type { RenderedPage, RenderRequest } from "@examples/mock-backend/vite";
 import { chartKindOf } from "@reference/shared/chart/load";
@@ -19,7 +20,6 @@ import {
   type ServerRead,
 } from "@tscache/integrations/shared/hydration";
 import { serverReader } from "@tscache/integrations/shared/server";
-import type { CacheConfig, Range } from "tscache";
 import { App } from "./App";
 
 type Reader = (config: CacheConfig, range: Range) => Promise<ServerRead>;

@@ -3,7 +3,7 @@ import {
   createClient,
   type GetResult,
   type TscacheClient,
-} from "tscache";
+} from "@anishbenji/tscache";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type Connection, connect } from "../shared/connection";
 import type { ServerRead } from "../shared/hydration";

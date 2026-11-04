@@ -1,11 +1,11 @@
 // The tscache client, replaced when its worker is lost, and what the page
 // reports: the backend fetch count and a log.
 
+import { createClient } from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import { onFetchNotice } from "@examples/mock-backend/notices";
 import { createMemo, createSignal, refresh } from "solid-js";
-import { createClient } from "tscache";
-import workerUrl from "tscache/worker?worker&url";
 
 interface LogLine {
   at: number;

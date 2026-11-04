@@ -4,9 +4,9 @@
 // own answer lands, so the page never shows a fallback. The browser fetches
 // only what the read did not cover (the provisional last day, say).
 
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { hydrate } from "@solidjs/web";
 import { Errored, isPending, useContext } from "solid-js";
-import { type ClientOptions, createClient } from "tscache";
 import { candles, describe } from "../shared/candles";
 import {
   type Dehydrated,

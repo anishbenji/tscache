@@ -19,7 +19,7 @@ holds the lifecycle and the hydration, and add what a snippet leaves out: the au
 a chart, and tests that run each one. Nothing is published, so the one-package rule (starter §5) is
 untouched and no adapter API needs versioning; the library's framework surface (lifecycle, then
 promise to reactivity) is small enough for an application to own. Subpath adapters with optional peers
-(`tscache/react`, `tscache/solid`) stay possible later if copying proves a burden.
+(`@anishbenji/tscache/react`, `@anishbenji/tscache/solid`) stay possible later if copying proves a burden.
 
 **Decisions (user, 2026-10-26).** They live in a `reference/` workspace of their own, next to the
 examples rather than in place of them. Each draws with both Lightweight Charts and uPlot behind one
@@ -157,8 +157,8 @@ are rows N34–N44 in `docs/architecture.md` §8.
   applied in one engine step only where the browser's cache covers nothing, so another tab's fetch
   cannot land between the check and the put (`docs/reviews/step-14.md`, R2-2). N34–N39; built in
   step ⑮ (`get(range, { snapshot: true })`, `CacheHandle.hydrate`, `encodeSnapshot`/`decodeSnapshot`).
-- A `tscache/vite` entry exporting the fetcher-URL plugin, with file URLs for server builds. The SSR page
-  plugin stays in the examples. N40–N41; built in step ⑯ (`import { fetcherUrl } from "tscache/vite"`).
+- A `@anishbenji/tscache/vite` entry exporting the fetcher-URL plugin, with file URLs for server builds. The SSR page
+  plugin stays in the examples. N40–N41; built in step ⑯ (`import { fetcherUrl } from "@anishbenji/tscache/vite"`).
 - DC-1 and DC-2 from step ⑫ (`docs/reviews/step-12.md`): the refresh snippet's assumption that a refresh
   issues a new access token, and the two ways a client can stop being served that N32 does not detect,
   are documented as assumptions (N42–N44), not changed.

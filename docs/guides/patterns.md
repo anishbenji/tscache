@@ -19,7 +19,7 @@ only cause refetches; the parts that do change have better tools:
   own clock.
 
 ```ts
-import type { CacheHandle } from "tscache";
+import type { CacheHandle } from "@anishbenji/tscache";
 
 // A one-minute series whose previous UTC day a batch rewrites at 02:00:
 // once the batch has run, forget that day, and the next get fetches it.
@@ -66,7 +66,7 @@ has its own dedicated worker and a clear stays in that tab.
 Cookie-based authentication needs no tscache code: cookies go with the worker's fetches.
 
 With tokens, the fetcher receives them in its `context`, throws `AuthInvalidError` (from
-`tscache/fetcher`) when the backend refuses one, and every tab hears `authInvalid` with the refused
+`@anishbenji/tscache/fetcher`) when the backend refuses one, and every tab hears `authInvalid` with the refused
 context (design (b), architecture §6.2, N33). Any tab may refresh and call `updateAuth`, after which the
 paused fetches run again. Refreshing with a rotating refresh token needs one tab at a time; the Web Locks
 snippet in [`examples/react-lwcharts/src/auth-refresh.ts`](../../examples/react-lwcharts/src/auth-refresh.ts)

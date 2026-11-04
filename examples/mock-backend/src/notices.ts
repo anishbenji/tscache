@@ -2,7 +2,7 @@
 // reports each fetch on a BroadcastChannel so every open tab can show how
 // many requests the backend actually received.
 
-import type { Range } from "tscache";
+import type { Range } from "@anishbenji/tscache";
 
 export interface FetchNotice {
   cacheId: string;

@@ -4,8 +4,8 @@
 // that: while auth is invalid it answers at once, with the unfetched ranges
 // as 'auth-pending' misses, and the next get after updateAuth is complete.
 
+import type { GetResult, TscacheClient } from "@anishbenji/tscache";
 import { useCallback, useEffect, useReducer } from "react";
-import type { GetResult, TscacheClient } from "tscache";
 import { refreshOnAuthInvalid } from "./auth-refresh";
 import { log, message } from "./log";
 import {

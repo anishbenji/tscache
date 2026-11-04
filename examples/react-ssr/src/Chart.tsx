@@ -3,8 +3,8 @@
 // and each new answer replaces its data. Lightweight Charts is imported
 // then, so it stays out of the bundle that hydrates the page.
 
+import type { GetResult } from "@anishbenji/tscache";
 import { useEffect, useEffectEvent, useRef } from "react";
-import type { GetResult } from "tscache";
 import type { CandlePlot } from "./candle-chart";
 import { log, message } from "./log";
 

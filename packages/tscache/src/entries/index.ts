@@ -4,7 +4,7 @@
  * The client API: `createClient`, the cache handle, snapshots, errors and
  * the public types.
  *
- * @module tscache
+ * @module @anishbenji/tscache
  */
 
 export type { CacheHandle } from "../client/cache";

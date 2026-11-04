@@ -6,7 +6,7 @@
  * Every hosting runs this engine; a page normally reaches it through
  * `createClient`.
  *
- * @module tscache/engine
+ * @module @anishbenji/tscache/engine
  */
 
 export type { EngineEvents } from "../engine/engine";

@@ -49,9 +49,9 @@ bunx biome ci .
 # Playwright never retries (docs/testing.md).
 bun scripts/test-clocks.ts
 bun run typecheck
-# Built before Knip: the examples' Vite configs import tscache/vite from
+# Built before Knip: the examples' Vite configs import @anishbenji/tscache/vite from
 # dist/, and Knip loads them; a fresh checkout has no dist/ yet.
-bun run --filter tscache build   # includes publint + attw (esm-only profile)
+bun run --filter @anishbenji/tscache build   # includes publint + attw (esm-only profile)
 # Generated before Fallow and the site's type check: the site's config imports
 # TypeDoc's sidebar, site/api/ is gitignored, and a fresh checkout has none.
 bun run --cwd site api

@@ -3,6 +3,13 @@
 // a new client; the cache memo and the chart data derive from it, so they
 // follow with the new client's worker and its empty cache.
 
+import {
+  type CacheConfig,
+  type CacheHandle,
+  createClient,
+  type TscacheClient,
+} from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import { datasets } from "@examples/mock-backend/datasets";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import {
@@ -11,13 +18,6 @@ import {
   refresh,
   type SourceAccessor,
 } from "solid-js";
-import {
-  type CacheConfig,
-  type CacheHandle,
-  createClient,
-  type TscacheClient,
-} from "tscache";
-import workerUrl from "tscache/worker?worker&url";
 import { log } from "./log";
 
 export const INTERVAL = 10_000;

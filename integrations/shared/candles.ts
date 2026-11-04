@@ -2,7 +2,7 @@
 // line of text; a chart library takes the same columns (uPlot's data, a
 // Lightweight Charts series), and the snippets mark where it would go.
 
-import type { CacheConfig, GetResult, Range } from "tscache";
+import type { CacheConfig, GetResult, Range } from "@anishbenji/tscache";
 
 export const DAY = 86_400_000;
 

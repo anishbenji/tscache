@@ -6,11 +6,15 @@
 // since hydrate refuses a snapshot of another dataset version and never
 // touches what a cache already covers.
 
+import {
+  type CacheHandle,
+  createClient,
+  type TscacheClient,
+} from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import { readHydration, seed } from "@examples/mock-backend/hydration";
 import { createMemo, refresh, type SourceAccessor } from "solid-js";
-import { type CacheHandle, createClient, type TscacheClient } from "tscache";
-import workerUrl from "tscache/worker?worker&url";
 import { config } from "./sensor";
 
 export interface Session {

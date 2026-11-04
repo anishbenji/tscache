@@ -4,15 +4,15 @@
 // do not run on the server, so a server render, which has no connection,
 // shows the answer it was given and reads nothing.
 
-import { getContext } from "svelte";
-import { createSubscriber } from "svelte/reactivity";
 import type {
   CacheConfig,
   CacheHandle,
   GetResult,
   Range,
   TscacheClient,
-} from "tscache";
+} from "@anishbenji/tscache";
+import { getContext } from "svelte";
+import { createSubscriber } from "svelte/reactivity";
 import type { Connection, ConnectionState } from "../shared/connection";
 
 const CONNECTION = Symbol("tscache connection");

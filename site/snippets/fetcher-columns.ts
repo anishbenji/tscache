@@ -6,6 +6,13 @@
 // bytes fetched. `bun run docs:run` executes it against the examples' mock
 // backend.
 // #region fetcher
+
+import {
+  AuthInvalidError,
+  type Fetcher,
+  type FetchRequest,
+  type FetchResponse,
+} from "@anishbenji/tscache/fetcher";
 import {
   COLUMNS_TYPE,
   decodeColumns,
@@ -15,12 +22,6 @@ import {
   joinPages,
   type NormalPage,
 } from "@examples/mock-backend/columns";
-import {
-  AuthInvalidError,
-  type Fetcher,
-  type FetchRequest,
-  type FetchResponse,
-} from "tscache/fetcher";
 import type { Context } from "./fetcher";
 
 /** What a page carries besides its columns, in either format. */

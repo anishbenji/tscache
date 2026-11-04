@@ -1,5 +1,5 @@
 // What an app's bundler declares for these imports. Vite's client types
-// declare `?worker&url`; `?fetcher` is tscache/vite's (the worker setup
+// declare `?worker&url`; `?fetcher` is @anishbenji/tscache/vite's (the worker setup
 // guide).
 declare module "*?worker&url" {
   const url: string;

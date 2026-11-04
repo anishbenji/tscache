@@ -4,8 +4,8 @@
 // points after it stay provisional (request counts still arriving), so each
 // poll fetches only the provisional tail and the seconds since the last one.
 
+import type { CacheConfig, CacheHandle, GetResult } from "@anishbenji/tscache";
 import { datasets } from "@examples/mock-backend/datasets";
-import type { CacheConfig, CacheHandle, GetResult } from "tscache";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { chartWidth, keepClient, log, show, watchFetches } from "./session";

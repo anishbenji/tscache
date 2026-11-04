@@ -4,7 +4,7 @@
 // replaces it, fetching only what the server's answer did not cover (the
 // provisional last day, say).
 
-import { type ClientOptions, createClient } from "tscache";
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { type App, createSSRApp } from "vue";
 import { candles } from "../shared/candles";
 import {

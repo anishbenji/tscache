@@ -121,7 +121,7 @@ const devOptions = () => ({
   plugins: [fetcherUrl()],
 });
 
-describe("fetcherUrl (tscache/vite)", () => {
+describe("fetcherUrl (@anishbenji/tscache/vite)", () => {
   it("a client build emits the fetcher as its own chunk, default export kept, at a URL under the base", async () => {
     const outDir = join(root, "client");
     await build({
@@ -241,18 +241,20 @@ describe("fetcherUrl (tscache/vite)", () => {
   it("an installed tscache is bundled in dev SSR, so its import() of the fetcher URL resolves (R1-4)", async () => {
     // A stand-in for an installed tscache, which Vite would externalize: its
     // import() would then run in plain Node, where /@fs/ paths mean nothing.
-    await mkdir(join(root, "node_modules", "tscache"), { recursive: true });
+    await mkdir(join(root, "node_modules", "@anishbenji", "tscache"), {
+      recursive: true,
+    });
     await writeFile(
-      join(root, "node_modules", "tscache", "package.json"),
-      '{ "name": "tscache", "type": "module", "exports": "./index.js" }\n',
+      join(root, "node_modules", "@anishbenji", "tscache", "package.json"),
+      '{ "name": "@anishbenji/tscache", "type": "module", "exports": "./index.js" }\n',
     );
     await writeFile(
-      join(root, "node_modules", "tscache", "index.js"),
+      join(root, "node_modules", "@anishbenji", "tscache", "index.js"),
       "export const load = (url) => import(/* @vite-ignore */ url);\n",
     );
     await writeFile(
       join(root, "ssr.js"),
-      `import { load } from "tscache";\nimport url from "../${LIB}/fetcher.js?fetcher";\nexport const fetcher = () => load(url);\n`,
+      `import { load } from "@anishbenji/tscache";\nimport url from "../${LIB}/fetcher.js?fetcher";\nexport const fetcher = () => load(url);\n`,
     );
     const server = await createServer({
       ...devOptions(),

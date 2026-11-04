@@ -4,7 +4,7 @@
 // is the same, adds one after it, and refuses an earlier time. Each test
 // checks what each series holds after the draw, not only which call it got.
 
-import type { GetResult } from "tscache";
+import type { GetResult } from "@anishbenji/tscache";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLightweightChart } from "../src/chart/lightweight";
 import type { ChartView } from "../src/chart/view";

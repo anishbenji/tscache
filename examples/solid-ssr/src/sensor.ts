@@ -1,8 +1,13 @@
 // The greenhouse sensor as both sides of the page read it: one reading a
 // minute, with dropouts and offline blocks where the backend has no point.
 
+import type {
+  CacheConfig,
+  GetResult,
+  HostingMode,
+  Range,
+} from "@anishbenji/tscache";
 import { datasets } from "@examples/mock-backend/datasets";
-import type { CacheConfig, GetResult, HostingMode, Range } from "tscache";
 
 export const INTERVAL = 60_000;
 export const DAY = 24 * 3_600_000;

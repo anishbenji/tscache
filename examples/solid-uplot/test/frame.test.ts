@@ -1,4 +1,4 @@
-import type { GetResult } from "tscache";
+import type { GetResult } from "@anishbenji/tscache";
 import { describe, expect, it } from "vitest";
 import { toFrame } from "../src/frame";
 

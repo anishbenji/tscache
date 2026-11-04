@@ -1,7 +1,7 @@
 // Vite plugins for the examples: one mounts the mock backend on the dev and
 // preview servers, so each example runs from a single command, and one
 // renders the SSR examples' page on the server. The fetcher's URL comes from
-// tscache's own plugin, `fetcherUrl()` in `tscache/vite`.
+// tscache's own plugin, `fetcherUrl()` in `@anishbenji/tscache/vite`.
 
 /// <reference path="./node.d.ts" />
 

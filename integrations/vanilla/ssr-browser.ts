@@ -2,7 +2,7 @@
 // the server's markup until its own answer arrives, and fetches only what
 // the server's answer did not cover (the provisional last day, say).
 
-import { type ClientOptions, createClient } from "tscache";
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { candles, describe } from "../shared/candles";
 import { connect } from "../shared/connection";
 import {

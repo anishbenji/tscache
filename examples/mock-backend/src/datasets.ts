@@ -2,7 +2,7 @@
 // timestamps have a point and what the point holds, as the backend knows it
 // at a given time; the field specs double as the examples' cache configs.
 
-import type { Dtype } from "tscache";
+import type { Dtype } from "@anishbenji/tscache";
 import { unit, wander } from "./noise";
 
 const SECOND = 1000;

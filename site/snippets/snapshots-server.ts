@@ -6,7 +6,7 @@ import {
   createClient,
   encodeSnapshot,
   type Range,
-} from "tscache";
+} from "@anishbenji/tscache";
 import type { Context } from "./fetcher";
 
 export const candles: CacheConfig = {

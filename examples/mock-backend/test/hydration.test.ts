@@ -5,7 +5,7 @@ import {
   type Range,
   type TscacheClient,
   TscacheError,
-} from "tscache";
+} from "@anishbenji/tscache";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   dehydrate,

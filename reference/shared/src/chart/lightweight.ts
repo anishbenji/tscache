@@ -15,6 +15,7 @@
 // A live bar changes only the newest bars of the answer: those go to the
 // series with update(), which redraws the bar it is given, not every bar.
 
+import type { GetResult, Range } from "@anishbenji/tscache";
 import {
   type CandlestickData,
   CandlestickSeries,
@@ -24,7 +25,6 @@ import {
   type LogicalRange,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { GetResult, Range } from "tscache";
 import {
   appendedFrom,
   type ChartOptions,

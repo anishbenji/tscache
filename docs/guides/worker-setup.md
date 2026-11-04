@@ -1,6 +1,6 @@
 # Worker entry setup
 
-`createClient` needs the URL of the worker script, `tscache/worker`, as your
+`createClient` needs the URL of the worker script, `@anishbenji/tscache/worker`, as your
 bundler serves it. The URL is resolved by the browser at runtime, so a bare
 package specifier does not work: each bundler has its own way to turn the
 package entry into a served file. If the URL is wrong, both worker hostings
@@ -13,9 +13,9 @@ module worker.
 ## Vite
 
 ```ts
-import { createClient } from "tscache";
+import { createClient } from "@anishbenji/tscache";
 // `?worker&url` bundles the module worker and gives its served URL.
-import workerUrl from "tscache/worker?worker&url";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 
 const client = await createClient({ workerUrl });
 ```
@@ -26,7 +26,7 @@ adapter) with `import()`, only once a cache with `persist: true` opens or
 to empty the database). Vite's default worker format, `'iife'`, inlines that code
 into the worker file, where it is downloaded with the worker but not run.
 With `worker: { format: "es" }` in `vite.config.ts`, it becomes a chunk of
-its own that an app persisting nothing never downloads. The `tscache/vite`
+its own that an app persisting nothing never downloads. The `@anishbenji/tscache/vite`
 plugin, `fetcherUrl()`, warns once in `vite build` when the format is
 `'iife'`; it never changes the format itself. Pass the URL as Vite
 gives it: the worker's chunks import the worker file by that URL, so a query
@@ -36,7 +36,7 @@ or fragment added to it would load the worker's code a second time.
 
 webpack bundles a worker only when it sees `new Worker(new URL(...))` in your
 code; `createClient` creates the worker internally, so that syntax is not
-available, and a bare `new URL("tscache/worker", import.meta.url)` emits the
+available, and a bare `new URL("@anishbenji/tscache/worker", import.meta.url)` emits the
 entry file as a single asset **without** the chunks it imports (the worker
 then fails to start and the client falls back to in-process). Serve the whole
 `dist/` directory instead, for example with `copy-webpack-plugin`:
@@ -82,13 +82,13 @@ error comes back as a `'fetch-failed'` miss, and the next `get` tries again.
 
 With Vite, `?worker&url` does not fit the fetcher: Vite bundles a worker
 entry without its exports, so the module loads but has no default export.
-`fetcherUrl()` from `tscache/vite` emits the fetcher as a chunk of its own
+`fetcherUrl()` from `@anishbenji/tscache/vite` emits the fetcher as a chunk of its own
 instead, with its exports intact, and serves it from source in dev. It needs
 Vite 8 (`vite` is an optional peer dependency of tscache):
 
 ```ts
 // vite.config.ts
-import { fetcherUrl } from "tscache/vite";
+import { fetcherUrl } from "@anishbenji/tscache/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({ plugins: [fetcherUrl()] });
@@ -105,8 +105,8 @@ does not remove the helper. To keep a lazy import, build the fetcher on
 its own (below).
 
 ```ts
-import { createClient } from "tscache";
-import workerUrl from "tscache/worker?worker&url";
+import { createClient } from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherUrl from "./fetcher.ts?fetcher";
 
 const client = await createClient({
@@ -199,8 +199,9 @@ Two things differ from the browser:
   emitted chunk's URL as a path under `base`, which only a browser can load,
   so `fetcherUrl()` gives server code a file URL in a server build instead.
   In dev, server code gets an `/@fs/` path, which Vite's module runner
-  resolves; the plugin adds `tscache` to `ssr.noExternal`, so the library's
-  `import()` of the fetcher goes through that runner rather than plain Node.
+  resolves; the plugin adds `@anishbenji/tscache` to `ssr.noExternal`, so
+  the library's `import()` of the fetcher goes through that runner rather
+  than plain Node.
   Nothing to configure.
 - A server has no page origin, so a fetcher that requests relative paths
   needs the backend's origin from its context. The examples' fetcher reads

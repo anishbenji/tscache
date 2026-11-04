@@ -3,22 +3,22 @@
 ## Install
 
 ```sh
-npm install tscache   # or: bun add tscache, pnpm add tscache
+npm install @anishbenji/tscache   # or: bun add @anishbenji/tscache, pnpm add @anishbenji/tscache
 ```
 
 The package is ESM-only and has no runtime dependencies. Its entries:
 
-| Import            | For                                                                                    |
-| ----------------- | -------------------------------------------------------------------------------------- |
-| `tscache`         | the page: `createClient`, the types, the errors, `encodeSnapshot` and `decodeSnapshot` |
-| `tscache/worker`  | the worker script; you serve it, you never import it into the page                     |
-| `tscache/fetcher` | your fetcher module: its types and `AuthInvalidError`, nothing else                    |
-| `tscache/engine`  | the engine without a worker, for Node and tests                                        |
-| `tscache/vite`    | `fetcherUrl()`, the Vite plugin for the fetcher module (`vite` 8 is an optional peer)  |
+| Import                        | For                                                                                    |
+| ----------------------------- | -------------------------------------------------------------------------------------- |
+| `@anishbenji/tscache`         | the page: `createClient`, the types, the errors, `encodeSnapshot` and `decodeSnapshot` |
+| `@anishbenji/tscache/worker`  | the worker script; you serve it, you never import it into the page                     |
+| `@anishbenji/tscache/fetcher` | your fetcher module: its types and `AuthInvalidError`, nothing else                    |
+| `@anishbenji/tscache/engine`  | the engine without a worker, for Node and tests                                        |
+| `@anishbenji/tscache/vite`    | `fetcherUrl()`, the Vite plugin for the fetcher module (`vite` 8 is an optional peer)  |
 
 ## 1. Serve the worker
 
-`createClient` needs the URL of the `tscache/worker` script as your bundler serves it. With Vite,
+`createClient` needs the URL of the `@anishbenji/tscache/worker` script as your bundler serves it. With Vite,
 `?worker&url` gives it:
 
 <<< @/snippets/getting-started.ts#client{ts}

@@ -1,8 +1,8 @@
 // #region client
-import { createClient } from "tscache";
+import { createClient } from "@anishbenji/tscache";
 // Vite: `?worker&url` bundles the module worker and gives its served URL.
-import workerUrl from "tscache/worker?worker&url";
-// tscache/vite's plugin: the fetcher module's URL, its exports kept.
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
+// @anishbenji/tscache/vite's plugin: the fetcher module's URL, its exports kept.
 import fetcherModule from "./fetcher.ts?fetcher";
 
 const client = await createClient({

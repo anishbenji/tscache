@@ -4,7 +4,7 @@
 
 Both workers failed to start, usually because `workerUrl` does not resolve to the served worker script.
 Listen for `modeFallback`, whose `reason` says why each hosting failed. With webpack, a bare
-`new URL("tscache/worker", import.meta.url)` emits the entry without its chunks; serve `dist/` instead
+`new URL("@anishbenji/tscache/worker", import.meta.url)` emits the entry without its chunks; serve `dist/` instead
 ([Workers and fallback](/guides/workers)).
 
 ## `client.mode` is `'dedicated'`
@@ -79,7 +79,7 @@ can [seed](/guides/ssr) a new page's cache.
 
 ## Does it work in Node?
 
-Yes, with `mode: 'in-process'` or `Engine` from `tscache/engine`. There is no `worker_threads` hosting.
+Yes, with `mode: 'in-process'` or `Engine` from `@anishbenji/tscache/engine`. There is no `worker_threads` hosting.
 
 ## Can two origins share a cache?
 

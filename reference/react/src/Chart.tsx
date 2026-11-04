@@ -3,12 +3,12 @@
 // the chart kind and tears it down; another draws each new answer into it.
 // Both libraries are imperative, so the view lives in a ref, not in state.
 
+import type { GetResult, Range } from "@anishbenji/tscache";
 import { type ChartKind, loadChart } from "@reference/shared/chart/load";
 import type { ChartView } from "@reference/shared/chart/view";
 import { market } from "@reference/shared/market";
 import type { Session } from "@reference/shared/session";
 import { useEffect, useEffectEvent, useRef } from "react";
-import type { GetResult, Range } from "tscache";
 
 export interface ChartProps {
   /** Null on the server, which renders the empty element only. */

@@ -5,9 +5,9 @@
 // read, so it fetches only what that did not cover (the provisional last
 // day, say).
 
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { StrictMode } from "react";
 import { hydrateRoot } from "react-dom/client";
-import { type ClientOptions, createClient } from "tscache";
 import { candles } from "../shared/candles";
 import { connect } from "../shared/connection";
 import {

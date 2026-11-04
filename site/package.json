@@ -10,7 +10,7 @@
     "preview": "vitepress preview"
   },
   "dependencies": {
-    "tscache": "workspace:*"
+    "@anishbenji/tscache": "workspace:*"
   },
   "devDependencies": {
     "@examples/mock-backend": "workspace:*",

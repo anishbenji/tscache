@@ -1,7 +1,7 @@
 // The page's entry, as a bundler builds it: it imports through Vite's
 // `?worker&url` and `?fetcher`, and reads the server's script element.
 // #region page
-import workerUrl from "tscache/worker?worker&url";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "./fetcher.ts?fetcher";
 import { startCache } from "./snapshots-browser";
 

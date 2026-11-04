@@ -15,7 +15,7 @@
         "bench/e2e.ts"
       ],
       "project": ["src/**/*.ts", "test/**/*.ts", "bench/**/*.ts"],
-      // The tscache/vite test loads Vite through a computed specifier, so
+      // The @anishbenji/tscache/vite test loads Vite through a computed specifier, so
       // its types (which bring Node's) stay out of the package's type check.
       // The bench bundle's revisions, resolved by scripts/bench.ts.
       "ignoreDependencies": ["vite", "tscache-bench"]
