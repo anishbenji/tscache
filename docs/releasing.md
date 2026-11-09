@@ -12,11 +12,14 @@ provenance statement. No npm token is ever created or stored, and the workflow r
 ## Current state (9 November 2026)
 
 - The npm account `anishbenji` exists, with two-factor authentication through a security key.
-- `@anishbenji/tscache` exists on npm. Its first publish was staged, so npm created the public
-  placeholder version `0.0.0-stage`, which is what the package page shows. No real version is public
-  yet. No hand-published placeholder is needed.
-- The trusted publisher (below) allows only `npm stage publish`. `npm publish` and `npm dist-tag` are
-  not allowed through it, and package settings disallow tokens.
+- `@anishbenji/tscache@0.0.1` is live on npm as `latest`. No placeholder or bootstrap step remains.
+- The trusted publisher exists (GitHub Actions, `anishbenji/tscache`, workflow `release.yml`,
+  environment `npm-publish`) and allows only `npm stage publish`. `npm publish` and `npm dist-tag` are
+  not allowed through it. Publishing access requires 2FA and disallows tokens, including bypass
+  tokens.
+- npm shows that trusted publisher as **pending validation** (publish once before 11 November 2026,
+  11:08 UTC). It is deliberately left to lapse: nothing is staged or published to validate it, and it
+  is re-created with the same fields just before the real release (see the checklist below).
 
 Before the first release, check that nothing is left in the staging area for the version you are
 about to release: staged and published versions share one version index, so a pending stage of
@@ -62,10 +65,16 @@ On npmjs.com: **Packages → @anishbenji/tscache → Settings → Trusted publis
 | Environment name     | `npm-publish`                                                     |
 | Allowed actions      | `npm stage publish` only; leave npm publish and dist-tag unticked |
 
-npm does not check these values when you save them; a mistake shows only as an `ENEEDAUTH` error when
-the stage job runs. A new configuration expires unless its first successful publish happens within
-2 days; npm's documentation does not say whether a stage counts, so create it shortly before you push
-the first tag, after the dry run below has passed. If it expires, delete it and create it again.
+The environment name must stay exactly `npm-publish` and the workflow filename exactly `release.yml`:
+npm matches both against the OIDC token, so renaming either the environment in `release.yml` or the
+file itself breaks staging until the trusted publisher is re-created to match. npm does not check the
+values when you save them; a mistake shows only as an `ENEEDAUTH` error when the stage job runs.
+
+**Validation.** A new trusted publisher must be validated by one CI publish within about two days
+(npm: "within 2 days") of its creation, or it lapses and can no longer be used or edited. A dry run
+does not count: `npm stage publish --dry-run` stages nothing on the registry. So create (or re-create)
+the trusted publisher shortly before you push the release tag, after a dry run has passed, and let the
+tag's stage validate it. If it lapses, delete it and create it again with the same fields.
 
 Under **Settings → Publishing access**, keep **Require two-factor authentication and disallow tokens**.
 Trusted publishing keeps working, because it uses no token.
@@ -78,14 +87,17 @@ repository settings, which you change by hand.
 
 ## Cutting a release
 
-1. On a branch from `main`:
+1. Check that the trusted publisher is validated, or re-create it with the same fields (GitHub
+   Actions, anishbenji/tscache, release.yml, environment npm-publish, permission npm stage publish).
+   Then push the tag within two days, so the tag's stage validates the new connection.
+2. On a branch from `main`:
    - set `version` in `packages/tscache/package.json` to the new `X.Y.Z` (0.x semver: a minor release
      may break the API, a patch release never does);
    - regenerate the changelog with `bunx git-cliff --tag vX.Y.Z -o CHANGELOG.md` and edit the summary
      at the top;
    - write the release notes in `docs/releases/X.Y.Z.md`; this file becomes the GitHub release text.
-2. Open a pull request, let CI pass and merge it.
-3. Tag the merge commit on `main` and push the tag:
+3. Open a pull request, let CI pass and merge it.
+4. Tag the merge commit on `main` and push the tag:
 
    ```sh
    git switch main && git pull --ff-only
@@ -93,9 +105,9 @@ repository settings, which you change by hand.
    git push origin vX.Y.Z
    ```
 
-4. Follow the run with `gh run watch`. When it succeeds, the `stage` job summary shows
+5. Follow the run with `gh run watch`. When it succeeds, the `stage` job summary shows
    `+ @anishbenji/tscache@X.Y.Z (staged with id <stage-id>)`, and a draft GitHub release exists.
-5. Review the staged package. The stage commands need your own login (`npm login`); the workflow's
+6. Review the staged package. The stage commands need your own login (`npm login`); the workflow's
    OIDC token cannot run them.
 
    ```sh
@@ -105,7 +117,7 @@ repository settings, which you change by hand.
    ```
 
    On npmjs.com the same is under the package's **Staged Packages** tab.
-6. Approve it, with your security key: **Approve** in the Staged Packages tab, or
+7. Approve it, with your security key: **Approve** in the Staged Packages tab, or
 
    ```sh
    npm stage approve <stage-id>
@@ -113,9 +125,9 @@ repository settings, which you change by hand.
 
    This publishes the version under `latest`. The provenance statement, signed during the OIDC stage
    publish, is published with it.
-7. Publish the draft GitHub release: `gh release edit vX.Y.Z --draft=false`, or **Publish release** on
+8. Publish the draft GitHub release: `gh release edit vX.Y.Z --draft=false`, or **Publish release** on
    the draft.
-8. Check the result: `npm view @anishbenji/tscache@X.Y.Z`, the provenance badge on the npmjs.com
+9. Check the result: `npm view @anishbenji/tscache@X.Y.Z`, the provenance badge on the npmjs.com
    package page, and the GitHub release. In a project that installs the package,
    `npm audit signatures` verifies the signature and the provenance attestation.
 
