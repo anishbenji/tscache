@@ -32,19 +32,21 @@ npm stage list @anishbenji/tscache         # pending staged versions and their s
 
 ## The release workflow
 
-| Job                    | Runs when                | Permissions                         | Does                                                                                                                                       |
-| ---------------------- | ------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `plan`                 | always                   | `contents: read`                    | Reads the version; on a tag, fails unless the tag is `v<version>`; decides whether the run stages for real; checks the release notes exist |
-| `ci`                   | after `plan`             | `contents: read`                    | The full CI gate (`ci.yml` through `workflow_call`), without the bench job                                                                 |
-| `pack`                 | after `ci`               | `contents: read`                    | Builds the package and packs the tarball that is staged, as a workflow artifact                                                            |
-| `stage`                | real stage only          | `contents: read`, `id-token: write` | In the `npm-publish` environment: `npm stage publish <tarball> --provenance --access public`; prints the stage id in the job summary       |
-| `stage-dry-run`        | every other run          | none                                | `npm stage publish <tarball> --dry-run --access public`                                                                                    |
-| `github-release-draft` | after a successful stage | `contents: write`                   | Creates a **draft** GitHub release for the tag from `docs/releases/<version>.md`                                                           |
+| Job                    | Runs when                | Permissions                         | Does                                                                                                                                                                                                                                            |
+| ---------------------- | ------------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan`                 | always                   | `contents: read`                    | Reads the version; on a tag, fails unless the tag is `v<version>`; decides whether the run stages for real; for a real stage, fails unless the commit is on `main` and the version is above every published one; checks the release notes exist |
+| `ci`                   | after `plan`             | `contents: read`                    | The full CI gate (`ci.yml` through `workflow_call`), without the bench job                                                                                                                                                                      |
+| `pack`                 | after `ci`               | `contents: read`                    | Builds the package and packs the tarball that is staged, as a workflow artifact                                                                                                                                                                 |
+| `stage`                | real stage only          | `contents: read`, `id-token: write` | In the `npm-publish` environment: `npm stage publish <tarball> --provenance --access public`; prints the stage id in the job summary                                                                                                            |
+| `stage-dry-run`        | every other run          | none                                | `npm stage publish <tarball> --dry-run --force --access public`                                                                                                                                                                                 |
+| `github-release-draft` | after a successful stage | `contents: write`                   | Creates a **draft** GitHub release for the tag from `docs/releases/<version>.md`                                                                                                                                                                |
 
 A run stages for real when it runs on a `v*` tag and either the tag push started it, or it was started
 by hand on that tag with **dry-run** unticked. Every other run is a dry run. Only plain `X.Y.Z`
 versions are accepted: npm refuses a prerelease without `--tag`, and a staged package's tag cannot be
-changed later. Both stage jobs install npm 12.2.2 (staging needs npm 11.15.0 or later and Node 22.14.0
+changed later. Only a commit on `main` is staged: `main` takes changes only through reviewed pull
+requests, so a tag on any other commit fails `plan` (a dry run from another branch only warns). Both
+stage jobs install npm 12.2.2 (staging needs npm 11.15.0 or later and Node 22.14.0
 or later; the workflow uses Node 24).
 
 The GitHub release is a draft because the version is not on npm until you approve it. You publish the
@@ -169,6 +171,17 @@ gh workflow run release.yml --ref vX.Y.Z -f dry-run=false
 If the version is already staged, npm refuses to stage it again; reject the old stage first
 (`npm stage reject <stage-id>`, which asks for 2FA). The draft-release step skips a release that
 already exists.
+
+**If `stage` succeeded but `github-release-draft` failed**, the staged package is good: do not reject
+it, and do not start a new run, which would fail because the version is already staged. Either open
+the original run and use **Re-run failed jobs**, which keeps `plan`'s outputs and the uploaded
+tarball and runs only the draft job again, or create the draft by hand from a checkout of the tag:
+
+```sh
+gh release create vX.Y.Z --draft --verify-tag --title vX.Y.Z --notes-file docs/releases/X.Y.Z.md
+```
+
+Never reject a good stage only to get the draft.
 
 ## Rollback limits
 
