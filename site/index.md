@@ -31,11 +31,12 @@ once.
 ## What it leaves out
 
 Version 1 has no aggregation or resampling (a series at one minute and at one hour are two caches), no
-persistence across page loads, no eviction or memory limit, no subscriptions, and no irregular
-timestamps. The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
+eviction or memory limit, no subscriptions, and no irregular timestamps. The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
 
 ## Status
 
-tscache is pre-release. The design is settled and recorded in the
+tscache is at 0.x and follows semantic versioning within it: a minor release may break the API, a
+patch release never does. Pin a minor range (`~0.1.0`) to take fixes without breaking changes. The
+design is recorded in the
 [architecture document](https://github.com/anishbenji/tscache/blob/main/docs/architecture.md); [Architecture for contributors](/contributing)
 summarises it.
