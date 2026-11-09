@@ -266,3 +266,7 @@ and is not an action.
 - The OIDC exchange, the stage itself and provenance signing can only be checked by the first real
   stage; whether a stage counts as the trusted publisher's first "publish" for its 2-day expiry is not
   documented.
+
+## Codex round 1 (gate, effort high), on 49a5afd
+
+Verdict: merge. No findings; the six accepted pre-review findings of revisions 4 and 5 confirmed fixed. Settled. GitHub execution and the real OIDC stage remain unverified until the rehearsal dispatch.
