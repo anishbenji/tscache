@@ -10,21 +10,23 @@ The step adds an OpenSSF Scorecard workflow and its badge, a hardening checklist
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 4daddb0 | `ci`: `.github/workflows/scorecard.yml` and the Scorecard badge at the top of `README.md`.                                                          |
 | fee9973 | `docs`: `docs/supply-chain.md`, the hardening checklist. It is a new page because `docs/releasing.md` belongs to step 64, which has not merged yet. |
+| f9309f1 | `docs(review)`: this file, recording the two repository settings.                                                                                   |
+| b17616c | `ci`: drop `actions: read` and the `branch_protection_rule` trigger (pre-review findings 3 and 4).                                                  |
+| 6212b19 | `docs`: correct the checklist's token grep, `id-token` claim and tag-ruleset text (pre-review findings 1, 2 and 5).                                 |
 
 `ci.yml` and `release.yml` are not touched (step 64 owns them).
 
 ## The Scorecard workflow
 
-Triggers: push to `main`, weekly (Mondays 03:17 UTC) and `branch_protection_rule`. The workflow-level permissions are `{}`; the single job `analysis` holds:
+Triggers: push to `main` and weekly (Mondays 03:17 UTC), the two the action's README lists. `branch_protection_rule` is left out: it fires only for classic branch protection, and this repository uses rulesets. The workflow-level permissions are `{}`; the single job `analysis` holds:
 
-| Permission               | Why                                                                                                     |
-| ------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `contents: read`         | Check out the repository and read it for the checks.                                                    |
-| `actions: read`          | Read Actions data that some checks query; listed in the action's documentation.                         |
-| `security-events: write` | Upload the SARIF results to code scanning.                                                              |
-| `id-token: write`        | Sign the published results with the GitHub OIDC token (`publish_results: true`). No other job holds it. |
+| Permission               | Why                                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `contents: read`         | Check out the repository.                                                                                                             |
+| `security-events: write` | Upload the SARIF results to code scanning.                                                                                            |
+| `id-token: write`        | Sign the published results with the GitHub OIDC token (`publish_results: true`). Outside it, only release.yml's `stage` job holds it. |
 
-The job follows the Scorecard API's workflow restrictions: no top-level `env` or `defaults`, no workflow-level write permission, an Ubuntu hosted runner, and only the approved actions. The issues, pull-requests and checks reads the action's README suggests are for private repositories; this repository is public, so they are left out.
+The job follows the Scorecard API's workflow restrictions: no top-level `env` or `defaults`, no workflow-level write permission, an Ubuntu hosted runner, and only the approved actions. The README lists issues, pull-requests and checks reads for private repositories only, and `ossf/scorecard`'s own analysis workflow grants only `security-events` and `id-token` at job level; this repository is public, so no other read is granted. (`actions: read` was in the first build and was dropped in b17616c.)
 
 Action pins, each resolved from the release tag with `gh api repos/<owner>/<repo>/git/ref/tags/<tag>` (and the annotated tag object where the ref points to one). The scorecard-action, checkout and upload-artifact pins match the ones in `ossf/scorecard`'s own analysis workflow.
 
@@ -113,6 +115,62 @@ Undo:
 gh api --method DELETE repos/anishbenji/tscache/rulesets/26846390
 ```
 
+### 1a. Ruleset `protect-release-tags`: add the `update` rule (pre-review finding 5)
+
+`non_fast_forward` still allows a fast-forward move of a `v*` tag, so the `update` rule was added, which blocks any update to an existing matching tag for everyone outside the bypass list. This stays within the 2026-11-09 grant for a ruleset protecting `v*` tags; nothing else in the ruleset changed.
+
+State before (`gh api repos/anishbenji/tscache/rulesets/26846390`, fields reduced): as in the state after of section 1, rules `creation`, `deletion`, `non_fast_forward`, `updated_at` `2026-11-09T16:36:31.527+05:30`.
+
+Command:
+
+```sh
+gh api --method PUT repos/anishbenji/tscache/rulesets/26846390 --input ruleset-tags-r2.json
+```
+
+Payload (`ruleset-tags-r2.json`; a PUT with only `rules` replaces the rule list and leaves the other fields as they were):
+
+```json
+{
+  "rules": [
+    { "type": "creation" },
+    { "type": "update" },
+    { "type": "deletion" },
+    { "type": "non_fast_forward" }
+  ]
+}
+```
+
+State after (same command, fields reduced):
+
+```json
+{
+  "name": "protect-release-tags",
+  "target": "tag",
+  "enforcement": "active",
+  "bypass_actors": [
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+  ],
+  "conditions": { "ref_name": { "exclude": [], "include": ["refs/tags/v*"] } },
+  "rules": [
+    { "type": "creation" },
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "update" }
+  ],
+  "updated_at": "2026-11-09T16:48:30.875+05:30"
+}
+```
+
+The ruleset now blocks creating, updating (fast-forward or not) and deleting a `v*` tag for everyone except the repository admin role, which bypasses it always. `protect-main` read back byte-identical again.
+
+Undo (back to the state of section 1):
+
+```sh
+gh api --method PUT repos/anishbenji/tscache/rulesets/26846390 --input - <<'EOF'
+{ "rules": [{ "type": "creation" }, { "type": "deletion" }, { "type": "non_fast_forward" }] }
+EOF
+```
+
 ### 2. Environment `npm-publish`
 
 Commands:
@@ -193,11 +251,23 @@ Branch protection for `main` (`protect-main`, verified unchanged), GitHub Pages 
 
 ## Not verified
 
-- The Scorecard workflow has not run: it triggers on push to `main`, a schedule or a branch-protection change, none of which happens before merge. The badge shows no score until the first run on `main` publishes one.
+- The Scorecard workflow has not run: it triggers on push to `main` or on its schedule, neither of which happens before merge. The badge shows no score until the first run on `main` publishes one.
 - No linter for workflow files (actionlint, zizmor) is installed here, and adding one is a dependency decision. The workflow was parsed as YAML and checked by reading against the action's restrictions.
 - The tag ruleset was not exercised by pushing a tag (the brief forbids creating `v*` tags).
 - The npm-side items of the checklist (two-factor authentication, trusted publisher, no tokens on the account) are read on npmjs.com by the maintainer; no agent can see them.
 
+## Pre-review (director, before Codex)
+
+Five P2 findings, all validated by the director and all accepted.
+
+| #   | Finding                                                                                                                     | Resolution                                                                                                                                                                                                                                                                                                                      |
+| --- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | The checklist's token grep matches the page itself, and after step 64 `release.yml` and its review file                     | 6212b19: the grep skips `docs/` and matches only a credential in use. On this branch (6212b19) and on `ci/64-release-workflow` (3150930) it prints nothing and exits 1; on test files holding an `.npmrc` line, an `env:` assignment and an `export` it reports all three, and it skips a comment that only names the variable. |
+| 2   | The checklist says only the publish job holds `id-token: write`; Scorecard's job holds it too, and step 64's job is `stage` | 6212b19: the item names release.yml's `stage` job as the only user of `npm-publish`, and Scorecard's `analysis` job as the one other holder of `id-token: write`, with a grep and its expected output.                                                                                                                          |
+| 3   | `actions: read` is not needed on a public repository                                                                        | b17616c: dropped; the comment and this file's reasoning updated.                                                                                                                                                                                                                                                                |
+| 4   | `branch_protection_rule` never fires on a repository that uses rulesets                                                     | b17616c: trigger dropped.                                                                                                                                                                                                                                                                                                       |
+| 5   | `non_fast_forward` still lets a `v*` tag move forward                                                                       | `update` rule added to ruleset 26846390 (section 1a); the checklist's chain and ruleset item state what it enforces, including the admin role's permanent bypass.                                                                                                                                                               |
+
 ## Decision concerns
 
-- The ruleset follows the brief: creation restricted, deletion and non-fast-forward blocked. GitHub also offers an `update` rule, which blocks any update to an existing matching tag. Whether `non_fast_forward` alone stops every way of moving a tag to another commit is worth confirming; adding `update` is a one-line change to the ruleset if the user wants it.
+None.
