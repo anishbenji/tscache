@@ -8,14 +8,11 @@ and follows a live tail, in several tabs at once.
   same-origin tab reads the same data. Without `SharedWorker` it falls back to
   a dedicated `Worker`, then to the page itself; those give each tab a cache of
   its own, shared with no other tab.
-- **The worker fetches.** You give it a fetcher module, and a `get` fetches
-  only the ranges its cache neither holds nor already has in flight, widened
-  by one interval where a miss meets cached data so the series joins up (that
-  edge point is fetched again). Under the
-  SharedWorker, concurrent reads of a range from several tabs wait on one
-  fetch, and finalized history one tab fetched is not fetched again by
-  another. Points at or after the `finalizedUntil` watermark are provisional:
-  every read that includes them fetches them again.
+- **The worker fetches.** You give it a fetcher module. The worker fetches
+  only what's missing, and tabs share fetches already in flight when they
+  share a SharedWorker (see [Browser support](#browser-support)).
+  [How a read fetches](https://anishbenji.github.io/tscache/concepts/coverage#how-a-read-fetches)
+  has the details.
 - **Known gaps are first-class.** Coverage records what the cache _knows_,
   separately from the points that _exist_. A weekend without candles is a
   confirmed gap: it is never fetched again, and it is not confused with "not
