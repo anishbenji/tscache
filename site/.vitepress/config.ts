@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
+import { withMermaid } from "vitepress-plugin-mermaid";
 import apiSidebar from "../api/typedoc-sidebar.json" with { type: "json" };
 
 /** Pages link to the repository's own files (the architecture document,
@@ -20,7 +21,7 @@ function missingRepoFile(href: string): string | undefined {
   return existsSync(ROOT + decodeURIComponent(path)) ? undefined : path;
 }
 
-export default defineConfig({
+const config = defineConfig({
   title: "tscache",
   description:
     "Browser time-series cache: SharedWorker multi-tab sharing, worker-side fetch orchestration, coverage tracking with real-gap awareness.",
@@ -124,3 +125,7 @@ export default defineConfig({
     outline: [2, 3],
   },
 });
+
+// Renders ```mermaid fences in the browser, with Mermaid's dark theme while
+// the site is dark.
+export default withMermaid(config);
