@@ -33,7 +33,15 @@ export interface FetchInsight {
   endedAt: number;
   /** Whether it returned data; a failed fetch brought nothing. */
   ok: boolean;
+  /**
+   * The context the fetcher ran in: one id per worker, drawn when the
+   * fetcher module loads, so a new worker reports a new one.
+   */
+  worker: string;
 }
+
+/** This context's id in the reports (FetchInsight.worker). */
+const WORKER = crypto.randomUUID();
 
 /**
  * Now, in ms since the epoch at sub-millisecond resolution: the time line a
@@ -95,6 +103,7 @@ export function withInsights(fetch: MeteredFetch): Fetcher {
           startedAt,
           endedAt,
           ok,
+          worker: WORKER,
         });
       };
       try {

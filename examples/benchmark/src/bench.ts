@@ -1,8 +1,9 @@
 // The benchmark page: runs the workload (workload.ts) once per mode per
 // run, in tabs that are same-origin iframes of this page, so tscache's
 // tabs share one SharedWorker as real tabs of an origin do. Each mode of a
-// run starts from nothing: its tabs are new, and tscache's cache id is new.
-// Tabs dispose of their sources before they are removed.
+// run starts from nothing: its tabs are new, tscache's cache id is new, and
+// so is its SharedWorker, whose URL carries the run's id (modes.ts). Tabs
+// dispose of their sources before they are removed.
 // The backend's counters are read before and after each phase, so its
 // numbers are deltas of this mode's run alone. The modes take turns within
 // each run, in an order rotated by one each run.
@@ -13,6 +14,7 @@
 
 import type { Range } from "@anishbenji/tscache";
 import { fetchSeries } from "@examples/mock-backend/fetcher";
+import { onInsight } from "@examples/mock-backend/insights";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import type { PageMessage, TabMessage, ViewTiming } from "./protocol";
@@ -20,12 +22,14 @@ import {
   type Conditions,
   cells,
   describeConditions,
+  freshWorkers,
   HEADERS,
   markdown,
   type Row,
   type RunResult,
   rows,
   type Served,
+  type WorkerReport,
 } from "./report";
 import {
   anchorFor,
@@ -171,6 +175,31 @@ function longTasks(): { stop(): { count: number; ms: number } } {
   };
 }
 
+// --- Workers ---------------------------------------------------------------
+
+/**
+ * Which worker fetched for which cache, from the fetch reports of every
+ * worker of this origin: the check that each tscache run had a SharedWorker
+ * of its own.
+ */
+const workerReports: WorkerReport[] = [];
+onInsight(({ cacheId, worker }) => workerReports.push({ cacheId, worker }));
+
+/**
+ * The fresh-worker check, once a report of each of `runs` tscache runs has
+ * arrived; the reports travel on a channel of their own, so wait a little
+ * for the last.
+ */
+async function workersChecked(
+  runs: number,
+): Promise<ReturnType<typeof freshWorkers>> {
+  for (let wait = 0; ; wait++) {
+    const check = freshWorkers(workerReports);
+    if (check.runs >= runs || wait >= 50) return check;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 // --- Runs ------------------------------------------------------------------
 
 /** One run of `mode`: phase one in a tab, then phase two in three. */
@@ -271,13 +300,18 @@ async function runAll(
     }
     const conditions = { latencyMs, runs, browser: browserName() };
     const table = rows(results, MODES);
+    const workers = await workersChecked(modes.includes("tscache") ? runs : 0);
     last = { conditions, table };
     showTable(conditions, table);
+    element('[data-testid="workers"]').textContent = workers.fresh
+      ? `A new SharedWorker for each tscache run: ${workers.runs} runs, ${workers.workers} workers.`
+      : `A tscache run reused a worker: ${workers.runs} runs, ${workers.workers} workers.`;
     element('[data-testid="results-json"]').textContent = JSON.stringify({
       conditions,
       anchor: plan.one.at(0)?.range.end,
       rows: table,
       runs: results,
+      workers,
     });
     status.value = "done";
   } catch (error) {

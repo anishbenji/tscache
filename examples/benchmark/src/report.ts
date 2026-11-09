@@ -24,7 +24,10 @@ export interface RunResult {
   chartMs: number[];
   /** From opening the first tab to the last tab's last frame. */
   workloadMs: number;
-  /** Opening the first tab's source: tscache's worker start and handshake. */
+  /**
+   * Opening the first tab's source: for tscache, the client's connect to a
+   * SharedWorker that every run starts anew (modes.ts).
+   */
   setupMs: number;
   /** Main-thread long tasks during the run (PerformanceObserver). */
   longTasks: { count: number; ms: number };
@@ -49,7 +52,9 @@ export interface Row {
   chartP50: number;
   chartP95: number;
   workloadMs: number;
+  /** The median first connect, and run 1's, the browser's coldest. */
   setupMs: number;
+  coldSetupMs: number;
   longTasks: number;
   /** Requests and bytes as a share of no cache's. */
   vsNone: { requests: number; bytes: number } | undefined;
@@ -91,6 +96,8 @@ function rowOf(mode: Mode, runs: readonly RunResult[]): Row {
     chartP95: of((r) => quantile(r.chartMs, 0.95)),
     workloadMs: of((r) => r.workloadMs),
     setupMs: of((r) => r.setupMs),
+    coldSetupMs: runs.reduce((first, r) => (r.run < first.run ? r : first))
+      .setupMs,
     longTasks: of((r) => r.longTasks.count),
     vsNone: undefined,
   };
@@ -133,7 +140,7 @@ export function cells(row: Row): string[] {
     ms(row.chartP50),
     ms(row.chartP95),
     ms(row.workloadMs),
-    ms(row.setupMs),
+    `${ms(row.coldSetupMs)} · ${ms(row.setupMs)}`,
     int(row.longTasks),
     row.vsNone === undefined
       ? "–"
@@ -149,7 +156,7 @@ export const HEADERS = [
   "Time to chart p50",
   "Time to chart p95",
   "Workload",
-  "First connect",
+  "First connect (run 1 · median)",
   "Long tasks",
   "vs no cache",
 ];
@@ -172,4 +179,36 @@ export function markdown(
     line(HEADERS.map(() => "---")),
     ...table.map((row) => line(cells(row))),
   ].join("\n");
+}
+
+/** What the worker's fetch reports say about one fetch: its cache and worker. */
+export interface WorkerReport {
+  cacheId: string;
+  worker: string;
+}
+
+/**
+ * Whether every tscache run ran on a worker of its own: each run's cache
+ * (`<series>/<nonce>-<run>-tscache`) saw exactly one worker, and no two
+ * runs saw the same one.
+ */
+export function freshWorkers(reports: readonly WorkerReport[]): {
+  runs: number;
+  workers: number;
+  fresh: boolean;
+} {
+  const byRun = new Map<string, Set<string>>();
+  for (const { cacheId, worker } of reports) {
+    if (!cacheId.endsWith("-tscache")) continue;
+    const seen = byRun.get(cacheId) ?? new Set<string>();
+    seen.add(worker);
+    byRun.set(cacheId, seen);
+  }
+  const all = new Set([...byRun.values()].flatMap((seen) => [...seen]));
+  const onePerRun = [...byRun.values()].every((seen) => seen.size === 1);
+  return {
+    runs: byRun.size,
+    workers: all.size,
+    fresh: onePerRun && all.size === byRun.size,
+  };
 }

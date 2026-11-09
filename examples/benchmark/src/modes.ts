@@ -11,7 +11,10 @@
 //   staleTime Infinity, so a cached range is never refetched.
 // - tscache: a tscache client, whose worker loads the same fetcher; the
 //   tabs share one cache through the SharedWorker, and a view fetches only
-//   what the cache does not hold.
+//   what the cache does not hold. Each run starts a new SharedWorker: a
+//   SharedWorker is one per script URL, and the run's id is in its URL, so
+//   no run inherits a warm worker (one lives on about 30 s after its last
+//   tab) with its fetcher already loaded.
 
 import { createClient, type Range } from "@anishbenji/tscache";
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
@@ -87,10 +90,17 @@ function tanstack(): Source {
   };
 }
 
-/** A tscache client of the run's own cache, `run` naming it. */
+/** The worker script's URL for run `run`: a SharedWorker of its own. */
+function runWorkerUrl(run: string): string {
+  const url = new URL(workerUrl, location.href);
+  url.searchParams.set("run", run);
+  return url.href;
+}
+
+/** A tscache client of the run's own worker and cache, `run` naming both. */
 async function tscache(run: string): Promise<Source> {
   const client = await createClient({
-    workerUrl,
+    workerUrl: runWorkerUrl(run),
     fetcher: { module: fetcherModule },
   });
   const cache = await client.cache(cacheConfig(run));

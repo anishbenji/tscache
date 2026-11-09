@@ -39,10 +39,11 @@
       Every mode fetches through the same fetcher code and the same mock
       backend, with the same latency per page, and draws with the same uPlot
       chart. Each mode of each run starts empty (new tabs, a new tscache cache
-      id), and the backend's counters are read as deltas. Time to chart runs
-      from the read's start to the frame after <code>setData</code> returned.
-      tscache's first connect, which starts the worker, is its own column and
-      is inside the workload time.
+      id and a new SharedWorker, so no run reuses a warm worker), and the
+      backend's counters are read as deltas. Time to chart runs from the
+      read's start to the frame after <code>setData</code> returned. tscache's
+      first connect to its new worker is its own column, run 1's beside the
+      median, and is inside the workload time.
     </p>
     <details>
       <summary>Limits of this comparison</summary>
@@ -85,6 +86,7 @@
     </p>
     <h2>Results</h2>
     <p data-testid="conditions">Not run yet.</p>
+    <p data-testid="workers"></p>
     <table id="results">
       <thead></thead>
       <tbody></tbody>

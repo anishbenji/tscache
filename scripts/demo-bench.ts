@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 import {
   type Conditions,
+  type freshWorkers,
   markdown,
   type Row,
   type RunResult,
@@ -38,6 +39,8 @@ interface Results {
   anchor: number;
   rows: Row[];
   runs: RunResult[];
+  /** The check that every tscache run had a SharedWorker of its own. */
+  workers: ReturnType<typeof freshWorkers>;
 }
 
 function option(name: string, fallback: string): string {
@@ -116,6 +119,9 @@ function document(all: Results[], browser: string): string {
 
 ${markdown(results.conditions, results.rows)}
 
+A new SharedWorker for each tscache run, checked from the workers' fetch reports:
+${results.workers.runs} runs, ${results.workers.workers} workers, one per run.
+
 <details><summary>Every run</summary>
 
 ${runTable(results.runs)}
@@ -144,12 +150,13 @@ SharedWorker. Every range is computed from one anchor in yesterday's final histo
 - **tscache**: one client per tab, all on one shared cache.
 
 Every mode fetches with the same fetcher code from the same mock backend and draws with the same uPlot
-chart. Each mode of each run starts empty (new tabs and a new tscache cache id), the backend's counters
-are read as deltas, and the modes take turns in an order rotated each run. Backend requests, bars and
+chart. Each mode of each run starts empty (new tabs, a new tscache cache id and a new SharedWorker), the
+backend's counters are read as deltas, and the modes take turns in an order rotated each run. Backend requests, bars and
 bytes are what the backend served; time to chart runs from the read's start to the frame after
 \`setData\` returned, p50 and p95 over every view of every tab of a run; workload time covers both
-phases, tabs opening included. First connect is opening the first tab's source: tscache's worker start
-and handshake, which the workload time includes too. Medians over the runs are shown.
+phases, tabs opening included. First connect is opening the first tab's source: for tscache, the
+client's connect to the run's new SharedWorker, which the workload time includes too; run 1's is shown
+beside the median. Medians over the runs are shown.
 
 ## Limits
 
@@ -208,11 +215,13 @@ async function main(): Promise<void> {
       });
       const text = await status.textContent();
       if (text !== "done") throw new Error(`latency ${latency}: ${text}`);
-      all.push(
-        JSON.parse(
-          (await page.getByTestId("results-json").textContent()) ?? "",
-        ) as Results,
-      );
+      const results = JSON.parse(
+        (await page.getByTestId("results-json").textContent()) ?? "",
+      ) as Results;
+      if (!results.workers.fresh) {
+        throw new Error(`latency ${latency}: a tscache run reused a worker`);
+      }
+      all.push(results);
       console.log(`latency ${latency} ms: done`);
       await page.close();
     }

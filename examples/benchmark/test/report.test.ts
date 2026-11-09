@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  freshWorkers,
   HEADERS,
   markdown,
   median,
@@ -55,6 +56,8 @@ describe("rows", () => {
       chartP50: 21,
       chartP95: 31,
       workloadMs: 101,
+      setupMs: 1,
+      coldSetupMs: 0,
       vsNone: { requests: 0.2, bytes: 0.25 },
     });
   });
@@ -83,5 +86,32 @@ describe("markdown", () => {
     expect(lines[2]).toBe(`| ${HEADERS.join(" | ")} |`);
     expect(lines[4]).toMatch(/^\| No cache \| 9 \(9 \+ 0\) \|/);
     expect(lines[5]).toMatch(/^\| tscache \| 3 \(3 \+ 0\) \|.*0\.33× requests/);
+  });
+});
+
+describe("freshWorkers", () => {
+  const report = (run: string, worker: string) => ({
+    cacheId: `crypto/BENCH/n-${run}-tscache`,
+    worker,
+  });
+
+  it("holds when each tscache run had a worker of its own", () => {
+    expect(
+      freshWorkers([
+        report("0", "a"),
+        report("0", "a"),
+        report("1", "b"),
+        { cacheId: "crypto/BENCH", worker: "page" },
+      ]),
+    ).toEqual({ runs: 2, workers: 2, fresh: true });
+  });
+
+  it("fails when a run reused a worker, or one run saw two", () => {
+    expect(freshWorkers([report("0", "a"), report("1", "a")]).fresh).toBe(
+      false,
+    );
+    expect(freshWorkers([report("0", "a"), report("0", "b")]).fresh).toBe(
+      false,
+    );
   });
 });

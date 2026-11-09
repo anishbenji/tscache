@@ -51,6 +51,7 @@ function insight(overrides: Partial<FetchInsight>): FetchInsight {
     startedAt: 1000,
     endedAt: 1300,
     ok: true,
+    worker: "worker-1",
     ...overrides,
   };
 }
@@ -87,6 +88,10 @@ describe("withInsights", () => {
       ok: true,
     });
     expect(seen.endedAt).toBeGreaterThanOrEqual(seen.startedAt);
+    // One id per context: the same for every fetch the module makes.
+    const again = nextInsight();
+    await fetcher.fetch(request(range));
+    expect((await again).worker).toBe(seen.worker);
     expect(seen.ms).toBe(seen.endedAt - seen.startedAt);
   });
 

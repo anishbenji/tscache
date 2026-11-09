@@ -212,7 +212,7 @@ export const catalog: Entry[] = [
     lookFor: [
       "Pick a backend latency and run: each mode runs five times, in turn, and the table shows the medians, with the conditions above it.",
       "Backend requests and bars: the memo and TanStack Query cache per tab and by exact range, so the three tabs and every shifted range fetch again; tscache's tabs share one cache and fetch only the newest bars.",
-      "First connect is tscache's worker start, kept in the workload time, not hidden.",
+      "First connect is tscache's connect to a SharedWorker that every run starts anew, run 1's beside the median, kept in the workload time, not hidden.",
       "Copy as Markdown gives the table as docs/benchmarks/demo-comparison.md prints it; scripts/demo-bench.ts generates that file.",
     ],
     auth: false,

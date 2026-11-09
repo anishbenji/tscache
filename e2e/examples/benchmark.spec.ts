@@ -1,5 +1,9 @@
-import { expect, test } from "@playwright/test";
-import type { Row, RunResult } from "../../examples/benchmark/src/report";
+import { expect, type Page, test } from "@playwright/test";
+import type {
+  freshWorkers,
+  Row,
+  RunResult,
+} from "../../examples/benchmark/src/report";
 import { NEW_BARS, TABS, views } from "../../examples/benchmark/src/workload";
 import { appUrl } from "./apps";
 
@@ -13,10 +17,22 @@ test.describe.configure({ mode: "serial" });
 interface Results {
   rows: Row[];
   runs: RunResult[];
+  workers: ReturnType<typeof freshWorkers>;
 }
 
 /** How long the page may take to run the workload; a hang fails here. */
 const RUN_TIMEOUT = 60_000;
+
+/** Opens the benchmark with `query`, and returns its results once done. */
+async function runBenchmark(page: Page, query: string): Promise<Results> {
+  await page.goto(`/?${query}&autorun=1`);
+  await expect(page.getByTestId("status")).toHaveText("done", {
+    timeout: RUN_TIMEOUT,
+  });
+  return JSON.parse(
+    (await page.getByTestId("results-json").textContent()) ?? "{}",
+  ) as Results;
+}
 
 /** The views of one tab's workload, and of the three tabs of phase two. */
 const VIEWS = views(0).length;
@@ -24,16 +40,9 @@ const VIEWS = views(0).length;
 test("each mode makes the requests its caching allows, tscache the fewest", async ({
   page,
 }) => {
-  // The page's run may take up to RUN_TIMEOUT; the test allows for it.
   test.setTimeout(RUN_TIMEOUT + 30_000);
   // One run per mode at the lowest latency: the counts do not depend on it.
-  await page.goto("/?runs=1&latency=50&autorun=1");
-  await expect(page.getByTestId("status")).toHaveText("done", {
-    timeout: RUN_TIMEOUT,
-  });
-  const results = JSON.parse(
-    (await page.getByTestId("results-json").textContent()) ?? "{}",
-  ) as Results;
+  const results = await runBenchmark(page, "runs=1&latency=50");
   const run = (mode: RunResult["mode"]) => {
     const found = results.runs.find((r) => r.mode === mode);
     if (found === undefined) throw new Error(`no run of ${mode}`);
@@ -82,4 +91,20 @@ test("each mode makes the requests its caching allows, tscache the fewest", asyn
     "tscache",
   ]);
   for (const row of results.rows) expect(row.stable).toBe(true);
+  expect(results.workers).toEqual({ runs: 1, workers: 1, fresh: true });
+});
+
+test("every tscache run starts a SharedWorker of its own", async ({ page }) => {
+  test.setTimeout(RUN_TIMEOUT + 30_000);
+  // Two runs, back to back: the first run's worker outlives its last tab
+  // (extendedLifetime), so a second run on the same URL would inherit it.
+  const { workers, runs } = await runBenchmark(
+    page,
+    "runs=2&latency=50&modes=tscache",
+  );
+  expect(runs.map((r) => r.mode)).toEqual(["tscache", "tscache"]);
+  expect(workers).toEqual({ runs: 2, workers: 2, fresh: true });
+  await expect(page.getByTestId("workers")).toHaveText(
+    "A new SharedWorker for each tscache run: 2 runs, 2 workers.",
+  );
 });
