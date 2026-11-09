@@ -3,6 +3,17 @@
 
 
 [changelog]
+# Written once, above the first release. `bun run changelog --tag vX.Y.Z`
+# (git-cliff --unreleased --prepend) adds the commits since the last tag as
+# release X.Y.Z below it and leaves the older sections, with their
+# hand-written summaries, as they are.
+header = """
+# Changelog
+
+All notable changes to `@anishbenji/tscache`. The package follows semantic
+versioning within 0.x: a minor release may break the API, a patch release never
+does.\n
+"""
 # A Tera template to be rendered for each release in the changelog.
 # See https://keats.github.io/tera/docs/#introduction
 body = """
@@ -59,6 +70,11 @@ protect_breaking_commits = false
 # Assigns commits to groups.
 # Optionally sets the commit's scope and can decide to exclude commits from further processing.
 commit_parsers = [
+    # Review triage, size-budget updates and merge commits say nothing to a
+    # user of the package.
+    { message = "^docs\\(review\\)", skip = true },
+    { message = "^chore\\(size\\)", skip = true },
+    { message = "^Merge ", skip = true },
     { message = "^feat", group = "<!-- 0 -->🚀 Features" },
     { message = "^fix", group = "<!-- 1 -->🐛 Bug Fixes" },
     { message = "^doc", group = "<!-- 3 -->📚 Documentation" },
