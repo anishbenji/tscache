@@ -5,7 +5,9 @@ The normative design is the
 public API (§2), the wire protocol (§3), the module layout and the internal contracts (§4), and the
 decision register (§6–§8), whose decisions are locked. This page is a map of it. How work is planned,
 tested and reviewed is in [`AGENTS.md`](https://github.com/anishbenji/tscache/blob/main/AGENTS.md) and
-[`docs/workflow.md`](https://github.com/anishbenji/tscache/blob/main/docs/workflow.md).
+[`docs/workflow.md`](https://github.com/anishbenji/tscache/blob/main/docs/workflow.md); how a release is
+published to npm is in
+[`docs/releasing.md`](https://github.com/anishbenji/tscache/blob/main/docs/releasing.md).
 
 ## One engine, three hostings
 
