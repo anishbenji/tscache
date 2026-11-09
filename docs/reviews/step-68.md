@@ -22,7 +22,11 @@ Tests 2 and 3 passed before the fix; they guard the behaviour the fix must keep.
 
 ## Decision for the user: a bound on the fetcher load
 
-After the fix, nothing bounds what follows `hello`. A fetcher `import()` that never settles (a module server that accepts the connection and never answers, a top-level `await` that never resolves) leaves `createClient` pending forever. Before the fix, the handshake timeout bounded it, by accident and with the wrong outcome (a step down instead of a rejection).
+After the fix, no timer bounds what follows `hello`. Before it, the handshake timeout bounded that window, by accident and with the wrong outcome for a slow load (a step down instead of a wait).
+
+Resolved in this step (pre-review P1): a SharedWorker that dies between `hello` and `init-ok`, for example because the renderer of the tab hosting it crashed while it loaded another tab's fetcher. No `error` or port `close` reaches the other tab (N32), so `createClient` would have hung. The client now queues on the worker's lifetime lock as soon as `hello` names it; a grant before `init-ok` fails the hosting with a `HostingError` and the chain steps down, as the old timeout did. The same request then watches the connected client, so there is still one lock request per client.
+
+Still open: a fetcher `import()` that never settles while the worker stays alive (a module server that accepts the connection and never answers, a top-level `await` that never resolves). It leaves `createClient` pending forever.
 
 Options:
 
@@ -31,6 +35,16 @@ Options:
 - **C. A load timeout in the worker.** The server bounds `import(module)` and answers `init-err` when it runs out. Pros: one place decides for every tab; the module is reported once. Cons: `import()` cannot be cancelled, so a late load still completes in the worker and later connections reuse it; the bound lives in the worker, where an application cannot see it per tab; it changes the server's handshake contract (§4.8 N30).
 
 Recommendation: **A** for v0.1.0, with the hang named as a known limit in the workers guide once chosen, and revisit with **B** if a consumer reports a hang. A fetcher module is the application's own code, served by the application's own server, and the common failures (a 404, a syntax error, a missing `fetch` export) already reject at once through `init-err`. Not decided in this step; no bound is implemented.
+
+## Pre-review (director, round 1)
+
+| ID  | Severity | Finding                                                                                                       | Resolution                                                                                                                                                             |
+| --- | -------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P1       | A SharedWorker that dies between `hello` and `init-ok` hangs `createClient`: the lock watch began at init-ok. | Fixed: the watch starts at `hello`; a grant before `init-ok` is a `HostingError`, the request is handed to the connected client or withdrawn when the handshake fails. |
+| 2   | P1       | No tests for the behaviour documented after `hello`.                                                          | Added: an `init-err` after the timeout rejects with a `TscacheError` and constructs no dedicated `Worker`; a worker `error` after `hello` is a `HostingError`.         |
+| 3   | P2       | The §2.1 TSDoc of `handshakeTimeoutMs` still described the old behaviour.                                     | Fixed: it now matches `types.ts`.                                                                                                                                      |
+
+The tests for finding 1 failed before the fix: the hello-time watch tests saw no lock request (`expected [] to deeply equal [ [ 'tscache-worker:w1', 'shared' ] ]`). The tests for finding 2 passed before and after: they cover behaviour the first commit already had.
 
 ## Not verified
 
