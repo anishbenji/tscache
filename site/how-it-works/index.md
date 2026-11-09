@@ -24,7 +24,7 @@ persistence layer keeps the caches that ask for it in IndexedDB.
 
 | Piece          | Runs in     | What it does                                                                                                                                                                 |
 | -------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Client         | each page   | `createClient` tries the hostings in turn and wraps the connected port; `client.cache(config)` returns a `CacheHandle`, whose every method is one request                    |
+| Client         | each page   | `createClient` tries the hostings in turn and wraps the connected port; `client.cache(config)` returns a `CacheHandle`, whose data methods are each one request              |
 | `PortClient`   | each page   | the page's end of the port: completes the handshake, matches each response to its request by id, rebuilds errors and passes events on                                        |
 | `RpcServer`    | the hosting | one per engine, any number of ports: greets each port with a `hello` naming its client id, expects an `init` back, dispatches requests, and sends events to every ready port |
 | `Orchestrator` | the hosting | serves `get` and `invalidate`: plans the fetches a read needs, minus those already in flight, calls the fetcher, applies each response as a put, then reads once             |
@@ -67,9 +67,9 @@ its own `Orchestrator`. The fetcher module is therefore loaded wherever the engi
 for the in-process hosting.
 
 The SharedWorker holds a Web Lock for as long as it runs, and names it in its `hello`. A shared-mode
-client queues on that lock; it is granted the lock only once the worker is gone, and then rejects
-everything pending and emits `workerLost`. A dedicated worker reports its failure with an `error` event
-instead.
+client queues on that lock; it is granted the lock only once the worker is gone. A dedicated worker's
+client learns of its worker's failure from the worker's `error` event instead. Either way the client
+then rejects everything pending and emits `workerLost`; only the detection differs.
 
 Drawn from:
 
@@ -93,12 +93,18 @@ Drawn from:
    it, and calls the fetcher once per merged range. While auth is invalid, or while the fetcher's `updateAuth`
    hook is swapping credentials, it fetches and joins nothing: those ranges come back as `'auth-pending'` at
    once.
-4. Each response is applied as a put over the range it was asked for, which makes that range
-   authoritative; a response that lands after the cache was cleared is dropped instead. The orchestrator
-   waits for the fetches until they settle or auth goes invalid, whichever comes first; fetches still
-   running when auth goes invalid finish in the background. It then reads the engine once, and labels
-   the misses left by a failed fetch, or by auth going invalid, as `'fetch-failed'` or `'auth-pending'`.
-5. The result travels back to the page with its typed arrays transferred, not copied.
+4. Each response is applied as a put over the range it was asked for. That makes the part of the range
+   below the cache's watermark, and below the response's own `meta.finalizedUntil` when it reports one,
+   authoritative (see [the watermark](./data-model#the-watermark)). A response that lands after the
+   cache was cleared is dropped instead. The orchestrator waits for the fetches until they settle or
+   auth goes invalid, whichever comes first; fetches still running when auth goes invalid finish in the
+   background.
+5. If the cache was cleared while the read waited, the orchestrator runs one more round: it asks again
+   for what is still missing, minus the ranges whose fetch failed or came back auth-pending. There is
+   no third round.
+6. It then reads the engine once, and labels the misses left by a failed fetch, or by auth going
+   invalid, as `'fetch-failed'` or `'auth-pending'`.
+7. The result travels back to the page with its typed arrays transferred, not copied.
 
 Drawn from:
 
@@ -107,5 +113,7 @@ Drawn from:
 - [`packages/tscache/src/orchestrator/orchestrator.ts#Orchestrator`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/orchestrator.ts)
 - [`packages/tscache/src/orchestrator/orchestrator.ts#planRound`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/orchestrator.ts)
 - [`packages/tscache/src/orchestrator/orchestrator.ts#coalesce`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/orchestrator.ts)
+- [`packages/tscache/src/orchestrator/orchestrator.ts#blockedBy`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/orchestrator.ts)
+- [`packages/tscache/src/engine/cache.ts#CacheState`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/engine/cache.ts)
 - [`packages/tscache/src/orchestrator/orchestrator.ts#annotate`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/orchestrator.ts)
 - [`packages/tscache/src/rpc/protocol.ts#transferablesOf`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/rpc/protocol.ts)
