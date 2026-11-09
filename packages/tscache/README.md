@@ -128,8 +128,8 @@ option (default `"shared"`), and reports the one it settled on as
    sharing.
 
 Each step down emits a `modeFallback` event with the reason. Chrome on Android
-has no `SharedWorker`, so there every tab gets its own cache through the
-dedicated worker. Only the SharedWorker hosting persists a cache with
+before version 148 has no `SharedWorker`, so there every tab gets its own cache
+through the dedicated worker. Only the SharedWorker hosting persists a cache with
 `persist: true`. [Workers and fallback](https://anishbenji.github.io/tscache/guides/workers)
 has the details.
 
