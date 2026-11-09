@@ -1,0 +1,120 @@
+<svg class="hiw-svg" viewBox="0 0 760 612" role="img" aria-labelledby="hiw-dm-title hiw-dm-desc" xmlns="http://www.w3.org/2000/svg">
+<title id="hiw-dm-title">tscache data model</title>
+<desc id="hiw-dm-desc">A row of 24 grid slots with points; the dense segments that hold them, split by a gap longer than gapSplitK and by a page edge; the coverage ranges kept apart from the points; the misses a read reports; and the finalized watermark at slot 20, after which points are provisional and never covered.</desc>
+<defs><marker id="hiw-dm-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="hiw-headfill"/></marker></defs>
+<text x="20" y="28" class="hiw-t">Grid</text>
+<text x="150" y="28" class="hiw-s hiw-m">t = alignmentOffset + slot × interval</text>
+<text x="20" y="78" class="hiw-t">Slots</text>
+<text x="20" y="94" class="hiw-xs">grid points</text>
+<rect x="150" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="162" cy="78" r="6" class="hiw-pt"/>
+<text x="162" y="106" class="hiw-xs hiw-m" text-anchor="middle">0</text>
+<rect x="174" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="186" cy="78" r="6" class="hiw-pt"/>
+<rect x="198" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="210" cy="78" r="6" class="hiw-pt"/>
+<text x="210" y="106" class="hiw-xs hiw-m" text-anchor="middle">2</text>
+<rect x="222" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="234" cy="78" r="6" class="hiw-pt"/>
+<rect x="246" y="64" width="24" height="28" class="hiw-cell"/>
+<text x="258" y="106" class="hiw-xs hiw-m" text-anchor="middle">4</text>
+<rect x="270" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="282" cy="78" r="6" class="hiw-pt"/>
+<rect x="294" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="306" cy="78" r="6" class="hiw-pt"/>
+<text x="306" y="106" class="hiw-xs hiw-m" text-anchor="middle">6</text>
+<rect x="318" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="330" cy="78" r="6" class="hiw-pt"/>
+<rect x="342" y="64" width="24" height="28" class="hiw-cell"/>
+<text x="354" y="106" class="hiw-xs hiw-m" text-anchor="middle">8</text>
+<rect x="366" y="64" width="24" height="28" class="hiw-cell"/>
+<rect x="390" y="64" width="24" height="28" class="hiw-cell"/>
+<text x="402" y="106" class="hiw-xs hiw-m" text-anchor="middle">10</text>
+<rect x="414" y="64" width="24" height="28" class="hiw-cell"/>
+<rect x="438" y="64" width="24" height="28" class="hiw-cell"/>
+<text x="450" y="106" class="hiw-xs hiw-m" text-anchor="middle">12</text>
+<rect x="462" y="64" width="24" height="28" class="hiw-cell"/>
+<rect x="486" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="498" cy="78" r="6" class="hiw-pt"/>
+<text x="498" y="106" class="hiw-xs hiw-m" text-anchor="middle">14</text>
+<rect x="510" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="522" cy="78" r="6" class="hiw-pt"/>
+<rect x="534" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="546" cy="78" r="6" class="hiw-pt"/>
+<text x="546" y="106" class="hiw-xs hiw-m" text-anchor="middle">16</text>
+<rect x="558" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="570" cy="78" r="6" class="hiw-pt"/>
+<rect x="582" y="64" width="24" height="28" class="hiw-cell"/>
+<text x="594" y="106" class="hiw-xs hiw-m" text-anchor="middle">18</text>
+<rect x="606" y="64" width="24" height="28" class="hiw-cell"/>
+<circle cx="618" cy="78" r="6" class="hiw-pt"/>
+<rect x="630" y="64" width="24" height="28" class="hiw-cell hiw-cell-prov"/>
+<circle cx="642" cy="78" r="6" class="hiw-pt hiw-pt-prov"/>
+<text x="642" y="106" class="hiw-xs hiw-m" text-anchor="middle">20</text>
+<rect x="654" y="64" width="24" height="28" class="hiw-cell hiw-cell-prov"/>
+<circle cx="666" cy="78" r="6" class="hiw-pt hiw-pt-prov"/>
+<rect x="678" y="64" width="24" height="28" class="hiw-cell hiw-cell-prov"/>
+<text x="690" y="106" class="hiw-xs hiw-m" text-anchor="middle">22</text>
+<rect x="702" y="64" width="24" height="28" class="hiw-cell hiw-cell-prov"/>
+<text x="20" y="136" class="hiw-t">Segments</text>
+<text x="20" y="152" class="hiw-xs">DenseSegment runs</text>
+<rect x="152" y="122" width="188" height="26" rx="6" class="hiw-seg"/>
+<text x="246" y="139" class="hiw-s" text-anchor="middle">segment A</text>
+<rect x="488" y="122" width="44" height="26" rx="6" class="hiw-seg"/>
+<text x="510" y="139" class="hiw-s" text-anchor="middle">B</text>
+<rect x="536" y="122" width="140" height="26" rx="6" class="hiw-seg"/>
+<text x="582" y="139" class="hiw-s" text-anchor="middle">segment C</text>
+<path d="M345,135 H483" class="hiw-wire" marker-start="url(#hiw-dm-head)" marker-end="url(#hiw-dm-head)"/>
+<text x="258" y="164" class="hiw-xs" text-anchor="middle">1 empty slot: same segment</text>
+<text x="414" y="178" class="hiw-xs" text-anchor="middle">6 empty slots &gt; gapSplitK (4): split</text>
+<line x1="534" y1="48" x2="534" y2="156" class="hiw-page"/>
+<text x="538" y="44" class="hiw-xs">page edge (segmentSlotCap = 16)</text>
+<rect x="150" y="196" width="280" height="100" rx="8" class="hiw-box"/>
+<text x="162" y="216" class="hiw-t">inside segment A</text>
+<text x="162" y="234" class="hiw-xs">presence mask, one bit per slot:</text>
+<text x="162" y="250" class="hiw-s hiw-m">1 1 1 1 0 1 1 1</text>
+<text x="162" y="268" class="hiw-xs">one typed array per field, of its dtype</text>
+<text x="162" y="284" class="hiw-xs">no timestamps: a slot's position gives its t</text>
+<path d="M162,148 V196" class="hiw-wire hiw-dash"/>
+<rect x="446" y="196" width="280" height="100" rx="8" class="hiw-box"/>
+<text x="458" y="216" class="hiw-t">dataset version (optional)</text>
+<text x="458" y="234" class="hiw-xs">set by config.version or the first</text>
+<text x="458" y="250" class="hiw-xs">meta.version; a put or response with</text>
+<text x="458" y="266" class="hiw-xs">another one clears points and coverage,</text>
+<text x="458" y="282" class="hiw-xs">then is applied (cacheCleared)</text>
+<text x="20" y="340" class="hiw-t">Coverage</text>
+<text x="20" y="356" class="hiw-xs">CoverageIndex</text>
+<rect x="152" y="326" width="284" height="26" rx="6" class="hiw-cov"/>
+<text x="294" y="343" class="hiw-s" text-anchor="middle">covered 0–11</text>
+<rect x="488" y="326" width="140" height="26" rx="6" class="hiw-cov"/>
+<text x="558" y="343" class="hiw-s" text-anchor="middle">covered 14–19</text>
+<text x="558" y="368" class="hiw-xs" text-anchor="middle">crosses the page edge and segments B, C</text>
+<text x="20" y="406" class="hiw-t">get(0…23)</text>
+<text x="20" y="422" class="hiw-xs">a cache-only read</text>
+<rect x="440" y="392" width="44" height="26" rx="6" class="hiw-miss"/>
+<text x="462" y="409" class="hiw-s" text-anchor="middle">miss</text>
+<rect x="632" y="392" width="92" height="26" rx="6" class="hiw-miss"/>
+<text x="678" y="409" class="hiw-s" text-anchor="middle">miss</text>
+<text x="150" y="436" class="hiw-xs">returns every present point, coverage 0–11 and 14–19, and 'uncached' misses</text>
+<line x1="630" y1="58" x2="630" y2="188" class="hiw-wm"/>
+<line x1="630" y1="318" x2="630" y2="446" class="hiw-wm"/>
+<text x="624" y="458" class="hiw-xs" text-anchor="end">finalized watermark (finalizedUntil) at slot 20</text>
+<text x="636" y="458" class="hiw-xs">provisional</text>
+<text x="20" y="494" class="hiw-t">Slot states</text>
+<rect x="20" y="508" width="28" height="24" rx="4" class="hiw-cov"/>
+<circle cx="34" cy="520" r="6" class="hiw-pt"/>
+<text x="58" y="518" class="hiw-s hiw-strong">covered, point</text>
+<text x="58" y="532" class="hiw-xs">returned; not fetched again</text>
+<rect x="400" y="508" width="28" height="24" rx="4" class="hiw-cov"/>
+<text x="438" y="518" class="hiw-s hiw-strong">covered, no point</text>
+<text x="438" y="532" class="hiw-xs">a confirmed real gap</text>
+<rect x="20" y="544" width="28" height="24" rx="4" class="hiw-miss"/>
+<text x="58" y="554" class="hiw-s hiw-strong">not covered, no point</text>
+<text x="58" y="568" class="hiw-xs">a miss: a fetching get asks for it</text>
+<rect x="400" y="544" width="28" height="24" rx="4" class="hiw-miss"/>
+<circle cx="414" cy="556" r="6" class="hiw-pt"/>
+<text x="438" y="554" class="hiw-s hiw-strong">not covered, point</text>
+<text x="438" y="568" class="hiw-xs">returned and asked for again</text>
+<circle cx="34" cy="594" r="6" class="hiw-pt hiw-pt-prov"/>
+<text x="52" y="598" class="hiw-xs">provisional point: at or after the watermark; stored and returned, its slot never covered</text>
+</svg>
