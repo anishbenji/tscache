@@ -51,3 +51,17 @@ Both checks ran by hand on the build of a33f09b and were rerun after cae75d6. Th
 - The changelog's 0.1.0 date (2026-11-09) and its commit list stop at this branch. Before the tag, regenerate the section with `bunx git-cliff --tag v0.1.0 -o CHANGELOG.md` and restore the summary. `bun run changelog` would add a second 0.1.0 section, because no tag exists yet. Step 64's `docs/releasing.md` should state this.
 - `SECURITY.md` still says "pre-release"; step 62 owns that file's supported-versions table.
 - The release-notes sizes are from this branch's build; later steps that change `src/` change them.
+
+## Pre-review — director: three P2 findings
+
+| #   | Sev | Finding                                                                               | Decision | Resolution |
+| --- | --- | ------------------------------------------------------------------------------------- | -------- | ---------- |
+| P-1 | P2  | `bun run changelog` (`--prepend`) loses the blank line before the next `## [` heading | accepted | 7d512ec    |
+| P-2 | P2  | README, release notes and changelog summary claim one fetch however many tabs ask     | accepted | fdec03e    |
+| P-3 | P2  | The changelog lets `docs(reviews)` and `build(deps)` commits through                  | accepted | ca42b58    |
+
+**P-1.** Reproduced in a scratch clone: after tagging `v0.1.0` and adding a `fix:` commit, `git-cliff --unreleased --prepend CHANGELOG.md --tag v0.1.1` wrote `- Something after release` directly above `## [0.1.0] - …`. git-cliff trims the rendered release (`trim = true`) and joins it to the older content with a single newline. The fix is a postprocessor, `'\n*\z'` → `"\n"`, which ends the output with exactly one newline; the prepend's own newline then makes it a blank line. The header lost its explicit trailing `\n`: with it, the header was followed by two blank lines. Checked again in a fresh clone of ca42b58 with the same steps. The new section ends with a blank line before `## [0.1.0]`, the header is followed by one blank line, and everything from `## [0.1.0]` on is byte-identical to the committed `CHANGELOG.md`. The clone was deleted afterwards. The postprocessor runs on each release before git-cliff joins them, so it does not separate releases in a full `-o` regeneration of several tagged releases. Only the 0.1.0 regeneration below uses `-o`, and it has one release.
+
+**P-2.** The claims now follow the code. A get fetches only what its cache neither covers nor has in flight: `planRound` in `orchestrator/orchestrator.ts` subtracts the in-flight ranges and joins them. That sharing spans tabs only under the SharedWorker hosting, where every tab's port reaches one `Engine`. The dedicated and in-process hostings build one engine per tab (`entries/worker.ts`, `client/in-process.ts`). Points at or after `finalizedUntil` are never recorded as coverage (`engine/cache.ts`, `volatileFrom`; site/concepts/freshness.md), so every read that includes them fetches them again. The same wording went into `site/index.md`, which made the same claim. The root `README.md` has no such claim (its line 12 is the decision-register pointer), so it is unchanged. The auth sentence now says `authInvalid` reaches every tab _the worker serves_, which under a dedicated worker is one tab.
+
+**P-3.** `^docs\(reviews?\)` and `^(chore|build)\(deps` replace the narrower patterns. The 0.1.0 section was regenerated with `bunx git-cliff --tag v0.1.0 -o CHANGELOG.md` and the hand-written summary put back on top.
