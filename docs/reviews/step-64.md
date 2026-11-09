@@ -22,6 +22,21 @@ Changes:
   approval.
 - `docs/releasing.md` drops the hand-published 0.0.1 bootstrap and documents the staged flow.
 
+## Revision 3 (user decision, 9 November 2026)
+
+`@anishbenji/tscache@0.0.1` is live as `latest`, which supersedes the `0.0.0-stage` note above. The
+trusted publisher exists (GitHub Actions, `anishbenji/tscache`, `release.yml`, environment
+`npm-publish`, permission `npm stage publish` only; publishing access requires 2FA and disallows
+bypass tokens) and is pending validation until 11 November 2026, 11:08 UTC. Nothing is staged or
+published to validate it; the user re-creates it just before the real release. Changes, docs only:
+
+- `docs/releasing.md` gives the current state, says a new trusted publisher must be validated by one
+  CI publish within about two days or it lapses and that a dry run does not count, says the
+  environment name must stay exactly `npm-publish` and the workflow filename exactly `release.yml`,
+  and starts the release checklist with the validation check.
+- `release.yml` was checked, not changed: the file is `.github/workflows/release.yml`, and its only
+  environment line is `environment: npm-publish` on the `stage` job.
+
 ## Scope
 
 | File                            | What                                                                                                      |
