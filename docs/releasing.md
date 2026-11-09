@@ -87,17 +87,21 @@ repository settings, which you change by hand.
 
 ## Cutting a release
 
-1. Check that the trusted publisher is validated, or re-create it with the same fields (GitHub
-   Actions, anishbenji/tscache, release.yml, environment npm-publish, permission npm stage publish).
-   Then push the tag within two days, so the tag's stage validates the new connection.
-2. On a branch from `main`:
+1. On a branch from `main`:
    - set `version` in `packages/tscache/package.json` to the new `X.Y.Z` (0.x semver: a minor release
-     may break the API, a patch release never does);
+     may break the API, a patch release never does). It must be above every version already on npm;
+     the `plan` job checks this;
    - regenerate the changelog with `bunx git-cliff --tag vX.Y.Z -o CHANGELOG.md` and edit the summary
      at the top;
    - write the release notes in `docs/releases/X.Y.Z.md`; this file becomes the GitHub release text.
-3. Open a pull request, let CI pass and merge it.
-4. Tag the merge commit on `main` and push the tag:
+2. Open a pull request, let CI pass and merge it.
+3. Run a dry run on `main` (see [Dry run](#dry-run)) and check that it passes with no warning: with the
+   bumped version and its notes in place, a warning means the tag run would fail.
+4. Check that the trusted publisher is validated, or re-create it with the same fields (GitHub
+   Actions, anishbenji/tscache, release.yml, environment npm-publish, permission npm stage publish).
+   Do this only now, after the merge and the dry run, because a new connection lapses unless the tag's
+   stage validates it within two days.
+5. Within two days of step 4, tag the merge commit on `main` and push the tag:
 
    ```sh
    git switch main && git pull --ff-only
@@ -105,9 +109,9 @@ repository settings, which you change by hand.
    git push origin vX.Y.Z
    ```
 
-5. Follow the run with `gh run watch`. When it succeeds, the `stage` job summary shows
+6. Follow the run with `gh run watch`. When it succeeds, the `stage` job summary shows
    `+ @anishbenji/tscache@X.Y.Z (staged with id <stage-id>)`, and a draft GitHub release exists.
-6. Review the staged package. The stage commands need your own login (`npm login`); the workflow's
+7. Review the staged package. The stage commands need your own login (`npm login`); the workflow's
    OIDC token cannot run them.
 
    ```sh
@@ -117,7 +121,7 @@ repository settings, which you change by hand.
    ```
 
    On npmjs.com the same is under the package's **Staged Packages** tab.
-7. Approve it, with your security key: **Approve** in the Staged Packages tab, or
+8. Approve it, with your security key: **Approve** in the Staged Packages tab, or
 
    ```sh
    npm stage approve <stage-id>
@@ -125,11 +129,11 @@ repository settings, which you change by hand.
 
    This publishes the version under `latest`. The provenance statement, signed during the OIDC stage
    publish, is published with it.
-8. Publish the draft GitHub release: `gh release edit vX.Y.Z --draft=false`, or **Publish release** on
+9. Publish the draft GitHub release: `gh release edit vX.Y.Z --draft=false`, or **Publish release** on
    the draft.
-9. Check the result: `npm view @anishbenji/tscache@X.Y.Z`, the provenance badge on the npmjs.com
-   package page, and the GitHub release. In a project that installs the package,
-   `npm audit signatures` verifies the signature and the provenance attestation.
+10. Check the result: `npm view @anishbenji/tscache@X.Y.Z`, the provenance badge on the npmjs.com
+    package page, and the GitHub release. In a project that installs the package,
+    `npm audit signatures` verifies the signature and the provenance attestation.
 
 If the tag does not match the package version, the `plan` job fails before anything is built. Delete
 the tag (`git push origin :refs/tags/vX.Y.Z` and `git tag -d vX.Y.Z`), fix the version, and tag again.
@@ -144,9 +148,14 @@ gh workflow run release.yml --ref main            # dry-run defaults to true
 gh run watch
 ```
 
-The `stage-dry-run` job runs `npm stage publish --dry-run`, which prints the tarball's file list and
-size and changes nothing on the registry. A dry run on `main` warns, but does not fail, when
-`docs/releases/<version>.md` is missing.
+The `stage-dry-run` job runs `npm stage publish --dry-run --force`, which prints the tarball's file
+list and size and changes nothing on the registry. `--force` skips only npm's client-side version
+checks, which would otherwise fail every dry run whose version is not above the registry's, such as
+`main` between two releases (today `0.0.0` on `main` against `0.0.1` on npm). The `plan` job makes
+the same check against `npm view @anishbenji/tscache versions` instead: a dry run reports it as a
+warning, and a tag run fails on it before CI. A dry run also warns, but does not fail, when
+`docs/releases/<version>.md` is missing. Staged versions are not public, so neither check sees a
+pending stage; `npm stage list` does (see [Current state](#current-state-9-november-2026)).
 
 ## Retrying a failed stage
 
