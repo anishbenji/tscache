@@ -5,18 +5,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { apps as APPS } from "../examples/apps";
 
 // The launcher (scripts/demo.ts) on its own. Every way out stops every
 // process it started, builds included, with what they started in turn, and
-// frees every port (step 30 R1-1, R2-2). Each test takes eleven free ports
-// the system picks, and kills anything left over however it ends.
+// frees every port (step 30 R1-1, R2-2). Each test takes free ports the
+// system picks, one for the hub and one per app, and kills anything left
+// over however it ends.
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const launcherPath = fileURLToPath(
   new URL("../../scripts/demo.ts", import.meta.url),
 );
-/** The hub's port and the ten apps' after it. */
-const PORTS = 11;
+/** Every app the launcher builds and serves. */
+const APP_COUNT = Object.keys(APPS).length;
+/** The hub's port and the apps' after it. */
+const PORTS = APP_COUNT + 1;
 
 /** A listener whose close() ends its connections instead of waiting. */
 interface Held {
@@ -246,7 +250,7 @@ const child = Bun.spawn(["sleep", "60"]);
 await Bun.write(\`\${dir}/\${name}.pids\`, \`\${process.pid} \${child.pid}\`);
 if (name === "solid-uplot") {
   const { readdirSync } = await import("node:fs");
-  while (readdirSync(dir).filter((f) => f.endsWith(".pids")).length < 9) {
+  while (readdirSync(dir).filter((f) => f.endsWith(".pids")).length < ${APP_COUNT}) {
     await Bun.sleep(50);
   }
   console.error("solid-uplot: forced failure");
@@ -277,8 +281,8 @@ test("a failed build stops the other builds, with what they started", async () =
     }
     expect(code).toBe(1);
     expect(launched.stderr()).toContain("solid-uplot: build failed");
-    // Nine builds, each with a child; none outlives the launcher.
-    expect(pids).toHaveLength(18);
+    // A build per app, each with a child; none outlives the launcher.
+    expect(pids).toHaveLength(2 * APP_COUNT);
     expect(pids.filter(running)).toEqual([]);
     expect(await allFree([hub, ...apps])).toBe(true);
   } finally {
