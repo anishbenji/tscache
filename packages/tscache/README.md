@@ -4,6 +4,11 @@ A browser cache for timestamp-aligned time series: candles, metrics, sensor
 readings, event counts. It is built for a chart that scrolls through history
 and follows a live tail, in several tabs at once.
 
+**Measured benefit:** see the
+[demo comparison](https://github.com/anishbenji/tscache/blob/main/docs/benchmarks/demo-comparison.md).
+<!-- Step 67 (or step 65, if it merges first) replaces this line with one
+measured figure from docs/benchmarks/demo-comparison.md. -->
+
 - **One cache for every tab.** The cache runs in a `SharedWorker`, so every
   same-origin tab reads the same data. Without `SharedWorker` it falls back to
   a dedicated `Worker`, then to the page itself; those give each tab a cache of
