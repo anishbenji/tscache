@@ -12,7 +12,7 @@ header = """
 
 All notable changes to `@anishbenji/tscache`. The package follows semantic
 versioning within 0.x: a minor release may break the API, a patch release never
-does.\n
+does.
 """
 # A Tera template to be rendered for each release in the changelog.
 # See https://keats.github.io/tera/docs/#introduction
@@ -37,6 +37,11 @@ trim = true
 render_always = true
 # An array of regex based postprocessors to modify the changelog.
 postprocessors = [
+    # End the output with exactly one newline. git-cliff trims the body and
+    # joins a prepended release to the older ones with a single newline, so
+    # without this the new release's last line runs into the next
+    # "## [" heading.
+    { pattern = '\n*\z', replace = "\n" },
     # Replace the placeholder <REPO> with a URL.
     #{ pattern = '<REPO>', replace = "https://github.com/orhun/git-cliff" },
 ]
