@@ -77,6 +77,10 @@ const config = defineConfig({
           ],
         },
         {
+          text: "How it works",
+          items: [{ text: "Package map", link: "/how-it-works/package-map" }],
+        },
+        {
           text: "API by example",
           items: [
             { text: "The client", link: "/usage/client" },
