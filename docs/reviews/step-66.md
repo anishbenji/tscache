@@ -271,3 +271,11 @@ Five P2 findings, all validated by the director and all accepted.
 ## Decision concerns
 
 None.
+
+## Codex round 1 (gate), on 04ffd58
+
+Verdict: merge after fixes. All five pre-review fixes were confirmed.
+
+| #         | Finding                                                                                                                                                                                                        | Verdict | Action                                                                                                                    |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| R1-1 [P1] | The token audit in `docs/supply-chain.md` used `git grep -n`, which prints the whole matching line, so a committed token would be echoed into the terminal and captured logs (AGENTS.md: never print secrets). | Valid   | Fixed: the audit uses `git grep -l` (file names only), and the page says how to handle a listed file without printing it. |
