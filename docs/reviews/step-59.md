@@ -207,3 +207,7 @@ The code was followed in every case; none of these changes behaviour, and none i
 - Browsers other than Chromium.
 - Narrow screens beyond the SVGs' 600 px minimum width (the figure scrolls horizontally below it).
 - The `path#symbol` anchors are checked by hand here; step 61 adds the CI check that resolves them.
+
+## Parent accuracy review: clean
+
+The parent thread ran an independent accuracy review at fc07019 on 2026-11-09. An agent read the code and wrote a cited fact sheet; the parent compared `site/how-it-works/index.md`, `data-model.md`, `overview.svg` and `data-model.svg` (their text labels) against it and found no inaccuracies. `package-map.md` is generated from the imports and was not hand-checked.
