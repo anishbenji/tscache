@@ -7,8 +7,8 @@ The release flow itself (the placeholder bootstrap, cutting a release, approving
 ## The chain
 
 1. A change reaches `main` only through a pull request that passes the `ci` check (ruleset `protect-main`).
-2. The maintainer creates a `v*` tag. Only a repository admin may create one, and no one may delete or force-move one (ruleset `protect-release-tags`).
-3. The tag starts `release.yml`. Its publish job runs in the environment `npm-publish`, which accepts deployments from `v*` tags only, and it holds `id-token: write` so it can exchange the GitHub OIDC token with npm.
+2. The maintainer creates a `v*` tag. The ruleset `protect-release-tags` blocks creating, updating (moving, fast-forward or not) and deleting a `v*` tag for everyone except the repository admin role, which bypasses the ruleset always. On this repository that is the maintainer alone, so the maintainer can still create, move or delete a release tag; no one else can.
+3. The tag starts `release.yml`. Its `stage` job is the only job that uses the environment `npm-publish`, which accepts deployments from `v*` tags only, and it holds `id-token: write` so it can exchange the GitHub OIDC token with npm.
 4. npm's trusted publisher for `@anishbenji/tscache` accepts that token only from this repository, `release.yml` and the `npm-publish` environment, and allows only `npm stage publish`. The job stages the version with provenance; nothing is live yet.
 5. The maintainer approves the staged version on npmjs.com or with `npm stage approve`, which asks for the security key. Approval is the final human gate.
 
@@ -31,16 +31,18 @@ No step uses an npm token.
   ```sh
   gh secret list --repo anishbenji/tscache
   gh secret list --repo anishbenji/tscache --env npm-publish
-  git grep -n -i -e '_authToken' -e 'NPM_TOKEN' -e 'NODE_AUTH_TOKEN'
+  git grep -n -i -E -e '_authToken=' \
+    -e '(NPM_TOKEN|NODE_AUTH_TOKEN)[[:space:]]*[:=]' \
+    -e 'secrets\.(NPM_TOKEN|NODE_AUTH_TOKEN)' -- ':!docs/'
   ```
 
-  Each command prints nothing.
+  Expected: all three commands print nothing; the two `gh secret list` commands exit 0 and the `git grep` exits 1. The grep looks for a credential in use (an `.npmrc` `_authToken=` line, either variable assigned in a shell or a workflow `env:`, or either one read from `secrets`); it skips `docs/`, which names these variables in prose, and plain mentions such as the comment in `release.yml` that explains why `setup-node` gets no `registry-url`.
 
 - [ ] Gitleaks runs on every commit (pre-commit hook) and again over the whole branch in `bun run ci`.
 
 ### Release tags
 
-- [ ] The ruleset `protect-release-tags` is active, targets `refs/tags/v*`, blocks creation, deletion and non-fast-forward updates, and lists only the repository admin role as a bypass actor.
+- [ ] The ruleset `protect-release-tags` is active, targets `refs/tags/v*`, blocks creation, updates, deletion and non-fast-forward updates, and lists only the repository admin role as a bypass actor, with bypass mode `always`.
 
   ```sh
   gh api repos/anishbenji/tscache/rulesets \
@@ -49,7 +51,7 @@ No step uses an npm token.
     --jq '{enforcement, bypass_actors, conditions, rules: [.rules[].type]}'
   ```
 
-  Expected: `enforcement` is `active`, `bypass_actors` holds one entry (`RepositoryRole`, id 5, `always`), the include list is `["refs/tags/v*"]`, and the rules are `creation`, `deletion` and `non_fast_forward`.
+  Expected: `enforcement` is `active`, `bypass_actors` holds one entry (`RepositoryRole`, id 5, `always`), the include list is `["refs/tags/v*"]`, and the rules are `creation`, `deletion`, `non_fast_forward` and `update` (GitHub lists them in that order).
 
 ### The `npm-publish` environment
 
@@ -65,7 +67,13 @@ No step uses an npm token.
   Expected: `{"custom_branch_policies":true,"protected_branches":false}`, then one policy, `{"name":"v*","type":"tag"}`.
 
 - [ ] The environment holds no secrets and no variables. A required reviewer is optional; the npm approval step is already a human gate.
-- [ ] Only the publish job of `release.yml` names the environment, and only that job holds `id-token: write`.
+- [ ] Only the `stage` job of `release.yml` uses the `npm-publish` environment. Outside it, the only job that holds `id-token: write` is the `analysis` job of `scorecard.yml`, which needs it to publish the Scorecard results; that job never names the environment, so npm's trusted publisher does not accept its token.
+
+  ```sh
+  grep -n -e 'environment:' -e 'id-token:' .github/workflows/*.yml
+  ```
+
+  Expected: `environment: npm-publish` and `id-token: write` in `release.yml` (the `stage` job, plus the comment above it), and `id-token: write` in `scorecard.yml`; nothing else.
 
 ### Workflows
 
