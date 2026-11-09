@@ -89,6 +89,36 @@ jobs:
             fi
           fi
 
+          # The version must be strictly above every published release
+          # version: npm refuses an existing version, and refuses to apply
+          # `latest` below a higher one. Prereleases (npm's 0.0.0-stage
+          # placeholder) are ignored, as npm ignores them for `latest`. The
+          # read needs no auth. Staged versions are not public, so a pending
+          # stage of this version only shows up as a stage failure; the
+          # maintainer checks `npm stage list` first (docs/releasing.md).
+          package="$(jq -r .name packages/tscache/package.json)"
+          versions=""
+          if ! versions="$(npm view "$package" versions --json 2>/dev/null)"; then
+            if [ "$stage" = true ]; then
+              echo "::error::Could not read the published versions of ${package} from the registry"
+              exit 1
+            fi
+            echo "::warning::Could not read the published versions of ${package} from the registry"
+            versions="[]"
+          fi
+          highest="$(printf '%s' "$versions" | jq -r 'if type == "array" then .[] else . end' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
+          if [ -n "$highest" ]; then
+            above="$(printf '%s\n%s\n' "$highest" "$version" | sort -V | tail -n 1)"
+            if [ "$version" = "$highest" ] || [ "$above" != "$version" ]; then
+              msg="Version ${version} is not above the highest published version ${highest} of ${package}"
+              if [ "$stage" = true ]; then
+                echo "::error::${msg}"
+                exit 1
+              fi
+              echo "::warning::${msg}; a real release of this version would fail here"
+            fi
+          fi
+
           notes="docs/releases/${version}.md"
           if [ ! -f "$notes" ]; then
             if [ "$stage" = true ]; then
@@ -238,11 +268,15 @@ jobs:
           name: package
           path: ${{ runner.temp }}/package
 
+      # --force skips only npm's client-side version checks (an existing
+      # version; `latest` below a higher one), which plan already reports as
+      # a warning, so a dry run works between releases. With --dry-run npm
+      # makes no registry write either way (docs/reviews/step-64.md).
       - name: Stage (dry run)
         working-directory: ${{ runner.temp }}/package
         env:
           TARBALL: ${{ needs.pack.outputs.tarball }}
-        run: npm stage publish "./${TARBALL}" --dry-run --access public
+        run: npm stage publish "./${TARBALL}" --dry-run --force --access public
 
   # A draft GitHub release for the tag, from docs/releases/<version>.md,
   # after a successful stage. It stays a draft because the version is not on
