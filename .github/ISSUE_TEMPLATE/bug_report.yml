@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for the report. Please check [Troubleshooting](https://github.com/anishbenji/tscache/blob/main/site/troubleshooting.md) first.
+        Thank you for the report. Please check [Troubleshooting](https://anishbenji.github.io/tscache/troubleshooting) first.
         Do not report a security problem here; follow [SECURITY.md](https://github.com/anishbenji/tscache/blob/main/SECURITY.md) instead.
   - type: input
     id: version
