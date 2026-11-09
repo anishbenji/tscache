@@ -48,8 +48,7 @@ body:
       label: Minimal reproduction
       description: |
         The smallest code that shows the problem: the cache config, the fetcher and the calls, or a link to a repository.
-        A reproduction against the examples' mock backend is ideal.
-      render: ts
+        A reproduction against the examples' mock backend is ideal. Put code in fenced blocks (three backticks followed by `ts`).
     validations:
       required: true
   - type: textarea
