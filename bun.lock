@@ -137,7 +137,7 @@
     },
     "packages/tscache": {
       "name": "@anishbenji/tscache",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "devDependencies": {
         "fake-indexeddb": "^6.2.7",
         "vite": "^8.3.5",

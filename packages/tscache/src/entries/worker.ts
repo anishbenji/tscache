@@ -16,9 +16,7 @@ import type { PersisterOptions } from "../persist/persister";
 import { holdLifetimeLock, lockManager } from "../rpc/lifetime";
 import type { MessagePortLike } from "../rpc/protocol";
 import { RpcServer } from "../rpc/server";
-
-/** Library version reported in hello; replaced at build time later. */
-const LIB_VERSION = "0.0.0";
+import { LIB_VERSION } from "../version";
 
 /** The dedicated-worker global, when this module runs inside one. */
 function dedicatedWorkerScope(): MessagePortLike | undefined {

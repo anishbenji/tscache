@@ -1,6 +1,6 @@
 {
   "name": "@anishbenji/tscache",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Browser time-series cache: SharedWorker multi-tab sharing, worker-side fetch orchestration, coverage tracking with real-gap awareness",
   "license": "MIT",
   "repository": {
@@ -13,6 +13,9 @@
     "url": "https://github.com/anishbenji/tscache/issues"
   },
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "sideEffects": [
     "./dist/worker.js"
   ],

@@ -13,10 +13,8 @@ import { ClearOnlyPersistence, lazyIdbStore } from "../persist/clear-only";
 import { PortClient } from "../rpc/port-client";
 import type { FetcherConfig, MessagePortLike } from "../rpc/protocol";
 import { RpcServer } from "../rpc/server";
+import { LIB_VERSION } from "../version";
 import type { Hosting } from "./hosting";
-
-/** Library version reported by the in-process server. */
-const LIB_VERSION = "0.0.0";
 
 /** The persistence chunk (persist/lazy.ts), for the clear-only call. */
 const lazyPersist = () => import("../persist/lazy");
