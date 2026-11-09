@@ -23,6 +23,7 @@ import {
 import type { ServerRead } from "@tscache/integrations/shared/hydration";
 import { createEffect, createMemo, createSignal, Show } from "solid-js";
 import { Chart } from "./Chart";
+import { Insights } from "./Insights";
 import { createSessionState } from "./session";
 
 export interface AppProps {
@@ -132,6 +133,7 @@ export function App(props: AppProps) {
           </button>
         </Show>
       </p>
+      <Insights insights={session?.insights} />
       <Chart
         session={session}
         kind={kind()}

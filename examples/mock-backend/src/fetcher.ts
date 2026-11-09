@@ -7,6 +7,8 @@
 // number, and reads JSON from a backend that answers JSON anyway, page by
 // page: each page is normalized as it arrives, and the pages are joined by
 // the one rule table in src/columns.ts, whatever mix of formats they came in.
+// The demo pages' insights (src/insights.ts) wrap it: each fetch is timed
+// and its body bytes counted.
 
 import {
   AuthInvalidError,
@@ -23,6 +25,7 @@ import {
   joinPages,
   type NormalPage,
 } from "./columns";
+import { type MeteredFetch, withInsights } from "./insights";
 import { type FetchNotice, postFetchNotice } from "./notices";
 
 /** The fetcher context the examples pass to createClient and updateAuth. */
@@ -51,6 +54,8 @@ interface PageMembers {
 /** One page: its columns normalized, whatever its format, and its members. */
 interface Page extends PageMembers {
   columns: NormalPage;
+  /** The size of its body. */
+  bytes: number;
 }
 
 function stringIn(context: unknown, key: keyof ExampleContext) {
@@ -94,16 +99,19 @@ async function fetchPage(
     throw new AuthInvalidError("the backend refused the access token");
   }
   if (!response.ok) throw new Error(`the backend answered ${response.status}`);
+  const raw = await response.arrayBuffer();
+  const bytes = raw.byteLength;
   if (!isColumnsType(response.headers.get("content-type"))) {
-    const body = (await response.json()) as PageMembers;
-    return { columns: fromJson(body), meta: body.meta, ...nextOf(body) };
+    const body = JSON.parse(new TextDecoder().decode(raw)) as PageMembers;
+    return { columns: fromJson(body), meta: body.meta, bytes, ...nextOf(body) };
   }
   // Views over the body: no value is parsed or copied.
-  const decoded = decodeColumns(await response.arrayBuffer());
+  const decoded = decodeColumns(raw);
   const members = decoded.header as unknown as PageMembers;
   return {
     columns: fromColumns(decoded),
     meta: members.meta,
+    bytes,
     ...nextOf(members),
   };
 }
@@ -119,7 +127,7 @@ function nextOf({ next }: PageMembers): { next?: number } {
 async function collect(
   path: string,
   request: FetchRequest,
-  counted: () => void,
+  counted: (bytes: number) => void,
 ): Promise<FetchResponse | undefined> {
   let page = await fetchPage(path, request, request.range.start);
   const { version } = page.meta;
@@ -128,7 +136,7 @@ async function collect(
   // and its watermark would claim an earlier page's provisional points.
   let finalizedUntil = page.meta.finalizedUntil;
   for (;;) {
-    counted();
+    counted(page.bytes);
     if (page.meta.version !== version) return undefined;
     pages.push(page);
     finalizedUntil = Math.min(finalizedUntil, page.meta.finalizedUntil);
@@ -147,7 +155,7 @@ async function collect(
 
 async function fetchRange(
   request: FetchRequest,
-  counted: () => void,
+  counted: (bytes: number) => void,
 ): Promise<FetchResponse> {
   const path = seriesPath(request.cacheId);
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -157,27 +165,34 @@ async function fetchRange(
   throw new Error("the dataset version kept changing during the fetch");
 }
 
-const fetcher: Fetcher = {
-  async fetch(request) {
-    let pages = 0;
-    const notice = (outcome: FetchNotice["outcome"]): FetchNotice => ({
-      cacheId: request.cacheId,
-      range: request.range,
-      pages,
-      outcome,
+/**
+ * Fetches the whole range, page by page, and announces the fetch on the
+ * examples' notice channel. Exported for the benchmark page, whose modes
+ * without tscache call it in the page, so every mode fetches and decodes
+ * with the same code.
+ */
+export const fetchSeries: MeteredFetch = async (request, meter) => {
+  let pages = 0;
+  const notice = (outcome: FetchNotice["outcome"]): FetchNotice => ({
+    cacheId: request.cacheId,
+    range: request.range,
+    pages,
+    outcome,
+  });
+  try {
+    const response = await fetchRange(request, (bytes) => {
+      pages++;
+      meter.page(bytes);
     });
-    try {
-      const response = await fetchRange(request, () => {
-        pages++;
-      });
-      postFetchNotice(notice("ok"));
-      return response;
-    } catch (error) {
-      const auth = error instanceof AuthInvalidError;
-      postFetchNotice(notice(auth ? "auth-invalid" : "failed"));
-      throw error;
-    }
-  },
+    postFetchNotice(notice("ok"));
+    return response;
+  } catch (error) {
+    const auth = error instanceof AuthInvalidError;
+    postFetchNotice(notice(auth ? "auth-invalid" : "failed"));
+    throw error;
+  }
 };
+
+const fetcher: Fetcher = withInsights(fetchSeries);
 
 export default fetcher;

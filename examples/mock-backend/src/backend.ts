@@ -41,6 +41,10 @@ export interface BackendStats {
   pages: Record<string, number>;
   /** Series pages answered, per format: JSON or a columns body. */
   formats: { json: number; columns: number };
+  /** Points (bars) in the series pages answered, over every dataset. */
+  points: number;
+  /** Body bytes of the series pages answered, over every dataset. */
+  bytes: number;
   /**
    * Series requests and socket subscriptions refused for a missing or
    * stale access token.
@@ -223,6 +227,8 @@ export function createBackend(options: BackendOptions = {}): Backend {
   const stats = {
     pages: {} as Record<string, number>,
     formats: { json: 0, columns: 0 },
+    points: 0,
+    bytes: 0,
     refused: 0,
     refreshes: 0,
     reused: 0,
@@ -270,6 +276,7 @@ export function createBackend(options: BackendOptions = {}): Backend {
       return text(401, "access token refused");
     }
     stats.pages[dataset] = (stats.pages[dataset] ?? 0) + 1;
+    stats.points += page.timestamps.length;
     const { next, finalizedUntil, ...data } = page;
     const meta = { version: tag, finalizedUntil };
     const members = next === undefined ? { meta } : { meta, next };
@@ -281,12 +288,19 @@ export function createBackend(options: BackendOptions = {}): Backend {
         { ...data, dtypes: datasets[dataset].fields },
         members,
       );
+      stats.bytes += body.byteLength;
       return new Response(body, {
         headers: { ...headers, "content-type": COLUMNS_TYPE },
       });
     }
     stats.formats.json++;
-    return json({ ...data, ...members }, headers);
+    const body = new TextEncoder().encode(
+      JSON.stringify({ ...data, ...members }),
+    );
+    stats.bytes += body.byteLength;
+    return new Response(body, {
+      headers: { ...headers, "content-type": "application/json" },
+    });
   }
 
   /** What a live stream pushes, from either transport. */

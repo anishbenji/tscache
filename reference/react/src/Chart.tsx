@@ -48,7 +48,10 @@ export function Chart({ session, kind, answer, onShowing }: ChartProps) {
         session.scrolled(visible);
       });
       const { answer } = session.state;
-      if (answer !== undefined) mounted.draw(answer);
+      if (answer !== undefined) {
+        mounted.draw(answer);
+        session.insights.drawn(answer);
+      }
       showing();
     });
     return () => {
@@ -60,11 +63,13 @@ export function Chart({ session, kind, answer, onShowing }: ChartProps) {
     };
   }, [session, kind]);
 
+  const insights = session?.insights;
   useEffect(() => {
     if (answer === undefined || view.current === null) return;
     view.current.draw(answer);
+    insights?.drawn(answer);
     showing();
-  }, [answer]);
+  }, [answer, insights]);
 
   return <div id="chart" className="chart" ref={element} />;
 }

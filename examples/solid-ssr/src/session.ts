@@ -14,17 +14,26 @@ import {
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import { readHydration, seed } from "@examples/mock-backend/hydration";
-import { createMemo, refresh, type SourceAccessor } from "solid-js";
+import {
+  createInsights,
+  type Insights,
+} from "@examples/mock-backend/read-insights";
+import { createMemo, onCleanup, refresh, type SourceAccessor } from "solid-js";
+import "@examples/mock-backend/insights.css";
 import { config } from "./sensor";
 
 export interface Session {
   client: SourceAccessor<TscacheClient>;
   cache: SourceAccessor<CacheHandle>;
+  /** The reads of `cache`, for the insights panel; report each draw. */
+  insights: Insights;
 }
 
 /** Creates the memos under the calling component, which owns them. */
 export function createSession(log: (text: string) => void): Session {
   const hydration = readHydration();
+  const insights = createInsights();
+  onCleanup(() => insights.dispose());
   const client: SourceAccessor<TscacheClient> = createMemo(async () => {
     const next = await createClient({
       workerUrl,
@@ -40,7 +49,7 @@ export function createSession(log: (text: string) => void): Session {
     const handle = await client().cache(config);
     const { applied } = await seed(handle, hydration);
     log(`snapshot from the server: ${applied.length} range(s) applied`);
-    return handle;
+    return insights.instrument(handle);
   });
-  return { client, cache };
+  return { client, cache, insights };
 }

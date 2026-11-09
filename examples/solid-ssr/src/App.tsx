@@ -8,6 +8,7 @@ import {
   type FetchNotice,
   onFetchNotice,
 } from "@examples/mock-backend/notices";
+import { insightLines } from "@examples/mock-backend/read-insights";
 import {
   createEffect,
   createMemo,
@@ -33,6 +34,9 @@ interface Answer {
   figures: Figures;
 }
 
+/** The insights panel before the browser draws a read of its own. */
+const SERVER_INSIGHT = insightLines({ last: undefined, spread: undefined });
+
 function span(ms: number): string {
   const minutes = Math.round(ms / 60_000);
   return minutes < 120 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
@@ -49,7 +53,11 @@ function Live(props: ServerRead) {
   const write = (text: string) =>
     setLog((lines) => [{ at: Date.now(), text }, ...lines].slice(0, 50));
 
-  const { cache, client } = createSession(write);
+  const { cache, client, insights } = createSession(write);
+  const [insight, setInsight] = createSignal(insightLines(insights.state));
+  onSettled(() =>
+    insights.subscribe(() => setInsight(insightLines(insights.state))),
+  );
   // The server's window to begin with; each earlier day moves it back.
   const [start, setStart] = createSignal(() => props.window.start);
   const answer = createMemo<Answer | undefined>(
@@ -98,9 +106,13 @@ function Live(props: ServerRead) {
       figures={answer()?.figures ?? props.figures}
       fetches={fetches()}
       log={log()}
+      insight={insight()}
       onLoadPreviousDay={() => setStart((t) => t - DAY)}
     >
-      <SensorChart shown={answer()} />
+      <SensorChart
+        shown={answer()}
+        onDrawn={(result) => insights.drawn(result)}
+      />
     </Panel>
   );
 }
@@ -115,6 +127,7 @@ function ServerPanel(props: ServerRead) {
       figures={props.figures}
       fetches={0}
       log={[]}
+      insight={SERVER_INSIGHT}
     />
   );
 }

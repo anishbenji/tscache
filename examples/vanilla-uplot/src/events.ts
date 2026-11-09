@@ -8,7 +8,14 @@ import type { CacheConfig, CacheHandle, Range } from "@anishbenji/tscache";
 import { datasets } from "@examples/mock-backend/datasets";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
-import { chartWidth, keepClient, log, show, watchFetches } from "./session";
+import {
+  chartWidth,
+  insights,
+  keepClient,
+  log,
+  show,
+  watchFetches,
+} from "./session";
 
 const INTERVAL = 60_000;
 const WEEK = 7 * 24 * 3_600_000;
@@ -46,6 +53,7 @@ async function load(range: Range): Promise<void> {
     chart.setScale("x", { min: range.start, max: range.end });
   });
   moving = false;
+  insights.drawn(result);
   show("points", result.timestamps.length);
   show("empty", coveredSlots(result.coverage) - result.timestamps.length);
   show("status", "ready");
@@ -95,6 +103,6 @@ addEventListener("resize", () => {
 watchFetches();
 void keepClient(async (client) => {
   show("mode", client.mode);
-  cache = await client.cache(config);
+  cache = insights.instrument(await client.cache(config));
   await load(wholeWeek());
 });

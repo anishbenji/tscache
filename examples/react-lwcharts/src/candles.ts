@@ -11,6 +11,7 @@ import type {
 } from "@anishbenji/tscache";
 import { datasets } from "@examples/mock-backend/datasets";
 import { useEffect, useState } from "react";
+import { insights } from "./insights";
 import { log, message } from "./log";
 
 const DAY = 24 * 3_600_000;
@@ -74,7 +75,7 @@ export function useCandles(
       (opened) => {
         if (!mounted) return;
         log(`opened cache ${opened.id}`);
-        cache = opened;
+        cache = insights.instrument(opened);
         void poll();
       },
       (error) => log(`could not open the cache: ${message(error)}`),

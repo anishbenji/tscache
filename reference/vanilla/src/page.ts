@@ -6,6 +6,10 @@
 import { createClient } from "@anishbenji/tscache";
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
+import {
+  INSIGHTS_MARKUP,
+  mountInsights,
+} from "@examples/mock-backend/read-insights";
 import { fetcherContext } from "@reference/shared/auth";
 import {
   type ChartKind,
@@ -60,6 +64,7 @@ ${FEED_OPTIONS.map(([kind, name]) => `      <option value="${kind}">${name}</opt
   <output data-testid="auth">signed in</output>
   <button type="button" id="sign-in" hidden>Sign in again</button>
 </p>
+${INSIGHTS_MARKUP}
 <div id="chart" class="chart"></div>`;
 }
 
@@ -122,6 +127,7 @@ export function startPage(
   function render(state: SessionState): void {
     if (state.answer !== undefined && state.answer !== shown?.answer) {
       view?.draw(state.answer);
+      if (view !== undefined) session.insights.drawn(state.answer);
       showRange();
       output("summary").value = summarize(state.answer);
     }
@@ -144,6 +150,7 @@ export function startPage(
   }
   // The session changes nothing after teardown, so neither does this.
   const unsubscribe = session.subscribe(() => render(session.state));
+  const unmountInsights = mountInsights(root, session.insights);
 
   /** Shows the chart of `kind`, replacing the one shown. */
   async function mountChart(kind: ChartKind): Promise<void> {
@@ -162,7 +169,10 @@ export function startPage(
       session.scrolled(visible);
     });
     const { answer } = session.state;
-    if (answer !== undefined) view.draw(answer);
+    if (answer !== undefined) {
+      view.draw(answer);
+      session.insights.drawn(answer);
+    }
     showRange();
   }
 
@@ -203,6 +213,7 @@ export function startPage(
     disposed = true;
     controls.abort();
     unsubscribe();
+    unmountInsights();
     detach?.();
     view?.dispose();
     await session.dispose();

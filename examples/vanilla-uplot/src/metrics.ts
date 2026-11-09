@@ -8,7 +8,14 @@ import type { CacheConfig, CacheHandle, GetResult } from "@anishbenji/tscache";
 import { datasets } from "@examples/mock-backend/datasets";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
-import { chartWidth, keepClient, log, show, watchFetches } from "./session";
+import {
+  chartWidth,
+  insights,
+  keepClient,
+  log,
+  show,
+  watchFetches,
+} from "./session";
 
 const INTERVAL = 5000;
 const WINDOW = 10 * 60_000;
@@ -74,6 +81,7 @@ function draw(result: GetResult, now: number): void {
     chart.setData([result.timestamps, cpu, requests], false);
     chart.setScale("x", { min: now - WINDOW, max: now });
   });
+  insights.drawn(result);
   const final = result.timestamps.filter((t) => t < provisionalFrom).length;
   show("final", final);
   show("provisional", result.timestamps.length - final);
@@ -112,7 +120,7 @@ addEventListener("resize", () => {
 watchFetches();
 void keepClient(async (client) => {
   show("mode", client.mode);
-  cache = await client.cache(config);
+  cache = insights.instrument(await client.cache(config));
   await poll();
 });
 setInterval(() => void poll(), 1000);

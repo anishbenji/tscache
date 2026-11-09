@@ -5,7 +5,7 @@
 // gap: the charts break there, and switching ranges or zooming inside
 // covered time asks the backend for nothing.
 
-import type { Range } from "@anishbenji/tscache";
+import type { GetResult, Range } from "@anishbenji/tscache";
 import { render } from "@solidjs/web";
 import {
   createEffect,
@@ -24,6 +24,8 @@ import {
   duration,
   entries,
   fetches,
+  insight,
+  insights,
   log,
   moment,
   time,
@@ -32,6 +34,9 @@ import {
 import { createSession, INTERVAL } from "./session";
 
 const HOUR = 3_600_000;
+
+/** The cache's answer each frame was made from, for the insights. */
+const answers = new WeakMap<Frame, GetResult>();
 
 const PRESETS = [
   { hours: 1, label: "Last hour" },
@@ -63,6 +68,16 @@ function Dashboard(props: DashboardProps) {
     return drawn() ? "ready" : "drawing";
   };
 
+  // The charts' effects set the frame's data in this same task; the
+  // insights time the draw up to the next frame.
+  createEffect(
+    () => props.frame,
+    (frame) => {
+      const result = answers.get(frame);
+      if (result !== undefined) insights.drawn(result);
+    },
+  );
+
   createEffect(
     () => props.frame.misses,
     (misses) => {
@@ -85,6 +100,12 @@ function Dashboard(props: DashboardProps) {
         <output data-testid="points">{props.frame.points}</output> · confirmed
         gaps <output data-testid="gaps">{props.frame.gaps.length}</output> ·{" "}
         <output data-testid="status">{status()}</output>
+      </p>
+      <p class="insights" data-testid="insights">
+        <output data-testid="provenance">{insight().source}</output>
+        <br />
+        <output data-testid="time-to-chart">{insight().timing}</output> ·{" "}
+        <output data-testid="chart-spread">{insight().spread}</output>
       </p>
       <p class="shown">
         {moment(props.frame.range.start)} – {moment(props.frame.range.end)} (
@@ -110,7 +131,10 @@ function App() {
   const frame = createMemo<Frame>(async () => {
     const handle = cache();
     const { range } = view();
-    return toFrame(await handle.get(range), range, INTERVAL);
+    const result = await handle.get(range);
+    const next = toFrame(result, range, INTERVAL);
+    answers.set(next, result);
+    return next;
   });
 
   onSettled(watchFetches);

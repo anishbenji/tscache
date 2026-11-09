@@ -15,6 +15,7 @@ import { type Hydration, seed } from "@examples/mock-backend/hydration";
 import { onFetchNotice } from "@examples/mock-backend/notices";
 import { useEffect, useState } from "react";
 import { candles, type Summary, summarize, utcDay } from "./candles";
+import { insights } from "./insights";
 import { log, message } from "./log";
 
 /** A connected client and its candles cache. */
@@ -53,7 +54,7 @@ async function connect(
   try {
     const cache = await client.cache(candles);
     const { applied } = await seed(cache, hydration);
-    return { client, cache, applied };
+    return { client, cache: insights.instrument(cache), applied };
   } catch (error) {
     void client.dispose();
     throw error;

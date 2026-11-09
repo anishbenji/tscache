@@ -3,6 +3,7 @@
 // answers. Times are UTC and numbers are formatted without the locale, so
 // the server and the browser write the same text.
 
+import type { insightLines } from "@examples/mock-backend/read-insights";
 import type { JSX } from "@solidjs/web";
 import { For } from "solid-js";
 import type { Figures, Reading, ServerRead } from "./sensor";
@@ -18,6 +19,8 @@ export interface LogLine {
   at: number;
   text: string;
 }
+
+type InsightLines = ReturnType<typeof insightLines>;
 
 /** A minute in UTC, such as "2026-10-22 14:32". */
 export const utc = (t: number): string =>
@@ -45,6 +48,11 @@ interface PanelProps {
   /** Backend fetches the browser's tabs made; none on the server. */
   fetches: number;
   log: LogLine[];
+  /**
+   * Where the drawn read's bars came from, and its time to chart
+   * (@examples/mock-backend/read-insights); placeholders on the server.
+   */
+  insight: InsightLines;
   /** Absent on the server: without JavaScript nothing can load more. */
   onLoadPreviousDay?: () => void;
   /** The chart; the server renders its frame empty. */
@@ -68,6 +76,11 @@ export function Panel(props: PanelProps) {
         <output data-testid="mode">{props.mode}</output> · browser fetches{" "}
         <output data-testid="fetches">{props.fetches}</output> ·{" "}
         <output data-testid="status">{props.status}</output>
+      </p>
+      <p class="stats insights" data-testid="insights">
+        <output data-testid="provenance">{props.insight.source}</output> ·{" "}
+        <output data-testid="time-to-chart">{props.insight.timing}</output> ·{" "}
+        <output data-testid="chart-spread">{props.insight.spread}</output>
       </p>
       <figure class="chart">{props.children}</figure>
       <p>

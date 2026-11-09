@@ -20,6 +20,11 @@
 // into its markup, React reads it with useSyncExternalStore, Solid with a
 // signal. Drawing the chart stays with the page; the session only asks the
 // chart which time it shows (attachChart).
+//
+// The demo's insights ride along: the series reads through cache handles
+// instrumented for them, and a page reports each draw to `insights`, which
+// says where the drawn bars came from and how long they took to reach the
+// chart (@examples/mock-backend/read-insights).
 
 import type {
   GetResult,
@@ -29,6 +34,10 @@ import type {
   Range,
   TscacheClient,
 } from "@anishbenji/tscache";
+import {
+  createInsights,
+  type Insights,
+} from "@examples/mock-backend/read-insights";
 import {
   type Connection,
   type ConnectionState,
@@ -184,6 +193,11 @@ export interface Session {
   readonly opening: Range;
   readonly state: SessionState;
   /**
+   * The page's insights into its reads. Report each draw of an answer with
+   * `insights.drawn(answer)`, right after the chart drew it.
+   */
+  readonly insights: Insights;
+  /**
    * Calls `listener` after each change of `state`. Returns the
    * unsubscribe. Needs no `this`, so pass it as it is.
    */
@@ -240,7 +254,19 @@ export function startSession({ open, served, feed }: SessionOptions): Session {
     served === undefined ? [] : [{ config: market, read: served }],
   );
 
-  const bars = series(connection, {
+  const insights = createInsights();
+  /** The connection, with every cache handle instrumented for the insights. */
+  const reads: Connection = {
+    get state() {
+      return connection.state;
+    },
+    subscribe: connection.subscribe,
+    cache: async (client, config) =>
+      insights.instrument(await connection.cache(client, config)),
+    dispose: () => connection.dispose(),
+  };
+
+  const bars = series(reads, {
     config: market,
     render({ result }) {
       const gaps = gapsOf(result);
@@ -416,6 +442,7 @@ export function startSession({ open, served, feed }: SessionOptions): Session {
     get state() {
       return state;
     },
+    insights,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -460,6 +487,7 @@ export function startSession({ open, served, feed }: SessionOptions): Session {
       uninstall?.();
       stopWatchingTokens();
       bars.dispose();
+      insights.dispose();
       await connection.dispose();
     },
   };

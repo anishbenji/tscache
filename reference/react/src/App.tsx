@@ -23,6 +23,7 @@ import {
 import type { ServerRead } from "@tscache/integrations/shared/hydration";
 import { type ChangeEvent, useEffect, useState } from "react";
 import { Chart } from "./Chart";
+import { Insights } from "./Insights";
 import { useSessionState } from "./session";
 
 export interface AppProps {
@@ -112,6 +113,7 @@ export function App({ session, served, initialKind, initialFeed }: AppProps) {
           </button>
         )}
       </p>
+      <Insights insights={session?.insights} />
       <Chart
         session={session}
         kind={kind}

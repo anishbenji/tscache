@@ -1,12 +1,17 @@
-// The page's log and its count of backend fetches, as module-scope signals:
-// what feeds them (the fetcher's notices, tscache events) arrives outside
-// any component.
+// The page's log, its count of backend fetches and its insights into its
+// reads, as module-scope signals: what feeds them (the fetcher's notices and
+// reports, tscache events) arrives outside any component.
 
 import {
   type FetchNotice,
   onFetchNotice,
 } from "@examples/mock-backend/notices";
+import {
+  createInsights,
+  insightLines,
+} from "@examples/mock-backend/read-insights";
 import { createSignal } from "solid-js";
+import "@examples/mock-backend/insights.css";
 
 interface LogEntry {
   at: number;
@@ -17,6 +22,16 @@ const [entries, setEntries] = createSignal<LogEntry[]>([]);
 const [fetches, setFetches] = createSignal(0);
 
 export { entries, fetches };
+
+/**
+ * Where each drawn read's bars came from, and its time to chart: the cache
+ * is instrumented with it (session.ts), and each draw reported to it.
+ */
+export const insights = createInsights();
+const [insight, setInsight] = createSignal(insightLines(insights.state));
+insights.subscribe(() => setInsight(insightLines(insights.state)));
+
+export { insight };
 
 export function log(text: string): void {
   setEntries((list) => [{ at: Date.now(), text }, ...list].slice(0, 50));

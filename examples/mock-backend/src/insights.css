@@ -1,0 +1,6 @@
+/* The insights panel every demo page shows (read-insights.ts). */
+.insights {
+  color: #5b6475;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}

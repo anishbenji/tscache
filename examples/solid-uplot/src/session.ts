@@ -18,7 +18,7 @@ import {
   refresh,
   type SourceAccessor,
 } from "solid-js";
-import { log } from "./log";
+import { insights, log } from "./log";
 
 export const INTERVAL = 10_000;
 
@@ -46,6 +46,8 @@ export function createSession(): Session {
     });
     return next;
   });
-  const cache = createMemo<CacheHandle>(() => client().cache(config));
+  const cache = createMemo<CacheHandle>(() =>
+    client().cache(config).then(insights.instrument),
+  );
   return { client, cache };
 }
