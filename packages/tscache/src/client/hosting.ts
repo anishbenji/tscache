@@ -41,10 +41,13 @@ interface ErrorSource {
 }
 
 /**
- * Completes the handshake within `timeoutMs`. A worker `error` before then
- * (script failed to load, threw at top level) or a timeout aborts the
- * handshake: its listeners go and this side's port closes, so a late hello
- * completes nothing (the SharedWorker itself is untouched).
+ * Completes the handshake. `timeoutMs` bounds only the wait for hello
+ * (N25): once hello arrives the timer stops, and the rest (the worker
+ * loading the fetcher module, init-ok or init-err) takes as long as it
+ * takes. A worker `error` at any point before init-ok (script failed to
+ * load, threw at top level) or the timeout aborts the handshake: its
+ * listeners go and this side's port closes, so a late hello completes
+ * nothing (the SharedWorker itself is untouched).
  */
 async function handshake(
   port: MessagePortLike,
@@ -72,6 +75,7 @@ async function handshake(
       port,
       fetcher === undefined ? {} : { fetcher },
       controller.signal,
+      () => clearTimeout(timer),
     );
   } finally {
     clearTimeout(timer);
