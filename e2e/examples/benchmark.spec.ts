@@ -15,16 +15,21 @@ interface Results {
   runs: RunResult[];
 }
 
+/** How long the page may take to run the workload; a hang fails here. */
+const RUN_TIMEOUT = 60_000;
+
 /** The views of one tab's workload, and of the three tabs of phase two. */
 const VIEWS = views(0).length;
 
 test("each mode makes the requests its caching allows, tscache the fewest", async ({
   page,
 }) => {
+  // The page's run may take up to RUN_TIMEOUT; the test allows for it.
+  test.setTimeout(RUN_TIMEOUT + 30_000);
   // One run per mode at the lowest latency: the counts do not depend on it.
   await page.goto("/?runs=1&latency=50&autorun=1");
   await expect(page.getByTestId("status")).toHaveText("done", {
-    timeout: 60_000,
+    timeout: RUN_TIMEOUT,
   });
   const results = JSON.parse(
     (await page.getByTestId("results-json").textContent()) ?? "{}",
