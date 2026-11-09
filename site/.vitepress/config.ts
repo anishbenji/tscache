@@ -136,5 +136,7 @@ const config = defineConfig({
 });
 
 // Renders ```mermaid fences in the browser, with Mermaid's dark theme while
-// the site is dark.
-export default withMermaid(config);
+// the site is dark. securityLevel 'strict' (the plugin defaults to 'loose'):
+// labels are encoded as text and click handlers are off; the generated
+// graph needs neither.
+export default withMermaid({ ...config, mermaid: { securityLevel: "strict" } });
