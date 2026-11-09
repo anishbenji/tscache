@@ -48,6 +48,7 @@ const config = defineConfig({
     nav: [
       { text: "Guide", link: "/guide/getting-started" },
       { text: "Concepts", link: "/concepts/coverage" },
+      { text: "How it works", link: "/how-it-works/" },
       { text: "API", link: "/usage/client" },
       { text: "Reference", link: "/api/" },
     ],
@@ -78,7 +79,11 @@ const config = defineConfig({
         },
         {
           text: "How it works",
-          items: [{ text: "Package map", link: "/how-it-works/package-map" }],
+          items: [
+            { text: "Overview", link: "/how-it-works/" },
+            { text: "Package map", link: "/how-it-works/package-map" },
+            { text: "Data model", link: "/how-it-works/data-model" },
+          ],
         },
         {
           text: "API by example",

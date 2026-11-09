@@ -1,0 +1,91 @@
+<svg class="hiw-svg" viewBox="0 0 760 736" role="img" aria-labelledby="hiw-ov-title hiw-ov-desc" xmlns="http://www.w3.org/2000/svg">
+<title id="hiw-ov-title">tscache system overview</title>
+<desc id="hiw-ov-desc">Each tab's page holds a client and a PortClient, connected over a MessagePort to one RpcServer in a SharedWorker (or a dedicated worker, or in-process). The server dispatches to the orchestrator and the engine; the orchestrator fetches through the fetcher module, which calls the backend; in the SharedWorker, persistence writes the engine's caches to IndexedDB.</desc>
+<defs><marker id="hiw-ov-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="hiw-headfill"/></marker></defs>
+<rect x="32" y="32" width="712" height="160" rx="10" class="hiw-shadow"/>
+<rect x="26" y="26" width="712" height="160" rx="10" class="hiw-shadow"/>
+<rect x="20" y="20" width="712" height="160" rx="10" class="hiw-frame"/>
+<text x="36" y="44" class="hiw-t">Page</text>
+<text x="80" y="44" class="hiw-s">one per tab; each tab has its own client</text>
+<rect x="36" y="56" width="170" height="84" rx="8" class="hiw-box"/>
+<text x="48" y="78" class="hiw-t">Your application</text>
+<text x="48" y="96" class="hiw-s">your code calls</text>
+<text x="48" y="112" class="hiw-s">cache.get(range), put, …</text>
+<rect x="222" y="56" width="214" height="84" rx="8" class="hiw-box"/>
+<text x="234" y="78" class="hiw-t">Client · CacheHandle</text>
+<text x="234" y="96" class="hiw-s">createClient() runs the</text>
+<text x="234" y="112" class="hiw-s">hosting chain; cache(config)</text>
+<text x="234" y="128" class="hiw-s">returns a CacheHandle</text>
+<rect x="452" y="56" width="196" height="84" rx="8" class="hiw-accent"/>
+<text x="464" y="78" class="hiw-t">PortClient</text>
+<text x="464" y="96" class="hiw-s">request ids, handshake,</text>
+<text x="464" y="112" class="hiw-s">errors and events</text>
+<path d="M206,98 H220" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<path d="M436,98 H450" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<text x="36" y="165" class="hiw-s">hosting chain, first that starts wins:</text>
+<rect x="252" y="152" width="56" height="18" rx="9" class="hiw-pill"/>
+<text x="280" y="165" class="hiw-xs hiw-m" text-anchor="middle">shared</text>
+<rect x="328" y="152" width="74" height="18" rx="9" class="hiw-pill"/>
+<text x="365" y="165" class="hiw-xs hiw-m" text-anchor="middle">dedicated</text>
+<rect x="422" y="152" width="78" height="18" rx="9" class="hiw-pill"/>
+<text x="461" y="165" class="hiw-xs hiw-m" text-anchor="middle">in-process</text>
+<path d="M308,161 H326" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<path d="M402,161 H420" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<path d="M546,140 V276" class="hiw-wire" marker-start="url(#hiw-ov-head)" marker-end="url(#hiw-ov-head)"/>
+<rect x="20" y="214" width="560" height="470" rx="10" class="hiw-frame"/>
+<text x="36" y="240" class="hiw-t">SharedWorker</text>
+<text x="36" y="258" class="hiw-s">or a dedicated Worker, or in-process in the page</text>
+<text x="556" y="207" class="hiw-s">MessagePort</text>
+<rect x="36" y="278" width="528" height="64" rx="8" class="hiw-box"/>
+<text x="48" y="300" class="hiw-t">RpcServer</text>
+<text x="48" y="318" class="hiw-s">hello → init handshake with each port; dispatches each</text>
+<text x="48" y="334" class="hiw-s">request; sends events to every ready port</text>
+<rect x="188" y="376" width="376" height="64" rx="8" class="hiw-box"/>
+<text x="200" y="398" class="hiw-t">Orchestrator</text>
+<text x="200" y="416" class="hiw-s">misses → coalesced fetches, minus the fetches</text>
+<text x="200" y="432" class="hiw-s">in flight; the auth state</text>
+<rect x="36" y="474" width="528" height="104" rx="8" class="hiw-box"/>
+<text x="48" y="496" class="hiw-t">Engine</text>
+<text x="48" y="514" class="hiw-s">one CacheState per cache id: segments, coverage,</text>
+<text x="48" y="530" class="hiw-s">dataset version, finalized watermark</text>
+<rect x="52" y="538" width="240" height="30" rx="6" class="hiw-inner"/>
+<text x="172" y="558" class="hiw-s hiw-m" text-anchor="middle">DenseSegment[]</text>
+<rect x="308" y="538" width="240" height="30" rx="6" class="hiw-inner"/>
+<text x="428" y="558" class="hiw-s hiw-m" text-anchor="middle">CoverageIndex</text>
+<rect x="36" y="594" width="528" height="76" rx="8" class="hiw-box hiw-lazy"/>
+<text x="48" y="616" class="hiw-t">Persistence</text>
+<text x="48" y="634" class="hiw-s">SharedWorker: HostedPersistence loads the Persister with</text>
+<text x="48" y="650" class="hiw-s">import(); other hostings: clearAll empties the database</text>
+<path d="M376,342 V374" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<text x="384" y="362" class="hiw-xs">get, invalidate</text>
+<path d="M110,342 V472" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<text x="118" y="400" class="hiw-xs">put, clear,</text>
+<text x="118" y="414" class="hiw-xs">hydrate, …</text>
+<path d="M36,320 H28 V632 H34" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<path d="M376,440 V472" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<text x="384" y="460" class="hiw-xs">read; apply responses as puts</text>
+<path d="M300,594 V580" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<text x="308" y="590" class="hiw-xs">observe changes, restore</text>
+<rect x="600" y="236" width="140" height="70" rx="8" class="hiw-box"/>
+<text x="612" y="258" class="hiw-t">Your backend</text>
+<text x="612" y="276" class="hiw-s">HTTP, WebSocket, …</text>
+<text x="612" y="292" class="hiw-s">your fetcher calls it</text>
+<rect x="600" y="362" width="140" height="92" rx="8" class="hiw-box hiw-lazy"/>
+<text x="612" y="384" class="hiw-t">Fetcher module</text>
+<text x="612" y="402" class="hiw-s">your code, loaded</text>
+<text x="612" y="418" class="hiw-s">once with import();</text>
+<text x="612" y="434" class="hiw-s">its fetch() answers</text>
+<rect x="600" y="594" width="140" height="76" rx="8" class="hiw-box"/>
+<text x="612" y="616" class="hiw-t">IndexedDB</text>
+<text x="612" y="634" class="hiw-s">database tscache:</text>
+<text x="612" y="650" class="hiw-s">caches and pages</text>
+<path d="M564,408 H598" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<path d="M670,362 V308" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<path d="M564,632 H598" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<path d="M20,712 H56" class="hiw-wire" marker-end="url(#hiw-ov-head)"/>
+<text x="64" y="716" class="hiw-s">calls or messages</text>
+<rect x="190" y="703" width="36" height="18" rx="4" class="hiw-box hiw-lazy"/>
+<text x="234" y="716" class="hiw-s">loaded with import() when first needed</text>
+<rect x="500" y="703" width="36" height="18" rx="4" class="hiw-accent"/>
+<text x="544" y="716" class="hiw-s">the page's end of the port</text>
+</svg>
