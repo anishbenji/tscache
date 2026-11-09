@@ -102,3 +102,7 @@ Every claim of the new section and the shortened bullet, traced to the code and 
 ### Chrome on Android version (director, after the README changes)
 
 The roadmap's "before 148" is correct. Chrome Platform Status lists "SharedWorker on Android" as shipping in Chrome 148 (origin trial 140 to 147), and MDN's compatibility table gives Chrome Android 148 and WebView Android 148. The README now says "Chrome on Android before version 148". `site/guides/workers.md` and the troubleshooting page still say Chrome on Android has none; step 60 corrects them.
+
+## Codex round 2 (gate), on 9fc1d25
+
+Verdict: merge. No findings; P-1, P-2, P-3 and R1-1 confirmed fixed. Settled.
