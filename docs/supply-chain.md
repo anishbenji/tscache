@@ -31,12 +31,12 @@ No step uses an npm token.
   ```sh
   gh secret list --repo anishbenji/tscache
   gh secret list --repo anishbenji/tscache --env npm-publish
-  git grep -n -i -E -e '_authToken=' \
+  git grep -l -i -E -e '_authToken=' \
     -e '(NPM_TOKEN|NODE_AUTH_TOKEN)[[:space:]]*[:=]' \
     -e 'secrets\.(NPM_TOKEN|NODE_AUTH_TOKEN)' -- ':!docs/'
   ```
 
-  Expected: all three commands print nothing; the two `gh secret list` commands exit 0 and the `git grep` exits 1. The grep looks for a credential in use (an `.npmrc` `_authToken=` line, either variable assigned in a shell or a workflow `env:`, or either one read from `secrets`); it skips `docs/`, which names these variables in prose, and plain mentions such as the comment in `release.yml` that explains why `setup-node` gets no `registry-url`.
+  Expected: all three commands print nothing; the two `gh secret list` commands exit 0 and the `git grep` exits 1. The grep prints file names only (`-l`), never the matching line, so a committed credential is not echoed into a terminal or a log; open a listed file in an editor, revoke the credential, and remove it. The grep looks for a credential in use (an `.npmrc` `_authToken=` line, either variable assigned in a shell or a workflow `env:`, or either one read from `secrets`); it skips `docs/`, which names these variables in prose, and plain mentions such as the comment in `release.yml` that explains why `setup-node` gets no `registry-url`.
 
 - [ ] Gitleaks runs on every commit (pre-commit hook) and again over the whole branch in `bun run ci`.
 
