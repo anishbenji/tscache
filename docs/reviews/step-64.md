@@ -37,6 +37,39 @@ published to validate it; the user re-creates it just before the real release. C
 - `release.yml` was checked, not changed: the file is `.github/workflows/release.yml`, and its only
   environment line is `environment: npm-publish` on the `stage` job.
 
+## Revision 4 (pre-review findings, 9 November 2026)
+
+The director's pre-review raised one P1 and two P2s, all validated and fixed:
+
+| #   | Sev | Finding                                                                                                                                | Fix                                                                                                                                                                                                                       |
+| --- | --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P1  | `stage-dry-run` fails whenever the version is not above the registry's: npm runs its registry version checks under `--dry-run` too     | The dry run passes `--force`, which skips only those client-side checks; `plan` reads `npm view <name> versions --json` and fails a real stage, or warns on a dry run, when the version is not strictly above the highest |
+| 2   | P2  | The called CI joined `ci-<ref>`, the same group as normal CI on that ref, because `github.ref` is the caller's                         | `ci.yml` uses `${{ github.workflow }}-${{ github.ref }}`; `release.yml`'s own group becomes `release-run-<ref>` (see below)                                                                                               |
+| 3   | P2  | The checklist re-created the trusted publisher before the bump PR, so it could lapse before the tag; it contradicted the setup section | Reordered: bump PR → merge → dry run on `main` → validate or re-create the trusted publisher → tag within two days                                                                                                        |
+
+**Finding 1, the npm source.** In npm 12.2.2, `lib/commands/publish.js` (git tag `v12.2.2`), `force`
+is read at line 130 and used in exactly two `if (!force)` blocks: lines 133–138 (a prerelease needs
+`--tag`) and lines 181–193 (`#registryVersions`, a read-only `pacote.packument` GET at lines 259–285,
+then "You cannot publish over the previously published versions" and "Cannot implicitly apply the
+"latest" tag"). The only registry write, `libpub(...)` with `stage: true`, is at lines 205–217 inside
+`if (!dryRun)`, so `--dry-run --force` writes nothing and skips only the version read and the two
+checks. The prerelease check it also skips cannot matter: `plan` accepts only plain `X.Y.Z`. The real
+stage does not pass `--force`, so npm still enforces both checks there.
+
+**Finding 1, `plan`.** The version is compared with every published plain `X.Y.Z` version (prereleases
+such as `0.0.0-stage` are ignored, as npm ignores them for `latest`), using `sort -V`. A registry read
+failure fails a real stage and warns on a dry run. Staged versions are not public, so a pending stage
+of the same version is not visible to `plan`; it shows up as a stage failure, and the maintainer checks
+`npm stage list` first (`docs/releasing.md`).
+
+**Finding 2, the group names.** GitHub: "A called workflow uses the name of its caller workflow in
+`${{ github.workflow }}`" (Reusing workflow configurations), so the called CI's group is
+`Release-<ref>`, and normal CI's is `CI-<ref>`. Pull requests and pushes keep one group per ref, with
+`cancel-in-progress` still true only for pull requests, so their behaviour is unchanged; only the
+group's prefix changes. GitHub also says "The concurrency group name is case insensitive" (Control the
+concurrency of workflows and jobs), so `release.yml`'s own `release-<ref>` would have matched
+`Release-<ref>` and made the called CI wait on its own caller. That group is now `release-run-<ref>`.
+
 ## Scope
 
 | File                            | What                                                                                                      |
@@ -55,15 +88,17 @@ published to validate it; the user re-creates it just before the real release. C
 - **Version check.** On a tag, `plan` fails unless the tag is exactly `v<version>` from
   `packages/tscache/package.json`, before CI runs. Only plain `X.Y.Z` is accepted: npm refuses a
   prerelease without `--tag`, the workflow sets none, and a staged package's tag cannot be changed
-  later. A real stage also fails in `plan` when `docs/releases/<version>.md` is missing; a dry run only
-  warns.
+  later. `plan` also reads the published versions (`npm view`, no auth) and requires the version to be
+  strictly above the highest one. A real stage fails in `plan` when that check fails or
+  `docs/releases/<version>.md` is missing; a dry run only warns.
 - **CI through `workflow_call`.** `ci.yml` gains the trigger. On push, pull request and manual runs
   the `inputs` context is empty, `!inputs.skip-bench` is true, and both jobs run as before. The release
   passes `skip-bench: true`: the bench job compares a head against a base, and on a tag push or a
   manual run its base resolves to `HEAD`, so the comparison means nothing and a timing-noise failure
-  could block a release. The concurrency groups differ (`ci-<ref>` in the called workflow,
-  `release-<ref>` in the caller), so neither cancels the other, which GitHub warns about when caller
-  and callee share a group.
+  could block a release. The concurrency groups differ: `Release-<ref>` in the called CI (GitHub gives
+  a called workflow its caller's `github.workflow` and `github.ref`), `CI-<ref>` for normal CI, and
+  `release-run-<ref>` for the release workflow itself, distinct even though group names are
+  case-insensitive (revision 4).
 - **Build and stage are separate jobs.** `pack` installs dependencies, builds (tsdown, publint, attw)
   and packs the tarball with no OIDC permission, then uploads it as an artifact. `stage` checks out
   nothing and installs no project dependency: it sets up Node, installs the pinned npm, downloads the
@@ -75,9 +110,10 @@ published to validate it; the user re-creates it just before the real release. C
   notes that "you can publish name@version, ./foo.tgz, etc", and the stage branch sends the same
   manifest and tarball data with `stage: true`. Lifecycle scripts run only for directory specs, so the
   tarball spec also keeps project scripts out of the OIDC job.
-- **Dry runs never get OIDC.** `stage-dry-run` runs the same steps with `--dry-run`, no environment and
-  no permissions. With `--dry-run`, npm skips the registry call and only warns when there are no
-  credentials (`publish.js`). Keeping dry runs out of `npm-publish` also lets step 66 restrict that
+- **Dry runs never get OIDC.** `stage-dry-run` runs the same steps with `--dry-run --force`, no
+  environment and no permissions. With `--dry-run`, npm skips the registry write and only warns when
+  there are no credentials; `--force` skips its client-side version checks, which `plan` makes instead
+  (revision 4, with the source lines). Keeping dry runs out of `npm-publish` also lets step 66 restrict that
   environment to `v*` tags without breaking dry runs from `main`.
 - **npm version.** Staged publishing needs npm 11.15.0 or later and Node 22.14.0 or later. Both stage
   jobs run `npm install --global npm@12.2.2` and fail unless `npm --version` then prints exactly
@@ -112,7 +148,7 @@ The workflow default is `permissions: {}`: no job inherits anything, and each st
 | `pack`                 | `contents: read`  | Checkout. The artifact upload uses the runner's Actions runtime token, not `GITHUB_TOKEN`.                                                        |
 | `stage`                | `contents: read`  | Required by the brief; stating any permission sets the rest to none. The job itself checks out nothing.                                           |
 | `stage`                | `id-token: write` | Lets the job request a GitHub OIDC token, which npm exchanges for a short-lived token limited to `npm stage publish`, and which signs provenance. |
-| `stage-dry-run`        | none (`{}`)       | It downloads the artifact (runtime token) and runs `npm stage publish --dry-run`, which needs no credential.                                      |
+| `stage-dry-run`        | none (`{}`)       | It downloads the artifact (runtime token) and runs `npm stage publish --dry-run --force`, which needs no credential.                              |
 | `github-release-draft` | `contents: write` | `gh release create --draft` creates a release, which needs write access to repository contents. Only this job has it, and only after a stage.     |
 
 `stage` also runs in the environment `npm-publish`, the environment named in the trusted-publisher
@@ -144,24 +180,27 @@ and is not an action.
 
 ## Doc sources
 
-| Claim                                                                                                                                   | Source                                                                                                                                                 |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Staged publishing needs npm ≥ 11.15.0 and Node ≥ 22.14.0; staging a new package creates `0.0.0-stage`                                   | npm, [Staged publishing](https://docs.npmjs.com/staged-publishing)                                                                                     |
-| `npm stage list`, `view`, `download` need no 2FA; `approve` (CLI or Staged Packages tab) prompts for 2FA                                | same, and npm, [`npm stage`](https://docs.npmjs.com/cli/v11/commands/npm-stage)                                                                        |
-| `npm stage publish [<package-spec>]` flags: `--tag`, `--access`, `--dry-run`, `--provenance`                                            | npm, [`npm stage`](https://docs.npmjs.com/cli/v11/commands/npm-stage)                                                                                  |
-| Staged and published versions share one version index; prerelease needs `--tag`; tag is immutable; reject then re-stage                 | same                                                                                                                                                   |
-| OIDC tokens can run `npm stage publish` (if allowed) but no `npm stage` subcommand                                                      | same                                                                                                                                                   |
-| Trusted publishing needs npm ≥ 11.5.1 and Node ≥ 22.14.0, GitHub-hosted runners, and `id-token: write`                                  | npm, [Trusted publishing](https://docs.npmjs.com/trusted-publishers)                                                                                   |
-| Publisher fields; allowed actions (stage publish always allowed); config expiry within 2 days                                           | same                                                                                                                                                   |
-| npm validates the calling workflow's filename under `workflow_call`                                                                     | same (so the stage job lives in `release.yml` itself)                                                                                                  |
-| `repository.url` must match the GitHub repository                                                                                       | same; `packages/tscache/package.json` has `git+https://github.com/anishbenji/tscache.git`                                                              |
-| "Require two-factor authentication and disallow tokens" keeps trusted publishing working                                                | same                                                                                                                                                   |
-| Provenance needs a cloud-hosted runner                                                                                                  | npm, [Generating provenance statements](https://docs.npmjs.com/generating-provenance-statements)                                                       |
-| Unpublish within 72 h without dependents; after that only < 300 weekly downloads, one owner, no dependents; a version is never reusable | npm, [Unpublish policy](https://docs.npmjs.com/policies/unpublish)                                                                                     |
-| Called-workflow permissions can only be kept or reduced; `github` context is the caller's; shared concurrency groups cancel the caller  | GitHub, [Reusing workflow configurations](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations)          |
-| Secrets reach a called workflow only when passed                                                                                        | GitHub, [Reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)                                                |
-| Referencing a missing environment creates it without protection rules; required reviewers; tag rules                                    | GitHub, [Managing environments for deployment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments) |
-| Tarball spec, dry-run behaviour and the stage-id line                                                                                   | npm CLI source, `lib/commands/publish.js` and `lib/commands/stage/publish.js` at tag `latest` (12.2.2)                                                 |
+| Claim                                                                                                                                                                                                 | Source                                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Staged publishing needs npm ≥ 11.15.0 and Node ≥ 22.14.0; staging a new package creates `0.0.0-stage`                                                                                                 | npm, [Staged publishing](https://docs.npmjs.com/staged-publishing)                                                                                                         |
+| `npm stage list`, `view`, `download` need no 2FA; `approve` (CLI or Staged Packages tab) prompts for 2FA                                                                                              | same, and npm, [`npm stage`](https://docs.npmjs.com/cli/v11/commands/npm-stage)                                                                                            |
+| `npm stage publish [<package-spec>]` flags: `--tag`, `--access`, `--dry-run`, `--provenance`                                                                                                          | npm, [`npm stage`](https://docs.npmjs.com/cli/v11/commands/npm-stage)                                                                                                      |
+| Staged and published versions share one version index; prerelease needs `--tag`; tag is immutable; reject then re-stage                                                                               | same                                                                                                                                                                       |
+| OIDC tokens can run `npm stage publish` (if allowed) but no `npm stage` subcommand                                                                                                                    | same                                                                                                                                                                       |
+| Trusted publishing needs npm ≥ 11.5.1 and Node ≥ 22.14.0, GitHub-hosted runners, and `id-token: write`                                                                                                | npm, [Trusted publishing](https://docs.npmjs.com/trusted-publishers)                                                                                                       |
+| Publisher fields; allowed actions (stage publish always allowed); config expiry within 2 days                                                                                                         | same                                                                                                                                                                       |
+| npm validates the calling workflow's filename under `workflow_call`                                                                                                                                   | same (so the stage job lives in `release.yml` itself)                                                                                                                      |
+| `repository.url` must match the GitHub repository                                                                                                                                                     | same; `packages/tscache/package.json` has `git+https://github.com/anishbenji/tscache.git`                                                                                  |
+| "Require two-factor authentication and disallow tokens" keeps trusted publishing working                                                                                                              | same                                                                                                                                                                       |
+| Provenance needs a cloud-hosted runner                                                                                                                                                                | npm, [Generating provenance statements](https://docs.npmjs.com/generating-provenance-statements)                                                                           |
+| Unpublish within 72 h without dependents; after that only < 300 weekly downloads, one owner, no dependents; a version is never reusable                                                               | npm, [Unpublish policy](https://docs.npmjs.com/policies/unpublish)                                                                                                         |
+| Called-workflow permissions can only be kept or reduced; `github` context is the caller's; a called workflow uses its caller's name in `github.workflow`; shared concurrency groups cancel the caller | GitHub, [Reusing workflow configurations](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations)                              |
+| Secrets reach a called workflow only when passed                                                                                                                                                      | GitHub, [Reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)                                                                    |
+| Referencing a missing environment creates it without protection rules; required reviewers; tag rules                                                                                                  | GitHub, [Managing environments for deployment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)                     |
+| Tarball spec, dry-run behaviour and the stage-id line                                                                                                                                                 | npm CLI source, `lib/commands/publish.js` and `lib/commands/stage/publish.js` at tag `latest` (12.2.2)                                                                     |
+| `--force` gates only the prerelease check and the registry version checks; the registry write is inside `if (!dryRun)`                                                                                | npm CLI source, `lib/commands/publish.js` at git tag `v12.2.2`, lines 130–138, 181–193, 205–217, 259–285                                                                   |
+| Concurrency group names are case-insensitive; `${{ github.workflow }}-${{ github.ref }}` pattern                                                                                                      | GitHub, [Control the concurrency of workflows and jobs](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency) |
+| `npm view @anishbenji/tscache versions --json` needs no auth; today `["0.0.0-stage", "0.0.1"]`                                                                                                        | run on 9 November 2026                                                                                                                                                     |
 
 ## Verification
 
@@ -173,6 +212,14 @@ and is not an action.
   inputs: a matching tag push stages when the notes exist and fails when they are missing; a
   mismatched tag fails with the expected message; a dispatch on `main` is a dry run whatever `dry-run`
   says; a dispatch on a tag stages only with `dry-run` false.
+- Revision 4: the `plan` script was run locally with a stand-in `npm` that prints a given versions
+  list (13 cases, all as intended). Current registry (`0.0.0-stage`, `0.0.1`): `0.0.0` on `main` is a
+  dry run with a warning; a `v0.0.0` tag fails. Equal to latest (`0.0.1`): dry run warns, tag fails.
+  Below (`0.0.1` against `0.1.0`; `0.0.9` against `0.0.10`, which checks the numeric sort): tag fails.
+  Above (`0.1.0`): tag push and a tag dispatch with `dry-run` false stage, a `main` dispatch is a quiet
+  dry run. A single-string versions answer, a prerelease-only list, and a registry read failure (tag
+  fails, dry run warns) were covered too. Against the real registry, `0.0.0` on `main` warns and
+  exits 0.
 - The `pack` script was run locally after `bun run build`: `npm pack --pack-destination` writes
   `anishbenji-tscache-0.0.0.tgz`, the name the step expects.
 - The summary's `grep -E '\(staged'` matches the line format in npm's source.
@@ -180,8 +227,11 @@ and is not an action.
 
 ## Not verified
 
-- The workflow has not run on GitHub: no tag, no dispatch. The rehearsal after steps 63 and 64 merge
-  dispatches it with `dry-run` true.
+- The workflow has not run on GitHub: no tag, no dispatch. **Rehearsal plan:** after steps 63 and 64
+  merge, dispatch `release.yml` on `main` with `dry-run` true. With step 63's `0.1.0` and its notes on
+  `main`, `plan` should pass without a warning, CI and `pack` should pass, and `stage-dry-run` should
+  print the tarball's contents. If `main` is still below `0.0.1`, `plan` warns and the dry run still
+  completes, because of `--force`. Keep the log for the rehearsal decision.
 - `actionlint` is not installed on this machine and was not added.
 - `npm stage publish --dry-run` on the packed tarball was not run locally: the agent's command guard
   blocks any npm publish command in unattended runs. The `stage-dry-run` job exercises it on the first
