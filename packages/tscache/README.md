@@ -114,6 +114,25 @@ setups without a bundler, and the full fetcher contract.
 | `@anishbenji/tscache/engine`  | the engine without a worker, for Node, server rendering and tests                      |
 | `@anishbenji/tscache/vite`    | `fetcherUrl()`, the Vite plugin for the fetcher module (`vite` 8 is an optional peer)  |
 
+## Browser support
+
+`createClient` tries three hostings in this order, starting from its `mode`
+option (default `"shared"`), and reports the one it settled on as
+`client.mode`:
+
+1. **SharedWorker** (`"shared"`), where the browser has it. Every same-origin
+   tab that loads the same worker script shares one cache and its fetches.
+2. **Dedicated worker** (`"dedicated"`): one `Worker` per tab, each with a cache
+   of its own.
+3. **In-process** (`"in-process"`): the engine in the page itself, with no
+   sharing.
+
+Each step down emits a `modeFallback` event with the reason. Chrome on Android
+has no `SharedWorker`, so there every tab gets its own cache through the
+dedicated worker. Only the SharedWorker hosting persists a cache with
+`persist: true`. [Workers and fallback](https://anishbenji.github.io/tscache/guides/workers)
+has the details.
+
 ## Stability
 
 tscache follows semantic versioning within 0.x: a minor release (0.2.0) may
