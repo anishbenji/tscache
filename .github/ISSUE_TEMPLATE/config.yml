@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/anishbenji/tscache/tree/main/site
+    about: Getting started, the concepts, every public API, guides and an FAQ.
+  - name: Troubleshooting and FAQ
+    url: https://github.com/anishbenji/tscache/blob/main/site/troubleshooting.md
+    about: Common causes of a fallback hosting mode, protocol mismatches and fetcher errors.
+  - name: Report a security problem
+    url: https://github.com/anishbenji/tscache/security/advisories/new
+    about: Report a vulnerability privately; do not open a public issue.
