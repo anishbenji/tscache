@@ -9,8 +9,9 @@ Listen for `modeFallback`, whose `reason` says why each hosting failed. With web
 
 ## `client.mode` is `'dedicated'`
 
-Expected on Chrome for Android, which has no `SharedWorker`. Elsewhere, the SharedWorker failed or did
-not say hello within `handshakeTimeoutMs`; `modeFallback` says which.
+Expected on Chrome for Android, which has no `SharedWorker`. Elsewhere, the SharedWorker failed, did
+not say hello within `handshakeTimeoutMs`, or stopped running during the handshake ("SharedWorker
+stopped running during the handshake"); `modeFallback` says which.
 
 ## `createClient` rejects with `ProtocolMismatchError`
 

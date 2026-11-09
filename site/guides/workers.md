@@ -12,7 +12,9 @@ The engine runs in one of three hostings, tried in order from `mode` (default `'
 
 A hosting **fails**, and the chain steps down with a `modeFallback` event, when its constructor throws
 (Chrome on Android has no `SharedWorker`), when the worker fires `error` before the handshake (the script
-failed to load or threw), or when no hello arrives within `handshakeTimeoutMs`. When the last hosting
+failed to load or threw), when no hello arrives within `handshakeTimeoutMs`, or when a SharedWorker
+stops running after its hello but before the handshake completes (reason: "SharedWorker stopped running
+during the handshake"). When the last hosting
 fails, `createClient` rejects. A `ProtocolMismatchError` never steps down: it is a real
 incompatibility.
 
