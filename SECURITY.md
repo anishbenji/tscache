@@ -2,7 +2,15 @@
 
 ## Supported versions
 
-tscache is pre-release. Security fixes land on `main` only.
+tscache follows semver for 0.x releases: a minor release may break the API,
+a patch release never does. Only the latest 0.x minor receives fixes; a
+security fix ships as a patch of that minor, and an older minor gets none.
+
+| Version           | Supported             |
+| ----------------- | --------------------- |
+| latest 0.x minor  | Yes                   |
+| older 0.x minors  | No                    |
+| unreleased `main` | Fixes land here first |
 
 ## Reporting a vulnerability
 
