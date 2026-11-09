@@ -8,7 +8,8 @@ once.
   data. Where there is no `SharedWorker` (Chrome on Android), it falls back to a dedicated `Worker`,
   then to the page itself; those give each tab a cache of its own, shared with no other tab.
 - **The worker fetches.** You give it a fetcher module, and a `get` fetches only the ranges its cache
-  neither holds nor already has in flight. Under the SharedWorker, concurrent reads of a range from
+  neither holds nor already has in flight, widened by one interval where a miss meets cached data so the
+  series joins up (that edge point is fetched again). Under the SharedWorker, concurrent reads of a range from
   several tabs wait on one fetch, and finalized history one tab fetched is not fetched again by
   another. Points at or after the `finalizedUntil` watermark are provisional: every read that includes
   them fetches them again.

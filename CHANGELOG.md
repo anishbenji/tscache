@@ -14,7 +14,9 @@ for charts that scroll through history and follow a live tail in several tabs.
   page itself. A lost SharedWorker is detected with a lifetime Web Lock and
   reported as `workerLost`.
 - **Fetching in the worker.** A fetcher module, loaded by the worker, fetches
-  only the ranges the cache neither holds nor already has in flight. Under the
+  only the ranges the cache neither holds nor already has in flight, widened by one
+  interval where a miss meets cached data so the series joins up (that edge
+  point is fetched again). Under the
   SharedWorker hosting, concurrent reads of a range from several tabs wait on
   one fetch, and finalized history one tab fetched is not fetched again for
   another; the dedicated and in-process fallbacks give each tab a cache of its
