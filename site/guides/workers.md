@@ -16,6 +16,11 @@ failed to load or threw), or when no hello arrives within `handshakeTimeoutMs`. 
 fails, `createClient` rejects. A `ProtocolMismatchError` never steps down: it is a real
 incompatibility.
 
+`handshakeTimeoutMs` bounds only the wait for hello. Once the worker has said hello, it loads your
+`fetcher` module, and that load is not bounded by the timeout: a slow import delays `createClient`
+but does not step down. A fetcher module that fails to load rejects `createClient` with a
+`TscacheError` (`init-err`) naming the module, without falling back.
+
 ::: info Chrome on Android
 Chrome on Android has no `SharedWorker`. There the client falls back to a dedicated worker per tab, with
 one `modeFallback` event. Nothing to configure, but each tab then has a cache of its own: a clear stays
