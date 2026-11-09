@@ -70,6 +70,26 @@ group's prefix changes. GitHub also says "The concurrency group name is case ins
 concurrency of workflows and jobs), so `release.yml`'s own `release-<ref>` would have matched
 `Release-<ref>` and made the called CI wait on its own caller. That group is now `release-run-<ref>`.
 
+## Revision 5 (second pre-review, 9 November 2026)
+
+The second pre-review at 83fd89a found no P0 or P1 and three P2s, all validated and fixed:
+
+| #   | Sev | Finding                                                                        | Fix                                                                                                                                                                                       |
+| --- | --- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P2  | The workflow table in `docs/releasing.md` showed the dry run without `--force` | The `stage-dry-run` row now reads `npm stage publish <tarball> --dry-run --force --access public`, as in `release.yml` and the Dry run section                                            |
+| 2   | P2  | No documented recovery when `stage` succeeds but `github-release-draft` fails  | The retry section: use **Re-run failed jobs** on the original run (keeps `plan`'s outputs and the artifact), or `gh release create vX.Y.Z --draft ...` by hand; never reject a good stage |
+| 3   | P2  | A tag on a commit that is not on `main` would stage unreviewed code            | `plan` fails a real stage unless `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` succeeds; a dry run warns                                                                       |
+
+**Finding 3, how `origin/main` gets there.** `plan`'s checkout now sets `fetch-depth: 0`. At the
+pinned `actions/checkout` SHA, `src/git-source-provider.ts` fetches `getRefSpecForAllHistory(...)`
+when `fetchDepth <= 0`, and `src/ref-helper.ts` defines that as
+`['+refs/heads/*:refs/remotes/origin/*', tagsRefSpec]`, so `origin/main` exists after checkout. The
+director suggested a separate `git fetch origin main`; it is not needed, and with
+`persist-credentials: false` a later fetch would run without the checkout's token. `plan` keeps
+`contents: read`, and `GITHUB_SHA` is the runner's default environment variable, so no `${{ }}`
+enters the `run:` block. Any non-zero exit from `git merge-base` counts as not on `main`, including a
+missing `origin/main` (exit 128).
+
 ## Scope
 
 | File                            | What                                                                                                      |
@@ -88,7 +108,8 @@ concurrency of workflows and jobs), so `release.yml`'s own `release-<ref>` would
 - **Version check.** On a tag, `plan` fails unless the tag is exactly `v<version>` from
   `packages/tscache/package.json`, before CI runs. Only plain `X.Y.Z` is accepted: npm refuses a
   prerelease without `--tag`, the workflow sets none, and a staged package's tag cannot be changed
-  later. `plan` also reads the published versions (`npm view`, no auth) and requires the version to be
+  later. For a real stage, `plan` also requires the commit to be an ancestor of `origin/main`
+  (revision 5); a dry run warns. `plan` also reads the published versions (`npm view`, no auth) and requires the version to be
   strictly above the highest one. A real stage fails in `plan` when that check fails or
   `docs/releases/<version>.md` is missing; a dry run only warns.
 - **CI through `workflow_call`.** `ci.yml` gains the trigger. On push, pull request and manual runs
@@ -143,7 +164,7 @@ The workflow default is `permissions: {}`: no job inherits anything, and each st
 
 | Job                    | Permission        | Why                                                                                                                                               |
 | ---------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan`                 | `contents: read`  | `actions/checkout` reads the repository for `package.json` and the release notes.                                                                 |
+| `plan`                 | `contents: read`  | `actions/checkout` reads the repository, with full history for the `origin/main` ancestry check, plus `package.json` and the release notes.       |
 | `ci`                   | `contents: read`  | The caller job's permissions cap the called workflow; `ci.yml` checks out the repository and declares `contents: read` itself.                    |
 | `pack`                 | `contents: read`  | Checkout. The artifact upload uses the runner's Actions runtime token, not `GITHUB_TOKEN`.                                                        |
 | `stage`                | `contents: read`  | Required by the brief; stating any permission sets the rest to none. The job itself checks out nothing.                                           |
@@ -220,6 +241,12 @@ and is not an action.
   dry run. A single-string versions answer, a prerelease-only list, and a registry read failure (tag
   fails, dry run warns) were covered too. Against the real registry, `0.0.0` on `main` warns and
   exits 0.
+- Revision 5: the `plan` script was run in scratch repositories, where `git clone` of a local
+  source repository provides real `origin/main` and `origin/side` refs (7 cases, all as intended). A
+  tag push on an older `main` commit and on the `main` tip stages. A tag push, and a tag dispatch with
+  `dry-run` false, on a `side` commit not on `main` fail with "is not on origin/main". A tag dispatch
+  with `dry-run` true and a branch dispatch on that commit warn and exit 0. A repository without
+  `origin/main` fails a tag push.
 - The `pack` script was run locally after `bun run build`: `npm pack --pack-destination` writes
   `anishbenji-tscache-0.0.0.tgz`, the name the step expects.
 - The summary's `grep -E '\(staged'` matches the line format in npm's source.
