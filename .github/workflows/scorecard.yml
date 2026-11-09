@@ -15,8 +15,6 @@ on:
   schedule:
     # Weekly, Mondays at 03:17 UTC.
     - cron: "17 3 * * 1"
-  # Re-score when the branch protection or rulesets change.
-  branch_protection_rule:
 
 # No permissions by default; the one job asks for what it needs.
 permissions: {}
@@ -27,11 +25,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
-      # Check out the repository and read it for the checks.
+      # Check out the repository. The repository is public, so the checks
+      # need no other read permission (the action's README lists issues,
+      # pull-requests and checks reads for private repositories only).
       contents: read
-      # Read the repository's Actions data, which some checks query through
-      # the API; read-only, listed in the action's documentation.
-      actions: read
       # Upload the SARIF results to code scanning.
       security-events: write
       # Sign the published results with the GitHub OIDC token
