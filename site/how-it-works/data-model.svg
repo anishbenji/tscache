@@ -104,7 +104,7 @@
 <rect x="20" y="508" width="28" height="24" rx="4" class="hiw-cov"/>
 <circle cx="34" cy="520" r="6" class="hiw-pt"/>
 <text x="58" y="518" class="hiw-s hiw-strong">covered, point</text>
-<text x="58" y="532" class="hiw-xs">returned; not fetched again</text>
+<text x="58" y="532" class="hiw-xs">returned; fetched again only at a miss's edge</text>
 <rect x="400" y="508" width="28" height="24" rx="4" class="hiw-cov"/>
 <text x="438" y="518" class="hiw-s hiw-strong">covered, no point</text>
 <text x="438" y="532" class="hiw-xs">a confirmed real gap</text>

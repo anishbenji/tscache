@@ -71,18 +71,22 @@ range 14 to 19 runs across the page edge and across both segment B and segment C
 
 Together, coverage and points give each slot one of four states:
 
-| Slot state            | What a read does                                  | In the diagram      |
-| --------------------- | ------------------------------------------------- | ------------------- |
-| covered, with a point | returns the point; the slot is not fetched again  | 0–3, 5–7, 14–17, 19 |
-| covered, no point     | returns nothing: a **confirmed real gap**         | 4, 8–11, 18         |
-| not covered, no point | reports it in a miss; a fetching read asks for it | 12–13, 22–23        |
-| not covered, a point  | returns the point, and a fetching read asks again | 20–21               |
+| Slot state            | What a read does                                       | In the diagram      |
+| --------------------- | ------------------------------------------------------ | ------------------- |
+| covered, with a point | returns the point; fetched again only at a miss's edge | 0–3, 5–7, 14–17, 19 |
+| covered, no point     | returns nothing: a **confirmed real gap**              | 4, 8–11, 18         |
+| not covered, no point | reports it in a miss; a fetching read asks for it      | 12–13, 22–23        |
+| not covered, a point  | returns the point, and a fetching read asks again      | 20–21               |
 
 A read returns every present point in its range, covered or not, with the covered sub-ranges and the
 uncovered ones as misses of reason `'uncached'`; the two tile the range exactly. When the orchestrator
 served the read, it relabels the part of a miss left by a failed fetch, or by auth going invalid, as
 `'fetch-failed'` or `'auth-pending'`: a range it did not fetch because auth was invalid, and a fetch
 still running when auth went invalid, both come back `'auth-pending'`.
+
+A covered slot never causes a fetch by itself, but it can be fetched again as part of a miss's fetch:
+the orchestrator extends each miss by one slot into the coverage next to it, so with slot 0 covered and
+slot 1 missing it asks for slots 0 to 1.
 
 The last state arises in two ways: an invalidation forgets coverage but keeps the points, and points at
 or after the watermark are never covered.
@@ -92,6 +96,7 @@ Drawn from:
 - [`packages/tscache/src/coverage.ts#CoverageIndex`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/coverage.ts)
 - [`packages/tscache/src/engine/read.ts#read`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/engine/read.ts)
 - [`packages/tscache/src/engine/cache.ts#CacheState`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/engine/cache.ts)
+- [`packages/tscache/src/orchestrator/orchestrator.ts#coalesce`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/orchestrator.ts)
 - [`packages/tscache/src/orchestrator/orchestrator.ts#annotate`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/orchestrator.ts)
 - [`packages/tscache/src/types.ts#MissReason`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/types.ts)
 
