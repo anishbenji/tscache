@@ -59,8 +59,12 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       stage: ${{ steps.plan.outputs.stage }}
     steps:
+      # Full history: with fetch-depth 0, checkout fetches every branch into
+      # refs/remotes/origin/*, so origin/main is present for the ancestry
+      # check below without a second, unauthenticated fetch.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - id: plan
@@ -87,6 +91,18 @@ jobs:
             if [ "$EVENT" = push ] || [ "$DRY_RUN" = false ]; then
               stage=true
             fi
+          fi
+
+          # Only reviewed code is staged: the commit must be on main, which
+          # takes changes only through reviewed pull requests. A tag on any
+          # other commit fails a real stage; a dry run only warns.
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            msg="Commit ${GITHUB_SHA} is not on origin/main"
+            if [ "$stage" = true ]; then
+              echo "::error::${msg}; only a commit on main can be staged"
+              exit 1
+            fi
+            echo "::warning::${msg}; a real release from it would fail here"
           fi
 
           # The version must be strictly above every published release
