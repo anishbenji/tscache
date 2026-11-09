@@ -14,9 +14,14 @@ for charts that scroll through history and follow a live tail in several tabs.
   page itself. A lost SharedWorker is detected with a lifetime Web Lock and
   reported as `workerLost`.
 - **Fetching in the worker.** A fetcher module, loaded by the worker, fetches
-  only the ranges the cache lacks; concurrent reads from any tab share one
-  fetch. An `AuthInvalidError` from the fetcher reaches every tab as
-  `authInvalid`, and `updateAuth` retries with new credentials.
+  only the ranges the cache neither holds nor already has in flight. Under the
+  SharedWorker hosting, concurrent reads of a range from several tabs wait on
+  one fetch, and finalized history one tab fetched is not fetched again for another; the dedicated
+  and in-process fallbacks give each tab a cache of its own. Points at or after
+  the `finalizedUntil` watermark are provisional and fetched again by every
+  read that includes them. An `AuthInvalidError` from the fetcher reaches every
+  tab the worker serves as `authInvalid`, and `updateAuth` retries with new
+  credentials.
 - **Coverage.** A read returns the present points as one typed array per
   field, the ranges the cache knows for certain, and each missing range with
   its reason. A confirmed gap (a weekend, a sensor dropout) is never fetched

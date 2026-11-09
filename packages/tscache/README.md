@@ -5,12 +5,15 @@ readings, event counts. It is built for a chart that scrolls through history
 and follows a live tail, in several tabs at once.
 
 - **One cache for every tab.** The cache runs in a `SharedWorker`, so every
-  same-origin tab reads the same data, and a range one tab fetched is never
-  fetched again by another. Without `SharedWorker` it falls back to a dedicated
-  `Worker` per tab, then to the page itself.
-- **The worker fetches.** You give it a fetcher module; a `get` for a range the
-  cache does not hold fetches only what is missing, once, however many tabs
-  ask at the same moment.
+  same-origin tab reads the same data. Without `SharedWorker` it falls back to
+  a dedicated `Worker`, then to the page itself; those give each tab a cache of
+  its own, shared with no other tab.
+- **The worker fetches.** You give it a fetcher module, and a `get` fetches
+  only the ranges its cache neither holds nor already has in flight. Under the
+  SharedWorker, concurrent reads of a range from several tabs wait on one
+  fetch, and finalized history one tab fetched is not fetched again by
+  another. Points at or after the `finalizedUntil` watermark are provisional:
+  every read that includes them fetches them again.
 - **Known gaps are first-class.** Coverage records what the cache _knows_,
   separately from the points that _exist_. A weekend without candles is a
   confirmed gap: it is never fetched again, and it is not confused with "not
