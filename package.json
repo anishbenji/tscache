@@ -21,7 +21,7 @@
     "docs:check": "tsc -p site && tsc -p site/scripts",
     "docs:run": "bun site/scripts/run-snippets.ts",
     "test": "vitest run --passWithNoTests",
-    "build": "bun run --filter tscache build",
+    "build": "bun run --filter @anishbenji/tscache build",
     "knip": "knip",
     "fallow": "fallow audit",
     "changelog": "git-cliff -o CHANGELOG.md",

@@ -3,8 +3,8 @@
 // line breaks there. Under the lines, a grey band marks each confirmed gap
 // and a hatched band marks time that is not loaded.
 
+import type { Range } from "@anishbenji/tscache";
 import { createEffect, onSettled } from "solid-js";
-import type { Range } from "tscache";
 import uPlot from "uplot";
 import type { Frame } from "./frame";
 

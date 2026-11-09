@@ -1,5 +1,5 @@
 // #region engine
-import { Engine, PutError } from "tscache/engine";
+import { Engine, PutError } from "@anishbenji/tscache/engine";
 
 const engine = new Engine();
 const DAY = 86_400_000;

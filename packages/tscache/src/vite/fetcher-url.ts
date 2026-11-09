@@ -132,7 +132,7 @@ export function fetcherUrl(): FetcherUrlPlugin {
     // runner, which resolves /@fs/ paths. An installed tscache would be
     // externalized and its import() run in plain Node, where they mean
     // nothing; bundling it routes the import() through the runner.
-    config: () => ({ ssr: { noExternal: ["tscache"] } }),
+    config: () => ({ ssr: { noExternal: ["@anishbenji/tscache"] } }),
     configResolved(config) {
       serve = config.command === "serve";
       base = config.base;

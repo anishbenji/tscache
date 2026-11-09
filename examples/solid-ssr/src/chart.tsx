@@ -3,8 +3,8 @@
 // draws those arrays as they are: no copy, and no slot grid padded with
 // nulls. The lines break where readings are more than a minute apart.
 
+import type { GetResult, Range } from "@anishbenji/tscache";
 import { createEffect, onSettled } from "solid-js";
-import type { GetResult, Range } from "tscache";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { INTERVAL } from "./sensor";

@@ -4,6 +4,7 @@
 // readings are public, the same for every visitor; data that differs per
 // user must not share a server cache.
 
+import { createClient, type TscacheClient } from "@anishbenji/tscache";
 import type { ExampleContext } from "@examples/mock-backend/fetcher";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import {
@@ -14,7 +15,6 @@ import {
 } from "@examples/mock-backend/hydration";
 import type { RenderedPage, RenderRequest } from "@examples/mock-backend/vite";
 import { generateHydrationScript, renderToString } from "@solidjs/web";
-import { createClient, type TscacheClient } from "tscache";
 import { APP_PROPS, App } from "./App";
 import { config, figuresOf, lastDay, type ServerRead } from "./sensor";
 

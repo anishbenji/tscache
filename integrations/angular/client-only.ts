@@ -3,7 +3,7 @@
 // when it is destroyed.
 
 import type { ApplicationConfig } from "@angular/core";
-import { type ClientOptions, createClient } from "tscache";
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { provideTscache } from "./tscache";
 
 /**

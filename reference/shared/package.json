@@ -14,7 +14,7 @@
     "@examples/mock-backend": "workspace:*",
     "@tscache/integrations": "workspace:*",
     "lightweight-charts": "^5.2.1",
-    "tscache": "workspace:*",
+    "@anishbenji/tscache": "workspace:*",
     "uplot": "^1.6.32"
   },
   "devDependencies": {

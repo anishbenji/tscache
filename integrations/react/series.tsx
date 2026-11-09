@@ -8,6 +8,12 @@
 // would bring back the Suspense fallback: a store update cannot be a
 // transition.
 
+import type {
+  CacheConfig,
+  GetResult,
+  Range,
+  TscacheClient,
+} from "@anishbenji/tscache";
 import {
   createContext,
   type ReactNode,
@@ -17,7 +23,6 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react";
-import type { CacheConfig, GetResult, Range, TscacheClient } from "tscache";
 import type { Connection, ConnectionState, Seed } from "../shared/connection";
 
 interface Source {

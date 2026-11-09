@@ -3,14 +3,14 @@
 // them after one fetch, so a refresh fetches only the bar forming now. Every
 // tab of the origin shares that one cache through the SharedWorker.
 
-import { datasets } from "@examples/mock-backend/datasets";
-import { useEffect, useState } from "react";
 import type {
   CacheConfig,
   CacheHandle,
   GetResult,
   TscacheClient,
-} from "tscache";
+} from "@anishbenji/tscache";
+import { datasets } from "@examples/mock-backend/datasets";
+import { useEffect, useState } from "react";
 import { log, message } from "./log";
 
 const DAY = 24 * 3_600_000;

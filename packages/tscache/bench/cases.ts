@@ -1,6 +1,6 @@
 // What the benchmarks time, ranked by what a chart does most: read the
 // screen it shows, take new bars, scroll back through history. Every case
-// drives the package's public engine (`tscache/engine`), the one engine all
+// drives the package's public engine (`@anishbenji/tscache/engine`), the one engine all
 // three hostings run, so the base and the head of a pull request expose
 // the same API to it. A case prepares its state outside the timer and
 // returns the operation to time; the operation returns a number derived
@@ -20,7 +20,7 @@ import {
 } from "./fixtures";
 import type { Op } from "./sample";
 
-/** An implementation under test: the `tscache/engine` entry of a revision. */
+/** An implementation under test: the `@anishbenji/tscache/engine` entry of a revision. */
 export type Impl = typeof EngineEntry;
 
 export interface Case {

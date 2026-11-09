@@ -25,7 +25,7 @@
   ],
   // The examples import the built package (its exports point into dist/),
   // which does not exist yet when `bun run ci` runs Fallow before the build.
-  "ignoreUnresolvedImports": ["tscache", "tscache/**"],
+  "ignoreUnresolvedImports": ["@anishbenji/tscache", "@anishbenji/tscache/**"],
   "workspaces": {
     "packages": [
       "packages/*",

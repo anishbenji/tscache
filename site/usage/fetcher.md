@@ -1,6 +1,6 @@
 # The fetcher module
 
-Import from `tscache/fetcher` in your fetcher. The entry holds the fetcher's types and
+Import from `@anishbenji/tscache/fetcher` in your fetcher. The entry holds the fetcher's types and
 `AuthInvalidError`, and imports nothing else, so a fetcher bundle stays small and pulls no page code into
 the worker.
 
@@ -32,7 +32,7 @@ It is validated as a batch; a response that fails validation makes the range `'f
 
 Throw it from `fetch` when the backend refuses the credentials. The worker recognises it by its `code`,
 `'tscache:auth-invalid'` (exported as `AUTH_INVALID_CODE`), never by `instanceof`: the fetcher and the
-worker are separate bundles and may each hold their own copy of the class. From the `tscache` entry,
+worker are separate bundles and may each hold their own copy of the class. From the `@anishbenji/tscache` entry,
 `isAuthInvalidError(value)` makes the same check.
 
 <<< @/snippets/errors.ts#marker{ts}

@@ -4,8 +4,8 @@
 // while coverage still records every empty slot as known: zooming into the
 // loaded week is answered from the cache, empty stretches included.
 
+import type { CacheConfig, CacheHandle, Range } from "@anishbenji/tscache";
 import { datasets } from "@examples/mock-backend/datasets";
-import type { CacheConfig, CacheHandle, Range } from "tscache";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { chartWidth, keepClient, log, show, watchFetches } from "./session";

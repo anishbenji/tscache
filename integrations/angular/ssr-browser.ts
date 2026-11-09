@@ -6,7 +6,7 @@
 // server's read did not cover (the provisional last day, say).
 
 import type { ApplicationConfig } from "@angular/core";
-import { type ClientOptions, createClient } from "tscache";
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { candles } from "../shared/candles";
 import { provideTscache } from "./tscache";
 

@@ -3,8 +3,8 @@
 // inside a Suspense boundary, for its first answer, and an error boundary,
 // for a connection or a read that failed.
 
+import type { Range } from "@anishbenji/tscache";
 import { Component, type ReactNode, Suspense, useState } from "react";
-import type { Range } from "tscache";
 import { candles, DAY, describe } from "../shared/candles";
 import { useSeries } from "./series";
 

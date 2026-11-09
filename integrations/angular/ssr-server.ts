@@ -11,7 +11,7 @@ import {
   makeEnvironmentProviders,
   TransferState,
 } from "@angular/core";
-import type { CacheConfig, Range } from "tscache";
+import type { CacheConfig, Range } from "@anishbenji/tscache";
 import { dehydrate } from "../shared/hydration";
 import { type ServerOptions, serverReader } from "../shared/server";
 import { SERVER_READER, serverReadKey } from "./tscache";

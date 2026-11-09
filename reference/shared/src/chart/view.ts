@@ -4,7 +4,7 @@
 // one implementation you use (lightweight.ts or uplot.ts) with this file;
 // load.ts picks between them for a page that offers both.
 
-import type { GetResult, Range } from "tscache";
+import type { GetResult, Range } from "@anishbenji/tscache";
 
 export interface ChartView {
   /**

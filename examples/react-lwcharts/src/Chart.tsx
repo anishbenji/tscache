@@ -2,6 +2,7 @@
 // own below. The chart is created once; each answer of the cache replaces
 // the data.
 
+import type { FieldArray, GetResult } from "@anishbenji/tscache";
 import {
   type CandlestickData,
   CandlestickSeries,
@@ -13,7 +14,6 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef } from "react";
-import type { FieldArray, GetResult } from "tscache";
 
 const UP = "#2a78d6";
 const DOWN = "#eb6834";

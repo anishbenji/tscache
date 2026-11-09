@@ -1,5 +1,9 @@
-import { type CacheHandle, createClient, type PutBatch } from "tscache";
-import workerUrl from "tscache/worker?worker&url";
+import {
+  type CacheHandle,
+  createClient,
+  type PutBatch,
+} from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "./fetcher.ts?fetcher";
 
 const MINUTE = 60_000;

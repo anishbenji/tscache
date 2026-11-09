@@ -5,9 +5,9 @@
 // The live chart is created only after hydration, so nothing in it can make
 // the hydrating render differ from the server's.
 
+import type { GetResult } from "@anishbenji/tscache";
 import type { JSX } from "@solidjs/web";
 import { createSignal, onSettled, Show } from "solid-js";
-import type { GetResult } from "tscache";
 import { describe } from "../shared/candles";
 import type { ServerRead } from "../shared/hydration";
 

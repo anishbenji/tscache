@@ -4,6 +4,7 @@
 // and writes the answer into the page twice: as markup, and as data the
 // browser starts its cache from (entry-client.ts).
 
+import type { CacheConfig, Range } from "@anishbenji/tscache";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import type { RenderedPage, RenderRequest } from "@examples/mock-backend/vite";
 import {
@@ -20,7 +21,6 @@ import {
   type ServerRead,
 } from "@tscache/integrations/shared/hydration";
 import { serverReader } from "@tscache/integrations/shared/server";
-import type { CacheConfig, Range } from "tscache";
 import { pageMarkup } from "./page";
 
 type Reader = (config: CacheConfig, range: Range) => Promise<ServerRead>;

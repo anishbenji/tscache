@@ -1,6 +1,6 @@
 // Answers of one-minute bars for the chart tests.
 
-import type { GetResult } from "tscache";
+import type { GetResult } from "@anishbenji/tscache";
 
 export const MINUTE = 60_000;
 export const T0 = Date.UTC(2026, 9, 30, 12, 0);

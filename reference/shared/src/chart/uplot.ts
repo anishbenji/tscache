@@ -11,7 +11,7 @@
 // arrays as they are, and only the count of draws (countDraw) tells it
 // from a change of history.
 
-import type { GetResult, Range } from "tscache";
+import type { GetResult, Range } from "@anishbenji/tscache";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import {

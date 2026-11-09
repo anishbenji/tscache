@@ -5,6 +5,7 @@
 // gap: the charts break there, and switching ranges or zooming inside
 // covered time asks the backend for nothing.
 
+import type { Range } from "@anishbenji/tscache";
 import { render } from "@solidjs/web";
 import {
   createEffect,
@@ -16,7 +17,6 @@ import {
   Loading,
   onSettled,
 } from "solid-js";
-import type { Range } from "tscache";
 import "uplot/dist/uPlot.min.css";
 import { PANELS, SensorChart } from "./chart";
 import { type Frame, toFrame } from "./frame";

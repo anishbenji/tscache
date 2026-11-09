@@ -1,4 +1,4 @@
-import type { TscacheClient } from "tscache";
+import type { TscacheClient } from "@anishbenji/tscache";
 
 const MINUTE = 60_000;
 

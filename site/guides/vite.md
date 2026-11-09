@@ -1,7 +1,7 @@
 # The Vite plugin
 
 The worker needs the fetcher module's **default export**. Vite's `?worker&url` bundles a module as a
-worker entry, without its exports, so it does not fit the fetcher. `fetcherUrl()` from `tscache/vite`
+worker entry, without its exports, so it does not fit the fetcher. `fetcherUrl()` from `@anishbenji/tscache/vite`
 gives a `?fetcher` import instead: the module's URL with its exports kept.
 
 <<< @/snippets/vite-config.ts#config{ts}
@@ -58,8 +58,8 @@ still logged.
 | a server build                 | a `file:` URL of the chunk, which server code can `import()`  |
 | the dev server, in server code | the file's absolute path, which Vite's module runner resolves |
 
-It also adds `tscache` to `ssr.noExternal`, so in dev the library's `import()` of the fetcher goes
-through Vite's module runner rather than plain Node. Nothing to configure for
+It also adds `@anishbenji/tscache` to `ssr.noExternal`, so in dev the library's `import()` of the
+fetcher goes through Vite's module runner rather than plain Node. Nothing to configure for
 [server rendering](/guides/ssr).
 
 ## The fetcher rule: import statically

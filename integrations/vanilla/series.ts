@@ -2,7 +2,7 @@
 // range on screen, and drops answers that a newer range has overtaken. One
 // connection (shared/connection.ts) serves every series of the page.
 
-import type { CacheConfig, GetResult, Range } from "tscache";
+import type { CacheConfig, GetResult, Range } from "@anishbenji/tscache";
 import type { Connection } from "../shared/connection";
 
 /** The cache's answer for a range. */

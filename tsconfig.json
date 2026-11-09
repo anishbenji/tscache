@@ -13,7 +13,7 @@
     // the import-free types module alone: the client's source needs the DOM
     // library, which the Bun scripts here do not load.
     "paths": {
-      "tscache": ["./packages/tscache/src/types.ts"]
+      "@anishbenji/tscache": ["./packages/tscache/src/types.ts"]
     }
   },
   "include": ["scripts", "*.config.ts", "packages/*/tsdown.config.ts"]

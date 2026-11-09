@@ -1,5 +1,9 @@
-import { type ClientOptions, createClient, type TscacheClient } from "tscache";
-import workerUrl from "tscache/worker?worker&url";
+import {
+  type ClientOptions,
+  createClient,
+  type TscacheClient,
+} from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "./fetcher.ts?fetcher";
 
 // #region options

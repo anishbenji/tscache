@@ -2,9 +2,9 @@
 // before the first render and disposed after the root unmounts, so it lives
 // as long as the page, whatever React mounts twice in StrictMode.
 
+import { type ClientOptions, createClient } from "@anishbenji/tscache";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { type ClientOptions, createClient } from "tscache";
 import { lastDays } from "../shared/candles";
 import { connect } from "../shared/connection";
 import { Page } from "./page";

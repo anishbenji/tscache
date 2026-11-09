@@ -8,12 +8,12 @@
 // view is a signal, so the drawing effect follows both the view and the
 // answer, and draws a new view at once.
 
+import type { GetResult, Range } from "@anishbenji/tscache";
 import { type ChartKind, loadChart } from "@reference/shared/chart/load";
 import type { ChartView } from "@reference/shared/chart/view";
 import { market } from "@reference/shared/market";
 import type { Session } from "@reference/shared/session";
 import { createEffect, createMemo, createSignal } from "solid-js";
-import type { GetResult, Range } from "tscache";
 
 export interface ChartProps {
   /** Null on the server, which renders the empty element only. */

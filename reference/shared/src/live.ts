@@ -26,8 +26,8 @@
 // the opening (onOpened) before the source's first bar, and a read that
 // fetches over the provisional end mends both.
 
+import type { CacheConfig, PutBatch, Range } from "@anishbenji/tscache";
 import type { Connection } from "@tscache/integrations/shared/connection";
-import type { CacheConfig, PutBatch, Range } from "tscache";
 import { formingBar } from "./market";
 
 /** What a source reports while its tab holds the feed. */

@@ -4,6 +4,7 @@
 // own read; the browser's hydration render shows the same, so the markup
 // matches, and then the session's state takes over.
 
+import type { Range } from "@anishbenji/tscache";
 import { type ChartKind, chartKindOf } from "@reference/shared/chart/load";
 import {
   FEED_OPTIONS,
@@ -21,7 +22,6 @@ import {
 } from "@reference/shared/session";
 import type { ServerRead } from "@tscache/integrations/shared/hydration";
 import { type ChangeEvent, useEffect, useState } from "react";
-import type { Range } from "tscache";
 import { Chart } from "./Chart";
 import { useSessionState } from "./session";
 

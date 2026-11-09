@@ -1,5 +1,5 @@
+import type { GetResult, Range, TscacheClient } from "@anishbenji/tscache";
 import type { Connection } from "@tscache/integrations/shared/connection";
-import type { GetResult, Range, TscacheClient } from "tscache";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type Holder, liveFeed, polling, socketAddress } from "../src/live";
 import { MINUTE, market } from "../src/market";

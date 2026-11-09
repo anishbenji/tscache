@@ -1,4 +1,4 @@
-import type { Dtype } from "tscache";
+import type { Dtype } from "@anishbenji/tscache";
 import { describe, expect, it } from "vitest";
 import {
   acceptsColumns,

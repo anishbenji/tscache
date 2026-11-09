@@ -5,10 +5,10 @@
 // refresh snippet, the cache, the polling) depends on this state and is
 // rebuilt by its own effect.
 
+import { createClient, type TscacheClient } from "@anishbenji/tscache";
+import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import { useEffect, useState } from "react";
-import { createClient, type TscacheClient } from "tscache";
-import workerUrl from "tscache/worker?worker&url";
 import { log, message } from "./log";
 import { currentTokens, toContext } from "./tokens";
 

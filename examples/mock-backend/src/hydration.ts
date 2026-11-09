@@ -16,7 +16,7 @@ import {
   type Range,
   type Snapshot,
   TscacheError,
-} from "tscache";
+} from "@anishbenji/tscache";
 
 /** What the server read: the range it asked for and its snapshot. */
 export interface Hydration {

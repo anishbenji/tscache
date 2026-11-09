@@ -3,8 +3,8 @@
 // cache id names the series for the fetcher as `<dataset>/<symbol>`, and
 // the interval in the id keeps another resolution's cache apart.
 
+import type { CacheConfig, GetResult, Range } from "@anishbenji/tscache";
 import { datasets } from "@examples/mock-backend/datasets";
-import type { CacheConfig, GetResult, Range } from "tscache";
 
 export const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
