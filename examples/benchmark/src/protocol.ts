@@ -3,11 +3,11 @@
 
 import type { View } from "./workload";
 
-/** The page asks a tab to read these views, one after another. */
-export interface RunMessage {
-  type: "run";
-  views: View[];
-}
+/**
+ * The page asks a tab to read these views, one after another, or to
+ * dispose of its source before the page removes it.
+ */
+export type PageMessage = { type: "run"; views: View[] } | { type: "dispose" };
 
 /** One view, as the tab drew it. */
 export interface ViewTiming {
@@ -20,4 +20,6 @@ export type TabMessage =
   /** The tab's source is open; `setupMs` is how long that took. */
   | { type: "ready"; tab: string; setupMs: number }
   | { type: "done"; tab: string; views: ViewTiming[] }
+  /** The tab's source is disposed: its client closed, its cache cleared. */
+  | { type: "disposed"; tab: string }
   | { type: "failed"; tab: string; error: string };

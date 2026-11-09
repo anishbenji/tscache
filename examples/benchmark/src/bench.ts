@@ -2,6 +2,7 @@
 // run, in tabs that are same-origin iframes of this page, so tscache's
 // tabs share one SharedWorker as real tabs of an origin do. Each mode of a
 // run starts from nothing: its tabs are new, and tscache's cache id is new.
+// Tabs dispose of their sources before they are removed.
 // The backend's counters are read before and after each phase, so its
 // numbers are deltas of this mode's run alone. The modes take turns within
 // each run, in an order rotated by one each run.
@@ -14,7 +15,7 @@ import type { Range } from "@anishbenji/tscache";
 import { fetchSeries } from "@examples/mock-backend/fetcher";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
-import type { RunMessage, TabMessage, ViewTiming } from "./protocol";
+import type { PageMessage, TabMessage, ViewTiming } from "./protocol";
 import {
   type Conditions,
   cells,
@@ -99,7 +100,8 @@ addEventListener("message", (event: MessageEvent<TabMessage>) => {
 interface Tab {
   setupMs: number;
   run(views: View[]): Promise<ViewTiming[]>;
-  close(): void;
+  /** Disposes of the tab's source, then removes the tab. */
+  close(): Promise<void>;
 }
 
 /** The next message of tab `id`; rejects on a failure it reports. */
@@ -128,13 +130,22 @@ async function openTab(mode: Mode, run: string, n: number): Promise<Tab> {
     setupMs: opened.setupMs,
     async run(views) {
       const done = next(id);
-      const message: RunMessage = { type: "run", views };
+      const message: PageMessage = { type: "run", views };
       frame.contentWindow?.postMessage(message, location.origin);
       const answer = await done;
       if (answer.type !== "done") throw new Error(`tab ${id}: ${answer.type}`);
       return answer.views;
     },
-    close: () => frame.remove(),
+    async close() {
+      const disposed = next(id);
+      const message: PageMessage = { type: "dispose" };
+      frame.contentWindow?.postMessage(message, location.origin);
+      try {
+        await disposed;
+      } finally {
+        frame.remove();
+      }
+    },
   };
 }
 
@@ -195,7 +206,7 @@ async function runMode(
     };
   } finally {
     tasks.stop();
-    for (const tab of opened) tab.close();
+    await Promise.all(opened.map((tab) => tab.close()));
   }
 }
 
