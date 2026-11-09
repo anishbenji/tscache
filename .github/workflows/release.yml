@@ -38,9 +38,12 @@ env:
 permissions: {}
 
 # One release run per ref at a time, and never cancel one: a run cut off
-# after staging leaves the draft GitHub release missing.
+# after staging leaves the draft GitHub release missing. Group names are
+# case-insensitive, and the CI this workflow calls uses
+# "<github.workflow>-<ref>", which here is "Release-<ref>"; this group must
+# differ from it, or the called CI would wait on its own caller.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-run-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:

@@ -21,8 +21,13 @@ on:
 permissions:
   contents: read
 
+# Keyed by workflow name as well as ref. A called workflow sees the caller's
+# github.workflow and github.ref, so CI called by release.yml ("Release")
+# never shares a group with a normal CI run ("CI") on the same ref, and
+# neither can cancel the other. Pull requests and pushes keep one group per
+# ref, as before.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
