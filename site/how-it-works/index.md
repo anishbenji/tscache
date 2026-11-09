@@ -90,11 +90,14 @@ Drawn from:
 3. Without a fetcher, or with `cacheOnly: true`, the orchestrator answers with one `Engine.get`.
    Otherwise it finds the read's misses, subtracts the fetches already in flight for that cache (it
    waits for those instead), merges adjacent misses, extends each by one slot into the coverage next to
-   it, and calls the fetcher once per merged range.
+   it, and calls the fetcher once per merged range. While auth is invalid, or while the fetcher's `updateAuth`
+   hook is swapping credentials, it fetches and joins nothing: those ranges come back as `'auth-pending'` at
+   once.
 4. Each response is applied as a put over the range it was asked for, which makes that range
-   authoritative; a response that lands after the cache was cleared is dropped instead. Once the fetches
-   the read waits for have settled, the orchestrator reads the engine once, and labels the misses that a failed fetch left
-   as `'fetch-failed'` or `'auth-pending'`.
+   authoritative; a response that lands after the cache was cleared is dropped instead. The orchestrator
+   waits for the fetches until they settle or auth goes invalid, whichever comes first; fetches still
+   running when auth goes invalid finish in the background. It then reads the engine once, and labels
+   the misses left by a failed fetch, or by auth going invalid, as `'fetch-failed'` or `'auth-pending'`.
 5. The result travels back to the page with its typed arrays transferred, not copied.
 
 Drawn from:

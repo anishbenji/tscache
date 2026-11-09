@@ -80,8 +80,9 @@ Together, coverage and points give each slot one of four states:
 
 A read returns every present point in its range, covered or not, with the covered sub-ranges and the
 uncovered ones as misses of reason `'uncached'`; the two tile the range exactly. When the orchestrator
-served the read and a fetch failed, it relabels the part of a miss that fetch was asked for as
-`'fetch-failed'` or `'auth-pending'`.
+served the read, it relabels the part of a miss left by a failed fetch, or by auth going invalid, as
+`'fetch-failed'` or `'auth-pending'`: a range it did not fetch because auth was invalid, and a fetch
+still running when auth went invalid, both come back `'auth-pending'`.
 
 The last state arises in two ways: an invalidation forgets coverage but keeps the points, and points at
 or after the watermark are never covered.
