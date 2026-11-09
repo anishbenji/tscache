@@ -1,0 +1,253 @@
+# Publishes @anishbenji/tscache to npm and creates the GitHub release.
+#
+# A pushed v* tag publishes for real. A manual run (workflow_dispatch) is a
+# dry run unless it is started on a v* tag with dry-run unticked, which is
+# the way to retry a failed publish. Every other combination ends in
+# `npm publish --dry-run`.
+#
+# Publishing uses npm trusted publishing (OIDC): no npm token exists, and
+# this workflow reads no secret. The maintainer steps, including the
+# one-time trusted-publisher setup on npmjs.com, are in docs/releasing.md.
+#
+# Actions are pinned to commit SHAs, with the release in a comment;
+# Dependabot keeps the pins current.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Run `npm publish --dry-run` instead of publishing
+        type: boolean
+        default: true
+
+# No job inherits a permission: each one states what it needs.
+permissions: {}
+
+# One release run per ref at a time, and never cancel one: a publish cut off
+# halfway leaves the GitHub release missing.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Reads the version and decides whether this run publishes. Fails fast,
+  # before CI, when the tag and the package version disagree or the release
+  # notes are missing.
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          version="$(jq -r .version packages/tscache/package.json)"
+          # Plain X.Y.Z only: a prerelease would need its own dist-tag, which
+          # this workflow does not set, and would otherwise become latest.
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packages/tscache/package.json version ${version} is not a plain X.Y.Z release version"
+            exit 1
+          fi
+
+          publish=false
+          if [ "$REF_TYPE" = tag ]; then
+            if [ "$REF_NAME" != "v${version}" ]; then
+              echo "::error::Tag ${REF_NAME} does not match packages/tscache/package.json version ${version} (expected v${version})"
+              exit 1
+            fi
+            if [ "$EVENT" = push ] || [ "$DRY_RUN" = false ]; then
+              publish=true
+            fi
+          fi
+
+          notes="docs/releases/${version}.md"
+          if [ ! -f "$notes" ]; then
+            if [ "$publish" = true ]; then
+              echo "::error::Release notes ${notes} are missing"
+              exit 1
+            fi
+            echo "::warning::Release notes ${notes} are missing; a real release would fail here"
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "publish=${publish}" >> "$GITHUB_OUTPUT"
+          echo "Version ${version}, publish: ${publish}" >> "$GITHUB_STEP_SUMMARY"
+
+  # The full CI gate (scripts/ci.sh) on the released commit. The bench job is
+  # skipped: it compares a head against its base, and a release has no base.
+  ci:
+    needs: plan
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      skip-bench: true
+
+  # Builds the package and packs the exact tarball that is published, in a
+  # job with no OIDC permission. The publish jobs install nothing and run no
+  # project code.
+  pack:
+    needs: [plan, ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tarball: ${{ steps.pack.outputs.tarball }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - run: bun install --frozen-lockfile
+
+      # tsdown, then publint and attw on the built package.
+      - run: bun run build
+
+      - id: pack
+        working-directory: packages/tscache
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          dest="${RUNNER_TEMP}/package"
+          mkdir -p "$dest"
+          npm pack --pack-destination "$dest"
+          tarball="anishbenji-tscache-${VERSION}.tgz"
+          if [ ! -f "${dest}/${tarball}" ]; then
+            echo "::error::Expected ${tarball}; npm pack wrote: $(ls "$dest")"
+            exit 1
+          fi
+          echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package
+          path: ${{ runner.temp }}/package/${{ steps.pack.outputs.tarball }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # A real publish. The only job that can mint an OIDC token (id-token:
+  # write), which npm exchanges for a short-lived publish token and which
+  # signs the provenance statement. The npm-publish environment is the one
+  # named in the trusted-publisher configuration on npmjs.com.
+  publish:
+    needs: [plan, pack]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # No registry-url: it would write an .npmrc that reads NODE_AUTH_TOKEN,
+      # and no token exists. npm's default registry is registry.npmjs.org.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - name: Ensure npm >= 11.5.1
+        run: |
+          current="$(npm --version)"
+          if [ "$(printf '%s\n' 11.5.1 "$current" | sort -V | head -n 1)" != 11.5.1 ]; then
+            npm install --global npm@11.21.2
+          fi
+          npm --version
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: package
+          path: ${{ runner.temp }}/package
+
+      - name: Publish
+        working-directory: ${{ runner.temp }}/package
+        env:
+          TARBALL: ${{ needs.pack.outputs.tarball }}
+        run: npm publish "./${TARBALL}" --provenance --access public
+
+  # Every run that does not publish: the same tarball through
+  # `npm publish --dry-run`, without the environment and without OIDC.
+  publish-dry-run:
+    needs: [plan, pack]
+    if: needs.plan.outputs.publish != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Ensure npm >= 11.5.1
+        run: |
+          current="$(npm --version)"
+          if [ "$(printf '%s\n' 11.5.1 "$current" | sort -V | head -n 1)" != 11.5.1 ]; then
+            npm install --global npm@11.21.2
+          fi
+          npm --version
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: package
+          path: ${{ runner.temp }}/package
+
+      - name: Publish (dry run)
+        working-directory: ${{ runner.temp }}/package
+        env:
+          TARBALL: ${{ needs.pack.outputs.tarball }}
+        run: npm publish "./${TARBALL}" --dry-run --access public
+
+  # The GitHub release for the tag, from docs/releases/<version>.md, after a
+  # successful publish. The only job that may write to the repository.
+  github-release:
+    needs: [plan, publish]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Skips a release that already exists, so a retried run that
+      # republishes nothing does not fail here.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists"
+            exit 0
+          fi
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "docs/releases/${VERSION}.md"
