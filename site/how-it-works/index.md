@@ -66,10 +66,15 @@ All three run the same server: each builds an `RpcServer` around a new `Engine`,
 its own `Orchestrator`. The fetcher module is therefore loaded wherever the engine runs, in the page
 for the in-process hosting.
 
-The SharedWorker holds a Web Lock for as long as it runs, and names it in its `hello`. A shared-mode
-client queues on that lock; it is granted the lock only once the worker is gone. A dedicated worker's
-client learns of its worker's failure from the worker's `error` event instead. Either way the client
-then rejects everything pending and emits `workerLost`; only the detection differs.
+Where the browser has Web Locks (secure contexts only), the SharedWorker holds a lock for as long as it
+runs and names it in its `hello` (`hello.lock`). A shared-mode client queues on that lock; it is granted
+the lock only once the worker is gone. A dedicated worker's client learns of its worker's failure from
+the worker's `error` event instead. Either way the client then rejects everything pending and emits
+`workerLost`; only the detection differs.
+
+Without Web Locks, the SharedWorker names no lock and the client watches none. A worker that dies with
+the tab hosting it (a renderer crash) is then noticed only if the browser fires a `close` event on the
+port; where it does not, pending requests stay pending and no `workerLost` is emitted.
 
 Drawn from:
 
@@ -82,6 +87,8 @@ Drawn from:
 - [`packages/tscache/src/entries/worker.ts#createServer`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/entries/worker.ts)
 - [`packages/tscache/src/rpc/lifetime.ts#holdLifetimeLock`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/rpc/lifetime.ts)
 - [`packages/tscache/src/rpc/lifetime.ts#watchLifetimeLock`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/rpc/lifetime.ts)
+- [`packages/tscache/src/rpc/lifetime.ts#lockManager`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/rpc/lifetime.ts)
+- [`packages/tscache/src/rpc/port-client.ts#PortClient`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/rpc/port-client.ts)
 
 ## One read, briefly
 
