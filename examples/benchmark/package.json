@@ -1,0 +1,19 @@
+{
+  "name": "@examples/benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader runner",
+    "build": "tsc -p . && vite build --configLoader runner",
+    "preview": "vite preview --configLoader runner"
+  },
+  "dependencies": {
+    "@examples/mock-backend": "workspace:*",
+    "@anishbenji/tscache": "workspace:*",
+    "uplot": "^1.6.32"
+  },
+  "devDependencies": {
+    "@tanstack/query-core": "5.105.0",
+    "vite": "^8.3.5"
+  }
+}

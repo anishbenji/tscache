@@ -8,15 +8,15 @@ import { expect, test } from "@playwright/test";
 
 // The launcher (scripts/demo.ts) on its own. Every way out stops every
 // process it started, builds included, with what they started in turn, and
-// frees every port (step 30 R1-1, R2-2). Each test takes ten free ports
+// frees every port (step 30 R1-1, R2-2). Each test takes eleven free ports
 // the system picks, and kills anything left over however it ends.
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const launcherPath = fileURLToPath(
   new URL("../../scripts/demo.ts", import.meta.url),
 );
-/** The hub's port and the nine apps' after it. */
-const PORTS = 10;
+/** The hub's port and the ten apps' after it. */
+const PORTS = 11;
 
 /** A listener whose close() ends its connections instead of waiting. */
 interface Held {

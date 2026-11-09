@@ -12,6 +12,7 @@ export const apps = {
   "react-lwcharts": 5104,
   "react-ssr": 5105,
   "solid-ssr": 5106,
+  benchmark: 5107,
   "reference-vanilla": 5201,
   "reference-react": 5202,
   "reference-solid": 5203,

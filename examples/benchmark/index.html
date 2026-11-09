@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tscache · benchmark</title>
+  </head>
+  <body>
+    <header>
+      <h1>Benchmark: tscache and three baselines</h1>
+    </header>
+    <p>
+      One workload, the same for every mode: a chart of one-minute candles
+      opens on the newest screen (240 bars), scrolls back five screens, zooms
+      out to four screens and back in, and returns to the newest screen. Then
+      the market moves on by five bars and three tabs do the same at once.
+      The tabs are same-origin iframes of this page, so tscache's tabs share
+      one SharedWorker, as real tabs of one origin do.
+    </p>
+    <ul>
+      <li>
+        <strong>No cache</strong>: every view fetches its range.
+      </li>
+      <li>
+        <strong>Per-tab memo</strong>: a <code>Map</code> per tab, keyed by
+        the exact range.
+      </li>
+      <li>
+        <strong>TanStack Query</strong> (<code>@tanstack/query-core</code>):
+        one QueryClient per tab, key <code>[series, start, end]</code>,
+        <code>staleTime: Infinity</code>.
+      </li>
+      <li>
+        <strong>tscache</strong>: one client per tab, all on one shared cache,
+        which fetches only what it does not hold.
+      </li>
+    </ul>
+    <p>
+      Every mode fetches through the same fetcher code and the same mock
+      backend, with the same latency per page, and draws with the same uPlot
+      chart. Each mode of each run starts empty (new tabs, a new tscache cache
+      id), and the backend's counters are read as deltas. Time to chart runs
+      from the read's start to the frame after <code>setData</code> returned.
+      tscache's first connect, which starts the worker, is its own column and
+      is inside the workload time.
+    </p>
+    <details>
+      <summary>Limits of this comparison</summary>
+      <ul>
+        <li>
+          TanStack Query and the memo cache per tab and by exact key: they are
+          not range-aware, so an overlapping or shifted range is a new fetch.
+          That is the point of the comparison, not a misconfiguration.
+        </li>
+        <li>
+          The workload reads final history only. tscache refetches provisional
+          (still-forming) bars on every read, which exact-key caches would
+          serve stale; a live workload would add those fetches to tscache.
+        </li>
+        <li>
+          The three tabs are iframes on one main thread, so their timings
+          share a thread that real tabs would not. Request, bar and byte
+          counts do not depend on it.
+        </li>
+        <li>
+          The backend is a mock on the same machine: latency is simulated per
+          page, and bandwidth is not limited.
+        </li>
+      </ul>
+    </details>
+    <p class="controls">
+      <label>
+        Backend latency
+        <select id="latency">
+          <option value="50">50 ms</option>
+          <option value="300">300 ms</option>
+          <option value="1000">1000 ms</option>
+        </select>
+      </label>
+      <label>
+        Runs per mode <input id="runs" type="number" min="1" max="20" value="5" />
+      </label>
+      <button type="button" id="run" disabled>Run the benchmark</button>
+      <output data-testid="status">loading</output>
+    </p>
+    <h2>Results</h2>
+    <p data-testid="conditions">Not run yet.</p>
+    <table id="results">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+    <p>
+      <button type="button" id="copy" disabled>Copy as Markdown</button>
+    </p>
+    <pre data-testid="results-json" hidden></pre>
+    <h2>Tabs</h2>
+    <div id="tabs"></div>
+    <h2>The data</h2>
+    <p>
+      The workload's newest screen, <output data-testid="preview-bars">0</output>
+      bars, read once without a cache.
+    </p>
+    <div id="preview"></div>
+    <script type="module" src="/src/bench.ts"></script>
+  </body>
+</html>

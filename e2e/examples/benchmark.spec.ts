@@ -1,0 +1,80 @@
+import { expect, test } from "@playwright/test";
+import type { Row, RunResult } from "../../examples/benchmark/src/report";
+import { NEW_BARS, TABS, views } from "../../examples/benchmark/src/workload";
+import { appUrl } from "./apps";
+
+// examples/benchmark: the workload once per mode, and only the counts it
+// makes the backend serve, which the workload fixes; no timing is checked
+// (docs/testing.md). The backend's counters are deltas of each mode's run.
+
+test.use({ baseURL: appUrl("benchmark") });
+test.describe.configure({ mode: "serial" });
+
+interface Results {
+  rows: Row[];
+  runs: RunResult[];
+}
+
+/** The views of one tab's workload, and of the three tabs of phase two. */
+const VIEWS = views(0).length;
+
+test("each mode makes the requests its caching allows, tscache the fewest", async ({
+  page,
+}) => {
+  // One run per mode at the lowest latency: the counts do not depend on it.
+  await page.goto("/?runs=1&latency=50&autorun=1");
+  await expect(page.getByTestId("status")).toHaveText("done", {
+    timeout: 60_000,
+  });
+  const results = JSON.parse(
+    (await page.getByTestId("results-json").textContent()) ?? "{}",
+  ) as Results;
+  const run = (mode: RunResult["mode"]) => {
+    const found = results.runs.find((r) => r.mode === mode);
+    if (found === undefined) throw new Error(`no run of ${mode}`);
+    return found;
+  };
+  const total = (r: RunResult) => r.one.requests + r.three.requests;
+  const none = run("none");
+  const memo = run("memo");
+  const tanstack = run("tanstack");
+  const tscache = run("tscache");
+
+  // No cache fetches every view of every tab.
+  expect(none.one.requests).toBe(VIEWS);
+  expect(none.three.requests).toBe(TABS * VIEWS);
+  // The exact-key caches skip only the views they saw before in the same
+  // tab: zooming back in and returning to the newest screen.
+  expect(memo.one.requests).toBe(VIEWS - 2);
+  expect(memo.three.requests).toBe(TABS * (VIEWS - 2));
+  expect(tanstack.one).toEqual(memo.one);
+  expect(tanstack.three).toEqual(memo.three);
+
+  expect(total(tscache)).toBeLessThanOrEqual(total(memo));
+  expect(total(memo)).toBeLessThanOrEqual(total(tanstack));
+  expect(total(tanstack)).toBeLessThanOrEqual(total(none));
+
+  // tscache in three tabs is one tab plus only the newest bars: one
+  // request, for the bars the market added, with a flank bar either side
+  // at most, however the three tabs' reads met in the shared worker.
+  expect(tscache.three.requests).toBe(1);
+  expect(tscache.three.bars).toBeGreaterThanOrEqual(NEW_BARS);
+  expect(tscache.three.bars).toBeLessThanOrEqual(NEW_BARS + 2);
+  // Phase one needs no more requests than the exact-key caches, and fewer
+  // bars: the zoomed-out view fetches only what the cache lacks.
+  expect(tscache.one.requests).toBeLessThanOrEqual(memo.one.requests);
+  expect(tscache.one.bars).toBeLessThan(memo.one.bars);
+
+  // Every view of every tab was drawn.
+  for (const r of results.runs) {
+    expect(r.chartMs).toHaveLength(VIEWS * (1 + TABS));
+  }
+  // The table has a row per mode, each from a run whose counts held.
+  expect(results.rows.map((row) => row.mode)).toEqual([
+    "none",
+    "memo",
+    "tanstack",
+    "tscache",
+  ]);
+  for (const row of results.rows) expect(row.stable).toBe(true);
+});
