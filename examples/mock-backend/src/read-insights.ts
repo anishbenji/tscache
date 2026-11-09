@@ -38,6 +38,11 @@ export interface ReadInsight {
   drawMs: number;
   /** The two together: time to chart. */
   chartMs: number;
+  /**
+   * The page was hidden between the draw and its frame, which a hidden page
+   * holds back: the time measures the hiding, so it stays out of the spread.
+   */
+  hidden: boolean;
 }
 
 /** Time to chart over the page's reads. */
@@ -80,7 +85,10 @@ interface Answered {
 
 /** How many reads the spread is taken over: the page's latest ones. */
 const SPREAD_READS = 200;
-/** Fetch reports older than this are dropped. */
+/**
+ * Fetch reports that ended this long before the oldest read still waiting
+ * for its frame, or before now when none waits, are dropped.
+ */
 const KEEP_MS = 120_000;
 
 /** The value at quantile `q` of ascending `sorted` (nearest rank). */
@@ -156,6 +164,32 @@ export function createInsights(): Insights {
   let stop: (() => void) | undefined;
   /** The read drawn last, whose provenance a late report may still change. */
   let shown: { read: Answered; result: GetResult } | undefined;
+  /** Reads drawn whose frame has not come yet. */
+  const waiting = new Set<Answered>();
+  /** How many times the page has been hidden. */
+  let hides = 0;
+  const onVisibility = () => {
+    if (document.visibilityState === "hidden") hides++;
+  };
+
+  /**
+   * Drops the reports no read can still match: those that ended before
+   * every read waiting for its frame, and the read on screen, was asked.
+   * A frame a hidden page held back for minutes keeps its read's reports.
+   */
+  function prune(now: number): void {
+    let oldest = now;
+    for (const read of waiting) oldest = Math.min(oldest, read.askedAt);
+    if (shown !== undefined) oldest = Math.min(oldest, shown.read.askedAt);
+    const cutoff = oldest - KEEP_MS;
+    reports = reports.filter((r) => r.endedAt >= cutoff);
+  }
+
+  function isHidden(): boolean {
+    return (
+      typeof document !== "undefined" && document.visibilityState === "hidden"
+    );
+  }
 
   function notify(): void {
     for (const listener of listeners) listener();
@@ -185,7 +219,18 @@ export function createInsights(): Insights {
       return () => listeners.delete(listener);
     },
     instrument(handle) {
-      stop ??= onInsight(received);
+      if (stop === undefined) {
+        const stopListening = onInsight(received);
+        const watches = typeof document !== "undefined";
+        if (watches)
+          document.addEventListener("visibilitychange", onVisibility);
+        stop = () => {
+          stopListening();
+          if (watches) {
+            document.removeEventListener("visibilitychange", onVisibility);
+          }
+        };
+      }
       const get: CacheHandle["get"] = async (range, options) => {
         const askedAt = moment();
         const result = await handle.get(range, options);
@@ -211,23 +256,28 @@ export function createInsights(): Insights {
       const read = answered.get(result);
       if (read === undefined) return;
       answered.delete(result);
+      waiting.add(read);
+      const hidesAtDraw = hides;
+      const hiddenAtDraw = isHidden();
       requestAnimationFrame(() => {
         const framedAt = moment();
-        // Older reports can match no read still waiting for its draw.
-        reports = reports.filter((r) => r.endedAt >= framedAt - KEEP_MS);
+        waiting.delete(read);
         const chartMs = framedAt - read.askedAt;
-        times.push(chartMs);
-        if (times.length > SPREAD_READS) times.shift();
-        shown = { read, result };
-        state = {
-          last: {
-            ...provenance(read, result, reports),
-            getMs: read.answeredAt - read.askedAt,
-            drawMs: framedAt - read.answeredAt,
-            chartMs,
-          },
-          spread: spreadOf(times),
+        const hidden = hiddenAtDraw || isHidden() || hides !== hidesAtDraw;
+        if (!hidden) {
+          times.push(chartMs);
+          if (times.length > SPREAD_READS) times.shift();
+        }
+        const last: ReadInsight = {
+          ...provenance(read, result, reports),
+          getMs: read.answeredAt - read.askedAt,
+          drawMs: framedAt - read.answeredAt,
+          chartMs,
+          hidden,
         };
+        shown = { read, result };
+        prune(framedAt);
+        state = { last, spread: spreadOf(times) };
         notify();
       });
     },
@@ -251,9 +301,13 @@ export function describeSource(read: ReadInsight): string {
   return `from cache ${bars(read.bars - read.fetchedBars)} · ${network}${joined}`;
 }
 
-/** "data → chart X ms (get Y + draw Z)". */
+/**
+ * "data → chart X ms (get Y + draw Z)", and a note when the page was hidden
+ * before the frame, which leaves the read out of the spread.
+ */
 export function describeTiming(read: ReadInsight): string {
-  return `data → chart ${ms(read.chartMs)} (get ${ms(read.getMs)} + draw ${ms(read.drawMs)})`;
+  const timing = `data → chart ${ms(read.chartMs)} (get ${ms(read.getMs)} + draw ${ms(read.drawMs)})`;
+  return read.hidden ? `${timing} · page hidden, not in p50/p95` : timing;
 }
 
 /** "last X ms · p50 Y ms · p95 Z ms over N reads". */

@@ -190,6 +190,7 @@ describe("the labels", () => {
     getMs: 310.2,
     drawMs: 12.4,
     chartMs: 322.6,
+    hidden: false,
   };
 
   it("name the cache's and the network's share", () => {
@@ -210,6 +211,9 @@ describe("the labels", () => {
   it("split time to chart into get and draw", () => {
     expect(describeTiming(read)).toBe(
       "data → chart 323 ms (get 310 ms + draw 12 ms)",
+    );
+    expect(describeTiming({ ...read, hidden: true })).toBe(
+      "data → chart 323 ms (get 310 ms + draw 12 ms) · page hidden, not in p50/p95",
     );
   });
 
@@ -317,6 +321,64 @@ describe("createInsights", () => {
     await corrected;
     expect(insights.state.last).toMatchObject({ fetchedBars: 5, fetches: 1 });
     expect(insights.state.spread?.count).toBe(1);
+    insights.dispose();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps a read's fetch through a frame a hidden page held back", async () => {
+    const frames: (() => void)[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const page = Object.assign(new EventTarget(), {
+      visibilityState: "visible" as DocumentVisibilityState,
+    });
+    vi.stubGlobal("document", page);
+    // Asked at 1000, answered at 1100; the frame comes ten minutes later,
+    // once the page is shown again.
+    const ticks = [1000, 1100, 1000 + 10 * 60_000];
+    vi.spyOn(performance, "now").mockImplementation(() => ticks.shift() ?? 0);
+    const origin = performance.timeOrigin;
+    const range = { start: T0, end: T0 + 9 * MINUTE };
+    const answer = {
+      timestamps: minutes(range.start, range.end),
+      fields: {},
+      coverage: [range],
+      misses: [],
+    } satisfies GetResult;
+    const handle = { id: "crypto/BTC", get: async () => answer };
+    const insights = createInsights();
+    const instrumented = insights.instrument(handle as unknown as CacheHandle);
+    // The read's own fetch, reported before its answer.
+    const reported = new Promise<void>((resolve) => {
+      const stop = onInsight(() => {
+        stop();
+        resolve();
+      });
+    });
+    const channel = new BroadcastChannel(INSIGHTS_CHANNEL);
+    channel.postMessage(
+      insight({ range, startedAt: origin + 1010, endedAt: origin + 1090 }),
+    );
+    channel.close();
+    await reported;
+    const result = await instrumented.get(range);
+    insights.drawn(result);
+    page.visibilityState = "hidden";
+    page.dispatchEvent(new Event("visibilitychange"));
+    page.visibilityState = "visible";
+    page.dispatchEvent(new Event("visibilitychange"));
+    frames[0]?.();
+
+    expect(insights.state.last).toMatchObject({
+      fetchedBars: 10,
+      fetches: 1,
+      hidden: true,
+    });
+    expect(insights.state.last?.chartMs).toBe(10 * 60_000);
+    // The ten minutes measure the hiding, not the chart.
+    expect(insights.state.spread).toBeUndefined();
     insights.dispose();
     vi.restoreAllMocks();
   });
