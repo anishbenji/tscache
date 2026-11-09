@@ -154,12 +154,26 @@ export function createInsights(): Insights {
   let reports: FetchInsight[] = [];
   const times: number[] = [];
   let stop: (() => void) | undefined;
+  /** The read drawn last, whose provenance a late report may still change. */
+  let shown: { read: Answered; result: GetResult } | undefined;
 
-  function publish(read: ReadInsight): void {
-    times.push(read.chartMs);
-    if (times.length > SPREAD_READS) times.shift();
-    state = { last: read, spread: spreadOf(times) };
+  function notify(): void {
     for (const listener of listeners) listener();
+  }
+
+  /**
+   * A fetch report reaches the page on its own channel, not with the answer,
+   * and can arrive after the frame the answer was drawn in: it then corrects
+   * the read on screen.
+   */
+  function received(insight: FetchInsight): void {
+    reports.push(insight);
+    const last = state.last;
+    if (shown === undefined || last === undefined) return;
+    const now = provenance(shown.read, shown.result, reports);
+    if (now.fetches === last.fetches) return;
+    state = { ...state, last: { ...last, ...now } };
+    notify();
   }
 
   return {
@@ -171,9 +185,7 @@ export function createInsights(): Insights {
       return () => listeners.delete(listener);
     },
     instrument(handle) {
-      stop ??= onInsight((insight) => {
-        reports.push(insight);
-      });
+      stop ??= onInsight(received);
       const get: CacheHandle["get"] = async (range, options) => {
         const askedAt = moment();
         const result = await handle.get(range, options);
@@ -203,12 +215,20 @@ export function createInsights(): Insights {
         const framedAt = moment();
         // Older reports can match no read still waiting for its draw.
         reports = reports.filter((r) => r.endedAt >= framedAt - KEEP_MS);
-        publish({
-          ...provenance(read, result, reports),
-          getMs: read.answeredAt - read.askedAt,
-          drawMs: framedAt - read.answeredAt,
-          chartMs: framedAt - read.askedAt,
-        });
+        const chartMs = framedAt - read.askedAt;
+        times.push(chartMs);
+        if (times.length > SPREAD_READS) times.shift();
+        shown = { read, result };
+        state = {
+          last: {
+            ...provenance(read, result, reports),
+            getMs: read.answeredAt - read.askedAt,
+            drawMs: framedAt - read.answeredAt,
+            chartMs,
+          },
+          spread: spreadOf(times),
+        };
+        notify();
       });
     },
     dispose() {

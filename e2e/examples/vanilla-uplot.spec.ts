@@ -78,12 +78,28 @@ test("zooming into the loaded week of events asks the backend for nothing", asyn
   const empty = Number(await page.getByTestId("empty").textContent());
   expect(events).toBeGreaterThan(0);
   expect(events + empty).toBeGreaterThan(7 * 24 * 60);
+  // The insights panel: the week came from the network, all of it.
+  await expect(page.getByTestId("provenance")).toHaveText(
+    new RegExp(
+      `^from cache 0 bars · from network ${events} bars? \\(\\d+ ms\\)$`,
+    ),
+  );
 
   await dragAcross(page, 0.4, 0.6);
   await expect
     .poll(async () => Number(await page.getByTestId("empty").textContent()))
     .toBeLessThan(empty / 2);
   expect(await notices(page)).toHaveLength(1);
+  // The zoom was answered from the cache alone.
+  await expect(page.getByTestId("provenance")).toHaveText(
+    /^from cache \d+ bars? · from network 0 bars$/,
+  );
+  await expect(page.getByTestId("time-to-chart")).toHaveText(
+    /^data → chart \d+ ms \(get \d+ ms \+ draw \d+ ms\)$/,
+  );
+  await expect(page.getByTestId("chart-spread")).toHaveText(
+    /^last \d+ ms · p50 \d+ ms · p95 \d+ ms over (?:[2-9]|[1-9]\d+) reads$/,
+  );
 });
 
 test("a slow answer for the whole week does not undo a later zoom", async ({

@@ -55,9 +55,10 @@ All routes live under `/api/`; the `mockBackend()` Vite plugin mounts them on
   a new version, replaces the access token, fails the next series requests,
   ends every live stream and socket, or moves the backend's clock on and
   back.
-- `GET /api/stats` counts series pages per dataset and per format, refused
-  requests and subscriptions, rotations, reused refresh tokens and open
-  live streams, and reports the backend's clock.
+- `GET /api/stats` counts series pages per dataset and per format, the
+  points and body bytes they carried, refused requests and subscriptions,
+  rotations, reused refresh tokens and open live streams, and reports the
+  backend's clock.
 
 Series requests and socket subscriptions need a token only when the plugin
 is created with `mockBackend({ auth: true })`. The socket upgrade is served
@@ -102,6 +103,28 @@ and reads JSON when the backend answers JSON; a context with
 `format: "json"` makes it ask for JSON. It announces each fetch on a
 `BroadcastChannel` (`src/notices.ts`), which the examples use for their
 fetch counters.
+
+The default export is the fetch wrapped by `withInsights` (`src/insights.ts`):
+each fetch is timed, its pages' body bytes are counted, and a report
+(`{ cacheId, range, bars, bytes, pages, ms, startedAt, endedAt, ok }`) goes
+out on the `BroadcastChannel` `tscache-demo-insights` before the answer
+returns to the cache. The unwrapped fetch is exported as `fetchSeries`, which
+the benchmark page calls directly in its modes without tscache.
+
+## Insights
+
+`src/read-insights.ts` is what every demo page shows about its reads. A page
+wraps its cache handle with `insights.instrument(handle)`, which times each
+`get()`, and calls `insights.drawn(result)` right after the chart library's
+`setData` returned. The panel then says how many of the drawn bars came from
+the cache and how many from the network ("from cache N bars · from network M
+bars (K ms)"), and the read's time to chart ("data → chart X ms (get Y + draw
+Z)"), with the last value, the p50 and the p95 of the page's reads. A read's
+fetched bars are those in its range that a fetch brought while it was in
+flight, from any tab of the origin; a read that joined a fetch already in
+flight says so. The state is one immutable object replaced on each change, so
+each framework binds it as it binds any store. It is demo instrumentation:
+the library has no such API.
 
 Each example loads the fetcher with `fetcherUrl()` from `@anishbenji/tscache/vite`,
 which makes `import url from "…?fetcher"` give the fetcher's URL with its

@@ -8,13 +8,17 @@ import {
   type FetchNotice,
   onFetchNotice,
 } from "@examples/mock-backend/notices";
-import { insightLines } from "@examples/mock-backend/read-insights";
+import {
+  createInsights,
+  insightLines,
+} from "@examples/mock-backend/read-insights";
 import {
   createEffect,
   createMemo,
   createSignal,
   Errored,
   isPending,
+  onCleanup,
   onSettled,
   Show,
 } from "solid-js";
@@ -22,6 +26,7 @@ import { SensorChart } from "./chart";
 import { type LogLine, Panel, type Status, utc } from "./panel";
 import { DAY, type Figures, figuresOf, type ServerRead } from "./sensor";
 import { createSession } from "./session";
+import "@examples/mock-backend/insights.css";
 
 /** The id of the script element that carries the page's props. */
 export const APP_PROPS = "app-props";
@@ -53,7 +58,11 @@ function Live(props: ServerRead) {
   const write = (text: string) =>
     setLog((lines) => [{ at: Date.now(), text }, ...lines].slice(0, 50));
 
-  const { cache, client, insights } = createSession(write);
+  const { cache, client } = createSession(write);
+  // The handle the page reads through, timed for the insights panel.
+  const insights = createInsights();
+  onCleanup(() => insights.dispose());
+  const reads = createMemo(() => insights.instrument(cache()));
   const [insight, setInsight] = createSignal(insightLines(insights.state));
   onSettled(() =>
     insights.subscribe(() => setInsight(insightLines(insights.state))),
@@ -63,7 +72,7 @@ function Live(props: ServerRead) {
   const answer = createMemo<Answer | undefined>(
     async () => {
       const { mode } = client();
-      const handle = cache();
+      const handle = reads();
       const range = { start: start(), end: Date.now() };
       const result = await handle.get(range);
       return { mode, range, result, figures: figuresOf(result) };

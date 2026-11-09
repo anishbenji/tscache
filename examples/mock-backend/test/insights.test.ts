@@ -1,7 +1,12 @@
 import type { CacheHandle, GetResult, Range } from "@anishbenji/tscache";
 import type { FetchRequest } from "@anishbenji/tscache/fetcher";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type FetchInsight, onInsight, withInsights } from "../src/insights";
+import {
+  type FetchInsight,
+  INSIGHTS_CHANNEL,
+  onInsight,
+  withInsights,
+} from "../src/insights";
 import {
   createInsights,
   describeSource,
@@ -271,5 +276,48 @@ describe("createInsights", () => {
     insights.drawn({ ...answer });
     expect(frames).toHaveLength(1);
     insights.dispose();
+  });
+  it("corrects the read on screen when its fetch report arrives late", async () => {
+    const frames: (() => void)[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    // The page's clock: asked at 1000, answered at 1100, drawn at 1200.
+    const ticks = [1000, 1100, 1200];
+    vi.spyOn(performance, "now").mockImplementation(() => ticks.shift() ?? 0);
+    const origin = performance.timeOrigin;
+    const range = { start: T0, end: T0 + 9 * MINUTE };
+    const answer = {
+      timestamps: minutes(range.start, range.end),
+      fields: {},
+      coverage: [range],
+      misses: [],
+    } satisfies GetResult;
+    const handle = { id: "crypto/BTC", get: async () => answer };
+    const insights = createInsights();
+    const instrumented = insights.instrument(handle as unknown as CacheHandle);
+    const result = await instrumented.get(range);
+    insights.drawn(result);
+    frames[0]?.();
+    expect(insights.state.last).toMatchObject({ fetchedBars: 0, fetches: 0 });
+
+    const corrected = new Promise<void>((resolve) => {
+      insights.subscribe(resolve);
+    });
+    const channel = new BroadcastChannel(INSIGHTS_CHANNEL);
+    channel.postMessage(
+      insight({
+        range: { start: T0 + 5 * MINUTE, end: T0 + 9 * MINUTE },
+        startedAt: origin + 1010,
+        endedAt: origin + 1090,
+      }),
+    );
+    channel.close();
+    await corrected;
+    expect(insights.state.last).toMatchObject({ fetchedBars: 5, fetches: 1 });
+    expect(insights.state.spread?.count).toBe(1);
+    insights.dispose();
+    vi.restoreAllMocks();
   });
 });

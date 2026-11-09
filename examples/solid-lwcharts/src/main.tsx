@@ -18,14 +18,8 @@ import {
   onSettled,
 } from "solid-js";
 import { type CandleChart, createCandleChart } from "./chart";
-import {
-  createTscacheClient,
-  fetches,
-  insight,
-  insights,
-  lines,
-  log,
-} from "./session";
+import { insight, insights } from "./insights";
+import { createTscacheClient, fetches, lines, log } from "./session";
 import "./style.css";
 
 const INTERVAL = 30 * 60_000;

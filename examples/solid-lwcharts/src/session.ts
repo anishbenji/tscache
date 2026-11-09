@@ -1,25 +1,11 @@
 // The tscache client, replaced when its worker is lost, and what the page
-// reports: the backend fetch count, a log, and the insights into its reads
-// (where the drawn bars came from, and their time to chart).
+// reports: the backend fetch count and a log.
 
 import { createClient } from "@anishbenji/tscache";
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import { onFetchNotice } from "@examples/mock-backend/notices";
-import {
-  createInsights,
-  insightLines,
-} from "@examples/mock-backend/read-insights";
 import { createMemo, createSignal, refresh } from "solid-js";
-import "@examples/mock-backend/insights.css";
-
-/** The page's reads: the cache is instrumented with it, each draw reported. */
-export const insights = createInsights();
-/** The insights panel's lines, a signal each change replaces. */
-const [insight, setInsight] = createSignal(insightLines(insights.state));
-insights.subscribe(() => setInsight(insightLines(insights.state)));
-
-export { insight };
 
 interface LogLine {
   at: number;
