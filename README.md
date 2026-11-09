@@ -1,5 +1,7 @@
 # tscache
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/anishbenji/tscache/badge)](https://scorecard.dev/viewer/?uri=github.com/anishbenji/tscache)
+
 Browser time-series cache: SharedWorker multi-tab sharing, worker-side fetch
 orchestration, and coverage tracking that distinguishes "not fetched yet" from
 "confirmed empty" (weekends, sensor dropouts).
