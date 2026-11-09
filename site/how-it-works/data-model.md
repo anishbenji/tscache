@@ -1,7 +1,3 @@
-<script setup>
-import "./diagrams.css";
-</script>
-
 # Data model
 
 One cache is one `CacheState` inside the engine. It holds four things: the points, stored in dense

@@ -1,5 +1,6 @@
-/* The "How it works" diagrams: inline SVGs drawn with the theme's colour
-   variables, so they follow the light and dark switch. */
+/* The "How it works" diagrams (the SVGs in site/how-it-works/), drawn
+   with the theme's colour variables so they follow the light and dark
+   switch. Loaded for every page by theme/index.ts. */
 
 .hiw-figure {
   margin: 24px 0;

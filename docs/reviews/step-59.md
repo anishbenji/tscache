@@ -9,13 +9,14 @@ traces below map each diagram element and each factual sentence to the code that
 
 ## Scope
 
-| Commit  | What                                                                                                                                                    |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 6d3f083 | `build(site)`: `vitepress-plugin-mermaid` 2.0.17 and its peer `mermaid` 11.17.2 as site dev dependencies; the config's export wrapped in `withMermaid`. |
-| e6d0aec | `docs(site)`: the package map page, `site/scripts/module-graph.ts`, its check in `bun run docs:check`, and the "How it works" sidebar group.            |
-| cee3a79 | `docs(site)`: the data model page, its SVG and the diagrams' stylesheet.                                                                                |
-| 41e6b7b | `docs(site)`: the overview page and its SVG; the nav entry and the full sidebar group.                                                                  |
-| (next)  | `docs(review)`: this file.                                                                                                                              |
+| Commit  | What                                                                                                                                                                        |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6d3f083 | `build(site)`: `vitepress-plugin-mermaid` 2.0.17 and its peer `mermaid` 11.17.2 as site dev dependencies; the config's export wrapped in `withMermaid`.                     |
+| e6d0aec | `docs(site)`: the package map page, `site/scripts/module-graph.ts`, its check in `bun run docs:check`, and the "How it works" sidebar group.                                |
+| cee3a79 | `docs(site)`: the data model page, its SVG and the diagrams' stylesheet.                                                                                                    |
+| 41e6b7b | `docs(site)`: the overview page and its SVG; the nav entry and the full sidebar group.                                                                                      |
+| 8c2f5d1 | `docs(review)`: this file.                                                                                                                                                  |
+| (next)  | `fix(site)`: the stylesheet moves into a theme extension (`site/.vitepress/theme/`), loaded for every page; Fallow did not see its import from the pages' `<script setup>`. |
 
 ### Mermaid plugin compatibility
 

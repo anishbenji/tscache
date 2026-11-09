@@ -1,7 +1,3 @@
-<script setup>
-import "./diagrams.css";
-</script>
-
 # How it works
 
 This section describes tscache from its source code. Each diagram lists the files and symbols it is drawn
