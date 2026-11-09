@@ -24,7 +24,7 @@ Tests 2 and 3 passed before the fix; they guard the behaviour the fix must keep.
 
 After the fix, no timer bounds what follows `hello`. Before it, the handshake timeout bounded that window, by accident and with the wrong outcome for a slow load (a step down instead of a wait).
 
-Resolved in this step (pre-review P1): a SharedWorker that dies between `hello` and `init-ok`, for example because the renderer of the tab hosting it crashed while it loaded another tab's fetcher. No `error` or port `close` reaches the other tab (N32), so `createClient` would have hung. The client now queues on the worker's lifetime lock as soon as `hello` names it; a grant before `init-ok` fails the hosting with a `HostingError` and the chain steps down, as the old timeout did. The same request then watches the connected client, so there is still one lock request per client.
+**Awaiting the user's confirmation (pre-review round 2, P1).** Implemented and tested, but it adds a step-down trigger beyond the wording of N25 (and the "after the handshake" of N32), so it needs the user's approval. The case: a SharedWorker that dies between `hello` and `init-ok`, for example because the renderer of the tab hosting it crashed while it loaded another tab's fetcher. No `error` or port `close` reaches the other tab (N32), so `createClient` would have hung. The client now queues on the worker's lifetime lock as soon as `hello` names it; a grant before `init-ok` fails the hosting with a `HostingError` and the chain steps down, as the old timeout did. The same request then watches the connected client, so there is still one lock request per client. The reading recorded as implementation notes on N25 and N32: a lifetime-lock grant before `init-ok` counts as a worker `error` before the handshake, which Chromium cannot report for a SharedWorker; it restores the bound the old timer gave by accident; the decision texts are unchanged. If the user rejects it, the alternative is to drop the hello-time watch and accept the hang, or to bring back a bound on the whole handshake.
 
 Still open: a fetcher `import()` that never settles while the worker stays alive (a module server that accepts the connection and never answers, a top-level `await` that never resolves). It leaves `createClient` pending forever.
 
@@ -45,6 +45,15 @@ Recommendation: **A** for v0.1.0, with the hang named as a known limit in the wo
 | 3   | P2       | The §2.1 TSDoc of `handshakeTimeoutMs` still described the old behaviour.                                     | Fixed: it now matches `types.ts`.                                                                                                                                      |
 
 The tests for finding 1 failed before the fix: the hello-time watch tests saw no lock request (`expected [] to deeply equal [ [ 'tscache-worker:w1', 'shared' ] ]`). The tests for finding 2 passed before and after: they cover behaviour the first commit already had.
+
+## Pre-review (director, round 2)
+
+No code bugs.
+
+| ID  | Severity | Finding                                                                                                                                                                                       | Resolution                                                                                                 |
+| --- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| 1   | P1       | The hello-time lock watch adds a step-down trigger beyond the wording of N25 and the "after the handshake" of N32, without recorded user approval.                                            | Code kept. Implementation notes on the N25 and N32 rows; marked above as awaiting the user's confirmation. |
+| 2   | P2       | Docs drift: §4.8 "Worker loss (N32)" said the client queues after the handshake; §4.7 `PortClient.connect` lacked `signal` and `afterHello`; the guides' trigger lists lacked the new reason. | Fixed in §4.8, §4.7, `site/guides/workers.md` and `site/troubleshooting.md`.                               |
 
 ## Not verified
 
