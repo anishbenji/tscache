@@ -19,6 +19,14 @@ import {
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+/**
+ * How far short of a read's start a wait for its fetches may stop: far
+ * more than the minutes a shown range is off, far less than the hour a
+ * history fetch spans (isHistory).
+ */
+const REACH_SLACK = 10 * MINUTE;
+
+type Range = FetchNotice["range"];
 /** How often the polling feed polls (reference/shared/src/session.ts). */
 const POLL_MS = 2000;
 
@@ -90,6 +98,25 @@ function isHistory(notice: FetchNotice): boolean {
 }
 
 /**
+ * Whether the fetches cover every bar from `from` through `until` without
+ * a gap. A fetch's range holds both its ends, so the next one may start a
+ * bar after it.
+ */
+function fetchedThrough(
+  fetched: readonly FetchNotice[],
+  from: number,
+  until: number,
+): boolean {
+  let reached = from - MINUTE;
+  const ranges = fetched.map((n) => n.range).sort((a, b) => a.start - b.start);
+  for (const range of ranges) {
+    if (range.start > reached + MINUTE) break;
+    reached = Math.max(reached, range.end);
+  }
+  return reached >= until;
+}
+
+/**
  * The page's fetches since the first `since`, once one of them is a
  * history read; a fetch of the forming bar may come first.
  */
@@ -133,10 +160,17 @@ async function draws(page: Page): Promise<{ full: number; appended: number }> {
   }));
 }
 
+/** The range on screen, in ms, by the backend's clock. */
+async function showingRange(page: Page): Promise<Range> {
+  const text = (await page.getByTestId("showing").textContent()) ?? "";
+  const { now } = await stats(page);
+  const [start = "", end = ""] = text.split(" – ");
+  return { start: shownTime(start, now), end: shownTime(end, now) };
+}
+
 /** The start of the range on screen, in ms, by the backend's clock. */
 async function showingStart(page: Page): Promise<number> {
-  const text = (await page.getByTestId("showing").textContent()) ?? "";
-  return shownTime(text.split(" – ")[0] ?? "", (await stats(page)).now);
+  return (await showingRange(page)).start;
 }
 
 test("a time shown without a year reads in the year nearest the clock", () => {
@@ -273,6 +307,26 @@ for (const app of [
         // The read reaching back answered: it spans a screen more of
         // history than the opening's (a pushed bar adds one).
         await expect.poll(() => barCount(page)).toBeGreaterThan(opened + 100);
+        // The page reads each time scrolling pauses (session.ts,
+        // SCROLL_PAUSE_MS), so a drag that pauses mid-way, as on a loaded
+        // machine, reads there first, and that answer alone can pass the
+        // count above. Wait for the read where the drag ended: it starts a
+        // screen before what is on screen (readRange in market.ts), and its
+        // fetches reach through the bar before the opening fetch. The wait
+        // stops ten minutes short of that start, for the shown times'
+        // rounding to the minute and a chart's span off its six hours: what
+        // the read may still fetch is then too short to be history.
+        const shown = await showingRange(page);
+        const reach = shown.start - (shown.end - shown.start) + REACH_SLACK;
+        await expect
+          .poll(async () =>
+            fetchedThrough(
+              (await notices(page)).slice(before),
+              reach,
+              opening.range.start - MINUTE,
+            ),
+          )
+          .toBe(true);
         const scrolled = await barCount(page);
         // Back where it was: the history is answered from the cache. A read
         // that fetched would post its notice before its answer arrived.
