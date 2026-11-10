@@ -331,7 +331,14 @@ export class Orchestrator {
   async #import(module: string): Promise<void> {
     let loaded: { default?: unknown };
     try {
-      loaded = (await import(/* @vite-ignore */ module)) as {
+      // The specifier is known only at run time. Without these hints an
+      // application's bundler replaces the import with a stub that always
+      // rejects (webpack and Rspack: an empty context; Turbopack: a throw),
+      // and the in-process hosting cannot load a fetcher. Pinned by
+      // test/bundler-hints.test.ts.
+      loaded = (await import(
+        /* @vite-ignore */ /* webpackIgnore: true */ module
+      )) as {
         default?: unknown;
       };
     } catch (error) {

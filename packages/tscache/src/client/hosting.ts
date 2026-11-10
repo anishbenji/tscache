@@ -4,14 +4,16 @@
  * treats as "step down". Any other error propagates as is.
  */
 
-import { TscacheError } from "../errors";
+import { nameFor, TscacheError } from "../errors";
 import { lockManager, watchLifetimeLock } from "../rpc/lifetime";
 import { PortClient } from "../rpc/port-client";
 import type { FetcherConfig, MessagePortLike } from "../rpc/protocol";
 import type { HostingMode } from "../types";
 
 /** A hosting could not be established; the chain may step down (N25). */
-export class HostingError extends TscacheError {}
+export class HostingError extends TscacheError {
+  override name: string = nameFor(this, HostingError, "HostingError");
+}
 
 export interface Hosting {
   mode: HostingMode;

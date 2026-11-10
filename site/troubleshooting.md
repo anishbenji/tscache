@@ -23,6 +23,9 @@ kept alive by a tab opened before the upgrade. Close the old tabs and reload.
 The worker could not `import()` it, or its default export has no `fetch` function. With Vite, import it
 with `?fetcher`, not `?worker&url`, which drops the exports. A relative URL resolves against the worker
 script, not the page: pass an absolute path.
+If the message says `Cannot find module` and your build is not Vite, a bundler rewrote the import:
+check that nothing strips the `/* webpackIgnore: true */` comment from tscache's code (see
+[webpack 5 and Rspack](/guides/workers#webpack-5-and-rspack)).
 
 ## `createClient` never settles
 

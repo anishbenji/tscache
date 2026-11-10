@@ -17,20 +17,40 @@ export function show(value: unknown): string {
   return Array.isArray(value) ? "an array" : "an object";
 }
 
+/**
+ * `error.name` for an instance being built by `cls`: the documented literal
+ * when `cls` is the class actually constructed, the constructor's own name
+ * for a subclass outside the library. The literal is written out because a
+ * minifier renames class identifiers, and with them `constructor.name`.
+ */
+export function nameFor(
+  error: Error,
+  cls: abstract new (...args: never) => Error,
+  name: string,
+): string {
+  return error.constructor === cls ? name : error.constructor.name;
+}
+
 export class TscacheError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = new.target.name;
+    this.name = nameFor(this, TscacheError, "TscacheError");
   }
 }
 
 /** Invalid CacheConfig, or cache() config conflict across tabs (N4). */
-export class ConfigError extends TscacheError {}
+export class ConfigError extends TscacheError {
+  override name: string = nameFor(this, ConfigError, "ConfigError");
+}
 
 /** NaN/inverted range endpoints. Unaligned endpoints snap, not reject (N1). */
-export class InvalidRangeError extends TscacheError {}
+export class InvalidRangeError extends TscacheError {
+  override name: string = nameFor(this, InvalidRangeError, "InvalidRangeError");
+}
 
-export class UnknownCacheError extends TscacheError {}
+export class UnknownCacheError extends TscacheError {
+  override name: string = nameFor(this, UnknownCacheError, "UnknownCacheError");
+}
 
 export type PutErrorCode =
   | "misaligned"
@@ -43,6 +63,7 @@ export type PutErrorCode =
 
 /** Atomic batch reject, naming the first offender. */
 export class PutError extends TscacheError {
+  override name: string = nameFor(this, PutError, "PutError");
   readonly code: PutErrorCode;
   readonly offenderIndex: number;
   readonly offenderTimestamp?: number;
@@ -69,6 +90,11 @@ export class PutError extends TscacheError {
 
 /** Handshake refusal: package skew or stale cached worker script. */
 export class ProtocolMismatchError extends TscacheError {
+  override name: string = nameFor(
+    this,
+    ProtocolMismatchError,
+    "ProtocolMismatchError",
+  );
   readonly clientProtocol: number;
   readonly workerProtocol: number;
 
@@ -91,6 +117,7 @@ export const AUTH_INVALID_CODE: "tscache:auth-invalid" = "tscache:auth-invalid";
  * separate bundle and may carry its own copy of the class.
  */
 export class AuthInvalidError extends TscacheError {
+  override name: string = nameFor(this, AuthInvalidError, "AuthInvalidError");
   readonly code: typeof AUTH_INVALID_CODE = AUTH_INVALID_CODE;
 }
 
