@@ -136,20 +136,8 @@ Nothing is coerced: a `null` from a JSON backend is rejected, not stored as `0`.
 field's own dtype is accepted as it is, without a scan. An empty batch is legal: with a range it states
 that the range holds no points.
 
-The conversions below never reject the batch and never warn, so a value that is not a valid number for
-its field is stored as some other number. Only an element that cannot be converted to a number at all (a
-BigInt, a symbol, an object whose conversion throws) rejects the batch with `PutError` `'field-mismatch'`:
-
-| Value given      | Float field (`f32`, `f64`)                  | Integer field (`i32`, `u8`, ...)                                    |
-| ---------------- | ------------------------------------------- | ------------------------------------------------------------------- |
-| `null`           | `0`                                         | `0`                                                                 |
-| `undefined`      | `NaN`                                       | `0`                                                                 |
-| `NaN`            | `NaN`                                       | `0`                                                                 |
-| A fraction       | kept (`f32` rounds it to the nearest `f32`) | truncated toward zero: `1.5` is `1`                                 |
-| Outside the type | `f32`: `Infinity` beyond about 3.4 × 10^38  | wraps around the type's range: `300` in `u8` is `44`, `-1` is `255` |
-
-A JSON backend has no `NaN`, so it usually sends `null` for a missing value, and the cache would store a
-bar of price `0`, indistinguishable from data. Map `null` to `NaN` for float fields in the fetcher
-([Fetchers](/guides/fetcher)), and check integer fields' ranges there if the backend can exceed them.
+A JSON backend has no `NaN`, so it usually sends `null` for a missing value. Map `null` to `NaN` for
+float fields in the fetcher ([Fetchers](/guides/fetcher)); a response that still holds one is rejected,
+and its range is reported `'fetch-failed'`.
 
 <<< @/snippets/cache.ts#put-error{ts}

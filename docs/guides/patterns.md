@@ -54,13 +54,9 @@ its own:
 - store it as `f32` or `f64` and write `NaN` for missing (exact for integers up to 2^24 and 2^53), or
 - keep a separate cache for it, so its absence is a missing point there.
 
-Values are converted to the field's dtype by typed-array assignment, which never warns and rejects only
-an element that cannot be converted to a number at all (a BigInt, a symbol, an object whose conversion
-throws: `PutError` `'field-mismatch'`). A `null` becomes `0` in every field, so a JSON backend, which has no `NaN`, must have its
-missing values mapped to `NaN` for float fields by the fetcher; otherwise the cache stores a value of
-`0`, indistinguishable from data. `undefined` becomes `NaN` in a float field and `0` in an integer
-field. An integer outside its type wraps around: `300` in a `u8` field is stored as `44`, `-1` as
-`255`. The table is in `site/concepts/grid.md` ("Batches").
+Nothing is coerced. A fraction for an integer field is truncated toward zero (`1.5` for an `i32` field
+is stored as `1`); a fetcher whose backend sends `null` that is not mapped to `NaN` gets its response
+rejected and the range reported `'fetch-failed'`. The rules are in `site/concepts/grid.md` ("Batches").
 
 `examples/solid-uplot` shows the problem with a sensor's integer field. Per-field presence masks are on
 the [roadmap](../roadmap.md).
