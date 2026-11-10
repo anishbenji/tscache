@@ -1,6 +1,6 @@
 # Step 76 — `f64` dtype wording
 
-Branch: `docs/76-f64-dtype-wording` · Status: built
+Branch: `docs/76-f64-dtype-wording` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -24,3 +24,11 @@ A search of `docs/`, `site/` and `packages/tscache/src` found no other claim of 
 - `bunx biome check .` and `bun run docs:build` pass.
 - `bun run ci`, run 1: exit 1. `e2e/reference/clients.spec.ts:283` (reference-vanilla, uPlot scroll-back) made one history fetch where it expected none; 143 passed, 1 failed, 19 did not run. This branch changes two documentation sentences, so the failure is not caused by it: it is a flake candidate on `main`, queued for a root-cause fix on its own branch.
 - `bun run ci`, run 2: exit 0 (Playwright 163 passed). The rerun is diagnostic; it does not clear the flake.
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-10). The reviewer confirmed the wording matches the required-dtype API and that decision 37 authorises the correction to the locked starter sentence.
+
+## Contract-test changes
+
+None.
