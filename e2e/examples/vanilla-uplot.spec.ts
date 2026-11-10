@@ -49,11 +49,15 @@ test("a restated history clears the cache and is fetched again", async ({
   await page.goto("/");
   await expect(page.getByTestId("status")).toHaveText("live");
   await waitNotices(page, 2);
+  // Counted before the click: the refetch follows the clear by one backend
+  // round trip, and can arrive before the assertion below sees the clear.
+  // Until the click the cache holds the window, so every later notice that
+  // spans the window is the refetch after the clear.
+  const before = (await notices(page)).length;
   await page.getByRole("button", { name: /restate history/i }).click();
   await expect(page.locator("#log")).toContainText(
     "cleared (version-mismatch)",
   );
-  const before = (await notices(page)).length;
   await expect
     .poll(async () =>
       (await notices(page)).slice(before).some((n) => span(n) >= 9 * MINUTE),
