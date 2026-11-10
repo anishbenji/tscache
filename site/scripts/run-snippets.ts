@@ -433,7 +433,8 @@ const RUNS: Record<string, Run> = {
     );
   },
   async "grid.ts"(logs) {
-    const { gauge, months, sessions, week, weekly } = await load("grid.ts");
+    const { gauge, monthIndex, monthOf, months, sessions, week, weekly } =
+      await load("grid.ts");
     const snapped = week.misses[0]?.range;
     check(
       snapped?.start === Date.UTC(2026, 9, 25, 14, 30) &&
@@ -472,6 +473,18 @@ const RUNS: Record<string, Run> = {
         ]),
       `months logged as ${JSON.stringify(logs.at(-1))}`,
     );
+    // Ordinals before 1970 are negative and must map back too.
+    for (const [year, month] of [
+      [1969, 12],
+      [1969, 1],
+      [1968, 6],
+    ] as const) {
+      const back = monthOf(monthIndex(year, month));
+      check(
+        back.year === year && back.month === month,
+        `${year}-${month} came back as ${JSON.stringify(back)}`,
+      );
+    }
     const load1m: GetResult = await gauge.get(
       { start: Date.UTC(2026, 10, 10, 12), end: Date.UTC(2026, 10, 10, 12, 1) },
       { cacheOnly: true },

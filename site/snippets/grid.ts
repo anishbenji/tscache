@@ -75,7 +75,11 @@ function monthIndex(year: number, month: number): number {
   return (year - 1970) * 12 + (month - 1); // month 1-12
 }
 function monthOf(index: number): { year: number; month: number } {
-  return { year: 1970 + Math.floor(index / 12), month: (index % 12) + 1 };
+  // A true modulo: months before 1970 have negative ordinals.
+  return {
+    year: 1970 + Math.floor(index / 12),
+    month: (((index % 12) + 12) % 12) + 1,
+  };
 }
 
 const monthly = await client.cache({
@@ -136,4 +140,4 @@ await gauge.put({ timestamps, fields: { load: values } });
 // #endregion jitter
 
 // Read by `bun run docs:run`, which checks what the example produced.
-export { gauge, months, sessions, week, weekly };
+export { gauge, monthIndex, monthOf, months, sessions, week, weekly };
