@@ -89,6 +89,9 @@ repository settings, which you change by hand.
 
 ## Cutting a release
 
+Before step 1, run through the checklist in [`docs/supply-chain.md`](supply-chain.md), which confirms
+that each protection on the path from `main` to npm is still in place.
+
 1. On a branch from `main`:
    - set `version` in `packages/tscache/package.json` to the new `X.Y.Z` (0.x semver: a minor release
      may break the API, a patch release never does). It must be above every version already on npm;

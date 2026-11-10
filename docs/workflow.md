@@ -1,14 +1,15 @@
 # Development and Review Workflow
 
-How each step of the commit plan (starter §11) is built, tested and reviewed. Claude implements; Codex writes contract tests and reviews; the user approves and merges. Roles and hard rules are in `AGENTS.md`.
+How each step is built, tested and reviewed. The commit plan of starter §11 (①–⑭) is complete; later steps are numbered as `AGENTS.md` (Steps) says. Claude implements; Codex writes contract tests and reviews; the user approves and merges. Roles and hard rules are in `AGENTS.md`.
 
-The primary driver is **T3 Code**: one Claude thread per step, plus a Codex thread for contract tests. Reviews are automated — the Claude thread runs Codex headless through `scripts/codex-review.sh` and loops review → triage → fix until every finding is settled. The fallback is the **Claude Code CLI**, which runs the same script. Both read the same repository files.
+The primary driver is **T3 Code**. When a director thread runs the project, it delegates each step to a child agent in its own git worktree and starts every review round through its budgeted round script (`AGENTS.md`, Review rounds); otherwise one Claude thread works each step, plus a Codex thread for contract tests. Reviews are automated — Codex runs headless through `scripts/codex-review.sh`, and the loop goes review → triage → fix until every finding is settled. The fallback is the **Claude Code CLI**, which runs the same script. Both read the same repository files.
 
 ## Files that drive the agents
 
 | File                                           | Read by                                                     | Purpose                                                                                                                                                         |
 | ---------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AGENTS.md`                                    | Codex natively; Claude through `CLAUDE.md`                  | Shared rules, roles, review rules                                                                                                                               |
+| `docs/INDEX.md`                                | Everyone, at the start of a task                            | Which document to read when, with sizes and owners, and how to read single decision rows of `docs/architecture.md`                                              |
 | `CLAUDE.md`                                    | Claude                                                      | Imports `AGENTS.md`, plus Claude-only notes                                                                                                                     |
 | `.claude/settings.json`                        | Claude Code, and Agent SDK hosts that load project settings | Permissions, Bash guard hook, Codex plugin                                                                                                                      |
 | `.claude/hooks/guard-bash.sh`, `guard-bash.ts` | Claude                                                      | Tripwire for literal `bun test` and git-hook bypasses; threat model in the `.ts` header, regression cases in `guard-bash.test.sh`. `bun run ci` is the backstop |
@@ -35,20 +36,20 @@ Do steps 1–2 yourself; T3 Code (a Claude thread) can do the rest with your app
 
 ## Per-step loop
 
-| #   | Who           | Action                                                                                                                                 | Engine steps ③–⑧ | Other steps |
-| --- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------- |
-| 0   | You           | `git switch -c feat/NN-slug main`                                                                                                      | ✓                | ✓           |
-| 1   | Codex thread  | Contract tests — prompt A. Leave uncommitted.                                                                                          | ✓                | —           |
-| 2   | Claude thread | Implement — prompt B                                                                                                                   | ✓                | ✓           |
-| 3   | Claude thread | Review loop — prompt E (below)                                                                                                         | ✓                | ✓           |
-| 4   | Claude thread | `git push -u origin feat/NN-slug`, then open a pull request whose body is the merge request from `docs/reviews/step-NN.md`             | ✓                | ✓           |
-| 5   | You           | Read the pull request, wait for the CI check, merge it on GitHub (merge commit). Then locally: `git switch main && git pull --ff-only` | ✓                | ✓           |
+| #   | Who           | Action                                                                                                                               | Engine logic | Other steps |
+| --- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------ | ----------- |
+| 0   | You           | `git switch -c feat/NN-slug main`                                                                                                    | ✓            | ✓           |
+| 1   | Codex thread  | Contract tests — prompt A. Leave uncommitted.                                                                                        | ✓            | —           |
+| 2   | Claude thread | Implement — prompt B                                                                                                                 | ✓            | ✓           |
+| 3   | Claude thread | Review loop — prompt E (below)                                                                                                       | ✓            | ✓           |
+| 4   | Claude thread | `git push -u origin feat/NN-slug`, then open a pull request whose body is the merge request from `docs/reviews/step-NN.md`           | ✓            | ✓           |
+| 5   | You           | Read the pull request, wait for the checks, merge it on GitHub (merge commit). Then locally: `git switch main && git pull --ff-only` | ✓            | ✓           |
 
 Keep tooling off step branches. Changes to hooks, scripts, agent configuration or this workflow go on their own `chore/NN-slug` branch from `main` with their own review loop, so a step review covers only the step's code.
 
 ## GitHub
 
-The repository is public on GitHub. `main` accepts changes only through a pull request whose `ci` check passed; force-pushes and deletion are blocked, and pull requests merge with a merge commit so the small-commit history survives. The `ci` check is `.github/workflows/ci.yml`, which runs `scripts/ci.sh` — the same gate as a local `bun run ci`, with `CI_BASE` set to the pull request's base commit.
+The repository is public on GitHub. `main` accepts changes only through a pull request whose required checks, `ci` and `bench`, passed; force-pushes and deletion are blocked, and pull requests merge with a merge commit so the small-commit history survives. Both are jobs of `.github/workflows/ci.yml`: `ci` runs `scripts/ci.sh` — the same gate as a local `bun run ci`, with `CI_BASE` set to the pull request's base commit, and `bench` runs the performance gate (`docs/benchmarking.md`). The user merges; a director may set auto-merge only as `AGENTS.md` (Merging) allows.
 
 Also enabled, all on the free plan: secret scanning with push protection, CodeQL default setup, Dependabot alerts and monthly update pull requests (`.github/dependabot.yml`), and private vulnerability reporting (`SECURITY.md`). A Dependabot pull request is a proposal: upgrading a dependency is still a decision for the user.
 
@@ -73,10 +74,10 @@ The Claude thread runs the loop without stopping between rounds, then reports th
 
 Replace `NN`, `<name>`, `<modules>` and `feat/NN-slug` before sending. Prompts C (review) and D (adversarial review) are generated by `scripts/codex-review.sh`; print one with `--print-prompt` to paste into a Codex thread by hand.
 
-**A — Contract tests (Codex, engine steps only)**
+**A — Contract tests (Codex, engine-logic changes only)**
 
 ```text
-You are the contract-test author for step NN (<name>) of the commit plan in starter-prompt.md §11 (see AGENTS.md → Roles).
+You are the contract-test author for step NN (<name>) (see AGENTS.md → Roles).
 Read docs/architecture.md (§2, §4, §5 and every decision row that touches this step) and starter-prompt.md §3.
 Write failing Vitest tests in packages/tscache/test/ that pin the specified behaviour of <modules>, importing from the paths in architecture §4. Cover happy paths, every documented rejection, fenceposts (inclusive ends, single-slot ranges, snap-outward, segment slot cap, gap exactly K vs K+1), and property-style checks where the doc asks for them.
 Test the contract, not an implementation: no assertions on private helpers or internal layout the doc does not specify.
@@ -87,8 +88,8 @@ Finish with a table of each test and the doc section it enforces, then any spec 
 **B — Implement (Claude)**
 
 ```text
-Implement step NN (<name>) per starter-prompt.md §11 and docs/architecture.md on branch feat/NN-slug.
-[Engine steps:] Codex's contract tests are in the working tree. Make them pass without weakening them; if one looks wrong, stop and tell me which and why.
+Implement step NN (<name>) per docs/architecture.md on branch feat/NN-slug.
+[Engine-logic changes:] Codex's contract tests are in the working tree. Make them pass without weakening them; if one looks wrong, stop and tell me which and why.
 Small Conventional Commits, `bun run ci` green after each; contract tests go in the same commit as the code that makes them pass.
 ```
 
@@ -121,7 +122,7 @@ Never enable the plugin's review gate; it loops Claude and Codex and drains usag
 | ⑤ Merge / put path        | Atomic reject leaves no partial state; new-wins across segment boundaries; K-split and slot-cap edges; overlap-warning cost when off                |
 | ⑦ Invalidation suite      | Volatile region never gaining authority; watermark moving backwards; version-mismatch clear racing a put                                            |
 | ⑨ RPC + handshake         | Cache-owned buffers never transferred; mismatch handling; payload still valid for IndexedDB and SSR                                                 |
-| ⑩ SharedWorker + fallback | Fallback order and pinning; tab death; the no-SharedWorker (Chrome Android) path                                                                    |
+| ⑩ SharedWorker + fallback | Fallback order and pinning; tab death; the no-SharedWorker path (Samsung Internet, Opera Mobile, and Chrome for Android before 148)                 |
 | ⑪ Fetcher orchestration   | Dedup keying, flank coalescing, `authInvalid`/`updateAuth` races, `get` never blocking on auth                                                      |
 | ⑫ Playwright suite        | Tests passing for the wrong reason (pages vs contexts), flakiness, timing assumptions                                                               |
 
@@ -129,5 +130,5 @@ The Bash guard (`.claude/hooks/guard-bash.ts`) is frozen and excluded from adver
 
 ## Model choice
 
-- **Claude threads:** Opus 5.5 by default. Consider Fable 5.1 for steps ⑨–⑪ if your plan covers it — on Max plans it can use up to 50% of the weekly limit at no extra cost; on Pro it needs usage credits.
+- **Claude threads:** when a director runs the project, its brief sets the model and effort for each task. Otherwise use Opus 5.5 by default, and the most capable model your plan offers only for the hardest design or concurrency work.
 - **Codex:** GPT-6.1 Sol at high effort for prompts A and C; xhigh for prompt D (the review script sets this). Avoid Ultrafast for reviews: it uses the subscription limit about 8× faster.

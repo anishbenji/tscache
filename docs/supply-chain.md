@@ -6,7 +6,7 @@ The release flow itself (the placeholder bootstrap, cutting a release, approving
 
 ## The chain
 
-1. A change reaches `main` only through a pull request that passes the `ci` check (ruleset `protect-main`).
+1. A change reaches `main` only through a pull request that passes the required `ci` and `bench` checks (ruleset `protect-main`).
 2. The maintainer creates a `v*` tag. The ruleset `protect-release-tags` blocks creating, updating (moving, fast-forward or not) and deleting a `v*` tag for everyone except the repository admin role, which bypasses the ruleset always. On this repository that is the maintainer alone, so the maintainer can still create, move or delete a release tag; no one else can.
 3. The tag starts `release.yml`. Its `stage` job is the only job that uses the environment `npm-publish`, which accepts deployments from `v*` tags only, and it holds `id-token: write` so it can exchange the GitHub OIDC token with npm.
 4. npm's trusted publisher for `@anishbenji/tscache` accepts that token only from this repository, `release.yml` and the `npm-publish` environment, and allows only `npm stage publish`. The job stages the version with provenance; nothing is live yet.
@@ -96,7 +96,7 @@ gh api repos/anishbenji/tscache/rulesets \
 - [ ] Enforcement is `active`, the target is the default branch, and the bypass list is empty, so the admin also goes through a pull request.
 - [ ] Deletion and non-fast-forward updates are blocked.
 - [ ] A pull request is required, review threads must be resolved, and the only merge method is a merge commit.
-- [ ] The `ci` status check is required. Whether `bench` should be required too is an open decision for the maintainer.
+- [ ] The `ci` and `bench` status checks are both required (user decision, 2026-11-09).
 - [ ] No classic branch protection rule overlaps the ruleset (`gh api repos/anishbenji/tscache/branches/main/protection` returns 404).
 
 ### OpenSSF Scorecard
