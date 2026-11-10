@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LATENCY,
   DEFAULT_RUNS,
+  LATENCIES,
   MAX_RUNS,
   parseRunConfig,
   view,
@@ -67,6 +68,11 @@ describe("parseRunConfig", () => {
     const parsed = parse({ runs });
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.errors.join(" ")).toMatch(/Runs per mode/);
+  });
+
+  it.each(LATENCIES)("takes the offered latency %d ms", (latency) => {
+    const parsed = parse({ latency: String(latency) });
+    expect(parsed.ok && parsed.config.latencyMs).toBe(latency);
   });
 
   it.each([
