@@ -10,13 +10,13 @@ does.
 
 - **A put rejects field values its field cannot hold** (architecture N68).
   A value that is not a number (`null`, `undefined`, a hole in an array, a
-  string, a boolean) in any field, and `NaN`, `±Infinity` or a value outside
-  the dtype's range in an integer field, now reject the whole batch with
-  `PutError` `'field-mismatch'`; before, they were coerced (`null` stored as
-  `0`, `300` in a `u8` field as `44`). The same applies to fetcher responses,
-  which then report `'fetch-failed'`. Float fields still accept `NaN`: a JSON
-  fetcher maps its `null`s to `NaN`. Integer fields still truncate a fraction
-  toward zero.
+  string, a boolean) in any field, and a fraction, `NaN`, `±Infinity` or a
+  value outside the dtype's range in an integer field, now reject the whole
+  batch with `PutError` `'field-mismatch'`; before, they were coerced (`null`
+  stored as `0`, `300` in a `u8` field as `44`, `1.5` in an `i32` field as
+  `1`). The same applies to fetcher responses, which then report
+  `'fetch-failed'`. Float fields still accept `NaN`: a JSON fetcher maps its
+  `null`s to `NaN`, and rounds values meant for an integer field.
 - **`hydrate` refuses a snapshot whose coverage reaches its own
   `finalizedUntil`** (architecture N69), with `TscacheError`, before anything
   changes. Snapshots the library takes are unaffected.

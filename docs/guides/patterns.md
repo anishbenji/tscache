@@ -54,9 +54,9 @@ its own:
 - store it as `f32` or `f64` and write `NaN` for missing (exact for integers up to 2^24 and 2^53), or
 - keep a separate cache for it, so its absence is a missing point there.
 
-Nothing is coerced. A fraction for an integer field is truncated toward zero (`1.5` for an `i32` field
-is stored as `1`); a fetcher whose backend sends `null` that is not mapped to `NaN` gets its response
-rejected and the range reported `'fetch-failed'`. The rules are in `site/concepts/grid.md` ("Batches").
+Nothing is coerced. A fraction for an integer field is rejected (`1.5` for an `i32` field; architecture
+N68, decision 38), as is a `null` a fetcher did not map to `NaN`: the response is rejected and the range
+reported `'fetch-failed'`. Round in the fetcher if the backend sends fractions for an integer field. The rules are in `site/concepts/grid.md` ("Batches").
 
 `examples/solid-uplot` shows the problem with a sensor's integer field. Per-field presence masks are on
 the [roadmap](../roadmap.md).

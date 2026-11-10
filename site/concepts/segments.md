@@ -18,7 +18,7 @@ exported as `DTYPES`.
 **Presence is per point, not per field.** A point exists with a value in every field, or does not
 exist. A float field can mark a missing value with `NaN`, which is legal and survives every transfer;
 `null` is not a number and is rejected, so a JSON backend's `null` must become `NaN` before the put.
-An integer field has no such value, and rejects `NaN`. If an integer field can be missing on its own, store it as `f32` or
+An integer field has no such value, and rejects `NaN` and fractions. If an integer field can be missing on its own, store it as `f32` or
 `f64` with `NaN` for missing (exact for integers up to 2^24 and 2^53), or keep it in a cache of its
 own. Different fetches cannot supply different fields of one point: model independent series as separate
 caches and join them when you read.

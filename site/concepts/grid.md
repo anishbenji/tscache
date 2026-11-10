@@ -127,10 +127,10 @@ What each field accepts:
   string (`"1"` included), a boolean, a bigint or an object.
 - **Float fields** (`f64`, `f32`) accept every number, `NaN`, `Infinity` and `-Infinity` included.
   `f32` stores the nearest float32.
-- **Integer fields** (`i32`, `u32`, `i16`, `u16`, `i8`, `u8`) accept a finite number whose truncation
-  toward zero lies in the dtype's range, and store the truncation: `1.5` given for an `i32` field is
-  stored as `1`. `NaN`, `±Infinity` and a value outside the range (`300` or `-1` for `u8`) are
-  rejected.
+- **Integer fields** (`i32`, `u32`, `i16`, `u16`, `i8`, `u8`) accept only an integer inside the
+  dtype's range (`-0` and an integral float such as `2.0` included), stored as given. A fraction
+  (`1.5` for an `i32` field), `NaN`, `±Infinity` and a value outside the range (`300` or `-1` for
+  `u8`) are rejected: round in the fetcher if the backend sends fractions for an integer field.
 
 Nothing is coerced: a `null` from a JSON backend is rejected, not stored as `0`. A typed array of the
 field's own dtype is accepted as it is, without a scan. An empty batch is legal: with a range it states
