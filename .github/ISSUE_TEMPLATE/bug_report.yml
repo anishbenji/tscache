@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in tscache does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Please check [Troubleshooting](https://anishbenji.github.io/tscache/troubleshooting) first.
+        Do not report a security problem here; follow [SECURITY.md](https://github.com/anishbenji/tscache/blob/main/SECURITY.md) instead.
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      description: The installed version of `@anishbenji/tscache`.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      description: For a problem outside a browser, name the runtime (Node, Bun) and its version.
+      placeholder: "Chrome 142 on macOS 26"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Worker mode
+      description: The value of `client.mode` when the problem happens.
+      options:
+        - shared (SharedWorker)
+        - dedicated (dedicated worker)
+        - in-process
+        - not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead. Include error messages and any `modeFallback` or warning events.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: |
+        The smallest code that shows the problem: the cache config, the fetcher and the calls, or a link to a repository.
+        A reproduction against the examples' mock backend is ideal. Put code in fenced blocks (three backticks followed by `ts`).
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Bundler and its version, server rendering, number of tabs open, or anything else that seems relevant.
