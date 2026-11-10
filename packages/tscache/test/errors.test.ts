@@ -35,6 +35,56 @@ describe("error taxonomy", () => {
     expect(new AuthInvalidError("x").name).toBe("AuthInvalidError");
   });
 
+  // A minifier renames class identifiers, and with them each constructor's
+  // `name` (review 2026-11, L2: names arrived as `r`, `b`, `e` under
+  // Next.js). Redefining `name` on the constructor simulates that without a
+  // bundler; the documented name (architecture §2.6) must not move with it.
+  const classes: [string, { readonly name: string }, () => Error][] = [
+    ["TscacheError", TscacheError, () => new TscacheError("x")],
+    ["ConfigError", ConfigError, () => new ConfigError("x")],
+    ["InvalidRangeError", InvalidRangeError, () => new InvalidRangeError("x")],
+    ["UnknownCacheError", UnknownCacheError, () => new UnknownCacheError("x")],
+    [
+      "PutError",
+      PutError,
+      () => new PutError("x", { code: "misaligned", offenderIndex: 0 }),
+    ],
+    [
+      "ProtocolMismatchError",
+      ProtocolMismatchError,
+      () =>
+        new ProtocolMismatchError("x", {
+          clientProtocol: 1,
+          workerProtocol: 2,
+        }),
+    ],
+    ["AuthInvalidError", AuthInvalidError, () => new AuthInvalidError("x")],
+  ];
+
+  it.each(classes)(
+    "%s keeps its documented name when a minifier renames the class",
+    (documented, cls, make) => {
+      const own = Object.getOwnPropertyDescriptor(cls, "name");
+      Object.defineProperty(cls, "name", { value: "r", configurable: true });
+      try {
+        expect(cls.name).toBe("r");
+        expect(make().name).toBe(documented);
+      } finally {
+        if (own) Object.defineProperty(cls, "name", own);
+      }
+    },
+  );
+
+  it("a subclass outside the library is named by its own constructor", () => {
+    class AppConfigError extends ConfigError {}
+    class AppPutError extends PutError {}
+    expect(new AppConfigError("x").name).toBe("AppConfigError");
+    expect(
+      new AppPutError("x", { code: "unsorted", offenderIndex: 0 }).name,
+    ).toBe("AppPutError");
+    expect(new AppConfigError("x")).toBeInstanceOf(ConfigError);
+  });
+
   it("PutError carries structured offender detail", () => {
     const e = new PutError("misaligned timestamp", {
       code: "misaligned",
