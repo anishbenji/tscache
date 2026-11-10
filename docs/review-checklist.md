@@ -66,7 +66,7 @@ Every review of a step branch checks the diff against this list. Section referen
 - [ ] The protocol-version handshake rejects a mismatch with a clear error.
 - [ ] Fallback order is SharedWorker → dedicated Worker → in-process; pinning continues down-chain from the pin.
 - [ ] Fetch dedup is keyed in the worker so one fetch serves all tabs; miss ranges extend by one interval on flanks abutting coverage.
-- [ ] `authInvalid` broadcasts to all tabs; `updateAuth` is accepted from any tab and retries paused fetches.
+- [ ] `authInvalid` broadcasts to all tabs; `updateAuth` is accepted from any tab, switches the context and restores auth; nothing is paused or retried (a `get` that returned `auth-pending` is re-issued by the consumer).
 - [ ] While auth is invalid, `get` resolves promptly with `auth-pending` misses; nothing awaits a human-speed event. With a fetcher, `get` awaits deduplicated fetches unless `{ cacheOnly: true }`.
 - [ ] Events use the three scopes; `requestId` is `<clientId>:<seq>`; `put()` returns its warnings.
 - [ ] `clear` in SharedWorker mode affects all tabs (documented); a version mismatch auto-clears and emits `cacheCleared` with `reason: 'version-mismatch'`.

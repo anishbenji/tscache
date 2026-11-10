@@ -264,8 +264,10 @@ integration snippets (`integrations/`) show the whole flow.
 
 - Same origin only: a worker script on another origin is refused by the
   browser, and `SharedWorker` is shared only among same-origin tabs.
-- Chrome on Android has no `SharedWorker`; the chain falls back to a dedicated
-  `Worker` per tab (one `modeFallback` event). Nothing to configure.
+- A browser without `SharedWorker` (Samsung Internet, Opera Mobile, Chrome for
+  Android before 148) makes the chain fall back to a dedicated `Worker` per tab
+  (one `modeFallback` event). Nothing to configure. The support table is in
+  `site/guides/workers.md` ("Browser support").
 - Check the setup once with `client.mode`: `'shared'` (or `'dedicated'` where
   SharedWorker is unavailable) means the URL resolved.
 - Chromium runs a `SharedWorker` in the process of the tab that created it.

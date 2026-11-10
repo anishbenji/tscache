@@ -28,6 +28,62 @@ Any integer offset is accepted and normalised into `[0, interval)`: an offset of
 same grid as `5`, and both configs resolve identically. The grid is fixed: a session that moves with
 daylight saving time does not fit one offset all year.
 
+## Data that does not fit a fixed grid
+
+The grid is one fixed step in milliseconds. Calendar-aware grids (a session that follows daylight saving
+time, months of different lengths) are not supported. A `put` with a timestamp off the grid is rejected
+whole (`'misaligned'`), so data on another schedule is mapped onto a grid in the fetcher, before the
+cache sees it. These recipes cover the common cases.
+
+### Daily bars from an exchange that observes daylight saving time
+
+A session that opens at 9:30 New York time opens at 14:30 UTC in winter and 13:30 UTC in summer, so no
+`alignmentOffset` fits it all year, and bars stamped at the open are rejected for half of it. A daily bar's
+identity is its trading date, not the minute the session opened: stamp each bar at 00:00 UTC of that
+date in the fetcher, on a grid of one day with offset 0.
+
+<<< @/snippets/grid.ts#daily-dst{ts}
+
+Ranges you read are then dates at midnight UTC too: a chart that shows the trading date reads the
+same timestamps, and the session's open time, if you need it, is a field or a lookup of its own.
+
+### Weekly bars
+
+A week is a fixed 604,800,000 ms, so weekly bars fit the grid when every bar is stamped on the same
+weekday at the same UTC time. The offset puts slot 0 on that weekday. The epoch, 1 January 1970, was a
+Thursday, so Monday at 00:00 UTC is an offset of 4 days, 345,600,000 ms (Sunday is 3 days,
+259,200,000 ms):
+
+<<< @/snippets/grid.ts#weekly{ts}
+
+A week that starts in a local time zone, or follows daylight saving time, is stamped at its date as
+above.
+
+### Monthly, quarterly and yearly bars
+
+Months differ in length, so no millisecond interval holds them. Map each month to an ordinal, its number
+of months since January 1970, store it as the timestamp on a grid of interval 1, and convert back when
+drawing:
+
+<<< @/snippets/grid.ts#monthly{ts}
+
+The trade-off: the cache no longer holds times. Every range you pass to `get`, `invalidate` or `put`,
+every `meta.finalizedUntil` the fetcher reports, and every timestamp a read returns is an ordinal, so
+the fetcher converts the requested ordinal range to the months it asks the backend for, and the chart
+needs a label for each ordinal. Quarters and years work the same way with their own ordinals.
+
+### Jittered timestamps
+
+Samples that arrive near, but not on, a fixed step are moved to the slot they belong to in the fetcher.
+For a metric scraped every minute by a job that only ever runs late (12:00:02, 12:01:03, 12:01:58),
+flooring, `Math.floor(t / interval) * interval` with offset 0, assigns each sample to the slot that
+starts at or before it. Jitter on both sides of the step (12:00:58 meant for 12:01) needs rounding to the
+nearest slot instead, `Math.round(t / interval) * interval`, since flooring would move such a sample into
+the slot before. Either way two samples can land in one slot. A batch's timestamps must be unique, so
+decide which one the slot keeps (the last, a mean, a sum) before the `put`:
+
+<<< @/snippets/grid.ts#jitter{ts}
+
 ## Ranges
 
 A `Range` is `{ start, end }` in milliseconds, **inclusive at both ends**. That is how chart libraries
@@ -66,5 +122,21 @@ A `put` batch (and a fetcher's response) is validated as a whole before anything
 Values are converted to the field's dtype by typed-array assignment, so `1.5` given for an `i32` field is
 stored as `1`. `NaN` is a legal value. An empty batch is legal: with a range it states that the range
 holds no points.
+
+The conversions below never reject the batch and never warn, so a value that is not a valid number for
+its field is stored as some other number. Only an element that cannot be converted to a number at all (a
+BigInt, a symbol, an object whose conversion throws) rejects the batch with `PutError` `'field-mismatch'`:
+
+| Value given      | Float field (`f32`, `f64`)                  | Integer field (`i32`, `u8`, ...)                                    |
+| ---------------- | ------------------------------------------- | ------------------------------------------------------------------- |
+| `null`           | `0`                                         | `0`                                                                 |
+| `undefined`      | `NaN`                                       | `0`                                                                 |
+| `NaN`            | `NaN`                                       | `0`                                                                 |
+| A fraction       | kept (`f32` rounds it to the nearest `f32`) | truncated toward zero: `1.5` is `1`                                 |
+| Outside the type | `f32`: `Infinity` beyond about 3.4 × 10^38  | wraps around the type's range: `300` in `u8` is `44`, `-1` is `255` |
+
+A JSON backend has no `NaN`, so it usually sends `null` for a missing value, and the cache would store a
+bar of price `0`, indistinguishable from data. Map `null` to `NaN` for float fields in the fetcher
+([Fetchers](/guides/fetcher)), and check integer fields' ranges there if the backend can exceed them.
 
 <<< @/snippets/cache.ts#put-error{ts}

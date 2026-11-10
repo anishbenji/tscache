@@ -32,7 +32,7 @@ function forgetYesterday(cache: CacheHandle): Promise<void> {
 ```
 
 With a SharedWorker one tab's timer serves every tab, since they read the same cache; with dedicated
-workers (Chrome for Android) each tab runs its own.
+workers (a browser without SharedWorker, such as Samsung Internet) each tab runs its own.
 
 ## Restatements need a version
 
@@ -50,6 +50,14 @@ such value, so a point that exists stores a number in it. If a field can be miss
 - store it as `f32` or `f64` and write `NaN` for missing (exact for integers up to 2^24 and 2^53), or
 - keep a separate cache for it, so its absence is a missing point there.
 
+Values are converted to the field's dtype by typed-array assignment, which never warns and rejects only
+an element that cannot be converted to a number at all (a BigInt, a symbol, an object whose conversion
+throws: `PutError` `'field-mismatch'`). A `null` becomes `0` in every field, so a JSON backend, which has no `NaN`, must have its
+missing values mapped to `NaN` for float fields by the fetcher; otherwise the cache stores a value of
+`0`, indistinguishable from data. `undefined` becomes `NaN` in a float field and `0` in an integer
+field. An integer outside its type wraps around: `300` in a `u8` field is stored as `44`, `-1` as
+`255`. The table is in `site/concepts/grid.md` ("Batches").
+
 `examples/solid-uplot` shows the problem with a sensor's integer field. Per-field presence masks are on
 the [roadmap](../roadmap.md).
 
@@ -58,8 +66,8 @@ the [roadmap](../roadmap.md).
 With a SharedWorker every same-origin tab reads the same caches. `cache.clear()` and `client.clearAll()`
 empty them for all tabs, and every tab hears `cacheCleared`. Use them for resets that should apply
 everywhere (a logout, a version change you detected yourself), not for one view's housekeeping; to
-refetch a range for one view, `invalidate` it. On Chrome for Android, which has no SharedWorker, each tab
-has its own dedicated worker and a clear stays in that tab.
+refetch a range for one view, `invalidate` it. In a browser without SharedWorker (Samsung Internet, for
+example), each tab has its own dedicated worker and a clear stays in that tab.
 
 ## Credentials
 
@@ -67,8 +75,12 @@ Cookie-based authentication needs no tscache code: cookies go with the worker's 
 
 With tokens, the fetcher receives them in its `context`, throws `AuthInvalidError` (from
 `@anishbenji/tscache/fetcher`) when the backend refuses one, and every tab hears `authInvalid` with the refused
-context (design (b), architecture §6.2, N33). Any tab may refresh and call `updateAuth`, after which the
-paused fetches run again. Refreshing with a rotating refresh token needs one tab at a time; the Web Locks
+context (design (b), architecture §6.2, N33). That holds with a SharedWorker. With dedicated workers each tab has its own worker, and in-process
+(no worker) each client has its own engine, each with its own credential state, so `authInvalid`
+reaches only the tab whose fetch was refused and `updateAuth` restores only that tab's worker, or that
+client's engine. The other tabs hear their own
+`authInvalid` when the backend refuses them, and the Web Locks snippet below still converges tab by tab. Any tab may refresh and call `updateAuth`, after which the
+next `get` fetches again; nothing is paused or retried for a `get` that already returned. Refreshing with a rotating refresh token needs one tab at a time; the Web Locks
 snippet in [`examples/react-lwcharts/src/auth-refresh.ts`](../../examples/react-lwcharts/src/auth-refresh.ts)
 does it, and its header lists what it assumes. The main assumption is that a refresh issues a new access
 token: a tab that takes the lock after another tab's refresh compares the stored access token with the

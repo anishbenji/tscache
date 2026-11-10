@@ -27,8 +27,8 @@ every handle in every tab stays valid.
 ::: warning With a SharedWorker, a clear reaches every tab
 Every same-origin tab reads the same caches. `clear()` and `clearAll()` empty them for all tabs, and
 every tab hears `cacheCleared`. Use them for resets that should apply everywhere (a logout, a version
-change you detected yourself). To refetch a range for one view, `invalidate` it. On Chrome for Android,
-which has no SharedWorker, each tab has its own worker and a clear stays in that tab.
+change you detected yourself). To refetch a range for one view, `invalidate` it. In a browser without
+SharedWorker (Samsung Internet, for example), each tab has its own worker and a clear stays in that tab.
 :::
 
 <<< @/snippets/cache.ts#events{ts}

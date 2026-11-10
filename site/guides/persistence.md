@@ -16,6 +16,14 @@ then the only writer of the database. In the dedicated-worker and in-process hos
 directly, `persist: true` is accepted and does nothing, without an event. `client.mode === 'shared'` in a
 browser with IndexedDB tells you that the cache persists.
 
+::: warning A page that fell back persists nothing
+A page whose SharedWorker failed (a browser without it, a script that did not load, a worker that did
+not answer in time) runs a dedicated worker or in-process, and its caches stay in memory: a reload
+fetches everything again. Nothing reports it except `client.mode`, which is then `'dedicated'` or
+`'in-process'`, and the `modeFallback` events, which are emitted once, just after `createClient`
+resolves, to the listeners attached by then. Check `client.mode` if persistence matters to you.
+:::
+
 ## What is stored, and when
 
 - The covered ranges below the finalized watermark, and the points inside them. The provisional tail

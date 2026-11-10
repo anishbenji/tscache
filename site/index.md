@@ -5,7 +5,7 @@ counts. It is built for a chart that scrolls through history and follows a live 
 once.
 
 - **One cache for every tab.** The cache runs in a `SharedWorker`, so every same-origin tab reads the same
-  data. Where there is no `SharedWorker` (Chrome on Android), it falls back to a dedicated `Worker`,
+  data. Where there is no `SharedWorker` (Samsung Internet, Chrome for Android before 148), it falls back to a dedicated `Worker`,
   then to the page itself; those give each tab a cache of its own, shared with no other tab.
 - **The worker fetches.** You give it a fetcher module, and a `get` fetches only the ranges its cache
   neither holds nor already has in flight, widened by one interval where a miss meets cached data so the

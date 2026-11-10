@@ -23,7 +23,8 @@ export interface Context {
 /** One page of the backend's answer. */
 interface Page {
   timestamps: number[];
-  fields: Record<string, number[]>;
+  /** JSON has no NaN, so a missing value arrives as null. */
+  fields: Record<string, (number | null)[]>;
   meta: {
     version: string;
     /** The first timestamp that is not final yet. */
@@ -74,7 +75,10 @@ const fetcher: Fetcher = {
       for (const t of page.timestamps) timestamps.push(t);
       for (const [name, values] of Object.entries(page.fields)) {
         fields[name] ??= [];
-        for (const value of values) fields[name].push(value);
+        // The cache would store null as 0, a value like any other: make it
+        // NaN, a float field's missing value (an integer field stores 0
+        // either way).
+        for (const value of values) fields[name].push(value ?? NaN);
       }
       // The earliest watermark: a later page must not vouch for an
       // earlier page's provisional points.

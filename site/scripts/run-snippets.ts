@@ -79,10 +79,23 @@ function within(
 }
 
 const backend = createBackend({ latencyMs: 0, pushMs: 200 });
+/**
+ * A series whose JSON page holds a null, as a JSON backend sends for a
+ * missing value: the fetcher snippet must hand it to the cache as NaN.
+ */
+const NULLS_SERIES = "test/nulls";
+const nullsPage = {
+  timestamps: [0, MINUTE],
+  fields: { close: [1.5, null] },
+  meta: { version: "1", finalizedUntil: 2 * MINUTE },
+};
 const server = Bun.serve({
   port: 0,
   fetch: async (request) =>
-    (await backend(request)) ?? new Response("not found", { status: 404 }),
+    new URL(request.url).pathname === `/api/series/${NULLS_SERIES}`
+      ? Response.json(nullsPage)
+      : ((await backend(request)) ??
+        new Response("not found", { status: 404 })),
 });
 const origin = server.url.origin;
 
@@ -189,6 +202,47 @@ const load = (file: string) => import(new URL(file, SNIPPETS).href);
 /** Each run gets what its snippets logged, in order. */
 type Run = (logs: unknown[][]) => Promise<void>;
 
+/**
+ * The value-conversion table of site/concepts/grid.md ("Batches"), against
+ * an in-process engine: when the engine's conversion changes, this fails
+ * until the page says what it does.
+ */
+async function checkConversions(): Promise<void> {
+  const { createClient } = await import("@anishbenji/tscache");
+  const client = await createClient({ mode: "in-process" });
+  const cache = await client.cache({
+    id: "test/conversions",
+    interval: MINUTE,
+    fields: { float: "f64", single: "f32", int: "i32", byte: "u8" },
+  });
+  const given = [null, undefined, Number.NaN, 1.5, 300, -1, 1e40];
+  const timestamps = given.map((_, i) => i * MINUTE);
+  const column = given as unknown as number[];
+  await cache.put({
+    timestamps,
+    fields: { float: column, single: column, int: column, byte: column },
+  });
+  const read: GetResult = await cache.get(
+    { start: 0, end: timestamps.at(-1) ?? 0 },
+    { cacheOnly: true },
+  );
+  const expected: Record<string, number[]> = {
+    float: [0, Number.NaN, Number.NaN, 1.5, 300, -1, 1e40],
+    single: [0, Number.NaN, Number.NaN, 1.5, 300, -1, Number.POSITIVE_INFINITY],
+    int: [0, 0, 0, 1, 300, -1, 0],
+    byte: [0, 0, 0, 1, 44, 255, 0],
+  };
+  for (const [name, values] of Object.entries(expected)) {
+    const stored = [...(read.fields[name] ?? [])];
+    check(
+      stored.length === values.length &&
+        stored.every((v, i) => Object.is(v, values[i])),
+      `${name} stored ${JSON.stringify(stored.map(String))}, the docs say ${JSON.stringify(values.map(String))}`,
+    );
+  }
+  await client.dispose();
+}
+
 const RUNS: Record<string, Run> = {
   async "fetcher.ts"() {
     const { default: fetcher } = await import(FETCHER);
@@ -213,6 +267,17 @@ const RUNS: Record<string, Run> = {
     }
     check(typeof response.meta?.version === "string", "no version");
     check(typeof response.meta?.finalizedUntil === "number", "no watermark");
+    // A JSON null, a missing value, comes back as NaN (site/guides/fetcher.md).
+    const nulls = await fetcher.fetch({
+      ...request,
+      cacheId: NULLS_SERIES,
+      range: { start: 0, end: MINUTE },
+    });
+    const close = nulls.fields.close as number[];
+    check(
+      close.length === 2 && close[0] === 1.5 && Number.isNaN(close[1]),
+      `null mapped to ${JSON.stringify(close)}`,
+    );
   },
   async "fetcher-columns.ts"() {
     const { default: json } = await import(FETCHER);
@@ -432,14 +497,72 @@ const RUNS: Record<string, Run> = {
       "the hydrated engine lacks the points",
     );
   },
-  async "grid.ts"() {
-    const { week } = await load("grid.ts");
+  async "grid.ts"(logs) {
+    const { gauge, monthIndex, monthOf, months, sessions, week, weekly } =
+      await load("grid.ts");
     const snapped = week.misses[0]?.range;
     check(
       snapped?.start === Date.UTC(2026, 9, 25, 14, 30) &&
         snapped.end === Date.UTC(2026, 9, 30, 14, 30),
       `snapped to ${JSON.stringify(snapped)}`,
     );
+    // The recipes for data that does not fit a fixed grid: every put was
+    // accepted, and each cache holds what the page says.
+    const daily: GetResult = await sessions.get(
+      { start: Date.UTC(2026, 2, 6), end: Date.UTC(2026, 2, 9) },
+      { cacheOnly: true },
+    );
+    check(
+      daily.timestamps.join() ===
+        [Date.UTC(2026, 2, 6), Date.UTC(2026, 2, 9)].join(),
+      `daily bars at ${daily.timestamps.join()}`,
+    );
+    const mondays: GetResult = await weekly.get(
+      { start: Date.UTC(2026, 10, 1), end: Date.UTC(2026, 10, 15) },
+      { cacheOnly: true },
+    );
+    check(
+      mondays.timestamps.length === 2 &&
+        [...mondays.timestamps].every((t) => new Date(t).getUTCDay() === 1),
+      `weekly bars at ${mondays.timestamps.join()}`,
+    );
+    check(
+      months.timestamps.join() === "680,681",
+      `monthly ordinals ${months.timestamps.join()}`,
+    );
+    check(
+      JSON.stringify(logs.at(-1)?.[0]) ===
+        JSON.stringify([
+          { year: 2026, month: 9 },
+          { year: 2026, month: 10 },
+        ]),
+      `months logged as ${JSON.stringify(logs.at(-1))}`,
+    );
+    // Ordinals before 1970 are negative and must map back too.
+    for (const [year, month] of [
+      [1969, 12],
+      [1969, 1],
+      [1968, 6],
+    ] as const) {
+      const back = monthOf(monthIndex(year, month));
+      check(
+        back.year === year && back.month === month,
+        `${year}-${month} came back as ${JSON.stringify(back)}`,
+      );
+    }
+    const load1m: GetResult = await gauge.get(
+      { start: Date.UTC(2026, 10, 10, 12), end: Date.UTC(2026, 10, 10, 12, 1) },
+      { cacheOnly: true },
+    );
+    check(
+      load1m.timestamps.join() ===
+        [Date.UTC(2026, 10, 10, 12), Date.UTC(2026, 10, 10, 12, 1)].join() &&
+        [...(load1m.fields.load ?? [])].join() === "0.5,0.25",
+      `jittered samples stored as ${load1m.timestamps.join()} / ${[
+        ...(load1m.fields.load ?? []),
+      ].join()}`,
+    );
+    await checkConversions();
   },
   async "live.ts"() {
     const { cache, followStream, startPolling } = await load("live.ts");

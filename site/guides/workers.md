@@ -11,7 +11,7 @@ The engine runs in one of three hostings, tried in order from `mode` (default `'
 3. **`'in-process'`**: an engine in the page itself, behind the same message protocol. No sharing.
 
 A hosting **fails**, and the chain steps down with a `modeFallback` event, when its constructor throws
-(Chrome on Android has no `SharedWorker`), when the worker fires `error` before the handshake (the script
+(a browser without `SharedWorker`, see [Browser support](#browser-support)), when the worker fires `error` before the handshake (the script
 failed to load or threw), when no hello arrives within `handshakeTimeoutMs`, or when a SharedWorker
 stops running after its hello but before the handshake completes (reason: "SharedWorker stopped running
 during the handshake"). When the last hosting
@@ -24,13 +24,49 @@ but does not step down. A fetcher module that fails to load rejects `createClien
 `TscacheError` (`init-err`) naming the module, without falling back. A load that never settles leaves
 `createClient` pending: tscache 0.1.0 has no timeout on it ([Writing a fetcher](/guides/fetcher)).
 
-::: info Chrome on Android
-Chrome on Android has no `SharedWorker`. There the client falls back to a dedicated worker per tab, with
-one `modeFallback` event. Nothing to configure, but each tab then has a cache of its own: a clear stays
-in its tab, and a range is fetched once per tab.
+::: info Browsers without SharedWorker
+Samsung Internet and Opera Mobile have no `SharedWorker`, nor had Chrome for Android before version 148.
+There the client falls back to a dedicated worker per tab, with one `modeFallback` event. Nothing to
+configure, but each tab then has a cache of its own: a clear stays in its tab, a range is fetched once
+per tab, `authInvalid` and `updateAuth` reach only that tab ([Authentication](/guides/auth)), and
+`persist: true` stores nothing ([Persistence](/guides/persistence)). `client.mode` is then
+`'dedicated'`.
 :::
 
 <<< @/snippets/client.ts#fallback{ts}
+
+## Browser support
+
+First version of each browser that supports what each hosting needs, from MDN browser-compat-data 8.1.8,
+[caniuse](https://caniuse.com/sharedworkers) and
+[Chrome Platform Status](https://chromestatus.com/feature/6265472244514816), read 2026-11-10:
+
+| Feature                 | Chrome | Edge | Firefox | Safari | Chrome Android | Safari iOS | Firefox Android | Samsung Internet | Android WebView |
+| ----------------------- | ------ | ---- | ------- | ------ | -------------- | ---------- | --------------- | ---------------- | --------------- |
+| `SharedWorker`          | 5      | 79   | 29      | 16     | 148            | 16         | 33              | No               | 148             |
+| Module dedicated worker | 80     | 80   | 114     | 15     | 80             | 15         | 114             | 13.0             | 80              |
+| Module `SharedWorker`   | 80     | 80   | 114     | 16     | 148            | 16         | 114             | No               | 148             |
+| `import()` in workers   | 80     | 80   | 114     | 15     | 80             | 15         | 114             | 13.0             | 80              |
+| Web Locks in workers    | 69     | 79   | 96      | 15.4   | 69             | 15.4       | 96              | 10.0             | 69              |
+| IndexedDB in workers    | 24     | 12   | 37      | 10     | 25             | 10         | 37              | 1.5              | 4.4             |
+
+Chrome for Android and Android WebView ran `SharedWorker` as an origin trial in versions 140 to 144 and
+shipped it in 148. What the gaps mean for the chain:
+
+- **No `SharedWorker`** (Samsung Internet, which is based on Chromium 143 at version 30; Opera Mobile;
+  Chrome for Android and WebView before 148): the shared hosting fails and the client runs a dedicated
+  worker per tab, with the per-tab differences in the note above.
+- **No module workers** (Firefox before 114): both worker hostings fail, since the worker is an ES module
+  worker, and the client runs in-process.
+- **Web Locks** are used only by the shared hosting, to detect a lost worker
+  ([Losing the worker](#losing-the-worker)). Every browser version above that runs a module
+  `SharedWorker` also has Web Locks in workers. Safari 15.0 to 15.3 has no Web Locks, but it has no
+  `SharedWorker` either: it runs the dedicated hosting, which learns of a failed worker from the
+  worker's `error` event. Outside a secure context Web Locks are missing in every browser, with the
+  consequence described under [Losing the worker](#losing-the-worker).
+
+The repository's browser tests run in Chromium only; no other column of this table is tested by the
+project.
 
 ## Serving the worker script
 

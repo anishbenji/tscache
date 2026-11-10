@@ -15,6 +15,17 @@ The page then carries the server's answer twice:
 
 <<< @/snippets/snapshots-server.ts#server{ts}
 
+::: danger Escape every `<` before the JSON goes into the page
+`JSON.stringify` leaves `<` as it is, and the HTML parser ends a `<script>` element at the first
+`</script>` it meets, inside a JSON string or not. A field name, a dataset `version`, or anything else in
+the element (the columns beside the snapshot) that contains `</script>` would end the element early:
+the rest of the JSON is parsed as HTML, the browser's `JSON.parse` of the element's text throws, and
+when the string comes from data, the text after it runs as markup and script in your page (cross-site
+scripting). Replacing every `<` with `\u003c`, as the snippet does, keeps the JSON valid and decoding to
+the same value, and leaves the parser nothing to end the element with. tscache does not do it for you:
+`encodeSnapshot` returns a JSON value, not HTML.
+:::
+
 - **One client per server process**, created at startup and shared by every render, so a render reads
   what earlier renders fetched. Every visitor then reads the same cache: use it for public data only.
 - **The fetcher URL must be one the server can `import()`.** With Vite, `?fetcher` gives server code a
