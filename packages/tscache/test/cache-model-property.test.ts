@@ -21,8 +21,9 @@ import { batchOf, compareState, randomValue, show } from "./cache-model-checks";
 // at or after the watermark's slot, equal to the model), the watermark, the
 // version, a well-formed store and the segment layout (N14, N15).
 //
-// A failure prints the seed, the step and the operations before it; replay
-// one by calling `runCase` with its seed.
+// A failure prints the seed, the step and the operations before it. To
+// replay one, narrow the it.each table to { first: <seed>, count: 1 } (the
+// rule-reach assertion may then fail too, since one seed reaches fewer rules).
 
 const STEPS = 120;
 const VERSIONS = ["v1", "v2", "v3"] as const;

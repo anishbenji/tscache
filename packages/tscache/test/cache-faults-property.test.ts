@@ -30,8 +30,11 @@ import {
 //   and when any point inside the range changed none of the range is covered;
 // - the watermark did not move;
 // - a version step that ran before the write stays (the cache was cleared
-//   and the version adopted, and onVersionClear was called once); if it did
-//   not run, nothing changed at all.
+//   and the version adopted, and onVersionClear was called once).
+// A put that fails during validation (the fault fired with validateBatch,
+// §4.3, on the stack) changes nothing at all: points, coverage, watermark and
+// version are as before, and onMutate is not called (§4.10.4); after
+// validation, onMutate is called once.
 // The run then either retries the same put, which must land exactly on the
 // model, or carries on from the half-written state.
 //
@@ -41,11 +44,17 @@ import {
 // Uint8Array the slot and mask arrays use. Each is wrapped in a Proxy, so
 // instanceof, statics and species behave as before; the wrapper counts only
 // while a put is armed.
+//
+// A failure prints the seed, the step, the case's configuration and the
+// operations before it. To replay one, narrow the it.each table to a row
+// such as { first: <seed>, count: 1, retry: <as printed> }.
 
 const FAULT = new RangeError("injected: Array buffer allocation failed");
 let countdown = -1; // -1: disarmed
 let fired = false;
 let firedIn = "";
+/** Whether the fault fired inside validateBatch, the put's validation (§4.3). */
+let firedInValidation = false;
 
 function failing<T extends object>(ctor: T, label: string): T {
   return new Proxy(ctor, {
@@ -55,6 +64,9 @@ function failing<T extends object>(ctor: T, label: string): T {
           countdown = -1;
           fired = true;
           firedIn = label;
+          firedInValidation = (new Error().stack ?? "").includes(
+            "validateBatch",
+          );
           throw FAULT;
         }
         countdown--;
@@ -73,7 +85,13 @@ function failing<T extends object>(ctor: T, label: string): T {
 const fieldArrays = FIELD_ARRAYS as Record<Dtype, (typeof FIELD_ARRAYS)[Dtype]>;
 const originals = { ...fieldArrays };
 
+/** V8's stack depth setting, which the DOM lib types do not declare. */
+const V8Error = Error as ErrorConstructor & { stackTraceLimit: number };
+const stackTraceLimit = V8Error.stackTraceLimit;
+
 beforeAll(() => {
+  // Deep enough that validateBatch shows on the stack of a fault inside it.
+  V8Error.stackTraceLimit = 50;
   for (const dtype of Object.keys(originals) as Dtype[]) {
     fieldArrays[dtype] = failing(originals[dtype], "a field array");
   }
@@ -84,6 +102,7 @@ beforeAll(() => {
 afterAll(() => {
   Object.assign(fieldArrays, originals);
   vi.unstubAllGlobals();
+  V8Error.stackTraceLimit = stackTraceLimit;
 });
 
 const STEPS = 60;
@@ -95,7 +114,8 @@ const FIELD_SETS: Record<string, Dtype>[] = [
 /** Every outcome the generator must reach in each batch of seeds. */
 const OUTCOMES = [
   "put succeeded",
-  "failed with nothing changed",
+  "failed in validation, nothing changed",
+  "failed in the write with nothing changed",
   "failed part-way, points changed",
   "failed part-way, coverage withdrawn only",
   "failed after a version clear",
@@ -132,6 +152,7 @@ function runCase(
   };
   const model = new CacheModel(o);
   let versionClears = 0;
+  let mutations = 0;
   const c = new CacheState(
     resolveCacheConfig({
       id: "faults",
@@ -146,7 +167,11 @@ function runCase(
         : { finalizedUntil: o.finalizedUntil }),
       ...(o.version === undefined ? {} : { version: o.version }),
     }),
-    { onVersionClear: () => versionClears++ },
+    {
+      onVersionClear: () => versionClears++,
+      // Fires once for every mutating call that passed validation (§4.10.4).
+      onMutate: () => mutations++,
+    },
   );
   const log: string[] = [];
   // A failed replace may leave the documented non-canonical layout; from then
@@ -209,6 +234,7 @@ function runCase(
       watermark: c.finalizedUntil,
       version: c.version,
       clears: versionClears,
+      mutations,
     };
     const authority = model.authority(range);
     const touched = model.touched(slots, range);
@@ -241,13 +267,58 @@ function runCase(
     log.push(`  ^ failed by injection in ${firedIn}`);
     note(`fault in ${firedIn}`);
 
-    // The version step (§4.5): it ran before the write and stays, or the
-    // fault came during validation and nothing at all changed.
+    // onMutate fires once for a put that passed validation and never for
+    // one that did not (§4.10.4).
+    const mutated = mutations - before.mutations;
+    if (mutated !== (firedInValidation ? 0 : 1)) {
+      return `onMutate called ${mutated} times by a put that failed ${firedInValidation ? "in validation" : "after it"}\n${where()}`;
+    }
+    // A fault during validation (§4.5 order inside put, errors): nothing at
+    // all may have changed.
+    const after = { rows: rowsOf(c, model), covered: coveredSlots(c) };
+    if (firedInValidation) {
+      const same =
+        c.version === before.version &&
+        Object.is(c.finalizedUntil, before.watermark) &&
+        versionClears === before.clears &&
+        sameNumbers(before.covered, after.covered) &&
+        before.rows.size === after.rows.size &&
+        [...before.rows].every(([s, row]) => {
+          const now = after.rows.get(s);
+          return now !== undefined && sameNumbers(row, now);
+        });
+      if (!same) {
+        return `a put that failed in validation changed the cache\n${where()}`;
+      }
+      note("failed in validation, nothing changed");
+      const formed = wellFormed(c, o.cap);
+      if (formed !== undefined)
+        return `after a failed validation: ${formed}\n${where()}`;
+      if (retry) {
+        const want = model.put(slots, columns, range, meta);
+        const result = c.put(
+          batchOf(model, slots, columns, meta, false),
+          options,
+        );
+        if (
+          result.cleared !== want.cleared ||
+          show(result.warnings) !== show(want.warnings)
+        ) {
+          return `the retried put returned ${show(result)} want ${show(want)}\n${where()}`;
+        }
+        const retried = compareState(c, model, r, strictLayout);
+        if (retried !== undefined)
+          return `after retrying a put that failed in validation: ${retried}\n${where()}`;
+      }
+      continue;
+    }
+
+    // The version step (§4.5): it ran before the write and stays, or it did
+    // not run and the write started from the state before.
     const versionStepRan =
       meta?.version !== undefined &&
       c.version === meta.version &&
       before.version !== meta.version;
-    const after = { rows: rowsOf(c, model), covered: coveredSlots(c) };
     if (!versionStepRan && c.version !== before.version) {
       return `a failed put changed the version ${before.version} -> ${c.version}\n${where()}`;
     }
@@ -331,7 +402,7 @@ function runCase(
     const covChanged = !sameNumbers(base.covered, after.covered);
     if (changed) note("failed part-way, points changed");
     else if (covChanged) note("failed part-way, coverage withdrawn only");
-    else if (!versionStepRan) note("failed with nothing changed");
+    else if (!versionStepRan) note("failed in the write with nothing changed");
 
     // The model takes over what the cache now holds inside the put's range.
     if (touched !== undefined) {
