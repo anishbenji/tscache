@@ -146,3 +146,33 @@ for (const mode of ["none", "memo", "tanstack", "tscache"] as const) {
     }
   });
 }
+
+test("a failed rerun leaves no results to copy from the run before", async ({
+  page,
+}) => {
+  test.setTimeout(2 * RUN_TIMEOUT + 30_000);
+  const status = page.getByTestId("status");
+  const copy = page.getByRole("button", { name: "Copy as Markdown" });
+  await page.goto("/?runs=1&latency=50&modes=memo");
+  await expect(status).toHaveText("ready");
+  const run = page.getByRole("button", { name: "Run the benchmark" });
+  await run.click();
+  await expect(status).toHaveText("done", { timeout: RUN_TIMEOUT });
+  await expect(page.locator("#results tbody tr")).toHaveCount(1);
+  await expect(copy).toBeEnabled();
+
+  await control(page, { failNext: 100 });
+  try {
+    await run.click();
+    await expect(status).toHaveText(/^failed: /, { timeout: RUN_TIMEOUT });
+    // The run before's table, its results and Copy are gone with it.
+    await expect(page.locator("#results tbody tr")).toHaveCount(0);
+    await expect(page.getByTestId("results-json")).toHaveText("");
+    await expect(page.getByTestId("conditions")).not.toContainText(
+      "ms per page",
+    );
+    await expect(copy).toBeDisabled();
+  } finally {
+    await control(page, { failNext: 0 });
+  }
+});

@@ -339,6 +339,17 @@ function showTable(conditions: Conditions, table: Row[]): void {
 
 let last: { conditions: Conditions; table: Row[] } | undefined;
 
+/** Takes the last run's results off the page. */
+function clearResults(): void {
+  last = undefined;
+  element('[data-testid="conditions"]').textContent = "Running.";
+  element('[data-testid="hit-ratio"]').textContent = "";
+  element('[data-testid="workers"]').textContent = "";
+  element('[data-testid="results-json"]').textContent = "";
+  element("#results thead").replaceChildren();
+  element("#results tbody").replaceChildren();
+}
+
 async function runAll(
   latencyMs: number,
   runs: number,
@@ -346,6 +357,9 @@ async function runAll(
 ): Promise<void> {
   runButton.disabled = true;
   copyButton.disabled = true;
+  // A run starts with nothing of the run before on the page, so a failed run
+  // leaves no table, no results and nothing to copy.
+  clearResults();
   try {
     // Each click starts with no reports; its checks read its own runs only.
     reports.length = 0;
