@@ -203,42 +203,89 @@ const load = (file: string) => import(new URL(file, SNIPPETS).href);
 type Run = (logs: unknown[][]) => Promise<void>;
 
 /**
- * The value-conversion table of site/concepts/grid.md ("Batches"), against
- * an in-process engine: when the engine's conversion changes, this fails
- * until the page says what it does.
+ * What each field accepts, as site/concepts/grid.md ("Batches") documents it
+ * (N68), against an in-process engine: when the engine's rules change, this
+ * fails until the page says what they are. Each case puts one value into one
+ * field (the others get 0) and expects either the stored number or a
+ * rejection with `PutError` `'field-mismatch'`.
  */
 async function checkConversions(): Promise<void> {
   const { createClient } = await import("@anishbenji/tscache");
   const client = await createClient({ mode: "in-process" });
+  const fields = {
+    float: "f64",
+    single: "f32",
+    int: "i32",
+    byte: "u8",
+  } as const;
   const cache = await client.cache({
     id: "test/conversions",
     interval: MINUTE,
-    fields: { float: "f64", single: "f32", int: "i32", byte: "u8" },
+    fields,
   });
-  const given = [null, undefined, Number.NaN, 1.5, 300, -1, 1e40];
-  const timestamps = given.map((_, i) => i * MINUTE);
-  const column = given as unknown as number[];
-  await cache.put({
-    timestamps,
-    fields: { float: column, single: column, int: column, byte: column },
-  });
-  const read: GetResult = await cache.get(
-    { start: 0, end: timestamps.at(-1) ?? 0 },
-    { cacheOnly: true },
-  );
-  const expected: Record<string, number[]> = {
-    float: [0, Number.NaN, Number.NaN, 1.5, 300, -1, 1e40],
-    single: [0, Number.NaN, Number.NaN, 1.5, 300, -1, Number.POSITIVE_INFINITY],
-    int: [0, 0, 0, 1, 300, -1, 0],
-    byte: [0, 0, 0, 1, 44, 255, 0],
+  const rejected = "rejected";
+  const nonNumbers: [unknown, typeof rejected][] = [
+    [null, rejected],
+    [undefined, rejected],
+    ["1", rejected],
+  ];
+  const documented: Record<
+    keyof typeof fields,
+    [unknown, number | typeof rejected][]
+  > = {
+    float: [
+      ...nonNumbers,
+      [Number.NaN, Number.NaN],
+      [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
+      [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY],
+      [1.5, 1.5],
+    ],
+    single: [
+      ...nonNumbers,
+      [Number.NaN, Number.NaN],
+      [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
+      [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY],
+      [1e40, Number.POSITIVE_INFINITY],
+    ],
+    int: [...nonNumbers, [Number.NaN, rejected], [1.5, 1]],
+    byte: [
+      ...nonNumbers,
+      [Number.NaN, rejected],
+      [300, rejected],
+      [-1, rejected],
+      [1.5, 1],
+    ],
   };
-  for (const [name, values] of Object.entries(expected)) {
-    const stored = [...(read.fields[name] ?? [])];
-    check(
-      stored.length === values.length &&
-        stored.every((v, i) => Object.is(v, values[i])),
-      `${name} stored ${JSON.stringify(stored.map(String))}, the docs say ${JSON.stringify(values.map(String))}`,
-    );
+  let t = 0;
+  for (const [name, cases] of Object.entries(documented)) {
+    for (const [value, expected] of cases) {
+      t += MINUTE;
+      const columns = Object.fromEntries(
+        Object.keys(fields).map((f) => [f, [f === name ? value : 0]]),
+      ) as unknown as Record<string, number[]>;
+      let outcome: number | string;
+      try {
+        await cache.put({ timestamps: [t], fields: columns });
+        const read: GetResult = await cache.get(
+          { start: t, end: t },
+          { cacheOnly: true },
+        );
+        outcome = read.fields[name]?.[0] ?? "missing";
+      } catch (error) {
+        const { name: kind, code } = error as {
+          name?: unknown;
+          code?: unknown;
+        };
+        outcome =
+          kind === "PutError" && code === "field-mismatch"
+            ? rejected
+            : `${String(kind)} ${String(code)}`;
+      }
+      check(
+        Object.is(outcome, expected),
+        `${name} given ${String(value)}: ${String(outcome)}, the docs say ${String(expected)}`,
+      );
+    }
   }
   await client.dispose();
 }
