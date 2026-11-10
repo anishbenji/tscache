@@ -77,7 +77,7 @@ Replace `NN`, `<name>`, `<modules>` and `feat/NN-slug` before sending. Prompts C
 **A — Contract tests (Codex, engine-logic changes only)**
 
 ```text
-You are the contract-test author for step NN (<name>) of the commit plan in starter-prompt.md §11 (see AGENTS.md → Roles).
+You are the contract-test author for step NN (<name>) (see AGENTS.md → Roles).
 Read docs/architecture.md (§2, §4, §5 and every decision row that touches this step) and starter-prompt.md §3.
 Write failing Vitest tests in packages/tscache/test/ that pin the specified behaviour of <modules>, importing from the paths in architecture §4. Cover happy paths, every documented rejection, fenceposts (inclusive ends, single-slot ranges, snap-outward, segment slot cap, gap exactly K vs K+1), and property-style checks where the doc asks for them.
 Test the contract, not an implementation: no assertions on private helpers or internal layout the doc does not specify.
@@ -88,8 +88,8 @@ Finish with a table of each test and the doc section it enforces, then any spec 
 **B — Implement (Claude)**
 
 ```text
-Implement step NN (<name>) per starter-prompt.md §11 and docs/architecture.md on branch feat/NN-slug.
-[Engine steps:] Codex's contract tests are in the working tree. Make them pass without weakening them; if one looks wrong, stop and tell me which and why.
+Implement step NN (<name>) per docs/architecture.md on branch feat/NN-slug.
+[Engine-logic changes:] Codex's contract tests are in the working tree. Make them pass without weakening them; if one looks wrong, stop and tell me which and why.
 Small Conventional Commits, `bun run ci` green after each; contract tests go in the same commit as the code that makes them pass.
 ```
 
