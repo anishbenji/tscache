@@ -241,10 +241,16 @@ function runCase(seed: number, seen: Map<string, number>): string | undefined {
 
 describe("CacheState against a slot-by-slot model — architecture §4.3–§4.5, N1, N3, N11, N13–N19", () => {
   it.each([
-    { first: 1, count: 200 },
-    { first: 10_001, count: 200 },
-    { first: 0xc0ffee, count: 200 },
-    { first: 0xdeadbeef, count: 200 },
+    // Eight short batches rather than four long ones, so that no test runs
+    // near the default timeout on a loaded machine; the seeds are the same.
+    { first: 1, count: 100 },
+    { first: 101, count: 100 },
+    { first: 10_001, count: 100 },
+    { first: 10_101, count: 100 },
+    { first: 0xc0ffee, count: 100 },
+    { first: 0xc0ffee + 100, count: 100 },
+    { first: 0xdeadbeef, count: 100 },
+    { first: 0xdeadbeef + 100, count: 100 },
   ])(
     "random K, cap, grid, meta and warnings agree after every step (seeds $first + $count)",
     ({ first, count }) => {

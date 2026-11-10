@@ -27,10 +27,11 @@ import {
 //   its old value, its new value, or removed by the put's own replace (only
 //   below the put's own watermark, N19);
 // - no coverage was added, coverage outside the put's range is unchanged,
-//   and when any point inside the range changed none of the range is covered;
+//   and none of the range is covered, whether or not any point changed;
 // - the watermark did not move;
-// - a version step that ran before the write stays (the cache was cleared
-//   and the version adopted, and onVersionClear was called once).
+// - the version step, which runs before the write, stays: the version the
+//   model derives is adopted, a mismatch has cleared the cache, and
+//   onVersionClear was called once for it.
 // A put that fails during validation (the fault fired with validateBatch,
 // §4.3, on the stack) changes nothing at all: points, coverage, watermark and
 // version are as before, and onMutate is not called (§4.10.4); after
@@ -313,16 +314,12 @@ function runCase(
       continue;
     }
 
-    // The version step (§4.5): it ran before the write and stays, or it did
-    // not run and the write started from the state before.
-    const versionStepRan =
-      meta?.version !== undefined &&
-      c.version === meta.version &&
-      before.version !== meta.version;
-    if (!versionStepRan && c.version !== before.version) {
-      return `a failed put changed the version ${before.version} -> ${c.version}\n${where()}`;
+    // The version step (§4.5) runs before the write and stays when the write
+    // fails: the model applies it, whatever the cache now reports.
+    const cleared = model.applyVersion(meta?.version);
+    if (c.version !== model.version) {
+      return `a failed put left the version ${c.version}, want ${model.version} (before ${before.version})\n${where()}`;
     }
-    const cleared = versionStepRan && model.applyVersion(meta?.version);
     if (versionClears - before.clears !== (cleared ? 1 : 0)) {
       return `onVersionClear called ${versionClears - before.clears} times after a failed put, cleared=${cleared}\n${where()}`;
     }
@@ -396,13 +393,15 @@ function runCase(
     const inside = after.covered.filter(
       (s) => touched !== undefined && touched.start <= s && s <= touched.end,
     );
-    if (changed && inside.length > 0) {
-      return `a failed put changed points in ${show(touched)} yet slots ${show(inside)} there are still covered\n${where()}`;
+    // A failed write withdraws the coverage of its whole range, whether or
+    // not any point changed (§4.3 allocation failure, §4.5 order inside put).
+    if (inside.length > 0) {
+      return `a failed write left slots ${show(inside)} of its range ${show(touched)} covered${changed ? " after changing points there" : ""}\n${where()}`;
     }
     const covChanged = !sameNumbers(base.covered, after.covered);
     if (changed) note("failed part-way, points changed");
     else if (covChanged) note("failed part-way, coverage withdrawn only");
-    else if (!versionStepRan) note("failed in the write with nothing changed");
+    else if (!cleared) note("failed in the write with nothing changed");
 
     // The model takes over what the cache now holds inside the put's range.
     if (touched !== undefined) {
@@ -445,10 +444,16 @@ function runCase(
 
 describe("CacheState.put failing part-way — architecture §4.3 allocation failure, §4.5 order inside put", () => {
   it.each([
-    { first: 1, count: 160, retry: true },
-    { first: 0xc0ffee, count: 160, retry: true },
-    { first: 10_001, count: 160, retry: false },
-    { first: 0xdeadbeef, count: 160, retry: false },
+    // Eight short batches rather than four long ones, so that no test runs
+    // near the default timeout on a loaded machine; the seeds are the same.
+    { first: 1, count: 80, retry: true },
+    { first: 81, count: 80, retry: true },
+    { first: 0xc0ffee, count: 80, retry: true },
+    { first: 0xc0ffee + 80, count: 80, retry: true },
+    { first: 10_001, count: 80, retry: false },
+    { first: 10_081, count: 80, retry: false },
+    { first: 0xdeadbeef, count: 80, retry: false },
+    { first: 0xdeadbeef + 80, count: 80, retry: false },
   ])(
     "every injected allocation failure leaves the documented state (seeds $first + $count, retry $retry)",
     ({ first, count, retry }) => {
