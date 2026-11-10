@@ -6,10 +6,10 @@ Branch: `fix/70-restated-history-flake` · Status: built
 
 The scheduled `Flake hunt` workflow failed on `main` at 0e45a85 (GitHub Actions run 42621162595, 2026-11-09 12:56 UTC: 2 failed, 4 did not run, 809 passed). Both failures were the same test, `e2e/examples/vanilla-uplot.spec.ts:45` › "a restated history clears the cache and is fetched again". The four tests that did not run were the two later tests of the serial group after each failure. The fix changes only that test. No library, example or mock backend code changes.
 
-| Commit  | What                                                                                             |
-| ------- | ------------------------------------------------------------------------------------------------ |
-| 9e773d1 | `test(e2e)`: the restated-history test counts its notices before the click, not after the clear. |
-| —       | `docs(review)`: this file.                                                                       |
+| Commit (by subject)                                                      | What                                                                                |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `test(e2e): count notices before the restate click, not after the clear` | The restated-history test counts its notices before the click, not after the clear. |
+| `docs(review): step 70, the restated-history flake`                      | This file.                                                                          |
 
 ## Root cause
 
@@ -48,6 +48,14 @@ The reproduction does not stay as a regression test, against the usual practice 
 - `scripts/flake-hunt.sh -n 30 --load e2e/examples/vanilla-uplot.spec.ts`, run through the heavy-job lock: 120 passed (7.1 min), 0 failures in 30 repeats of each of the spec's four tests.
 - `bun run ci`, run through the heavy-job lock on the commit that adds this file, which is the branch head; its result is in the step's report to the director. `bun scripts/test-clocks.ts` alone: 147 files clean.
 - `bunx biome check e2e/examples/vanilla-uplot.spec.ts`: clean.
+
+## Pre-review (Claude), not the gate
+
+One round on 2026-11-10 after the branch was rebased onto main 5635b56. No P0 or P1. The reviewer confirmed the reasoning of the fix, that the assertion is no weaker (same predicate, bound and timeout), and that the other example specs count before the action.
+
+| #    | Sev | Finding                                                    | Decision | Resolution                                                           |
+| ---- | --- | ---------------------------------------------------------- | -------- | -------------------------------------------------------------------- |
+| PR-1 | P2  | The Scope table named a commit hash from before the rebase | accepted | The table now names commits by subject, which a rebase cannot change |
 
 ## Not verified
 
