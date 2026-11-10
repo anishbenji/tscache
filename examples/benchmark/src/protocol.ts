@@ -14,6 +14,9 @@ export interface ViewTiming {
   /** From the read's start to the frame after setData returned. */
   chartMs: number;
   bars: number;
+  /** When the read began and answered, on the fetch reports' time line. */
+  askedAt: number;
+  answeredAt: number;
 }
 
 export type TabMessage =

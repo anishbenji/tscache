@@ -82,7 +82,19 @@ test("each mode makes the requests its caching allows, tscache the fewest", asyn
   // Every view of every tab was drawn.
   for (const r of results.runs) {
     expect(r.chartMs).toHaveLength(VIEWS * (1 + TABS));
+    expect(r.requested).toHaveLength(VIEWS * (1 + TABS));
   }
+  // Views answered without a request: in the per-tab modes each request is
+  // one view's own, so the rest are the views without one. tscache's tabs
+  // may join one request, which leaves at most the views it did not make.
+  const hits = (r: RunResult) => r.requested.filter((asked) => !asked).length;
+  const views = VIEWS * (1 + TABS);
+  for (const r of [none, memo, tanstack])
+    expect(hits(r)).toBe(views - total(r));
+  expect(hits(tscache)).toBeLessThanOrEqual(views - total(tscache));
+  expect(hits(tscache)).toBeGreaterThanOrEqual(
+    views - total(tscache) - (TABS - 1),
+  );
   // The table has a row per mode, each from a run whose counts held.
   expect(results.rows.map((row) => row.mode)).toEqual([
     "none",

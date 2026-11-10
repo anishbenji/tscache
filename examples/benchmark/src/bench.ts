@@ -14,7 +14,7 @@
 
 import type { Range } from "@anishbenji/tscache";
 import { fetchSeries } from "@examples/mock-backend/fetcher";
-import { onInsight } from "@examples/mock-backend/insights";
+import { type FetchInsight, onInsight } from "@examples/mock-backend/insights";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import type { PageMessage, TabMessage, ViewTiming } from "./protocol";
@@ -24,12 +24,15 @@ import {
   describeConditions,
   freshWorkers,
   HEADERS,
+  HIT_RATIO_NOTE,
   markdown,
+  type ReadView,
   type Row,
   type RunResult,
+  reportedPages,
+  requestedViews,
   rows,
   type Served,
-  type WorkerReport,
 } from "./report";
 import {
   anchorFor,
@@ -38,6 +41,7 @@ import {
   MODES,
   type Mode,
   SERIES,
+  sourceCacheId,
   type View,
   workload,
 } from "./workload";
@@ -178,12 +182,20 @@ function longTasks(): { stop(): { count: number; ms: number } } {
 // --- Workers ---------------------------------------------------------------
 
 /**
- * Which worker fetched for which cache, from the fetch reports of every
- * worker of this origin: the check that each tscache run had a SharedWorker
- * of its own.
+ * The fetch reports of every tab and worker of this origin, every mode's
+ * fetches included: which views waited for a request, and the check that
+ * each tscache run had a SharedWorker of its own.
  */
-const workerReports: WorkerReport[] = [];
-onInsight(({ cacheId, worker }) => workerReports.push({ cacheId, worker }));
+const reports: FetchInsight[] = [];
+onInsight((insight) => reports.push(insight));
+
+/** Resolves once `done()` holds, or after about five seconds. */
+async function settled(done: () => boolean): Promise<boolean> {
+  for (let wait = 0; ; wait++) {
+    if (done() || wait >= 50) return done();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
 
 /**
  * The fresh-worker check, once a report of each of `runs` tscache runs has
@@ -193,11 +205,44 @@ onInsight(({ cacheId, worker }) => workerReports.push({ cacheId, worker }));
 async function workersChecked(
   runs: number,
 ): Promise<ReturnType<typeof freshWorkers>> {
-  for (let wait = 0; ; wait++) {
-    const check = freshWorkers(workerReports);
-    if (check.runs >= runs || wait >= 50) return check;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+  await settled(() => freshWorkers(reports).runs >= runs);
+  return freshWorkers(reports);
+}
+
+/**
+ * Which of a run's views waited for a request, once the fetch reports of its
+ * caches account for every page the backend served it. Reports that never
+ * add up fail the run: the page and the backend would disagree.
+ */
+async function requestedOf(
+  views: ReadView[],
+  requests: number,
+): Promise<boolean[]> {
+  const cacheIds = new Set(views.map((view) => view.cacheId));
+  const pages = () => reportedPages(reports, cacheIds);
+  if (!(await settled(() => pages() >= requests)) || pages() !== requests) {
+    throw new Error(
+      `fetch reports account for ${pages()} pages; the backend served ${requests}`,
+    );
   }
+  return requestedViews(views, reports);
+}
+
+/** A tab's views, as drawn, matched to the cache its fetches report under. */
+function readViews(
+  mode: Mode,
+  id: string,
+  tab: number,
+  views: View[],
+  timings: ViewTiming[],
+): ReadView[] {
+  const cacheId = sourceCacheId(mode, id, `${id}/${tab}`);
+  return timings.map((timing, i) => ({
+    cacheId,
+    range: (views[i] as View).range,
+    askedAt: timing.askedAt,
+    answeredAt: timing.answeredAt,
+  }));
 }
 
 // --- Runs ------------------------------------------------------------------
@@ -223,12 +268,25 @@ async function runMode(
     const three = await Promise.all(opened.map((tab) => tab.run(plan.three)));
     const workloadMs = performance.now() - startedAt;
     const after = await counters();
+    const phases = {
+      one: served(before, middle),
+      three: served(middle, after),
+    };
+    const views = [
+      ...readViews(mode, id, 1, plan.one, one),
+      ...three.flatMap((timings, i) =>
+        readViews(mode, id, i + 1, plan.three, timings),
+      ),
+    ];
     return {
       mode,
       run,
-      one: served(before, middle),
-      three: served(middle, after),
+      ...phases,
       chartMs: [one, ...three].flat().map((view) => view.chartMs),
+      requested: await requestedOf(
+        views,
+        phases.one.requests + phases.three.requests,
+      ),
       workloadMs,
       setupMs: first.setupMs,
       longTasks: tasks.stop(),
@@ -255,6 +313,7 @@ function browserName(): string {
 function showTable(conditions: Conditions, table: Row[]): void {
   element('[data-testid="conditions"]').textContent =
     describeConditions(conditions);
+  element('[data-testid="hit-ratio"]').textContent = HIT_RATIO_NOTE;
   const head = document.createElement("tr");
   for (const header of HEADERS) {
     const th = document.createElement("th");

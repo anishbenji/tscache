@@ -24,15 +24,18 @@ yesterday's final history, so every mode reads the same bars.
 
 ## The modes
 
-| Mode           | Between the chart and the fetcher                                                                  |
-| -------------- | -------------------------------------------------------------------------------------------------- |
-| No cache       | Nothing: every view fetches its range                                                              |
-| Per-tab memo   | A `Map` per tab, keyed by the exact range, holding each fetch's promise                            |
-| TanStack Query | `@tanstack/query-core`: one QueryClient per tab, key `[series, start, end]`, `staleTime: Infinity` |
-| tscache        | A client per tab, all on one shared cache, which fetches only what it does not hold                |
+| Mode                                       | Between the chart and the fetcher                                                                  |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| No cache                                   | Nothing: every view fetches its range                                                              |
+| Per-tab memo (exact range)                 | A `Map` per tab, keyed by the exact range, holding each fetch's promise                            |
+| TanStack Query (exact-range keys, per tab) | `@tanstack/query-core`: one QueryClient per tab, key `[series, start, end]`, `staleTime: Infinity` |
+| tscache                                    | A client per tab, all on one shared cache, which fetches only what it does not hold                |
 
-Every mode fetches with the mock backend's `fetchSeries` and draws with the
-same uPlot chart (`src/modes.ts`, `src/tab.ts`). Each mode of each run starts
+Every mode fetches with the mock backend's fetcher, the module tscache's
+worker loads, and draws with the same uPlot chart (`src/modes.ts`,
+`src/tab.ts`). TanStack Query here is keyed by exact range, in memory, per
+tab; a configuration with aligned chunks and a cache persisted across tabs is
+not measured. Each mode of each run starts
 empty, and the backend's counters are read as deltas. The page's "Limits of
 this comparison" names what the comparison does not show.
 

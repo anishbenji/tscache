@@ -2,8 +2,11 @@
 // it opens the source its URL names and reads the views the page sends,
 // one after another, drawing each with uPlot. Each view is timed from the
 // read's start until the frame after setData returned, the same way for
-// every mode. Before the page removes it, the tab disposes of its source.
+// every mode, and the read's start and answer are recorded on the time line
+// the fetch reports use, so the page can tell which views waited for a
+// request. Before the page removes it, the tab disposes of its source.
 
+import { moment } from "@examples/mock-backend/insights";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { openSource, type Source } from "./modes";
@@ -41,12 +44,16 @@ async function readAll(source: Source, { views }: RunMessage): Promise<void> {
   const timings: ViewTiming[] = [];
   for (const { range } of views) {
     const startedAt = performance.now();
+    const askedAt = moment();
     const bars = await source.read(range);
+    const answeredAt = moment();
     chart.setData([bars.timestamps as number[], bars.close as number[]]);
     await nextFrame();
     timings.push({
       chartMs: performance.now() - startedAt,
       bars: bars.timestamps.length,
+      askedAt,
+      answeredAt,
     });
   }
   post({ type: "done", tab, views: timings });
@@ -73,7 +80,7 @@ addEventListener("message", (event: MessageEvent<PageMessage>) => {
 async function start(): Promise<void> {
   if (!isMode(mode)) throw new Error(`unknown mode ${mode}`);
   const openedAt = performance.now();
-  source = await openSource(mode, run);
+  source = await openSource(mode, run, tab);
   post({ type: "ready", tab, setupMs: performance.now() - openedAt });
 }
 

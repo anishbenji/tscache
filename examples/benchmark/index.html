@@ -22,13 +22,13 @@
         <strong>No cache</strong>: every view fetches its range.
       </li>
       <li>
-        <strong>Per-tab memo</strong>: a <code>Map</code> per tab, keyed by
-        the exact range.
+        <strong>Per-tab memo (exact range)</strong>: a <code>Map</code> per
+        tab, keyed by the exact range.
       </li>
       <li>
-        <strong>TanStack Query</strong> (<code>@tanstack/query-core</code>):
-        one QueryClient per tab, key <code>[series, start, end]</code>,
-        <code>staleTime: Infinity</code>.
+        <strong>TanStack Query (exact-range keys, per tab)</strong>
+        (<code>@tanstack/query-core</code>): one QueryClient per tab, key
+        <code>[series, start, end]</code>, <code>staleTime: Infinity</code>.
       </li>
       <li>
         <strong>tscache</strong>: one client per tab, all on one shared cache,
@@ -41,22 +41,39 @@
       chart. Each mode of each run starts empty (new tabs, a new tscache cache
       id and a new SharedWorker, so no run reuses a warm worker), and the
       backend's counters are read as deltas. Time to chart runs from the
-      read's start to the frame after <code>setData</code> returned. tscache's
-      first connect to its new worker is its own column, run 1's beside the
-      median, and is inside the workload time.
+      read's start to the frame after <code>setData</code> returned. A view
+      is answered without a request when no fetch of its cache ended while
+      it was in flight; one that joined a fetch already in flight waited for
+      a request. tscache's first connect to its new worker is its own column,
+      run 1's beside the median, and is inside the workload time and the
+      first view's time to chart.
     </p>
     <details>
       <summary>Limits of this comparison</summary>
       <ul>
         <li>
-          TanStack Query and the memo cache per tab and by exact key: they are
-          not range-aware, so an overlapping or shifted range is a new fetch.
-          That is the point of the comparison, not a misconfiguration.
+          This is TanStack Query keyed by exact range, in memory, per tab. An
+          application can approach tscache's request counts by keying aligned
+          chunks and persisting the cache across tabs
+          (<code>persistQueryClient</code> or
+          <code>broadcastQueryClient</code>), writing chunk assembly and
+          forming-bar refresh itself. That configuration is not measured here.
         </li>
         <li>
-          The workload reads final history only. tscache refetches provisional
-          (still-forming) bars on every read, which exact-key caches would
-          serve stale; a live workload would add those fetches to tscache.
+          In a single tab (phase one) tscache makes the same number of requests
+          as the memo and TanStack Query and only moves fewer bars. The rest of
+          its saving comes from sharing one cache across tabs and from reading
+          the shifted ranges of phase two from bars it holds; the results file
+          splits the saving between exact repeats, sharing and the shifted
+          ranges.
+        </li>
+        <li>
+          The workload reads settled history only, which favours the
+          exact-key baselines' counts: tscache refetches still-forming bars on
+          every read and they do not. With live data, an exact-key cache's key
+          for the newest screen changes every minute, a new full fetch, and it
+          can serve a stale forming bar. Which way that nets out is not
+          measured.
         </li>
         <li>
           The three tabs are iframes on one main thread, so their timings
@@ -86,6 +103,7 @@
     </p>
     <h2>Results</h2>
     <p data-testid="conditions">Not run yet.</p>
+    <p data-testid="hit-ratio"></p>
     <p data-testid="workers"></p>
     <table id="results">
       <thead></thead>

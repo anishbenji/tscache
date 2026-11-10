@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   anchorFor,
+  exactKeyRequests,
   INTERVAL,
   NEW_BARS,
   SCREEN,
+  TABS,
   views,
   workload,
 } from "../src/workload";
@@ -64,5 +66,36 @@ describe("workload", () => {
         NEW_BARS * INTERVAL,
       );
     }
+  });
+});
+
+describe("exactKeyRequests", () => {
+  const plan = workload(anchorFor(NOW));
+  // Each tab's nine views hold two repeats: zooming back in, and returning.
+  const distinct = plan.one.length - 2;
+
+  it("per tab, fetches every distinct range once in each tab", () => {
+    // Phase two's ranges are all shifted, so tab one's cache has none.
+    expect(exactKeyRequests(plan, "per tab")).toEqual({
+      one: distinct,
+      three: TABS * distinct,
+      total: (1 + TABS) * distinct,
+    });
+  });
+
+  it("shared by the tabs, fetches every distinct range once", () => {
+    expect(exactKeyRequests(plan, "shared")).toEqual({
+      one: distinct,
+      three: distinct,
+      total: 2 * distinct,
+    });
+  });
+
+  it("without the shift, phase two is served from tab one's cache", () => {
+    const still = { one: plan.one, three: plan.one };
+    expect(exactKeyRequests(still, "shared").three).toBe(0);
+    expect(exactKeyRequests(still, "per tab").three).toBe(
+      (TABS - 1) * distinct,
+    );
   });
 });

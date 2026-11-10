@@ -34,8 +34,8 @@ export type Mode = (typeof MODES)[number];
 
 export const MODE_LABELS: Record<Mode, string> = {
   none: "No cache",
-  memo: "Per-tab memo",
-  tanstack: "TanStack Query",
+  memo: "Per-tab memo (exact range)",
+  tanstack: "TanStack Query (exact-range keys, per tab)",
   tscache: "tscache",
 };
 
@@ -86,6 +86,54 @@ export function workload(anchor: number): { one: View[]; three: View[] } {
     one: views(anchor),
     three: views(anchor + NEW_BARS * INTERVAL),
   };
+}
+
+/** Phase one's and phase two's request counts, and their sum. */
+export interface Requests {
+  one: number;
+  three: number;
+  total: number;
+}
+
+/**
+ * The requests a cache keyed by exact range makes on `plan`, in one tab and
+ * then in TABS tabs: per tab, as the memo and TanStack Query here, or one
+ * cache shared by every tab that joins a range already in flight. Counted,
+ * not measured: the shared cache is a counterfactual that no mode runs, so
+ * the results can say how much of tscache's saving sharing alone explains.
+ */
+export function exactKeyRequests(
+  plan: { one: View[]; three: View[] },
+  sharing: "per tab" | "shared",
+): Requests {
+  const key = ({ range }: View) => `${range.start}:${range.end}`;
+  const seen = (cache: Set<string>, tabViews: View[]) => {
+    let made = 0;
+    for (const view of tabViews) {
+      if (!cache.has(key(view))) made++;
+      cache.add(key(view));
+    }
+    return made;
+  };
+  const first = new Set<string>();
+  const one = seen(first, plan.one);
+  // Tab one keeps its cache in phase two. Per tab, the other tabs start
+  // empty; shared, they join what tab one fetches.
+  let three = seen(first, plan.three);
+  if (sharing === "per tab") {
+    for (let tab = 1; tab < TABS; tab++) three += seen(new Set(), plan.three);
+  }
+  return { one, three, total: one + three };
+}
+
+/**
+ * The cache id a tab's fetches are reported under: the run's tscache cache,
+ * which every tab of the run shares, or for the other modes one per tab, as
+ * their caches are. The fetcher reads the series from the first two
+ * segments and ignores the rest.
+ */
+export function sourceCacheId(mode: Mode, run: string, tab: string): string {
+  return mode === "tscache" ? cacheConfig(run).id : `${SERIES}/${tab}`;
 }
 
 /** The tscache config of a run: a fresh cache id, so a run starts empty. */
