@@ -1,6 +1,6 @@
 # Step 71 — Documentation truth pass
 
-Branch: `docs/71-truth-pass` · Reviewer: pre-review by Claude (not the gate); the gate is the director's · Status: built
+Branch: `docs/71-truth-pass` · Reviewer: GPT-6.1 Sol (high); pre-review by Claude, not the gate · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 Source: the November 2026 repository review (`docs/reviews/2026-11-review.md` in the main checkout, untracked): Part 1 §1.2 (D3–D20), Part 3 (3a, 3b, 3e, 3g, 3i), Part 4 §4.4 and Part 6 §6.4. Every claim was checked against the code before it went into the documents. Documentation and site snippets only: nothing under `packages/tscache/src`, `e2e/`, `examples/`, `reference/` or `integrations/` changed.
 
@@ -99,6 +99,14 @@ Each edit names its section or row and a short quote of the new text, so it can 
 - **`PortClient.connect` in architecture §4.7** (formerly edit A14, adding `signal?: AbortSignal`): step 68 (PR #93, "the handshake timer stops at `hello`") rewrote that signature and its comment, adding `signal` and `afterHello`, so its text is kept and the edit is withdrawn. Step 68's other text (the timeout bounds only the wait for `hello`; the lock watch from `hello`, user decision 24; a fetcher `import()` that never settles leaves `createClient` pending, user decision 25) was kept wherever this branch's edits met it: in the §4.8 "Chain" rule, `site/guides/workers.md` and `site/troubleshooting.md` this branch's browser wording was applied to step 68's sentences.
 - **D1 and D2** (handshake timer, `hello.lib`): code changes in other steps. **D10** (`f64` default): decision 37. **D16** (module layout): fixed by PR #92.
 - **Part 6 §6.4 rows outside the brief** (starter §1 "Local-only development", the Vitest and mitata versions, the export list, §9–§10; `AGENTS.md`).
+
+## Round 1 — reviewer verdict: merge after fixes
+
+| #    | Sev | Finding                                                                                                                                                                                                         | Decision | Resolution                                                                                                                                                                                                                                                         |
+| ---- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1-1 | P2  | "Conversion never rejects a value" (site/concepts/grid.md, docs/guides/patterns.md) is wrong for an element that cannot convert to a number: `[1n]` rejects with `PutError` `'field-mismatch'` (reviewer probe) | accepted | Both sentences now say the listed conversions never reject and that an element that cannot be converted at all (BigInt, symbol, a throwing object) rejects the batch; checked against `engine/batch.ts` (`data.set` in a `try`, `structural("field-mismatch", …)`) |
+
+No P0 or P1, so no further round (`docs/workflow.md`).
 
 ## Not verified
 

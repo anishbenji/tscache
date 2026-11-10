@@ -123,8 +123,9 @@ Values are converted to the field's dtype by typed-array assignment, so `1.5` gi
 stored as `1`. `NaN` is a legal value. An empty batch is legal: with a range it states that the range
 holds no points.
 
-The conversion never rejects a value and never warns, so a value that is not a valid number for its
-field is stored as some other number:
+The conversions below never reject the batch and never warn, so a value that is not a valid number for
+its field is stored as some other number. Only an element that cannot be converted to a number at all (a
+BigInt, a symbol, an object whose conversion throws) rejects the batch with `PutError` `'field-mismatch'`:
 
 | Value given      | Float field (`f32`, `f64`)                  | Integer field (`i32`, `u8`, ...)                                    |
 | ---------------- | ------------------------------------------- | ------------------------------------------------------------------- |

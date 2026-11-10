@@ -50,8 +50,9 @@ such value, so a point that exists stores a number in it. If a field can be miss
 - store it as `f32` or `f64` and write `NaN` for missing (exact for integers up to 2^24 and 2^53), or
 - keep a separate cache for it, so its absence is a missing point there.
 
-Values are converted to the field's dtype by typed-array assignment, which never rejects a value and
-never warns. A `null` becomes `0` in every field, so a JSON backend, which has no `NaN`, must have its
+Values are converted to the field's dtype by typed-array assignment, which never warns and rejects only
+an element that cannot be converted to a number at all (a BigInt, a symbol, an object whose conversion
+throws: `PutError` `'field-mismatch'`). A `null` becomes `0` in every field, so a JSON backend, which has no `NaN`, must have its
 missing values mapped to `NaN` for float fields by the fetcher; otherwise the cache stores a value of
 `0`, indistinguishable from data. `undefined` becomes `NaN` in a float field and `0` in an integer
 field. An integer outside its type wraps around: `300` in a `u8` field is stored as `44`, `-1` as
