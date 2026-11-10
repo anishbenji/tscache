@@ -160,8 +160,11 @@ export function rows(
 }
 
 const int = (n: number) => Math.round(n).toLocaleString("en-US");
-const ms = (n: number) =>
-  Number.isNaN(n) ? "–" : `${Math.round(n).toLocaleString("en-US")} ms`;
+// A value no view gave is NaN, and null once the page's JSON carried it.
+const ms = (n: number | null) =>
+  n === null || Number.isNaN(n)
+    ? "–"
+    : `${Math.round(n).toLocaleString("en-US")} ms`;
 const kb = (n: number) => `${(n / 1024).toFixed(1)} KiB`;
 const ratio = (n: number) => `${n.toFixed(2)}×`;
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cells,
   freshWorkers,
   HEADERS,
   HIT_RATIO_NOTE,
@@ -124,6 +125,12 @@ describe("markdown", () => {
       rows([all], ["none"]),
     );
     expect(text).toContain("| – · 20 ms |");
+  });
+
+  it("prints a dash for a p50 the page's JSON carried as null", () => {
+    const all = { ...run("none", 0, 3), requested: [true, true, true] };
+    const [row] = JSON.parse(JSON.stringify(rows([all], ["none"])));
+    expect(cells(row)).toContain("– · 20 ms");
   });
 });
 
