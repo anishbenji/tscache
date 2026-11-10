@@ -79,7 +79,8 @@ interface TscacheClient {
   /** Which hosting mode actually won the fallback chain. */
   readonly mode: HostingMode;
   clearAll(): Promise<void>;
-  /** Deliver new auth material to the fetcher; paused fetches retry. */
+  /** Deliver new auth material to the fetcher; the next get fetches again
+      (nothing is paused or retried, §4.9). */
   updateAuth(context: unknown): Promise<void>;
   on<E extends keyof ClientEvents>(
     event: E,
@@ -272,7 +273,7 @@ declare class AuthInvalidError extends Error {
 }
 ```
 
-Worker-side orchestration (locked behaviors): in-flight dedup in the worker — one fetch serves all tabs, and a `get` whose misses overlap fetches already in flight for the cache awaits them for the overlap and fetches only the rest (§4.9.1, N31; until step 44 the dedup was keyed per `(cacheId, range)`, so only identical ranges shared a fetch); miss coalescing extends computed miss ranges by one interval on flanks abutting existing coverage; an `AuthInvalidError` flips the auth state, broadcasts `authInvalid` to all tabs (design "b"), pauses affected fetches, and `updateAuth(context)` from any tab delivers new material and retries them. The examples ship a copy-pasteable Web Locks snippet for refresh-token rotation safety.
+Worker-side orchestration (locked behaviors): in-flight dedup in the worker — one fetch serves all tabs, and a `get` whose misses overlap fetches already in flight for the cache awaits them for the overlap and fetches only the rest (§4.9.1, N31; until step 44 the dedup was keyed per `(cacheId, range)`, so only identical ranges shared a fetch); miss coalescing extends computed miss ranges by one interval on flanks abutting existing coverage; an `AuthInvalidError` flips the auth state, broadcasts `authInvalid` to all tabs (design "b"), and while auth is invalid no fetch is issued (the misses come back `'auth-pending'` at once, design "y"); `updateAuth(context)` from any tab delivers new material and restores auth, and the next `get` fetches again. Nothing is paused or retried on behalf of a `get` that already returned (§4.9, step ⑪). The examples ship a copy-pasteable Web Locks snippet for refresh-token rotation safety.
 
 Cookie-based auth needs none of this machinery — cookies flow in worker fetches natively.
 
