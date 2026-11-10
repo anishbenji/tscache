@@ -21,7 +21,8 @@ incompatibility.
 `handshakeTimeoutMs` bounds only the wait for hello. Once the worker has said hello, it loads your
 `fetcher` module, and that load is not bounded by the timeout: a slow import delays `createClient`
 but does not step down. A fetcher module that fails to load rejects `createClient` with a
-`TscacheError` (`init-err`) naming the module, without falling back.
+`TscacheError` (`init-err`) naming the module, without falling back. A load that never settles leaves
+`createClient` pending: tscache 0.1.0 has no timeout on it ([Writing a fetcher](/guides/fetcher)).
 
 ::: info Chrome on Android
 Chrome on Android has no `SharedWorker`. There the client falls back to a dedicated worker per tab, with

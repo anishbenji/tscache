@@ -24,6 +24,13 @@ The worker could not `import()` it, or its default export has no `fetch` functio
 with `?fetcher`, not `?worker&url`, which drops the exports. A relative URL resolves against the worker
 script, not the page: pass an absolute path.
 
+## `createClient` never settles
+
+The fetcher module's `import()` has not settled: its server accepted the request and never answered, or
+a top-level `await` in the module, or in code it imports, never resolves. `handshakeTimeoutMs` bounds only
+the wait for the worker's hello, and in 0.1.0 nothing bounds the load after it. Check the module's
+request in the network panel of the worker's devtools, and move long work out of the module's top level.
+
 ## A fetch fails with `ReferenceError: document is not defined`
 
 The fetcher, or code it imports, uses `import()`, and a bundler wrapped it in a preload helper that

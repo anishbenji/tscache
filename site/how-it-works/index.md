@@ -72,6 +72,11 @@ the lock only once the worker is gone. A dedicated worker's client learns of its
 the worker's `error` event instead. Either way the client then rejects everything pending and emits
 `workerLost`; only the detection differs.
 
+The client queues on the lock as soon as `hello` names it, before the handshake ends. A grant that
+arrives before `init-ok`, for example because the worker died while it loaded the fetcher module, fails
+the shared hosting with a `HostingError`, and the client steps down the chain instead of emitting
+`workerLost`. The handshake timeout (`handshakeTimeoutMs`) bounds only the wait for `hello`.
+
 Without Web Locks, the SharedWorker names no lock and the client watches none. A worker that dies with
 the tab hosting it (a renderer crash) is then noticed only if the browser fires a `close` event on the
 port; where it does not, pending requests stay pending and no `workerLost` is emitted.
