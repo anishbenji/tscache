@@ -78,8 +78,9 @@ The copied worker files are served as they are. The library's own code is still 
 application, and that includes the in-process hosting, which loads the fetcher module with a runtime
 `import()` of the URL you pass. The import carries `/* webpackIgnore: true */` and
 `/* @vite-ignore */`, so the bundler leaves it for the runtime instead of replacing it with a stub that
-always rejects. A review probe checked this on a patched build with webpack 5.112.2, Rspack 2.3.2 and
-Next.js 16.4.6 (Turbopack, and `--webpack`). The repository's own tests build with Vite only.
+always rejects. A probe on 2026-11-10, run by hand against a copy of the built package with the hint
+added, checked this with webpack 5.112.2, Rspack 2.3.2 and Next.js 16.4.6 with Turbopack.
+The repository's own tests build with Vite only.
 
 ### No bundler
 

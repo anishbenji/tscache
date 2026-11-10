@@ -66,11 +66,13 @@ URL (architecture §4.9, N30). The import carries `/* webpackIgnore: true */`
 beside `/* @vite-ignore */`, so webpack, Rspack and Turbopack leave it to the
 runtime instead of replacing it with a stub that always rejects; without the
 hint, `createClient` with a fetcher rejected on the in-process hosting
-("fetcher module … failed to load: Cannot find module …"). The November 2026
-review probe verified the hint on a patched build with webpack 5.112.2,
-Rspack 2.3.2 and Next.js 16.4.6 (Turbopack and `--webpack`). The
-repository's own tests build with Vite only; no test runs webpack, Rspack or
-Next.js.
+("fetcher module … failed to load: Cannot find module …"). A probe on
+2026-11-10, run by hand against a copy of the built package with the hint
+added, verified it with webpack 5.112.2, Rspack 2.3.2 and Next.js 16.4.6
+with Turbopack (`next build --webpack` showed the failure; the hinted build
+was not run there); the results are recorded in
+`docs/reviews/step-69.md`. The repository's own tests build with Vite only;
+no test runs webpack, Rspack or Next.js.
 
 ## No bundler
 
