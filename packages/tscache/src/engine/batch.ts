@@ -38,20 +38,22 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/** A %TypedArray%.prototype getter: it reads the internal slots, which no subclass can override. */
+const typedArrayGetter = <T>(key: PropertyKey) =>
+  Object.getOwnPropertyDescriptor(
+    Object.getPrototypeOf(Uint8Array.prototype),
+    key,
+  )?.get as (this: unknown) => T;
+
 /**
  * The typed-array kind of a value ("Float64Array", …), or undefined. Read
  * from the %TypedArray% tag getter, not `instanceof`, so an array made in
  * another realm (an iframe, a different worker global) is recognized too.
  */
-const TYPED_ARRAY = Object.getPrototypeOf(Uint8Array.prototype);
-const typedArrayKind = Object.getOwnPropertyDescriptor(
-  TYPED_ARRAY,
-  Symbol.toStringTag,
-)?.get as (this: unknown) => string | undefined;
+const typedArrayKind = typedArrayGetter<string | undefined>(Symbol.toStringTag);
 
 /** A typed array's element count, from the %TypedArray% getter as the tag. */
-const typedArrayLength = Object.getOwnPropertyDescriptor(TYPED_ARRAY, "length")
-  ?.get as (this: unknown) => number;
+const typedArrayLength = typedArrayGetter<number>("length");
 
 /**
  * The element count of a `number[]` or a typed array. A typed array's is
@@ -113,9 +115,13 @@ function fieldArraysOf(batch: PutBatch, names: string[]): NumericArray[] {
 }
 
 /** Scans once and throws for the first timestamp that breaks a rule. */
-function assertTimestamps(timestamps: NumericArray, grid: Grid): void {
+function assertTimestamps(
+  timestamps: NumericArray,
+  n: number,
+  grid: Grid,
+): void {
   const expected = `t ≡ ${grid.alignmentOffset} (mod ${grid.interval})`;
-  for (let i = 0, n = lengthOf(timestamps); i < n; i++) {
+  for (let i = 0; i < n; i++) {
     const t = timestamps[i] as number;
     if (!isAligned(t, grid)) {
       throw new PutError(
@@ -218,8 +224,7 @@ function scanInto(
 }
 
 /** Timestamps are ascending, so only the two ends can fall outside. */
-function assertInside(timestamps: NumericArray, range: Range): void {
-  const n = lengthOf(timestamps);
+function assertInside(timestamps: NumericArray, n: number, range: Range): void {
   if (n === 0) return;
   const first = timestamps[0] as number;
   const last = timestamps[n - 1] as number;
@@ -266,11 +271,11 @@ export function validateBatch(
       );
     }
   });
-  assertTimestamps(timestamps, config);
+  assertTimestamps(timestamps, n, config);
   let authority: SlotRange | undefined;
   if (range !== undefined) {
     authority = snapIn(range, config);
-    assertInside(timestamps, range);
+    assertInside(timestamps, n, range);
   }
   // (5) Values (N68): field by field in schema order, each copied into a
   // fresh array of its dtype before anything is kept.
