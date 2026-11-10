@@ -200,11 +200,15 @@ function checkMeta(
   }
 }
 
-/** (4) Ascending, disjoint, not adjacent, inside the request. */
+/**
+ * (4) Ascending, disjoint, not adjacent, inside the request, and below the
+ * snapshot's own watermark when it has one (N69).
+ */
 function checkCoverage(
   value: unknown,
   request: SlotRange,
   config: ResolvedCacheConfig,
+  watermark: ValidSnapshot["watermark"],
 ): SlotRange[] {
   if (!Array.isArray(value)) fail("coverage must be an array");
   const out: SlotRange[] = [];
@@ -216,6 +220,11 @@ function checkCoverage(
     const last = out.at(-1);
     if (last !== undefined && r.start <= last.end + 1) {
       fail(`coverage[${i}] is not after coverage[${i - 1}] with a gap`);
+    }
+    // Slots at or after the watermark are provisional by the snapshot's own
+    // account: claiming them as covered is a corruption, never clipped.
+    if (watermark !== undefined && r.end >= watermark.slot) {
+      fail(`coverage[${i}] reaches past finalizedUntil ${show(watermark.t)}`);
     }
     out.push(r);
   }
@@ -261,7 +270,12 @@ export function validateSnapshot(
   checkEnvelope(input, config);
   const request = slotRange(input.range, config, "range");
   const meta = checkMeta(input, config);
-  const coverage = checkCoverage(input.coverage, request, config);
+  const coverage = checkCoverage(
+    input.coverage,
+    request,
+    config,
+    meta.watermark,
+  );
   const segments = checkSegments(input.segments, request, config);
   return { range: request, ...meta, coverage, segments };
 }

@@ -67,6 +67,8 @@ export class PutError extends TscacheError {
   readonly code: PutErrorCode;
   readonly offenderIndex: number;
   readonly offenderTimestamp?: number;
+  /** The field of a rejected value (N68); unset for every other reject. */
+  readonly offenderField?: string;
   /** Human-readable expectation, e.g. "t ≡ 0 (mod 60000)". */
   readonly expected?: string;
 
@@ -76,6 +78,7 @@ export class PutError extends TscacheError {
       code: PutErrorCode;
       offenderIndex: number;
       offenderTimestamp?: number;
+      offenderField?: string;
       expected?: string;
     },
   ) {
@@ -84,6 +87,8 @@ export class PutError extends TscacheError {
     this.offenderIndex = opts.offenderIndex;
     if (opts.offenderTimestamp !== undefined)
       this.offenderTimestamp = opts.offenderTimestamp;
+    if (opts.offenderField !== undefined)
+      this.offenderField = opts.offenderField;
     if (opts.expected !== undefined) this.expected = opts.expected;
   }
 }

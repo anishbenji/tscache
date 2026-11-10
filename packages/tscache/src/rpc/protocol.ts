@@ -128,6 +128,8 @@ export function listen(
 interface PutErrorData {
   offenderIndex: number;
   offenderTimestamp?: number;
+  /** N68; additive, so PROTOCOL_VERSION stays 1. */
+  offenderField?: string;
   expected?: string;
 }
 
@@ -176,6 +178,9 @@ export function toWireError(error: unknown): WireError {
     if (error.offenderTimestamp !== undefined) {
       data.offenderTimestamp = error.offenderTimestamp;
     }
+    if (error.offenderField !== undefined) {
+      data.offenderField = error.offenderField;
+    }
     if (error.expected !== undefined) data.expected = error.expected;
     wire.data = data;
   } else if (error instanceof ProtocolMismatchError) {
@@ -217,6 +222,7 @@ function rebuildPutError(wire: WireError): PutError {
   if (data.offenderTimestamp !== undefined) {
     opts.offenderTimestamp = data.offenderTimestamp;
   }
+  if (data.offenderField !== undefined) opts.offenderField = data.offenderField;
   if (data.expected !== undefined) opts.expected = data.expected;
   return new PutError(wire.message, opts);
 }

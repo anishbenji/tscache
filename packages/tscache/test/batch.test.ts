@@ -92,20 +92,27 @@ describe("validateBatch accepted inputs — architecture §2.2, §2.4, §4.3", (
       },
     });
     const values = [1.1, -1.9, 65_537.9, 4_294_967_297.9, Number.NaN];
+    // N68 (decision 29): integer fields reject NaN and out-of-range values,
+    // so they get values inside every integer dtype's range, which still
+    // truncate toward zero.
+    const integers = [1.1, 1.9, 0, 127.9, 0.5];
     const fields = Object.fromEntries(
-      Object.keys(all.fields).map((name) => [name, values]),
+      Object.keys(all.fields).map((name) => [
+        name,
+        name.startsWith("f") ? values : integers,
+      ]),
     );
     expect(
       validateBatch({ timestamps: [0, 1, 2, 3, 4], fields }, all).points.fields,
     ).toEqual({
       f64: new Float64Array(values),
       f32: new Float32Array(values),
-      i32: new Int32Array(values),
-      u32: new Uint32Array(values),
-      i16: new Int16Array(values),
-      u16: new Uint16Array(values),
-      i8: new Int8Array(values),
-      u8: new Uint8Array(values),
+      i32: new Int32Array(integers),
+      u32: new Uint32Array(integers),
+      i16: new Int16Array(integers),
+      u16: new Uint16Array(integers),
+      i8: new Int8Array(integers),
+      u8: new Uint8Array(integers),
     });
   });
 

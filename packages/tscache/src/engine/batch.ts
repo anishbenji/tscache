@@ -131,6 +131,77 @@ function assertTimestamps(timestamps: NumericArray, grid: Grid): void {
   }
 }
 
+/** The rejection of the field value at index `i` (N68). */
+function valueError(
+  name: string,
+  dtype: Dtype,
+  i: number,
+  timestamps: NumericArray,
+  value: string,
+  expected: string,
+): never {
+  const at = timestamps[i] as number;
+  throw new PutError(
+    `field "${name}" (${dtype}) value ${value} at index ${i}, t = ${at}: expected ${expected}`,
+    {
+      code: "field-mismatch",
+      offenderIndex: i,
+      offenderTimestamp: at,
+      offenderField: name,
+      expected,
+    },
+  );
+}
+
+/**
+ * Copies a field that may hold invalid values into `data`, a fresh array of
+ * its dtype, throwing for the first value the field cannot hold (N68, §4.3):
+ * a non-number in any field; in an integer field, a value that is not finite
+ * or whose truncation is outside the dtype's range. The scan and the copy are
+ * one pass, so each value is read once.
+ */
+function scanInto(
+  data: FieldArray,
+  name: string,
+  dtype: Dtype,
+  values: NumericArray,
+  timestamps: NumericArray,
+): void {
+  const float = dtype[0] === "f";
+  // An integer dtype's inclusive range, from its element size; a float
+  // dtype ("f64", "f32") holds every number.
+  const half = 2 ** (data.BYTES_PER_ELEMENT * 8 - 1);
+  const min = dtype[0] === "u" ? 0 : -half;
+  const max = dtype[0] === "u" ? 2 * half - 1 : half - 1;
+  for (let i = 0; i < values.length; i++) {
+    const v: unknown = values[i];
+    if (typeof v !== "number") {
+      // show() never calls the value's own conversion; the type tells "1" from 1.
+      valueError(
+        name,
+        dtype,
+        i,
+        timestamps,
+        show(v) + (v === null ? "" : ` (${typeof v})`),
+        "a number",
+      );
+    }
+    // NaN fails both comparisons; ±Infinity truncates to itself.
+    const t = float ? v : Math.trunc(v);
+    if (!float && !(t >= min && t <= max)) {
+      valueError(
+        name,
+        dtype,
+        i,
+        timestamps,
+        `${v}`,
+        `a finite number whose truncation is in [${min}, ${max}]`,
+      );
+    }
+    data[i] = t;
+  }
+}
+
 /** Timestamps are ascending, so only the two ends can fall outside. */
 function assertInside(timestamps: NumericArray, range: Range): void {
   const n = timestamps.length;
@@ -159,8 +230,8 @@ function assertInside(timestamps: NumericArray, range: Range): void {
 /**
  * Validates a consumer batch and converts it to slot terms. Throws PutError
  * naming the first offender, or InvalidRangeError for a malformed range.
- * Field values are copied into fresh arrays of the schema's dtypes by
- * typed-array assignment. `meta` is not looked at here.
+ * Field values are checked (N68) and copied into fresh arrays of the
+ * schema's dtypes. `meta` is not looked at here.
  */
 export function validateBatch(
   batch: PutBatch,
@@ -186,24 +257,31 @@ export function validateBatch(
     authority = snapIn(range, config);
     assertInside(timestamps, range);
   }
+  // (5) Values (N68): field by field in schema order, each copied into a
+  // fresh array of its dtype before anything is kept.
+  const fields: Record<string, FieldArray> = {};
+  names.forEach((name, c) => {
+    const dtype = config.fields[name] as Dtype;
+    const values = arrays[c] as NumericArray;
+    const Field = FIELD_ARRAYS[dtype];
+    const data = new Field(n);
+    // Anything but a number[] is a numeric typed array (fieldArraysOf), whose
+    // every element is a number: a float field takes it as it is, and an
+    // integer field's own storage array holds only valid values (the tag
+    // recognizes one from another realm). Every other array is scanned.
+    if (
+      !Array.isArray(values) &&
+      (dtype[0] === "f" ||
+        (values as FieldArray).constructor === Field ||
+        typedArrayKind.call(values) === Field.name)
+    ) {
+      data.set(values);
+    } else scanInto(data, name, dtype, values, timestamps);
+    setOwn(fields, name, data);
+  });
 
   const slots = new Float64Array(n);
   for (let i = 0; i < n; i++)
     slots[i] = slotOf(timestamps[i] as number, config);
-  const fields: Record<string, FieldArray> = {};
-  names.forEach((name, c) => {
-    const data = new FIELD_ARRAYS[config.fields[name] as Dtype](n);
-    try {
-      data.set(arrays[c] as NumericArray);
-    } catch {
-      // Assignment converts each element to a number, which throws for a
-      // symbol or an object whose own conversion throws.
-      structural(
-        "field-mismatch",
-        `field "${name}" holds a value that cannot be converted to a number`,
-      );
-    }
-    setOwn(fields, name, data);
-  });
   return { points: { slots, fields }, authority };
 }

@@ -55,20 +55,20 @@ describe.each(hostile.map((value) => ({ value })))(
       }
     });
 
-    it("as a field value → stored as a number, or PutError", () => {
-      // A value that converts (a function becomes NaN) is legal; one that
-      // cannot be converted rejects the batch.
+    it("as a field value → PutError naming the value (N68)", () => {
+      // None of these is a number, so none is coerced: each rejects the
+      // batch at its own index (decision 29).
       const batch = { timestamps: [0], fields: { x: [value] } };
-      try {
-        const { points } = validateBatch(batch as PutBatch, config);
-        expect(points.fields.x).toEqual(new Float64Array([Number.NaN]));
-      } catch (error) {
-        expect(error).toBeInstanceOf(PutError);
-        expect(error).toMatchObject({
+      expect(() => validateBatch(batch as PutBatch, config)).toThrow(PutError);
+      expect(() => validateBatch(batch as PutBatch, config)).toThrow(
+        expect.objectContaining({
           code: "field-mismatch",
-          offenderIndex: -1,
-        });
-      }
+          offenderIndex: 0,
+          offenderTimestamp: 0,
+          offenderField: "x",
+          expected: "a number",
+        }),
+      );
     });
 
     it("as a range or a range endpoint → InvalidRangeError", () => {
