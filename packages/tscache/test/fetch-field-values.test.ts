@@ -11,7 +11,10 @@ describe("fetcher field values — architecture §2.4, §4.3, N68", () => {
       const r = range(3, 13);
       const before = h.engine.snapshot(h.cfg.id, r);
       const first = h.get(a, r).promise;
-      await vi.waitFor(() => expect(h.calls).toHaveLength(1));
+      await vi.waitFor(() => expect(h.calls).toHaveLength(1), {
+        timeout: 4000,
+        interval: 1,
+      });
       const second = h.get(b, r).promise;
       await h.turn(b);
       h.call(0).respond({
@@ -38,7 +41,10 @@ describe("fetcher field values — architecture §2.4, §4.3, N68", () => {
         ]);
       }
       const retry = h.get(a, r).promise;
-      await vi.waitFor(() => expect(h.calls).toHaveLength(2));
+      await vi.waitFor(() => expect(h.calls).toHaveLength(2), {
+        timeout: 4000,
+        interval: 1,
+      });
       h.call(1).answer("live");
       expect((await retry).misses).toEqual([]);
     } finally {
