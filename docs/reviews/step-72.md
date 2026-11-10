@@ -1,6 +1,6 @@
 # Step 72 — agent rules and document index
 
-Branch: `chore/72-agent-rules-index` · Reviewer: not yet reviewed · Rounds: 0 · Status: built
+Branch: `chore/72-agent-rules-index` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -85,3 +85,7 @@ To fit PR-1, PR-7 and PR-8 under 7 KB, the Review rounds bullet drops "which gat
 - No Codex review has run on this branch (the brief forbids it).
 - `.github/workflows/ci.yml` still says, above the `bench` job, "The check is not required in branch protection yet"; the ruleset requires it. That file is a protected path and was not edited.
 - `starter-prompt.md` keeps the stale statements of review §6.4; `docs/INDEX.md` marks those sections as historical instead of editing the file.
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-10). The reviewer confirmed the pre-review fixes.
