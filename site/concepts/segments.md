@@ -59,9 +59,9 @@ interface DenseSegmentPayload {
 }
 ```
 
-The same structure is meant for three uses: the message between worker and page, the record of a
-future IndexedDB persistence layer, and the server-rendering payload in a page. Today you meet it inside
-a [snapshot](/usage/snapshots). Field data is little-endian, the native order of every supported
+The same structure has three uses: the message between worker and page, the server-rendering payload
+in a page, and the records of [persistence](/guides/persistence), whose persister stores one snapshot per
+page in IndexedDB. You meet it inside a [snapshot](/usage/snapshots). Field data is little-endian, the native order of every supported
 platform.
 
 The rejected alternatives and the exact layout rules are in §4.2–§4.3 of the

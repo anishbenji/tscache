@@ -1,0 +1,134 @@
+/* The "How it works" diagrams (the SVGs in site/how-it-works/), drawn
+   with the theme's colour variables so they follow the light and dark
+   switch. Loaded for every page by theme/index.ts. */
+
+.hiw-figure {
+  margin: 24px 0;
+  overflow-x: auto;
+}
+
+.hiw-svg {
+  display: block;
+  width: 100%;
+  min-width: 600px;
+  height: auto;
+  font-family: var(--vp-font-family-base);
+}
+
+.hiw-frame {
+  fill: var(--vp-c-bg-alt);
+  stroke: var(--vp-c-divider);
+  stroke-width: 1.5;
+}
+
+.hiw-shadow {
+  fill: var(--vp-c-bg-soft);
+  stroke: var(--vp-c-divider);
+}
+
+.hiw-box {
+  fill: var(--vp-c-bg-soft);
+  stroke: var(--vp-c-border);
+}
+
+.hiw-inner {
+  fill: var(--vp-c-bg);
+  stroke: var(--vp-c-border);
+}
+
+.hiw-accent {
+  fill: var(--vp-c-brand-soft);
+  stroke: var(--vp-c-brand-1);
+}
+
+.hiw-lazy {
+  stroke-dasharray: 6 4;
+}
+
+.hiw-pill {
+  fill: var(--vp-c-default-soft);
+  stroke: var(--vp-c-border);
+}
+
+.hiw-t {
+  fill: var(--vp-c-text-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hiw-s {
+  fill: var(--vp-c-text-2);
+  font-size: 12px;
+}
+
+.hiw-xs {
+  fill: var(--vp-c-text-2);
+  font-size: 11px;
+}
+
+.hiw-strong {
+  fill: var(--vp-c-text-1);
+  font-weight: 600;
+}
+
+.hiw-m {
+  font-family: var(--vp-font-family-mono);
+}
+
+.hiw-wire {
+  fill: none;
+  stroke: var(--vp-c-text-2);
+  stroke-width: 1.5;
+}
+
+.hiw-dash {
+  stroke-dasharray: 4 3;
+}
+
+.hiw-headfill {
+  fill: var(--vp-c-text-2);
+}
+
+.hiw-cell {
+  fill: var(--vp-c-bg);
+  stroke: var(--vp-c-divider);
+}
+
+.hiw-cell-prov {
+  fill: var(--vp-c-yellow-soft);
+}
+
+.hiw-pt {
+  fill: var(--vp-c-brand-1);
+}
+
+.hiw-pt-prov {
+  fill: var(--vp-c-yellow-1);
+}
+
+.hiw-seg {
+  fill: var(--vp-c-purple-soft);
+  stroke: var(--vp-c-purple-1);
+}
+
+.hiw-cov {
+  fill: var(--vp-c-green-soft);
+  stroke: var(--vp-c-green-1);
+}
+
+.hiw-miss {
+  fill: var(--vp-c-red-soft);
+  stroke: var(--vp-c-red-1);
+  stroke-dasharray: 4 3;
+}
+
+.hiw-page {
+  stroke: var(--vp-c-text-3);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 3;
+}
+
+.hiw-wm {
+  stroke: var(--vp-c-yellow-1);
+  stroke-width: 2.5;
+}

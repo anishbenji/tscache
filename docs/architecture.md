@@ -555,10 +555,14 @@ persist/            IndexedDB persistence (§4.10); imports engine/, never impor
   idb-store.ts      openIdbStore: the IndexedDB adapter
   persister.ts      Persister: load at open (abandoned by any change), change tracking, the
                     writer (one job at a time, one deadline each), flush, clearAll
-  lazy.ts           the chunk the SharedWorker loads with import(): the persister and the
-                    IndexedDB adapter (§4.10.8)
+  lazy.ts           the chunk loaded with import(): the persister, the IndexedDB adapter
+                    and clearDisk (§4.10.8)
   hosted.ts         HostedPersistence: the RPC server's persistence in the SharedWorker,
                     loading lazy.ts at the first persisted cache or clearAll (§4.10.8)
+  clear-only.ts     ClearOnlyPersistence: the dedicated-worker and in-process hostings'
+                    persistence, which persists nothing and empties the database at clearAll,
+                    loading lazy.ts then; lazyIdbStore (§4.10.7, N66)
+  clear-disk.ts     clearDisk: the clear-only database call, in the lazy.ts chunk (N66)
 orchestrator/
   orchestrator.ts   fetcher loading, miss coalescing, in-flight subtraction (§4.9.1), version
                     fence, orchestrated get, updateAuth
@@ -577,9 +581,12 @@ client/
                     a chunk of its own, so a worker-hosted page never loads the engine
   cache.ts          CacheHandle facade
   events.ts         typed emitter
+  dev.ts            development-only console output: merge warnings printed by the page that
+                    made the write (resolved decision #8)
 entries/
   index.ts          '.'        → createClient + public types/errors
-  worker.ts         './worker' → SharedWorker (onconnect) + dedicated (onmessage) entry
+  worker.ts         './worker' → SharedWorker (addEventListener('connect')) + dedicated
+                    (the worker global attached as a port, addEventListener('message')) entry
   engine.ts         './engine' → Engine direct (SSR/Node, tests)
   fetcher.ts        './fetcher' → fetcher author surface: types + AuthInvalidError, zero other imports (N6)
   vite.ts           './vite' → fetcherUrl(), the Vite plugin for the fetcher module (N40, N41);
@@ -593,6 +600,8 @@ vite/
                     The warning's opening words, `[tscache] Vite builds workers as IIFE`,
                     are a stable contract: apps filter it with a customLogger (site/guides/
                     vite.md); changing them is a breaking change (step 56, user decision #18)
+  urls.ts           devUrl and serverFileUrl: the URLs the plugin builds for the dev
+                    server and for server code, each encoded as the inverse of what decodes it
 ```
 
 `package.json` exports: `.`, `./worker`, `./engine` (locked) + `./fetcher` (N6, accepted 2026-06-11) + `./vite` (N40, 2026-10-23; `vite ^8.0.0` as an optional peer dependency, the one major the tests build with). ESM-only (resolved decision #6). `tsconfig` strict with `isolatedDeclarations: true`.

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
+import { withMermaid } from "vitepress-plugin-mermaid";
 import apiSidebar from "../api/typedoc-sidebar.json" with { type: "json" };
 
 /** Pages link to the repository's own files (the architecture document,
@@ -20,7 +21,7 @@ function missingRepoFile(href: string): string | undefined {
   return existsSync(ROOT + decodeURIComponent(path)) ? undefined : path;
 }
 
-export default defineConfig({
+const config = defineConfig({
   title: "tscache",
   description:
     "Browser time-series cache: SharedWorker multi-tab sharing, worker-side fetch orchestration, coverage tracking with real-gap awareness.",
@@ -47,6 +48,7 @@ export default defineConfig({
     nav: [
       { text: "Guide", link: "/guide/getting-started" },
       { text: "Concepts", link: "/concepts/coverage" },
+      { text: "How it works", link: "/how-it-works/" },
       { text: "API", link: "/usage/client" },
       { text: "Reference", link: "/api/" },
     ],
@@ -73,6 +75,14 @@ export default defineConfig({
               link: "/concepts/invalidation",
             },
             { text: "Events", link: "/concepts/events" },
+          ],
+        },
+        {
+          text: "How it works",
+          items: [
+            { text: "Overview", link: "/how-it-works/" },
+            { text: "Package map", link: "/how-it-works/package-map" },
+            { text: "Data model", link: "/how-it-works/data-model" },
           ],
         },
         {
@@ -124,3 +134,9 @@ export default defineConfig({
     outline: [2, 3],
   },
 });
+
+// Renders ```mermaid fences in the browser, with Mermaid's dark theme while
+// the site is dark. securityLevel 'strict' (the plugin defaults to 'loose'):
+// labels are encoded as text and click handlers are off; the generated
+// graph needs neither.
+export default withMermaid({ ...config, mermaid: { securityLevel: "strict" } });
