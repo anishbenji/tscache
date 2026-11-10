@@ -1,6 +1,6 @@
 # Step 74 — Model-based property tests for the cache
 
-Branch: `chore/74-model-property-tests` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: pending
+Branch: `chore/74-model-property-tests` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: escalated · Verdict after triage: pending
 
 ## Scope
 
@@ -122,6 +122,22 @@ One round on 2026-11-10, after the branch was rebased onto `main` b3f0b98.
 | R1-2 | P1  | When a failed write changed no point, the test did not require its range to be uncovered, and then adopted the kept coverage into the model                 | accepted | Same commit: after every fault past validation the put's whole range must be uncovered. Scratch wrapper re-adding the range's former coverage when no point changed: the old test passed all 640 seeds, the new one fails 535 of 640.                                                                                                                                                                                                                                                                              |
 
 While re-running the suite under a load average of 19, one 160-seed batch of the fault test timed out at Vitest's 5 s default. Per `docs/testing.md` the timeout was not raised: the same seeds now run in eight batches per file instead of four, which the same commit does; each batch takes 0.4–0.7 s at a load average of 13. Three runs of the whole package suite then passed at load averages 13 to 16.
+
+## Round 2 — reviewer verdict: merge after fixes
+
+2026-11-10. Third finding running on the fault test's expectations after a failed write (PR-1, R1-1 and R1-2 before it), so by the convergence rule (`docs/workflow.md`, review loop step 7) the area is to be redesigned rather than patched: the expectation becomes the explicit set of legal post-failure states, computed from the model's pre-put state, and the observed state must equal exactly one member. That set cannot be written without three answers the specification does not give, so the redesign is escalated and nothing was changed.
+
+| #    | Sev | Finding                                                                                                                                                                                                                                            | Decision            | Resolution                                          |
+| ---- | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------------------------------- |
+| R2-1 | P1  | A failure that left only part of one insertion run applied (seed 1, step 53: slots [1, 3, 6], K = 3, one run; only slot 1 inserted) passes the per-slot checks and is adopted into the model; §4.3 requires each run to complete or change nothing | accepted, escalated | Redesign blocked on decision questions Q1–Q3 below. |
+
+§4.3 ("Allocation failure") says only: "It works in steps, each of which either completes or changes nothing: first, for a replace, the old points inside the authority are removed; then the batch goes in one run of points at a time (a run is a stretch of the batch that shares a segment)." That a failure leaves a prefix of the steps follows from it (a throw ends the put). It leaves open:
+
+- **Q1. Run order.** Are the runs applied in ascending slot order? If so, the legal partial outcomes are the ascending prefixes; if the order is unspecified, any subset of runs is legal.
+- **Q2. What a run is.** "Shares a segment" with what: (a) consecutive batch points at most K empty slots apart on the same page, ignoring stored points (what `SegmentStore` does); or (b) batch points that end up in one segment after the put, counting the stored points between them?
+- **Q3. The put's own watermark (N19).** A put with `meta.finalizedUntil` is written in two passes, the final points with the clipped replace and then the provisional points as an upsert. Is a run that crosses the put's own watermark one run, as §4.3 read alone says, or two, cut at the watermark?
+
+A scratch probe in the fault test (not committed) classified every one of the 9 898 failures past validation against each reading. Under (a) with the cut at the watermark, no run was left partial and the applied runs were always an ascending prefix. Without the cut (Q3, one run), 11 failures left a run half applied. Under (b), 76 more did. So the library conforms to reading Q1 ascending, Q2 (a), Q3 cut; under the other readings it has a defect. Recommended: adopt that reading in §4.3 (a documentation change, no code change), then build the set-based expectation on it.
 
 ## Contract-test changes
 
