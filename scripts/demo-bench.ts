@@ -12,20 +12,26 @@
 
 import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
+import { arch, cpus, release, type } from "node:os";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 import {
   type Conditions,
   type freshWorkers,
   markdown,
+  quantile,
   type Row,
   type RunResult,
 } from "../examples/benchmark/src/report";
 import {
+  exactKeyRequests,
   MODE_LABELS,
+  type Mode,
   NEW_BARS,
   SCREEN,
   TABS,
+  type View,
+  workload,
 } from "../examples/benchmark/src/workload";
 import { Processes } from "./demo/processes";
 
@@ -36,6 +42,7 @@ const RUN_TIMEOUT_MS = 30 * 60_000;
 
 interface Results {
   conditions: Conditions;
+  /** The end of phase one's newest screen. */
   anchor: number;
   rows: Row[];
   runs: RunResult[];
@@ -80,40 +87,103 @@ async function ready(): Promise<void> {
 /** The per-run counts under a table: every run is shown, none dropped. */
 function runTable(results: RunResult[]): string {
   const line = (cells: (string | number)[]) => `| ${cells.join(" | ")} |`;
+  const headers = [
+    "Run",
+    "Mode",
+    "Requests (1 tab)",
+    "Requests (3 tabs)",
+    "Views without a request",
+    "Bars (1 tab)",
+    "Bars (3 tabs)",
+    "Time to chart p50 ms",
+    "Time to chart p95 ms",
+    "First view ms",
+    "Workload ms",
+  ];
   return [
-    line([
-      "Run",
-      "Mode",
-      "Requests (1 tab)",
-      "Requests (3 tabs)",
-      "Bars (1 tab)",
-      "Bars (3 tabs)",
-      "Workload ms",
-    ]),
-    line(Array.from({ length: 7 }, () => "---")),
+    line(headers),
+    line(headers.map(() => "---")),
     ...results.map((r) =>
       line([
         r.run + 1,
         MODE_LABELS[r.mode],
         r.one.requests,
         r.three.requests,
+        `${r.requested.filter((asked) => !asked).length} of ${r.requested.length}`,
         r.one.bars,
         r.three.bars,
+        Math.round(quantile(r.chartMs, 0.5)),
+        Math.round(quantile(r.chartMs, 0.95)),
+        Math.round(r.chartMs[0] ?? Number.NaN),
         Math.round(r.workloadMs),
       ]),
     ),
   ].join("\n");
 }
 
+function git(...args: string[]): string {
+  return execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
+}
+
+/** The commit, flagged when the working tree differs from it. */
 function commit(): string {
-  return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
-    cwd: ROOT,
-    encoding: "utf8",
-  }).trim();
+  const dirty = git("status", "--porcelain") !== "";
+  return `\`${git("rev-parse", "--short", "HEAD")}\`${dirty ? " (with uncommitted changes)" : ""}`;
+}
+
+function machine(): string {
+  const cpu = cpus()[0]?.model.trim() ?? "unknown CPU";
+  return `${type()} ${release()} (${arch()}), ${cpu}, ${cpus().length} logical cores`;
+}
+
+/** The median phase-one bars of `mode` over `results`' runs. */
+function barsOne(results: Results, mode: Mode): number {
+  const of = results.runs.filter((r) => r.mode === mode).map((r) => r.one.bars);
+  return quantile(of, 0.5);
+}
+
+const int = (n: number) => Math.round(n).toLocaleString("en-US");
+
+/**
+ * The Limits item that splits tscache's saving, from the workload and the
+ * first latency's measured counts (the counts do not depend on latency).
+ * The per-tab exact-key count is the memo's, worked out from the ranges and
+ * checked against the measured row; the shared one is a counterfactual.
+ */
+function savingSplit(results: Results): string {
+  const row = (mode: Mode) => results.rows.find((r) => r.mode === mode);
+  const none = row("none");
+  const memo = row("memo");
+  const tscache = row("tscache");
+  if (none === undefined || memo === undefined || tscache === undefined) {
+    return "- The saving is not split: a run left out no cache, the memo or tscache.";
+  }
+  const plan = workload(results.anchor);
+  const perTab = exactKeyRequests(plan, "per tab");
+  const shared = exactKeyRequests(plan, "shared");
+  if (perTab.total !== memo.requests) {
+    throw new Error(
+      `the memo made ${memo.requests} requests; its ranges allow ${perTab.total}`,
+    );
+  }
+  const same = tscache.requestsOne === memo.requestsOne;
+  const oneTab = same
+    ? `the same ${int(memo.requestsOne)} requests as the memo and TanStack Query`
+    : `${int(tscache.requestsOne)} requests, against the memo's and TanStack Query's ${int(memo.requestsOne)}`;
+  const views = (list: View[]) => list.length;
+  return `- In a single tab (phase one) tscache makes ${oneTab}, and moves fewer bars
+  (${int(barsOne(results, "tscache"))} against ${int(barsOne(results, "memo"))}): its zoomed-out view fetches only the
+  bars it lacks. Of the ${int(none.requests - tscache.requests)} requests it saves against no cache over both phases
+  (${int(views(plan.one) + TABS * views(plan.three))} views), ${int(none.requests - perTab.total)} are exact repeats within a tab, which any cache saves, and
+  the memo and TanStack Query save them too. A cache keyed by exact range but shared by the tabs, with
+  requests in flight joined, would make ${int(shared.total)} (worked out from the ranges; no mode runs it): ${int(perTab.total - shared.total)}
+  are saved by sharing across tabs. The remaining ${int(shared.total - tscache.requests)} are saved because tscache reads the shifted
+  ranges of phase two from the bars it holds and fetches only the ${NEW_BARS} new ones.`;
 }
 
 function document(all: Results[], browser: string): string {
   const generated = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const first = all[0];
   const sections = all.map(
     (results) => `## Backend latency ${results.conditions.latencyMs} ms
 
@@ -130,8 +200,8 @@ ${runTable(results.runs)}
   );
   return `# Demo benchmark: tscache and three baselines
 
-Generated by \`bun scripts/demo-bench.ts\` from commit \`${commit()}\` on ${generated} UTC, in headless
-${browser}. This file is the only source of any number quoted in the README or the docs; regenerate it
+Generated by \`bun scripts/demo-bench.ts\` from commit ${commit()} on ${generated} UTC, in headless
+${browser}, on ${machine()}. This file is the only source of any number quoted in the README or the docs; regenerate it
 rather than editing it. The page that runs the benchmark is the demo hub's Benchmark entry
 (\`examples/benchmark\`), and its design and fairness rules are in \`docs/reviews/step-67.md\`.
 
@@ -144,9 +214,9 @@ the first tab again and two new ones. The tabs are same-origin iframes, so tscac
 SharedWorker. Every range is computed from one anchor in yesterday's final history.
 
 - **No cache**: every view fetches its range.
-- **Per-tab memo**: a \`Map\` per tab, keyed by the exact range.
-- **TanStack Query** (\`@tanstack/query-core\`): one QueryClient per tab, key \`[series, start, end]\`,
-  \`staleTime: Infinity\`.
+- **${MODE_LABELS.memo}**: a \`Map\` per tab, keyed by the exact range.
+- **${MODE_LABELS.tanstack}** (\`@tanstack/query-core\`): one QueryClient per tab, key
+  \`[series, start, end]\`, \`staleTime: Infinity\`.
 - **tscache**: one client per tab, all on one shared cache.
 
 Every mode fetches with the same fetcher code from the same mock backend and draws with the same uPlot
@@ -154,16 +224,25 @@ chart. Each mode of each run starts empty (new tabs, a new tscache cache id and 
 backend's counters are read as deltas, and the modes take turns in an order rotated each run. Backend requests, bars and
 bytes are what the backend served; time to chart runs from the read's start to the frame after
 \`setData\` returned, p50 and p95 over every view of every tab of a run; workload time covers both
-phases, tabs opening included. First connect is opening the first tab's source: for tscache, the
-client's connect to the run's new SharedWorker, which the workload time includes too; run 1's is shown
-beside the median. Medians over the runs are shown.
+phases, tabs opening included. A view is answered without a request when no fetch of its cache ended
+while it was in flight (every mode's fetches report through the same fetcher wrapper, and the reports
+must account for every page the backend served); a view that joined a fetch already in flight waited
+for a request. The p50 is also given for the two kinds of view apart. First view is the time to chart
+of the run's first view, cold path included: for tscache, the worker's first fetch, with its fetcher
+loaded in the run's new worker. First connect is opening the first tab's source: for tscache, the
+client's connect to the run's new SharedWorker, which the workload time includes too. Run 1's first
+view and first connect are shown beside the medians. Medians over the runs are shown.
 
 ## Limits
 
-- TanStack Query and the memo cache per tab and by exact key: they are not range-aware, so an
-  overlapping or shifted range is a new fetch. That is the point of the comparison.
-- The workload reads final history only. tscache refetches provisional (still-forming) bars on every
-  read, which exact-key caches would serve stale; a live workload would add those fetches to tscache.
+- This is TanStack Query keyed by exact range, in memory, per tab. An application can approach
+  tscache's request counts by keying aligned chunks and persisting the cache across tabs
+  (\`persistQueryClient\` or \`broadcastQueryClient\`), writing chunk assembly and forming-bar refresh
+  itself. That configuration is not measured here.
+${first === undefined ? "" : `${savingSplit(first)}\n`}- The workload reads settled history only, which favours the exact-key baselines' counts: tscache
+  refetches still-forming bars on every read and they do not. With live data, an exact-key cache's key
+  for the newest screen changes every minute, a new full fetch, and it can serve a stale forming bar.
+  Which way that nets out is not measured.
 - The three tabs are iframes on one main thread, so their timings share a thread that real tabs would
   not. Request, bar and byte counts do not depend on it.
 - The backend is a mock on the same machine: latency is simulated per page, and bandwidth is not
