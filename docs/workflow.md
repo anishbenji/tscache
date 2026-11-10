@@ -122,7 +122,7 @@ Never enable the plugin's review gate; it loops Claude and Codex and drains usag
 | ⑤ Merge / put path        | Atomic reject leaves no partial state; new-wins across segment boundaries; K-split and slot-cap edges; overlap-warning cost when off                |
 | ⑦ Invalidation suite      | Volatile region never gaining authority; watermark moving backwards; version-mismatch clear racing a put                                            |
 | ⑨ RPC + handshake         | Cache-owned buffers never transferred; mismatch handling; payload still valid for IndexedDB and SSR                                                 |
-| ⑩ SharedWorker + fallback | Fallback order and pinning; tab death; the no-SharedWorker path (Samsung Internet, and Chrome for Android before 148)                               |
+| ⑩ SharedWorker + fallback | Fallback order and pinning; tab death; the no-SharedWorker path (Samsung Internet, Opera Mobile, and Chrome for Android before 148)                 |
 | ⑪ Fetcher orchestration   | Dedup keying, flank coalescing, `authInvalid`/`updateAuth` races, `get` never blocking on auth                                                      |
 | ⑫ Playwright suite        | Tests passing for the wrong reason (pages vs contexts), flakiness, timing assumptions                                                               |
 
