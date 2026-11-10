@@ -79,10 +79,23 @@ function within(
 }
 
 const backend = createBackend({ latencyMs: 0, pushMs: 200 });
+/**
+ * A series whose JSON page holds a null, as a JSON backend sends for a
+ * missing value: the fetcher snippet must hand it to the cache as NaN.
+ */
+const NULLS_SERIES = "test/nulls";
+const nullsPage = {
+  timestamps: [0, MINUTE],
+  fields: { close: [1.5, null] },
+  meta: { version: "1", finalizedUntil: 2 * MINUTE },
+};
 const server = Bun.serve({
   port: 0,
   fetch: async (request) =>
-    (await backend(request)) ?? new Response("not found", { status: 404 }),
+    new URL(request.url).pathname === `/api/series/${NULLS_SERIES}`
+      ? Response.json(nullsPage)
+      : ((await backend(request)) ??
+        new Response("not found", { status: 404 })),
 });
 const origin = server.url.origin;
 
@@ -189,6 +202,47 @@ const load = (file: string) => import(new URL(file, SNIPPETS).href);
 /** Each run gets what its snippets logged, in order. */
 type Run = (logs: unknown[][]) => Promise<void>;
 
+/**
+ * The value-conversion table of site/concepts/grid.md ("Batches"), against
+ * an in-process engine: when the engine's conversion changes, this fails
+ * until the page says what it does.
+ */
+async function checkConversions(): Promise<void> {
+  const { createClient } = await import("@anishbenji/tscache");
+  const client = await createClient({ mode: "in-process" });
+  const cache = await client.cache({
+    id: "test/conversions",
+    interval: MINUTE,
+    fields: { float: "f64", single: "f32", int: "i32", byte: "u8" },
+  });
+  const given = [null, undefined, Number.NaN, 1.5, 300, -1, 1e40];
+  const timestamps = given.map((_, i) => i * MINUTE);
+  const column = given as unknown as number[];
+  await cache.put({
+    timestamps,
+    fields: { float: column, single: column, int: column, byte: column },
+  });
+  const read: GetResult = await cache.get(
+    { start: 0, end: timestamps.at(-1) ?? 0 },
+    { cacheOnly: true },
+  );
+  const expected: Record<string, number[]> = {
+    float: [0, Number.NaN, Number.NaN, 1.5, 300, -1, 1e40],
+    single: [0, Number.NaN, Number.NaN, 1.5, 300, -1, Number.POSITIVE_INFINITY],
+    int: [0, 0, 0, 1, 300, -1, 0],
+    byte: [0, 0, 0, 1, 44, 255, 0],
+  };
+  for (const [name, values] of Object.entries(expected)) {
+    const stored = [...(read.fields[name] ?? [])];
+    check(
+      stored.length === values.length &&
+        stored.every((v, i) => Object.is(v, values[i])),
+      `${name} stored ${JSON.stringify(stored.map(String))}, the docs say ${JSON.stringify(values.map(String))}`,
+    );
+  }
+  await client.dispose();
+}
+
 const RUNS: Record<string, Run> = {
   async "fetcher.ts"() {
     const { default: fetcher } = await import(FETCHER);
@@ -213,6 +267,17 @@ const RUNS: Record<string, Run> = {
     }
     check(typeof response.meta?.version === "string", "no version");
     check(typeof response.meta?.finalizedUntil === "number", "no watermark");
+    // A JSON null, a missing value, comes back as NaN (site/guides/fetcher.md).
+    const nulls = await fetcher.fetch({
+      ...request,
+      cacheId: NULLS_SERIES,
+      range: { start: 0, end: MINUTE },
+    });
+    const close = nulls.fields.close as number[];
+    check(
+      close.length === 2 && close[0] === 1.5 && Number.isNaN(close[1]),
+      `null mapped to ${JSON.stringify(close)}`,
+    );
   },
   async "fetcher-columns.ts"() {
     const { default: json } = await import(FETCHER);
@@ -497,6 +562,7 @@ const RUNS: Record<string, Run> = {
         ...(load1m.fields.load ?? []),
       ].join()}`,
     );
+    await checkConversions();
   },
   async "live.ts"() {
     const { cache, followStream, startPolling } = await load("live.ts");
