@@ -124,28 +124,43 @@ export interface TrackedRead {
 }
 
 /**
- * The reports worth keeping: those that a tracked read (in flight, waiting
- * for its frame, or on screen) can still match, since a read matches only
- * reports that ended while it was in flight, and those that ended within
- * `keepMs` of the newest report, for a read whose start has not been seen
- * yet. Bounded however long the page goes without drawing.
+ * At most this many reports are kept besides those an answered read owns
+ * (`retainedReports`), the oldest dropped first. The pages fetch a few
+ * times a second at most, so it holds minutes of reports.
+ */
+export const MAX_REPORTS = 1000;
+
+/**
+ * The reports worth keeping. A read matches only reports that ended while
+ * it was in flight, so an answered read (the one waiting for its frame, or
+ * the one on screen) owns the reports inside its closed window: they are
+ * always kept, and they are few, the fetches that ended during one get().
+ * Of the rest, those a read in flight can still match, and those that ended
+ * within `keepMs` of the newest report (for a read whose start has not been
+ * seen yet), are kept up to `cap`, the oldest dropped first. The cap thus
+ * never drops a report a pending frame needs, and the total is bounded
+ * however long the page goes without drawing.
  */
 export function retainedReports(
   reports: readonly FetchInsight[],
   reads: readonly TrackedRead[],
   keepMs: number,
+  cap: number = MAX_REPORTS,
 ): FetchInsight[] {
   let newest = Number.NEGATIVE_INFINITY;
   for (const r of reports) newest = Math.max(newest, r.endedAt);
-  return reports.filter(
+  const inside = (r: FetchInsight, read: TrackedRead) =>
+    r.endedAt >= read.askedAt &&
+    (read.answeredAt === undefined || r.endedAt <= read.answeredAt);
+  const owned = (r: FetchInsight) =>
+    reads.some((read) => read.answeredAt !== undefined && inside(r, read));
+  const others = reports.filter(
     (r) =>
-      r.endedAt >= newest - keepMs ||
-      reads.some(
-        (read) =>
-          r.endedAt >= read.askedAt &&
-          (read.answeredAt === undefined || r.endedAt <= read.answeredAt),
-      ),
+      !owned(r) &&
+      (r.endedAt >= newest - keepMs || reads.some((read) => inside(r, read))),
   );
+  const kept = new Set(others.slice(Math.max(0, others.length - cap)));
+  return reports.filter((r) => owned(r) || kept.has(r));
 }
 
 /** How many reads the spread is taken over: the page's latest ones. */
@@ -230,8 +245,13 @@ export function createInsights(): Insights {
   let stop: (() => void) | undefined;
   /** The read drawn last, whose provenance a late report may still change. */
   let shown: { read: Answered; result: GetResult } | undefined;
-  /** Reads drawn whose frame has not come yet. */
-  const waiting = new Set<Answered>();
+  /**
+   * The draw whose frame has not come yet; at most one. A later draw
+   * replaces it, its frame cancelled: the earlier result never reached the
+   * screen. A hidden page, whose frames wait, so holds one read, not one per
+   * poll.
+   */
+  let pending: { read: Answered; frame: number } | undefined;
   /** How many times the page has been hidden. */
   let hides = 0;
   const onVisibility = () => {
@@ -243,13 +263,18 @@ export function createInsights(): Insights {
 
   /**
    * Drops the reports no read can still match (`retainedReports`): the
-   * reads in flight, those waiting for their frame, a frame a hidden page
-   * held back for minutes included, and the read on screen.
+   * reads in flight, the one draw waiting for its frame (a frame a hidden
+   * page held back for minutes included), and the read on screen.
    */
   function prune(): void {
-    const reads: TrackedRead[] = [...inFlight, ...waiting];
+    const reads: TrackedRead[] = [...inFlight];
+    if (pending !== undefined) reads.push(pending.read);
     if (shown !== undefined) reads.push(shown.read);
     reports = retainedReports(reports, reads, KEEP_MS);
+  }
+
+  function cancelFrame(frame: number): void {
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
   }
 
   function isHidden(): boolean {
@@ -331,12 +356,14 @@ export function createInsights(): Insights {
       const read = answered.get(result);
       if (read === undefined) return;
       answered.delete(result);
-      waiting.add(read);
+      if (pending !== undefined) cancelFrame(pending.frame);
       const hidesAtDraw = hides;
       const hiddenAtDraw = isHidden();
-      requestAnimationFrame(() => {
+      const frame = requestAnimationFrame(() => {
+        // A later draw replaced this one (where frames cannot be cancelled).
+        if (pending?.frame !== frame) return;
         const framedAt = moment();
-        waiting.delete(read);
+        pending = undefined;
         const chartMs = framedAt - read.askedAt;
         const hidden = hiddenAtDraw || isHidden() || hides !== hidesAtDraw;
         if (!hidden) {
@@ -355,6 +382,7 @@ export function createInsights(): Insights {
         state = { last, spread: spreadOf(times) };
         notify();
       });
+      pending = { read, frame };
     },
     dispose() {
       stop?.();

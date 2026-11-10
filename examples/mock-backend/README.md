@@ -127,9 +127,11 @@ fetched bars are those in its range that a fetch of its own engine brought
 while it was in flight: on a SharedWorker, a fetch any tab's read started; on
 a dedicated worker or in process, a fetch of this page's engine only, told
 apart by the page each report names. A read that joined a fetch already in
-flight says so. A page keeps only the reports that a read in flight, waiting
-for its frame or on screen can still match, and those of the last two
-minutes. The state is one immutable object replaced on each change, so
+flight says so. A page has at most one draw waiting for its frame: a later
+draw replaces it, so a hidden page that keeps polling holds one read. It
+keeps the reports the waiting read and the read on screen own, and of the
+rest those a read in flight can match or that ended in the last two minutes,
+at most 1,000, the oldest dropped first. The state is one immutable object replaced on each change, so
 each framework binds it as it binds any store. It is demo instrumentation:
 the library has no such API.
 

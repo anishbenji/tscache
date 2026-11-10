@@ -228,6 +228,24 @@ describe("retainedReports", () => {
     );
   });
 
+  it("keeps at most `cap` reports no answered read can match, the newest", () => {
+    const recent = Array.from({ length: 300 }, (_, i) => at(10_000 + i));
+    const kept = retainedReports(recent, [], 120_000, 100);
+    expect(kept).toHaveLength(100);
+    expect(kept[0]?.endedAt).toBe(10_200);
+  });
+
+  it("never drops for the cap a report an answered read can match", () => {
+    // The read waiting for its frame (or on screen) owns the reports that
+    // ended while it was in flight; the cap drops only the others.
+    const reads = [{ askedAt: 0, answeredAt: 10 }];
+    const own = [at(5), at(6)];
+    const recent = Array.from({ length: 300 }, (_, i) => at(10_000 + i));
+    const kept = retainedReports([...own, ...recent], reads, 120_000, 100);
+    expect(kept).toHaveLength(102);
+    expect(kept.slice(0, 2)).toEqual(own);
+  });
+
   it("stays bounded when the page has stopped drawing", () => {
     // A history tab on screen since 1000, while a polling tab reports a
     // fetch every second for an hour.
@@ -458,6 +476,45 @@ describe("createInsights", () => {
     expect(insights.state.last).toMatchObject({ fetchedBars: 5, fetches: 1 });
     insights.dispose();
     vi.restoreAllMocks();
+  });
+
+  it("keeps one pending frame, the latest read's, while frames are withheld", async () => {
+    // A hidden page polls on: each read is drawn, but no frame comes.
+    const frames = new Map<number, () => void>();
+    let ids = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+      frames.set(++ids, callback);
+      return ids;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const insights = createInsights();
+    let reads = 0;
+    const handle = {
+      id: "crypto/BTC",
+      get: async (): Promise<GetResult> => {
+        reads++;
+        const range = { start: T0, end: T0 + reads * MINUTE };
+        return {
+          timestamps: minutes(range.start, range.end),
+          fields: {},
+          coverage: [range],
+          misses: [],
+        };
+      },
+    };
+    const instrumented = insights.instrument(
+      handle as unknown as CacheHandle,
+      SHARED,
+    );
+    for (let i = 0; i < 200; i++) {
+      insights.drawn(await instrumented.get({ start: T0, end: T0 }));
+    }
+    // Each draw replaced the one before: one frame waits, holding one read.
+    expect(frames.size).toBe(1);
+    for (const frame of frames.values()) frame();
+    expect(insights.state.last?.bars).toBe(201);
+    expect(insights.state.spread?.count).toBe(1);
+    insights.dispose();
   });
 
   it("keeps a read's fetch through a frame a hidden page held back", async () => {
