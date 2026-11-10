@@ -23,7 +23,7 @@ export function show(value: unknown): string {
  * for a subclass outside the library. The literal is written out because a
  * minifier renames class identifiers, and with them `constructor.name`.
  */
-function nameFor(
+export function nameFor(
   error: Error,
   cls: abstract new (...args: never) => Error,
   name: string,

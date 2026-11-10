@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { HostingError } from "../src/client/hosting";
 import {
   AUTH_INVALID_CODE,
   AuthInvalidError,
@@ -59,6 +60,9 @@ describe("error taxonomy", () => {
         }),
     ],
     ["AuthInvalidError", AuthInvalidError, () => new AuthInvalidError("x")],
+    // Not exported, but createClient rejects with it at the end of the
+    // fallback chain, so its name is how an application recognises it.
+    ["HostingError", HostingError, () => new HostingError("x")],
   ];
 
   it.each(classes)(
