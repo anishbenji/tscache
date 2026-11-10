@@ -74,12 +74,13 @@ needs a label for each ordinal. Quarters and years work the same way with their 
 
 ### Jittered timestamps
 
-Samples that arrive near, but not on, a fixed step (a metric scraped every minute, at 12:00:02 and then
-12:00:58) are moved to the slot they belong to in the fetcher. Flooring, `Math.floor(t / interval) *
-interval` with offset 0, assigns each sample to the slot that starts at or before it; rounding to the
-nearest slot suits jitter on both sides of the step. Two samples can then land in one slot. A batch's
-timestamps must be unique, so decide which one the slot keeps (the last, a mean, a sum) before the
-`put`:
+Samples that arrive near, but not on, a fixed step are moved to the slot they belong to in the fetcher.
+For a metric scraped every minute by a job that only ever runs late (12:00:02, 12:01:03, 12:01:58),
+flooring, `Math.floor(t / interval) * interval` with offset 0, assigns each sample to the slot that
+starts at or before it. Jitter on both sides of the step (12:00:58 meant for 12:01) needs rounding to the
+nearest slot instead, `Math.round(t / interval) * interval`, since flooring would move such a sample into
+the slot before. Either way two samples can land in one slot. A batch's timestamps must be unique, so
+decide which one the slot keeps (the last, a mean, a sum) before the `put`:
 
 <<< @/snippets/grid.ts#jitter{ts}
 

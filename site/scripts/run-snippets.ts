@@ -492,7 +492,7 @@ const RUNS: Record<string, Run> = {
     check(
       load1m.timestamps.join() ===
         [Date.UTC(2026, 10, 10, 12), Date.UTC(2026, 10, 10, 12, 1)].join() &&
-        [...(load1m.fields.load ?? [])].join() === "0.75,0.25",
+        [...(load1m.fields.load ?? [])].join() === "0.5,0.25",
       `jittered samples stored as ${load1m.timestamps.join()} / ${[
         ...(load1m.fields.load ?? []),
       ].join()}`,

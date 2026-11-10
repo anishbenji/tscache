@@ -126,12 +126,13 @@ const gauge = await client.cache({
   interval: MINUTE,
   fields: { load: "f32" },
 });
-// 12:00:02, 12:00:58 and 12:01:01: the first two share the 12:00 slot.
+// A scraper that only ever runs late: 12:00:02, 12:01:03 and 12:01:58 (a
+// repeated scrape). The last two share the 12:01 slot, which keeps 0.25.
 const { timestamps, values } = toGrid(
   [
     { t: Date.UTC(2026, 10, 10, 12, 0, 2), value: 0.5 },
-    { t: Date.UTC(2026, 10, 10, 12, 0, 58), value: 0.75 },
-    { t: Date.UTC(2026, 10, 10, 12, 1, 1), value: 0.25 },
+    { t: Date.UTC(2026, 10, 10, 12, 1, 3), value: 0.75 },
+    { t: Date.UTC(2026, 10, 10, 12, 1, 58), value: 0.25 },
   ],
   MINUTE,
 );
