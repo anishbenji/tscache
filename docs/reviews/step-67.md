@@ -199,6 +199,24 @@ The reviewer confirmed R1-1, R1-3 and R2-1 fixed.
 
 A P1 was raised, so a round 4 follows (`docs/workflow.md`).
 
+## Round 4 — reviewer verdict: merge after fixes
+
+The reviewer confirmed every earlier accepted finding fixed.
+
+| #    | Sev | Finding                                                                                                                                                                                                         | Decision             | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R4-1 | P1  | The run count is not validated: a blank "Runs per mode" runs nothing yet reports `done` and enables Copy for empty results; `1.5` runs two runs while the conditions and the exported JSON say 1.5 (`bench.ts`) | accepted, redesigned | Validated: the handler passed `Number(runsInput.value)` on, and `Number("")` is 0 and `1.5` loops twice. Rounds 2, 3 and 4 each found a P1 in how the page turns its inputs and runs into published results (a failed read counted as success, a failed rerun leaving old results, an invalid count reporting done), so the area was redesigned as a whole rather than this input patched (below). `fix(examples): validate the benchmark's inputs once and publish only a done run` |
+
+### The redesign: inputs, run state and published results
+
+- **One validated configuration.** `parseRunConfig` (`examples/benchmark/src/run.ts`) parses every input once: the latency control or `?latency=` (one of 50, 300 and 1000), the run count or `?runs=` (a whole number from 1 to 20; blank is an error, never the default), `?modes=` (known modes, none twice, not empty) and `?autorun=` (1 when set). It names every invalid input at once. The page parses the URL on load and the controls on each click; an invalid input fails with its message before anything runs, and an invalid URL never autoruns. Nothing else starts a run.
+- **One run state.** A run is `idle`, `running`, `done` or `failed` (`RunState`), and one `render` shows it through `view`. The table, the results JSON and Copy exist only in `done`, made from the run that reached it and carrying its validated configuration (`config` in the JSON); every other state takes them off the page. A tscache run that reused a worker now fails the run instead of reaching `done` with a warning.
+- **The script validates the same way.** `scripts/demo-bench.ts` parses its `--latency` and `--runs` with `parseRunConfig` before building anything, and fails if the page's `config` differs from the one it asked for.
+- **Tests.** Unit tests for the parser, one per invalid case (blank, spaces, fractional, zero, negative, above the maximum, not a number and exponent counts; blank, unoffered, fractional and non-numeric latencies; an unknown, empty, blank-entry or repeated mode; a bad autorun; several at once), and for `view`. Browser tests for each path into `failed`: a blank and a fractional count and an unknown URL mode (each fails with no results, and the backend serves no series page), a failed fetch in each of the four modes, and a failed rerun after a done run. The ten benchmark browser tests pass. Paths into `failed` without a browser test of their own: a tab that fails to open, fetch reports that do not add up, and a reused worker, each a thrown error caught by the same `runAll`.
+- **The results file** is not regenerated: the measurement is unchanged, so no figure can change.
+
+A P1 was raised, so a round 5 follows (`docs/workflow.md`).
+
 ## Contract-test changes
 
 None. The new tests are demo tests; no contract test changed.
