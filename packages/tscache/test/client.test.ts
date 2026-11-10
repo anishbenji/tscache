@@ -10,6 +10,7 @@ import {
 import type { MessagePortLike } from "../src/rpc/protocol";
 import { RpcServer } from "../src/rpc/server";
 import type { ClientEvents, GetResult, PutBatch, Range } from "../src/types";
+import { installFakeLocks } from "./lock-test-helpers";
 
 // Implementer tests (architecture §2.1, §4.8): the client facade and the
 // fallback chain under Node, with fake Worker/SharedWorker globals that
@@ -489,43 +490,6 @@ describe("lifecycle (round 1)", () => {
     expect(listeners.has("pagehide")).toBe(false);
   });
 });
-
-interface LockRequest {
-  name: string;
-  mode: string;
-  signal: AbortSignal | undefined;
-  grant(): void;
-}
-
-/** A fake navigator.locks recording requests; the test grants them. */
-function installFakeLocks(): LockRequest[] {
-  const requests: LockRequest[] = [];
-  vi.stubGlobal("navigator", {
-    locks: {
-      request: (
-        name: string,
-        options: { mode: string; signal?: AbortSignal },
-        callback: () => unknown,
-      ) =>
-        new Promise((resolve, reject) => {
-          options.signal?.addEventListener(
-            "abort",
-            () => reject(new DOMException("withdrawn", "AbortError")),
-            { once: true },
-          );
-          requests.push({
-            name,
-            mode: options.mode,
-            signal: options.signal,
-            grant: () => {
-              Promise.resolve(callback()).then(resolve, reject);
-            },
-          });
-        }),
-    },
-  });
-  return requests;
-}
 
 /**
  * A SharedWorker global backed by one server that names `lock` in hello;

@@ -71,11 +71,15 @@ export class PortClient {
    * Waits for hello, checks the protocol, sends init and waits for its
    * answer. Rejects with ProtocolMismatchError when either side refuses,
    * and with TscacheError when the port closes or misbehaves meanwhile.
+   * `afterHello` runs once a hello with this protocol arrives, before init is
+   * sent, with `hello.lock`: the hosting stops its handshake timer there
+   * (N25) and starts watching the worker's lifetime lock (N32).
    */
   static connect(
     port: MessagePortLike,
     init: { fetcher?: FetcherConfig } = {},
     signal?: AbortSignal,
+    afterHello?: (lock: string | undefined) => void,
   ): Promise<PortClient> {
     return new Promise((resolve, reject) => {
       // hello first, then the init result: anything else is out of order.
@@ -119,6 +123,7 @@ export class PortClient {
         // Only a name can be queued on; anything else watches nothing.
         lock = typeof message.lock === "string" ? message.lock : undefined;
         stage = "init";
+        afterHello?.(lock);
         const reply: Init = { t: "init", protocol: PROTOCOL_VERSION };
         if (init.fetcher !== undefined) reply.fetcher = init.fetcher;
         try {

@@ -17,6 +17,9 @@ with `import()`, and calls its default export's `fetch` for every range a `get` 
 - **Loaded at startup.** A module that fails to import, or whose default export has no `fetch`, makes
   `createClient` reject with a `TscacheError` naming it, so a broken fetcher does not look like a flaky
   backend.
+- **Loads or fails.** Nothing bounds the load in 0.1.0: an `import()` that never settles (a module
+  server that accepts the request and never answers, a top-level `await` that never resolves) leaves
+  `createClient` pending. The handshake timeout ends at the worker's hello, before the load starts.
 - **Never closes its worker** (`self.close()`): a dedicated worker that does fires no `error`, and the
   calls of its tab hang.
 - **Bounds each request**, for example with `AbortSignal.timeout()` on its `fetch`, and throws when the

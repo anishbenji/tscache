@@ -41,10 +41,15 @@ interface ErrorSource {
 }
 
 /**
- * Completes the handshake within `timeoutMs`. A worker `error` before then
- * (script failed to load, threw at top level) or a timeout aborts the
- * handshake: its listeners go and this side's port closes, so a late hello
- * completes nothing (the SharedWorker itself is untouched).
+ * Completes the handshake. `timeoutMs` bounds only the wait for hello
+ * (N25): once hello arrives the timer stops, and the rest (the worker
+ * loading the fetcher module, init-ok or init-err) takes as long as it
+ * takes. A worker `error` at any point before init-ok (script failed to
+ * load, threw at top level) or the timeout aborts the handshake: its
+ * listeners go and this side's port closes, so a late hello completes
+ * nothing (the SharedWorker itself is untouched). `onHello` runs when hello
+ * arrives, with `hello.lock` and a `fail` that aborts the handshake the same
+ * way, for a failure only the hosting can see.
  */
 async function handshake(
   port: MessagePortLike,
@@ -52,6 +57,10 @@ async function handshake(
   fetcher: FetcherConfig | undefined,
   timeoutMs: number,
   what: string,
+  onHello?: (
+    lock: string | undefined,
+    fail: (error: HostingError) => void,
+  ) => void,
 ): Promise<PortClient> {
   const controller = new AbortController();
   const onError = (event: unknown) => {
@@ -72,6 +81,10 @@ async function handshake(
       port,
       fetcher === undefined ? {} : { fetcher },
       controller.signal,
+      (lock) => {
+        clearTimeout(timer);
+        onHello?.(lock, (error) => controller.abort(error));
+      },
     );
   } finally {
     clearTimeout(timer);
@@ -110,26 +123,47 @@ export async function openShared(
       `SharedWorker could not be created: ${String(error)}`,
     );
   }
-  const client = await handshake(
-    worker.port,
-    worker,
-    fetcher,
-    timeoutMs,
-    "SharedWorker",
-  );
   // The worker can die with the tab hosting it and nothing else would tell
   // this one (N32): queue on its lifetime lock, granted only once it is gone.
+  // The watch starts at hello, because the time to init-ok (the fetcher
+  // load) has no timeout (N25): a grant before init-ok fails the hosting,
+  // and the same request then watches the connected client.
   const watch = new AbortController();
   const locks = lockManager();
-  if (client.lock !== undefined && locks !== undefined) {
-    watchLifetimeLock(locks, client.lock, watch.signal, () =>
-      client.abort(
-        new TscacheError(
-          "SharedWorker stopped running (its lifetime lock was released)",
-        ),
-      ),
+  let connected: PortClient | undefined;
+  let client: PortClient;
+  try {
+    client = await handshake(
+      worker.port,
+      worker,
+      fetcher,
+      timeoutMs,
+      "SharedWorker",
+      (lock, fail) => {
+        if (lock === undefined || locks === undefined) return;
+        watchLifetimeLock(locks, lock, watch.signal, () => {
+          if (connected === undefined) {
+            fail(
+              new HostingError(
+                "SharedWorker stopped running during the handshake (its lifetime lock was released)",
+              ),
+            );
+          } else {
+            connected.abort(
+              new TscacheError(
+                "SharedWorker stopped running (its lifetime lock was released)",
+              ),
+            );
+          }
+        });
+      },
     );
+  } catch (error) {
+    // Withdraw the queued request: nothing is left to watch.
+    watch.abort();
+    throw error;
   }
+  connected = client;
   // Never terminated by one client: other tabs may be using it.
   return { mode: "shared", client, terminate: () => watch.abort() };
 }

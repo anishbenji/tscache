@@ -256,7 +256,11 @@ export interface ClientOptions {
   mode?: HostingMode;
   /**
    * How long a hosting may take to say hello before the chain steps down
-   * (N25). Default 5000 ms. A protocol mismatch never falls back.
+   * (N25). Default 5000 ms. The timeout bounds only the wait for hello:
+   * what the worker does after hello, such as loading the `fetcher` module,
+   * is not bounded by it. A fetcher module that fails to load rejects
+   * `createClient` with a `TscacheError` (`init-err`) instead of falling
+   * back. A protocol mismatch never falls back either.
    */
   handshakeTimeoutMs?: number;
   /** Worker-side fetch orchestration (§2.5). Omit for pure pull-model use. */

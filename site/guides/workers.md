@@ -12,9 +12,17 @@ The engine runs in one of three hostings, tried in order from `mode` (default `'
 
 A hosting **fails**, and the chain steps down with a `modeFallback` event, when its constructor throws
 (Chrome on Android has no `SharedWorker`), when the worker fires `error` before the handshake (the script
-failed to load or threw), or when no hello arrives within `handshakeTimeoutMs`. When the last hosting
+failed to load or threw), when no hello arrives within `handshakeTimeoutMs`, or when a SharedWorker
+stops running after its hello but before the handshake completes (reason: "SharedWorker stopped running
+during the handshake"). When the last hosting
 fails, `createClient` rejects. A `ProtocolMismatchError` never steps down: it is a real
 incompatibility.
+
+`handshakeTimeoutMs` bounds only the wait for hello. Once the worker has said hello, it loads your
+`fetcher` module, and that load is not bounded by the timeout: a slow import delays `createClient`
+but does not step down. A fetcher module that fails to load rejects `createClient` with a
+`TscacheError` (`init-err`) naming the module, without falling back. A load that never settles leaves
+`createClient` pending: tscache 0.1.0 has no timeout on it ([Writing a fetcher](/guides/fetcher)).
 
 ::: info Chrome on Android
 Chrome on Android has no `SharedWorker`. There the client falls back to a dedicated worker per tab, with
