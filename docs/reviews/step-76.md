@@ -18,3 +18,9 @@ User decision 37, option A (user, 2026-11-10). It was escalated from step 71: se
 | `docs/architecture.md` | `/** Field name → dtype. 'f64' is the documented default dtype. */`    | `/** Field name → dtype. Every field names its dtype; 'f64' is the usual choice. */`                                                                             |
 
 A search of `docs/`, `site/` and `packages/tscache/src` found no other claim of a default dtype.
+
+## Verification
+
+- `bunx biome check .` and `bun run docs:build` pass.
+- `bun run ci`, run 1: exit 1. `e2e/reference/clients.spec.ts:283` (reference-vanilla, uPlot scroll-back) made one history fetch where it expected none; 143 passed, 1 failed, 19 did not run. This branch changes two documentation sentences, so the failure is not caused by it: it is a flake candidate on `main`, queued for a root-cause fix on its own branch.
+- `bun run ci`, run 2: exit 0 (Playwright 163 passed). The rerun is diagnostic; it does not clear the flake.
