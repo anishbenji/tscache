@@ -6,6 +6,7 @@ import type {
 } from "../../examples/benchmark/src/report";
 import { NEW_BARS, TABS, views } from "../../examples/benchmark/src/workload";
 import { appUrl } from "./apps";
+import { control } from "./support";
 
 // examples/benchmark: the workload once per mode, and only the counts it
 // makes the backend serve, which the workload fixes; no timing is checked
@@ -120,3 +121,28 @@ test("every tscache run starts a SharedWorker of its own", async ({ page }) => {
     "A new SharedWorker for each tscache run: 2 runs, 2 workers.",
   );
 });
+
+for (const mode of ["none", "memo", "tanstack", "tscache"] as const) {
+  test(`a failed fetch fails the ${mode} run instead of counting it`, async ({
+    page,
+  }) => {
+    test.setTimeout(RUN_TIMEOUT + 30_000);
+    await page.goto(`/?runs=1&latency=50&modes=${mode}`);
+    // The preview has fetched; every series request from here on fails.
+    await expect(page.getByTestId("status")).toHaveText("ready");
+    await control(page, { failNext: 100 });
+    try {
+      await page.getByRole("button", { name: "Run the benchmark" }).click();
+      await expect(page.getByTestId("status")).toHaveText(/^failed: /, {
+        timeout: RUN_TIMEOUT,
+      });
+      await expect(page.getByTestId("status")).toContainText(
+        mode === "tscache" ? "fetch-failed" : "the backend answered 500",
+      );
+      // No table: a failed run is not a result.
+      await expect(page.locator("#results tbody tr")).toHaveCount(0);
+    } finally {
+      await control(page, { failNext: 0 });
+    }
+  });
+}

@@ -22,6 +22,7 @@ import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcher from "@examples/mock-backend/fetcher";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import { QueryClient } from "@tanstack/query-core";
+import { type Bars, barsOf } from "./answer";
 import {
   cacheConfig,
   INTERVAL,
@@ -29,12 +30,6 @@ import {
   SERIES,
   sourceCacheId,
 } from "./workload";
-
-/** What the chart draws: times and closes. */
-interface Bars {
-  timestamps: ArrayLike<number>;
-  close: ArrayLike<number>;
-}
 
 export interface Source {
   read(range: Range): Promise<Bars>;
@@ -116,11 +111,7 @@ async function tscache(run: string): Promise<Source> {
   const cache = await client.cache(cacheConfig(run));
   return {
     async read(range) {
-      const result = await cache.get(range);
-      return {
-        timestamps: result.timestamps,
-        close: result.fields.close ?? [],
-      };
+      return barsOf(await cache.get(range), range);
     },
     dispose: () => client.dispose(),
   };

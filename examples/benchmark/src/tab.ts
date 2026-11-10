@@ -9,6 +9,7 @@
 import { moment } from "@examples/mock-backend/insights";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
+import { drawable } from "./answer";
 import { openSource, type Source } from "./modes";
 import type { PageMessage, TabMessage, ViewTiming } from "./protocol";
 import { isMode } from "./workload";
@@ -45,7 +46,7 @@ async function readAll(source: Source, { views }: RunMessage): Promise<void> {
   for (const { range } of views) {
     const startedAt = performance.now();
     const askedAt = moment();
-    const bars = await source.read(range);
+    const bars = drawable(await source.read(range), range);
     const answeredAt = moment();
     chart.setData([bars.timestamps as number[], bars.close as number[]]);
     await nextFrame();
