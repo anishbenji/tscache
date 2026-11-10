@@ -1,0 +1,82 @@
+# Step 75 — Input validation: field values (N68) and snapshot coverage (N69)
+
+Branch: `feat/75-input-validation` · Reviewer: — · Rounds: 0 · Status: specification written · Verdict after triage: —
+
+## Scope
+
+Two input-validation gaps found by the November 2026 review, closed in three phases, following the engine-logic rule of `AGENTS.md` (TDD and Roles):
+
+1. **Specification** (this commit, Claude): `docs/architecture.md` states the two rules as decision rows N68 and N69 and in the sections they touch. No code and no test change.
+2. **Contract tests** (Codex): failing tests written from the specification, using the list at the end of this file. Codex also updates the existing tests that the new rules contradict (listed below), recording each change.
+3. **Implementation** (Claude): `engine/batch.ts`, `engine/snapshot.ts`, `errors.ts` and `rpc/protocol.ts` changed to pass the contract tests; the user-facing documentation (`site/`, `docs/guides/`) and the changelog updated with the code; then the review loop.
+
+## User decisions
+
+- **Decision 29, option A** (2026-11-10, `tscache-reports/decisions-resolved.md` entry 29, from review finding H5 and §3i): "reject `null`, non-numbers and out-of-range integers with `PutError` (`'field-mismatch'`); `NaN` stays legal for float fields." Recorded as N68.
+- **Decision 30, option A** (2026-11-10, entry 30, from review finding L1 and §2.1 F1): "reject a snapshot whose coverage reaches past its own `finalizedUntil`", in snapshot validation. Recorded as N69.
+
+## Director decisions under the grant
+
+Settled by the director under the user's standing grant; the user may veto any of them.
+
+- N68.2: the error is `PutError` `'field-mismatch'`, naming the first offender's field, index, timestamp, value (as `show()` prints it) and what was expected, in `offenderIndex`, `offenderTimestamp`, `expected` and a new `offenderField` (see open point 2).
+- N68.3: a value that is not of type `number` (`null`, `undefined`, a sparse-array hole, a string, a boolean, a bigint, an object) is rejected in every field, with no coercion.
+- N68.4: float fields accept every number, `NaN` and `±Infinity` included; `f32` stores the nearest float32, as today.
+- N68.5: integer fields reject `NaN` and `±Infinity`, truncate a finite value toward zero, and reject it when the truncation lies outside the dtype's range.
+- N68.6: a typed array of the field's own dtype is accepted without a scan; every other typed array and every `number[]` is checked by the rules above.
+- N69.1: a snapshot whose `finalizedUntil` is set and whose coverage reaches a slot at or after it is rejected by snapshot validation with `TscacheError` (`invalid snapshot: …`); points there, outside its coverage, stay legal.
+- N69.2: the check runs in the engine's snapshot validation (§4.5 step (4)), so `hydrate` throws before anything changes, as for every malformed snapshot.
+
+Spec choices made while writing (also open to veto):
+
+- Value checks run after the structural, timestamp and range checks (step (5) of §4.3), so a value offender always has a valid timestamp to report.
+- "First offender" means first in schema order, then in index order: one pass per field, no cross-field minimum.
+- The message names the value's `typeof` when it is neither a number nor `null`, because `show("1")` prints `1`.
+
+## Open points
+
+1. **Should a fractional value for an integer field be rejected too?** Decision 29 names only non-numbers and out-of-range values, so N68 keeps the documented truncation (`1.5` for an `i32` field is stored as `1`). For rejecting: a fraction in an integer field usually means a schema mistake (a price or a fractional crypto volume in an `i32` column), and truncation silently loses data; the integer fields are scanned anyway, so the extra check costs almost nothing; tightening after 0.1.0 is a breaking change, as decision 29 noted for the rest. For keeping: truncation is documented and invents no value (unlike `null` stored as `0`); the consumer chose the dtype; a backend that sends `10.0` as `10.000000001` after a float round trip would start failing. Lean: keep truncation, but decide before 0.1.0.
+2. **`PutError.offenderField`** is a new optional public property (§2.6) and travels in the RPC error data (§4.7; additive, `PROTOCOL_VERSION` stays 1). No existing property fits: `offenderIndex` and `offenderTimestamp` locate the point, not the column. The alternative is to name the field only in the message. Recommended: add it, since an app can then report the column without parsing text. Its contract test should be a test of its own, so it can be dropped if the user vetoes the property.
+3. **Stored records (§4.10) and N69.** Page snapshots never carry `finalizedUntil` (§4.10.2), and a page snapshot with one is already invalid (§4.10.5 step 5), so the new rule changes no load. The analogous case on load, a page whose coverage reaches past the cache record's watermark, is already clipped with `rewrite: true` (§4.10.5 step 6), which never makes a provisional slot authoritative. Whether such a page should instead be skipped whole is not specified here, since it would change persistence behaviour; recommended: leave it as it is.
+4. **User-facing documentation** to change in phase 3: `site/concepts/grid.md` (the truncation sentence), `site/concepts/segments.md` and `docs/guides/patterns.md` (missing values: a JSON backend's `null` must be mapped to `NaN` in the fetcher, or the response is rejected), and the changelog entry, which is a breaking change for any caller that relied on the coercion.
+
+## Existing tests the new rules contradict
+
+Read from the test files, not run. Phase 2 updates them; each change is recorded here.
+
+- `packages/tscache/test/batch.test.ts`, "converts all eight schema dtypes by typed-array assignment": it puts `65 537.9`, `4 294 967 297.9` and `NaN` into integer fields and expects wrapped values; under N68 that batch rejects.
+- `packages/tscache/test/hostile-values.test.ts`, "as a field value → stored as a number, or PutError": a function value is currently stored as `NaN`, and a value that cannot be converted rejects with `offenderIndex: -1`; under N68 every non-number rejects with `offenderIndex: 0`.
+- Other tests, examples, benchmarks and fixtures that put `null` or out-of-range integers may exist; `bun run ci` in phase 3 finds them.
+
+## For the contract-test author
+
+References: `docs/architecture.md` §2.4 "Field values (N68)", §2.6 (`PutError`), §4.3 "Rules for `validateBatch`" (the order of checks, "Values (N68)" and "Cost of the value check"), §4.7 (`toWireError` data), §2.8 "Applying a snapshot" (first rule), §4.5 "Hydrate: validation (N35)" step (4) and the paragraph after it, §4.10.5 steps 5 and 6, and rows N68 and N69 in §8 (with N19, N35, N17 for context). Import paths as in §4.
+
+Behaviours that need a test (N68, through `validateBatch` and through `CacheState.put` or `Engine.put`):
+
+- `null` in an `f64` `number[]` rejects with `code: 'field-mismatch'`, the element's `offenderIndex`, its `offenderTimestamp`, `offenderField` and `expected: "a number"`.
+- Each of `undefined`, a sparse-array hole, `"1"`, `true`, `1n`, `{}`, `[]`, a symbol, a null-prototype object and a function rejects the same way, in a float field and in an integer field.
+- `NaN`, `Infinity`, `-Infinity` and `-0` are accepted in `f64` and `f32` and read back unchanged (`NaN` as `NaN`).
+- `f32` stores `Math.fround(v)`; `1e300` in an `f32` field is stored as `Infinity`.
+- For each integer dtype: its minimum and maximum are accepted; minimum − 1 and maximum + 1 reject with `expected` naming that range; `NaN`, `Infinity` and `-Infinity` reject.
+- Truncation: `1.9` → `1`, `-1.9` → `-1`, `-0.5` in `u8` → `0`, `255.9` in `u8` → `255`; `256` and `-1` in `u8`, `-1` in `u32` and `2 ** 31` in `i32` reject; `-(2 ** 31)` in `i32` is accepted.
+- A typed array of the field's own dtype is accepted (`Float64Array` with `NaN` in `f64`, `Uint8Array [0, 255]` in `u8`).
+- A typed array of another type is checked: `Float64Array [NaN]` in `i32`, `Int32Array [300]` in `u8` and `Uint32Array [2 ** 31]` in `i32` reject; `Uint8ClampedArray` in `u8` is accepted; `Float64Array [0.1]` in `f32` is stored rounded; `Int32Array [16 777 217]` in `f32` is stored as `16 777 216`.
+- First offender: with offenders in the first schema field at index 3 and in the second at index 0, the first field's is reported; within a field the lowest index is.
+- Order against other checks: a length mismatch, a misaligned, unsorted or duplicate timestamp, and a timestamp outside `options.range` are each reported instead of a value offender in the same batch; a value offender is reported instead of an invalid `meta`.
+- Atomicity: a rejected batch changes nothing, coverage, points, version and watermark included; a batch with a differing `meta.version` and an invalid value does not clear the cache and calls no `onVersionClear`.
+- The message contains the field name in double quotes, the value as `show()` prints it, `(string)` for the string `"1"`, the index and the timestamp; a symbol and a null-prototype object still produce `PutError`.
+- An empty batch is unaffected; timestamps are unaffected (a `null` timestamp is still `'misaligned'`).
+- A fetcher response holding `null` fails as a rejected response does (`'fetch-failed'` for the gets that awaited it, with the `PutError`'s name and message), and nothing is cached.
+- A `PutError` from a value crosses the RPC layer with `offenderField` intact (`toWireError`, `fromWireError`).
+
+Behaviours that need a test (N69, through `CacheState.hydrate` and `Engine.hydrate`):
+
+- Grid interval 10, offset 0: a snapshot with `finalizedUntil: 30` and coverage `[{ start: 0, end: 20 }]` is accepted; with coverage ending at `30` it throws `TscacheError` whose message starts with `invalid snapshot:`, and the cache is unchanged (points, coverage, version, watermark).
+- Unaligned watermark, offset 3: `finalizedUntil: 33.25` makes slot 43 the first volatile one; coverage ending at `33` is accepted, coverage ending at `43` rejects.
+- Only a later coverage range reaching the watermark (`coverage[1]`) also rejects, and the message names it.
+- A snapshot with `finalizedUntil` and points (in `segments`) at or after it but outside its coverage is accepted, and those points are not applied.
+- A snapshot without `finalizedUntil` is not bound by the rule.
+- The rejection happens before the version precondition: a snapshot of another version that also breaks the rule throws rather than returning `skipped: 'version-mismatch'`.
+- A snapshot taken from any cache state (`get` with `snapshot: true`, `Engine.snapshot`) still passes validation (the round-trip property (a) of §4.5 keeps holding).
+- Restore is unchanged: a page snapshot that carries `finalizedUntil` is skipped with `rewrite: true`, as before (§4.10.5 property (d)).
