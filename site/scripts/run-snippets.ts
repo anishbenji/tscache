@@ -432,13 +432,57 @@ const RUNS: Record<string, Run> = {
       "the hydrated engine lacks the points",
     );
   },
-  async "grid.ts"() {
-    const { week } = await load("grid.ts");
+  async "grid.ts"(logs) {
+    const { gauge, months, sessions, week, weekly } = await load("grid.ts");
     const snapped = week.misses[0]?.range;
     check(
       snapped?.start === Date.UTC(2026, 9, 25, 14, 30) &&
         snapped.end === Date.UTC(2026, 9, 30, 14, 30),
       `snapped to ${JSON.stringify(snapped)}`,
+    );
+    // The recipes for data that does not fit a fixed grid: every put was
+    // accepted, and each cache holds what the page says.
+    const daily: GetResult = await sessions.get(
+      { start: Date.UTC(2026, 2, 6), end: Date.UTC(2026, 2, 9) },
+      { cacheOnly: true },
+    );
+    check(
+      daily.timestamps.join() ===
+        [Date.UTC(2026, 2, 6), Date.UTC(2026, 2, 9)].join(),
+      `daily bars at ${daily.timestamps.join()}`,
+    );
+    const mondays: GetResult = await weekly.get(
+      { start: Date.UTC(2026, 10, 1), end: Date.UTC(2026, 10, 15) },
+      { cacheOnly: true },
+    );
+    check(
+      mondays.timestamps.length === 2 &&
+        [...mondays.timestamps].every((t) => new Date(t).getUTCDay() === 1),
+      `weekly bars at ${mondays.timestamps.join()}`,
+    );
+    check(
+      months.timestamps.join() === "680,681",
+      `monthly ordinals ${months.timestamps.join()}`,
+    );
+    check(
+      JSON.stringify(logs.at(-1)?.[0]) ===
+        JSON.stringify([
+          { year: 2026, month: 9 },
+          { year: 2026, month: 10 },
+        ]),
+      `months logged as ${JSON.stringify(logs.at(-1))}`,
+    );
+    const load1m: GetResult = await gauge.get(
+      { start: Date.UTC(2026, 10, 10, 12), end: Date.UTC(2026, 10, 10, 12, 1) },
+      { cacheOnly: true },
+    );
+    check(
+      load1m.timestamps.join() ===
+        [Date.UTC(2026, 10, 10, 12), Date.UTC(2026, 10, 10, 12, 1)].join() &&
+        [...(load1m.fields.load ?? [])].join() === "0.75,0.25",
+      `jittered samples stored as ${load1m.timestamps.join()} / ${[
+        ...(load1m.fields.load ?? []),
+      ].join()}`,
     );
   },
   async "live.ts"() {

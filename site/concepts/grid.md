@@ -28,6 +28,61 @@ Any integer offset is accepted and normalised into `[0, interval)`: an offset of
 same grid as `5`, and both configs resolve identically. The grid is fixed: a session that moves with
 daylight saving time does not fit one offset all year.
 
+## Data that does not fit a fixed grid
+
+The grid is one fixed step in milliseconds. Calendar-aware grids (a session that follows daylight saving
+time, months of different lengths) are not supported. A `put` with a timestamp off the grid is rejected
+whole (`'misaligned'`), so data on another schedule is mapped onto a grid in the fetcher, before the
+cache sees it. These recipes cover the common cases.
+
+### Daily bars from an exchange that observes daylight saving time
+
+A session that opens at 9:30 New York time opens at 14:30 UTC in winter and 13:30 UTC in summer, so no
+`alignmentOffset` fits it all year, and bars stamped at the open are rejected for half of it. A daily bar's
+identity is its trading date, not the minute the session opened: stamp each bar at 00:00 UTC of that
+date in the fetcher, on a grid of one day with offset 0.
+
+<<< @/snippets/grid.ts#daily-dst{ts}
+
+Ranges you read are then dates at midnight UTC too: a chart that shows the trading date reads the
+same timestamps, and the session's open time, if you need it, is a field or a lookup of its own.
+
+### Weekly bars
+
+A week is a fixed 604,800,000 ms, so weekly bars fit the grid when every bar is stamped on the same
+weekday at the same UTC time. The offset puts slot 0 on that weekday. The epoch, 1 January 1970, was a
+Thursday, so Monday at 00:00 UTC is an offset of 4 days, 345,600,000 ms (Sunday is 3 days,
+259,200,000 ms):
+
+<<< @/snippets/grid.ts#weekly{ts}
+
+A week that starts in a local time zone, or follows daylight saving time, is stamped at its date as
+above.
+
+### Monthly, quarterly and yearly bars
+
+Months differ in length, so no millisecond interval holds them. Map each month to an ordinal, its number
+of months since January 1970, store it as the timestamp on a grid of interval 1, and convert back when
+drawing:
+
+<<< @/snippets/grid.ts#monthly{ts}
+
+The trade-off: the cache no longer holds times. Every range you pass to `get`, `invalidate` or `put`,
+every `meta.finalizedUntil` the fetcher reports, and every timestamp a read returns is an ordinal, so
+the fetcher converts the requested ordinal range to the months it asks the backend for, and the chart
+needs a label for each ordinal. Quarters and years work the same way with their own ordinals.
+
+### Jittered timestamps
+
+Samples that arrive near, but not on, a fixed step (a metric scraped every minute, at 12:00:02 and then
+12:00:58) are moved to the slot they belong to in the fetcher. Flooring, `Math.floor(t / interval) *
+interval` with offset 0, assigns each sample to the slot that starts at or before it; rounding to the
+nearest slot suits jitter on both sides of the step. Two samples can then land in one slot. A batch's
+timestamps must be unique, so decide which one the slot keeps (the last, a mean, a sum) before the
+`put`:
+
+<<< @/snippets/grid.ts#jitter{ts}
+
 ## Ranges
 
 A `Range` is `{ start, end }` in milliseconds, **inclusive at both ends**. That is how chart libraries
