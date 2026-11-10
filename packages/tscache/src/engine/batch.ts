@@ -43,10 +43,24 @@ function isObject(value: unknown): value is Record<string, unknown> {
  * from the %TypedArray% tag getter, not `instanceof`, so an array made in
  * another realm (an iframe, a different worker global) is recognized too.
  */
+const TYPED_ARRAY = Object.getPrototypeOf(Uint8Array.prototype);
 const typedArrayKind = Object.getOwnPropertyDescriptor(
-  Object.getPrototypeOf(Uint8Array.prototype),
+  TYPED_ARRAY,
   Symbol.toStringTag,
 )?.get as (this: unknown) => string | undefined;
+
+/** A typed array's element count, from the %TypedArray% getter as the tag. */
+const typedArrayLength = Object.getOwnPropertyDescriptor(TYPED_ARRAY, "length")
+  ?.get as (this: unknown) => number;
+
+/**
+ * The element count of a `number[]` or a typed array. A typed array's is
+ * read through the %TypedArray% getter, so a subclass that overrides
+ * `length` cannot make the checks and the copy disagree.
+ */
+function lengthOf(values: NumericArray): number {
+  return Array.isArray(values) ? values.length : typedArrayLength.call(values);
+}
 
 /** A `number[]` or a typed array of numbers; BigInt arrays and DataViews are not. */
 function isNumericArray(value: unknown): value is NumericArray {
@@ -101,7 +115,7 @@ function fieldArraysOf(batch: PutBatch, names: string[]): NumericArray[] {
 /** Scans once and throws for the first timestamp that breaks a rule. */
 function assertTimestamps(timestamps: NumericArray, grid: Grid): void {
   const expected = `t ≡ ${grid.alignmentOffset} (mod ${grid.interval})`;
-  for (let i = 0; i < timestamps.length; i++) {
+  for (let i = 0, n = lengthOf(timestamps); i < n; i++) {
     const t = timestamps[i] as number;
     if (!isAligned(t, grid)) {
       throw new PutError(
@@ -173,7 +187,8 @@ function scanInto(
   const half = 2 ** (data.BYTES_PER_ELEMENT * 8 - 1);
   const min = dtype[0] === "u" ? 0 : -half;
   const max = dtype[0] === "u" ? 2 * half - 1 : half - 1;
-  for (let i = 0; i < values.length; i++) {
+  // `data` has the batch's length, which the field's own length matched.
+  for (let i = 0; i < data.length; i++) {
     const v: unknown = values[i];
     if (typeof v !== "number") {
       // show() never calls the value's own conversion; the type tells "1" from 1.
@@ -204,7 +219,7 @@ function scanInto(
 
 /** Timestamps are ascending, so only the two ends can fall outside. */
 function assertInside(timestamps: NumericArray, range: Range): void {
-  const n = timestamps.length;
+  const n = lengthOf(timestamps);
   if (n === 0) return;
   const first = timestamps[0] as number;
   const last = timestamps[n - 1] as number;
@@ -241,9 +256,9 @@ export function validateBatch(
   const names = Object.keys(config.fields);
   const timestamps = timestampsOf(batch);
   const arrays = fieldArraysOf(batch, names);
-  const n = timestamps.length;
+  const n = lengthOf(timestamps);
   names.forEach((name, c) => {
-    const length = (arrays[c] as NumericArray).length;
+    const length = lengthOf(arrays[c] as NumericArray);
     if (length !== n) {
       structural(
         "length-mismatch",
@@ -267,13 +282,13 @@ export function validateBatch(
     const data = new Field(n);
     // Anything but a number[] is a numeric typed array (fieldArraysOf), whose
     // every element is a number: a float field takes it as it is, and an
-    // integer field's own storage array holds only valid values (the tag
-    // recognizes one from another realm). Every other array is scanned.
+    // integer field's own storage array holds only valid values. The element
+    // type is the tag (§4.3), never `constructor`, which a caller can
+    // redefine; the tag also recognizes an array from another realm. Every
+    // other array is scanned.
     if (
       !Array.isArray(values) &&
-      (dtype[0] === "f" ||
-        (values as FieldArray).constructor === Field ||
-        typedArrayKind.call(values) === Field.name)
+      (dtype[0] === "f" || typedArrayKind.call(values) === Field.name)
     ) {
       data.set(values);
     } else scanInto(data, name, dtype, values, timestamps);

@@ -108,3 +108,110 @@ describe.each(hostile.map((value) => ({ value })))(
     });
   },
 );
+
+// Typed arrays that lie about themselves (step 75 pre-review): the element
+// type and the length are read through the %TypedArray% getters, never
+// through `constructor` or an overridden `length` (§4.3 (1), (2), N68).
+describe("typed arrays that lie about their type or length", () => {
+  const ints = resolveCacheConfig({
+    id: "liars",
+    interval: 1,
+    fields: { x: "i32" },
+  });
+  const rejectsValues = (x: unknown) =>
+    expect(() =>
+      validateBatch(
+        { timestamps: [0, 1, 2], fields: { x } } as unknown as PutBatch,
+        ints,
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        name: "PutError",
+        code: "field-mismatch",
+        offenderIndex: 0,
+        offenderField: "x",
+      }),
+    );
+
+  it("a Float64Array whose own constructor says Int32Array is still scanned", () => {
+    const values = new Float64Array([Number.NaN, 1e20, 300]);
+    Object.defineProperty(values, "constructor", { value: Int32Array });
+    rejectsValues(values);
+  });
+
+  it("a Float64Array subclass whose prototype constructor says Int32Array is still scanned", () => {
+    class Spoof extends Float64Array {}
+    Object.defineProperty(Spoof.prototype, "constructor", {
+      value: Int32Array,
+    });
+    rejectsValues(new Spoof([Number.NaN, 1e20, 300]));
+  });
+
+  it("a throwing constructor getter does not escape as a TypeError", () => {
+    const bad = new Float64Array([Number.NaN, 1e20, 300]);
+    const good = new Int32Array([1, 2, 3]);
+    for (const values of [bad, good]) {
+      Object.defineProperty(values, "constructor", {
+        get() {
+          throw new TypeError("no");
+        },
+      });
+    }
+    rejectsValues(bad);
+    expect(
+      validateBatch({ timestamps: [0, 1, 2], fields: { x: good } }, ints).points
+        .fields.x,
+    ).toEqual(new Int32Array([1, 2, 3]));
+  });
+
+  it.each([
+    { name: "shorter", actual: [1, 2, 3], claimed: 1 },
+    { name: "longer", actual: [1], claimed: 3 },
+  ])(
+    "a length getter that claims a $name array is a length-mismatch",
+    ({ actual, claimed }) => {
+      class Liar extends Int32Array {
+        override get length(): number {
+          return claimed;
+        }
+      }
+      const timestamps = Array.from({ length: claimed }, (_, i) => i);
+      expect(() =>
+        validateBatch({ timestamps, fields: { x: new Liar(actual) } }, ints),
+      ).toThrow(
+        expect.objectContaining({
+          name: "PutError",
+          code: "length-mismatch",
+          offenderIndex: -1,
+        }),
+      );
+    },
+  );
+});
+
+describe("timestamps that lie about their length", () => {
+  it("a Float64Array subclass claiming fewer timestamps still has every one checked", () => {
+    const cfg = resolveCacheConfig({
+      id: "liars",
+      interval: 10,
+      fields: { x: "f64" },
+    });
+    class Liar extends Float64Array {
+      override get length(): number {
+        return 1;
+      }
+    }
+    expect(() =>
+      validateBatch(
+        { timestamps: new Liar([0, 15]), fields: { x: new Float64Array(2) } },
+        cfg,
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        name: "PutError",
+        code: "misaligned",
+        offenderIndex: 1,
+      }),
+    );
+  });
+});
