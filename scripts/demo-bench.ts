@@ -233,9 +233,10 @@ phases, tabs opening included. A view is answered without a request when no fetc
 while it was in flight (every mode's fetches report through the same fetcher wrapper, and the reports
 must account for every page the backend served); a view that joined a fetch already in flight waited
 for a request. The p50 is also given for the two kinds of view apart. First view is the time to chart
-of the run's first view, cold path included: for tscache, the worker's first fetch, with its fetcher
-loaded in the run's new worker. First connect is opening the first tab's source: for tscache, the
-client's connect to the run's new SharedWorker, which the workload time includes too. Run 1's first
+of the run's first view, the first fetch included; its clock starts once the tab's source is open, so
+it leaves out the connect. First connect is opening the first tab's source: for tscache, the client's
+connect to the run's new SharedWorker, which loads the fetcher module there; the workload time
+includes it. Run 1's first
 view and first connect are shown beside the medians. Medians over the runs are shown.
 
 ## Limits

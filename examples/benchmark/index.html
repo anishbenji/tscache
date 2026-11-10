@@ -47,9 +47,10 @@
       read's start to the frame after <code>setData</code> returned. A view
       is answered without a request when no fetch of its cache ended while
       it was in flight; one that joined a fetch already in flight waited for
-      a request. tscache's first connect to its new worker is its own column,
-      run 1's beside the median, and is inside the workload time and the
-      first view's time to chart.
+      a request. tscache's first connect to its new worker, which loads the
+      fetcher there, is its own column, run 1's beside the median, and is
+      inside the workload time. The first view's time to chart starts once
+      the tab's source is open, so it leaves the connect out.
     </p>
     <details>
       <summary>Limits of this comparison</summary>

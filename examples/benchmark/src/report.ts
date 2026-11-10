@@ -66,7 +66,10 @@ export interface Row {
   /** The p50 of the views answered without a request, and of the rest. */
   hitP50: number;
   missP50: number;
-  /** The run's first view, cold path included: the median, and run 1's. */
+  /**
+   * The run's first view, its first fetch included; timed from the read's
+   * start, after the connect (`setupMs`): the median, and run 1's.
+   */
   firstViewMs: number;
   coldFirstViewMs: number;
   workloadMs: number;
