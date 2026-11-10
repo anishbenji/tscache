@@ -91,9 +91,12 @@ async function fetchPage(
   if (stringIn(request.context, "format") !== "json") {
     headers.accept = `${COLUMNS_TYPE}, application/json;q=0.5`;
   }
+  // The backend's pages are no-store, and so is the request: it skips the
+  // browser's HTTP cache, whose lock would otherwise hold identical
+  // requests made at once (several tabs opening one chart) behind the first.
   const response = await fetch(
     origin === undefined ? url : new URL(url, origin),
-    { headers },
+    { headers, cache: "no-store" },
   );
   if (response.status === 401) {
     throw new AuthInvalidError("the backend refused the access token");
