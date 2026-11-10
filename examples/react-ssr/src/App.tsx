@@ -9,6 +9,7 @@ import type { Hydration } from "@examples/mock-backend/hydration";
 import { useState, useSyncExternalStore } from "react";
 import { CandleChart } from "./Chart";
 import { type Bar, HALF_YEAR, type Summary, utcDay } from "./candles";
+import { useInsightLines } from "./insights";
 import { useLog } from "./log";
 import {
   type Connection,
@@ -108,6 +109,18 @@ function Sessions({ bars }: { bars: Bar[] }) {
   );
 }
 
+/** Where the drawn bars came from, and their time to chart. */
+function Insights() {
+  const lines = useInsightLines();
+  return (
+    <p className="stats insights" data-testid="insights">
+      <output data-testid="provenance">{lines.source}</output> ·{" "}
+      <output data-testid="time-to-chart">{lines.timing}</output> ·{" "}
+      <output data-testid="chart-spread">{lines.spread}</output>
+    </p>
+  );
+}
+
 function Log() {
   const entries = useLog();
   return (
@@ -162,6 +175,7 @@ export function App({
         <output data-testid="server-cached">{serverCached}</output> of its{" "}
         {summary.bars} bars came from its cache.
       </p>
+      <Insights />
       <CandleChart result={frame?.result} onNearLeftEdge={earlier} />
       <p>
         Drag the chart to the right to scroll back; near the left edge the page

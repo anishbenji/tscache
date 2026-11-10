@@ -6,6 +6,7 @@
 import type { GetResult } from "@anishbenji/tscache";
 import { useEffect, useEffectEvent, useRef } from "react";
 import type { CandlePlot } from "./candle-chart";
+import { insights } from "./insights";
 import { log, message } from "./log";
 
 export function CandleChart({
@@ -20,7 +21,9 @@ export function CandleChart({
   const nearLeftEdge = useEffectEvent(onNearLeftEdge);
   // An answer that arrived while the chart was loading is drawn once it is.
   const drawLatest = useEffectEvent((created: CandlePlot) => {
-    if (result !== undefined) created.draw(result);
+    if (result === undefined) return;
+    created.draw(result);
+    insights.drawn(result);
   });
   useEffect(() => {
     const element = container.current;
@@ -41,7 +44,9 @@ export function CandleChart({
     };
   }, []);
   useEffect(() => {
-    if (result !== undefined) plot.current?.draw(result);
+    if (result === undefined || plot.current === null) return;
+    plot.current.draw(result);
+    insights.drawn(result);
   }, [result]);
   return <div className="chart" ref={container} />;
 }

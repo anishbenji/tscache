@@ -12,9 +12,11 @@ import {
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import { type Hydration, seed } from "@examples/mock-backend/hydration";
+import { pageContext } from "@examples/mock-backend/insights";
 import { onFetchNotice } from "@examples/mock-backend/notices";
 import { useEffect, useState } from "react";
 import { candles, type Summary, summarize, utcDay } from "./candles";
+import { insights } from "./insights";
 import { log, message } from "./log";
 
 /** A connected client and its candles cache. */
@@ -47,13 +49,13 @@ async function connect(
 ): Promise<Connection & { applied: Range[] }> {
   const client = await createClient({
     workerUrl,
-    fetcher: { module: fetcherModule },
+    fetcher: { module: fetcherModule, context: pageContext({}) },
   });
   client.on("workerLost", ({ reason }) => onLost(reason));
   try {
     const cache = await client.cache(candles);
     const { applied } = await seed(cache, hydration);
-    return { client, cache, applied };
+    return { client, cache: insights.instrument(cache, client), applied };
   } catch (error) {
     void client.dispose();
     throw error;

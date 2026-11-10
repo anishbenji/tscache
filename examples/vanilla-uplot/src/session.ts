@@ -1,10 +1,24 @@
 // What both pages share: a tscache client that is replaced when its worker
-// is lost, and a log of what the backend and the cache did.
+// is lost, a log of what the backend and the cache did, and the insights
+// panel: where each read's bars came from, and its time to chart.
 
 import { createClient, type TscacheClient } from "@anishbenji/tscache";
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
+import { pageContext } from "@examples/mock-backend/insights";
 import { onFetchNotice } from "@examples/mock-backend/notices";
+import {
+  createInsights,
+  mountInsights,
+} from "@examples/mock-backend/read-insights";
+import "@examples/mock-backend/insights.css";
+
+/**
+ * This page's reads: the cache handle is instrumented with it, and each draw
+ * reports to it. The panel in the page's markup shows it.
+ */
+export const insights = createInsights();
+mountInsights(document, insights);
 
 /**
  * Calls `use` with a connected client, and again with a new one whenever
@@ -17,7 +31,7 @@ export async function keepClient(
 ): Promise<void> {
   const client = await createClient({
     workerUrl,
-    fetcher: { module: fetcherModule },
+    fetcher: { module: fetcherModule, context: pageContext({}) },
   });
   client.on("workerLost", ({ reason }) => {
     log(`worker lost (${reason}); connecting a new client`);

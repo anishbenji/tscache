@@ -9,11 +9,16 @@ import {
   onFetchNotice,
 } from "@examples/mock-backend/notices";
 import {
+  createInsights,
+  insightLines,
+} from "@examples/mock-backend/read-insights";
+import {
   createEffect,
   createMemo,
   createSignal,
   Errored,
   isPending,
+  onCleanup,
   onSettled,
   Show,
 } from "solid-js";
@@ -21,6 +26,7 @@ import { SensorChart } from "./chart";
 import { type LogLine, Panel, type Status, utc } from "./panel";
 import { DAY, type Figures, figuresOf, type ServerRead } from "./sensor";
 import { createSession } from "./session";
+import "@examples/mock-backend/insights.css";
 
 /** The id of the script element that carries the page's props. */
 export const APP_PROPS = "app-props";
@@ -32,6 +38,9 @@ interface Answer {
   result: GetResult;
   figures: Figures;
 }
+
+/** The insights panel before the browser draws a read of its own. */
+const SERVER_INSIGHT = insightLines({ last: undefined, spread: undefined });
 
 function span(ms: number): string {
   const minutes = Math.round(ms / 60_000);
@@ -50,12 +59,20 @@ function Live(props: ServerRead) {
     setLog((lines) => [{ at: Date.now(), text }, ...lines].slice(0, 50));
 
   const { cache, client } = createSession(write);
+  // The handle the page reads through, timed for the insights panel.
+  const insights = createInsights();
+  onCleanup(() => insights.dispose());
+  const reads = createMemo(() => insights.instrument(cache(), client()));
+  const [insight, setInsight] = createSignal(insightLines(insights.state));
+  onSettled(() =>
+    insights.subscribe(() => setInsight(insightLines(insights.state))),
+  );
   // The server's window to begin with; each earlier day moves it back.
   const [start, setStart] = createSignal(() => props.window.start);
   const answer = createMemo<Answer | undefined>(
     async () => {
       const { mode } = client();
-      const handle = cache();
+      const handle = reads();
       const range = { start: start(), end: Date.now() };
       const result = await handle.get(range);
       return { mode, range, result, figures: figuresOf(result) };
@@ -98,9 +115,13 @@ function Live(props: ServerRead) {
       figures={answer()?.figures ?? props.figures}
       fetches={fetches()}
       log={log()}
+      insight={insight()}
       onLoadPreviousDay={() => setStart((t) => t - DAY)}
     >
-      <SensorChart shown={answer()} />
+      <SensorChart
+        shown={answer()}
+        onDrawn={(result) => insights.drawn(result)}
+      />
     </Panel>
   );
 }
@@ -115,6 +136,7 @@ function ServerPanel(props: ServerRead) {
       figures={props.figures}
       fetches={0}
       log={[]}
+      insight={SERVER_INSIGHT}
     />
   );
 }

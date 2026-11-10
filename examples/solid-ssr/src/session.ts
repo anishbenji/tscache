@@ -14,6 +14,7 @@ import {
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
 import { readHydration, seed } from "@examples/mock-backend/hydration";
+import { pageContext } from "@examples/mock-backend/insights";
 import { createMemo, refresh, type SourceAccessor } from "solid-js";
 import { config } from "./sensor";
 
@@ -28,7 +29,7 @@ export function createSession(log: (text: string) => void): Session {
   const client: SourceAccessor<TscacheClient> = createMemo(async () => {
     const next = await createClient({
       workerUrl,
-      fetcher: { module: fetcherModule },
+      fetcher: { module: fetcherModule, context: pageContext({}) },
     });
     next.on("workerLost", ({ reason }) => {
       log(`worker lost (${reason}); connecting a new client`);

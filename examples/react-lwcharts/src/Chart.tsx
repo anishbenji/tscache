@@ -14,6 +14,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef } from "react";
+import { insights } from "./insights";
 
 const UP = "#2a78d6";
 const DOWN = "#eb6834";
@@ -95,6 +96,7 @@ export function CandleChart({ result }: { result: GetResult | undefined }) {
     const bars = toBars(result);
     candles.setData(bars.candles);
     volume.setData(bars.volume);
+    insights.drawn(result);
     if (!fitted.current && bars.candles.length > 0) {
       chart.timeScale().fitContent();
       fitted.current = true;

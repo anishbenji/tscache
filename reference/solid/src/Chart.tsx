@@ -60,7 +60,10 @@ export function Chart(props: ChartProps) {
     () => ({ shown: view(), answer: props.answer }),
     ({ shown, answer }) => {
       if (shown === undefined) return;
-      if (answer !== undefined) shown.draw(answer);
+      if (answer !== undefined) {
+        shown.draw(answer);
+        session?.insights.drawn(answer);
+      }
       const visible = shown.visible();
       if (visible !== undefined) props.onShowing(visible);
     },

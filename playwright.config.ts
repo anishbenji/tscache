@@ -95,7 +95,7 @@ export default defineConfig({
             env: { DEMO_PORT: String(demoPort) },
             url: `${hub}healthz`,
             reuseExistingServer: !process.env.CI,
-            // Builds what the examples' servers did not, then starts nine.
+            // Builds what the examples' servers did not, then starts ten.
             timeout: 300_000,
             // The launcher's servers run in process groups of their own,
             // which Playwright's default SIGKILL to the launcher's group

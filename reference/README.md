@@ -63,6 +63,10 @@ depends on nothing but the server's read, so the browser's hydration render matc
 - **Refreshes credentials once across tabs.** An expired access token reaches every tab as
   `authInvalid`; one tab rotates the tokens under a Web Lock, every tab hands the new token to its
   client, and the reads that came back `auth-pending` are asked again (`shared/src/auth.ts`).
+- **Says where each read came from.** The session reads through cache handles instrumented for the
+  demo's insights (`@examples/mock-backend/read-insights`), and each client reports its draws, so the
+  page shows how many of the drawn bars came from the cache and how many from the network, and the
+  read's time to chart. Leave this out when copying a client: it is demo instrumentation.
 - **Renders on the server too.** `/ssr` is the same page rendered on the server, which reads with a
   credential of its own; the browser draws the server's read before it connects and starts its cache
   from it, so it fetches only the bar still forming.

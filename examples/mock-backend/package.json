@@ -9,7 +9,10 @@
     "./datasets": "./src/datasets.ts",
     "./fetcher": "./src/fetcher.ts",
     "./hydration": "./src/hydration.ts",
+    "./insights": "./src/insights.ts",
+    "./insights.css": "./src/insights.css",
     "./notices": "./src/notices.ts",
+    "./read-insights": "./src/read-insights.ts",
     "./vite": "./src/vite.ts"
   },
   "scripts": {

@@ -64,8 +64,10 @@ describe("createBackend", () => {
     // Caches between the two must keep the formats apart.
     expect(json.headers.get("vary")).toBe("accept");
     expect(binary.headers.get("vary")).toBe("accept");
-    const page = await json.json();
-    const decoded = decodeColumns(await binary.arrayBuffer());
+    const jsonBody = await json.arrayBuffer();
+    const binaryBody = await binary.arrayBuffer();
+    const page = JSON.parse(new TextDecoder().decode(jsonBody));
+    const decoded = decodeColumns(binaryBody);
     expect(decoded.header.fields).toEqual(
       Object.entries(datasets.candles.fields).map(([name, dtype]) => ({
         name,
@@ -80,7 +82,11 @@ describe("createBackend", () => {
     }
     expect(decoded.header.meta).toEqual(page.meta);
     expect(decoded.header.next).toBeUndefined();
-    expect((await stats(backend)).formats).toEqual({ json: 1, columns: 1 });
+    const counted = await stats(backend);
+    expect(counted.formats).toEqual({ json: 1, columns: 1 });
+    // What the benchmark page reads: points and body bytes over both.
+    expect(counted.points).toBe(2 * page.timestamps.length);
+    expect(counted.bytes).toBe(jsonBody.byteLength + binaryBody.byteLength);
   });
 
   it("carries the next page's start in a columns header", async () => {

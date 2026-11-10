@@ -9,6 +9,7 @@ import { type Auth, useAuth } from "./auth";
 import { CandleChart } from "./Chart";
 import { useCandles } from "./candles";
 import { useClient } from "./client";
+import { useInsightLines } from "./insights";
 import { useLog } from "./log";
 import { Panel } from "./Panel";
 import "./style.css";
@@ -21,6 +22,18 @@ function SessionLost({ auth }: { auth: Auth }) {
       <button type="button" onClick={() => void auth.signInAgain()}>
         Sign in again
       </button>
+    </p>
+  );
+}
+
+function Insights() {
+  const { source, timing, spread } = useInsightLines();
+  return (
+    <p className="insights" data-testid="insights">
+      <output data-testid="provenance">{source}</output>
+      <br />
+      <output data-testid="time-to-chart">{timing}</output> ·{" "}
+      <output data-testid="chart-spread">{spread}</output>
     </p>
   );
 }
@@ -63,6 +76,7 @@ function App() {
         </output>
       </p>
       <SessionLost auth={auth} />
+      <Insights />
       <CandleChart result={frame?.result} />
       <Panel mode={client?.mode} heard={auth.heard} />
       <h2>Log</h2>

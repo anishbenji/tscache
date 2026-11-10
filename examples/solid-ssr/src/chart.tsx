@@ -101,6 +101,8 @@ const options: uPlot.Options = {
 interface ChartProps {
   /** The browser's latest answer and its range; none before the first. */
   shown: { range: Range; result: GetResult } | undefined;
+  /** The chart has set the answer's data: called in the same task. */
+  onDrawn?: (result: GetResult) => void;
 }
 
 export function SensorChart(props: ChartProps) {
@@ -122,6 +124,7 @@ export function SensorChart(props: ChartProps) {
         );
         chart.setScale("x", { min: range.start, max: range.end });
       });
+      props.onDrawn?.(result);
     },
   );
 

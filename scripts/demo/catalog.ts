@@ -203,6 +203,30 @@ export const catalog: Entry[] = [
     ],
   },
   {
+    app: "benchmark",
+    title: "Benchmark: tscache and three baselines",
+    stack:
+      "Vanilla TypeScript · uPlot · no cache, memo, TanStack Query, tscache",
+    description:
+      "One seeded workload (load, scroll back five screens, zoom out and in, return to the newest screen, then the same in three tabs), run in each of four modes with the same fetcher, backend and chart, and a table of what each cost.",
+    lookFor: [
+      "Pick a backend latency and run: each mode runs five times, in turn, and the table shows the medians, with the conditions above it.",
+      "Backend requests and bars: the memo and TanStack Query cache per tab and by exact range, so the three tabs and every shifted range fetch again; tscache's tabs share one cache and fetch only the newest bars.",
+      "Views answered without a request: the time-to-chart p50 follows them, since a view without a request draws in about one frame in every mode that has one.",
+      "First connect is tscache's connect to a SharedWorker that every run starts anew, run 1's beside the median, kept in the workload time, not hidden.",
+      "Copy as Markdown gives the table as docs/benchmarks/demo-comparison.md prints it; scripts/demo-bench.ts generates that file.",
+    ],
+    auth: false,
+    launches: [
+      {
+        label: "Benchmark",
+        path: "/",
+        ready: { testId: "status", text: "ready" },
+        data: { testId: "preview-bars", text: POSITIVE },
+      },
+    ],
+  },
+  {
     app: "reference-vanilla",
     title: "Reference client: vanilla",
     stack: "No framework · both chart libraries · client and SSR",

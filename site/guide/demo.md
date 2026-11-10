@@ -8,7 +8,7 @@ bun run demo
 ```
 
 It builds the package and each app, serves every app on its own local port with its own mock backend,
-and opens a hub at <http://127.0.0.1:5400/> (`DEMO_PORT` moves it; the apps take the next nine
+and opens a hub at <http://127.0.0.1:5400/> (`DEMO_PORT` moves it; the apps take the next ten
 ports). Each app is its own origin, so each has its own SharedWorker. Ctrl-C stops everything.
 
 The hub lists every page: client-only and server-rendered, both chart libraries, and the
@@ -28,6 +28,14 @@ What to watch for:
   what is still forming. See [Server rendering](/guides/ssr).
 - **Live feeds.** Drop the streams from the panel: the feed reconnects and mends the bars it missed.
   See [Live feeds](/guides/live-feeds).
+- **Cache or network.** Every page labels the read on screen: how many of its bars came from the
+  cache and how many from the network, and its time to chart (from `get()` to the frame after the
+  chart library drew it), with the median and the 95th percentile of the page's reads.
+- **The benchmark.** The Benchmark entry runs one workload with no cache, a per-tab memo keyed by
+  exact range, TanStack Query with exact-range keys per tab, and tscache, and tabulates the backend
+  requests, the views answered without a request, bars, bytes and time to chart of each. The
+  numbers the documentation quotes come from `docs/benchmarks/demo-comparison.md`, which
+  `bun scripts/demo-bench.ts` generates.
 
 The launcher is
 [`scripts/demo.ts`](https://github.com/anishbenji/tscache/blob/main/scripts/demo.ts), and the hub's

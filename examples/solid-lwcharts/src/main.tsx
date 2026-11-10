@@ -18,6 +18,7 @@ import {
   onSettled,
 } from "solid-js";
 import { type CandleChart, createCandleChart } from "./chart";
+import { insight, insights } from "./insights";
 import { createTscacheClient, fetches, lines, log } from "./session";
 import "./style.css";
 
@@ -51,7 +52,10 @@ function Chart(props: { result: GetResult; onNearLeftEdge: () => void }) {
   createEffect(
     () => props.result,
     (result) => {
-      chart?.draw(result);
+      if (chart !== undefined) {
+        chart.draw(result);
+        insights.drawn(result);
+      }
       logMisses(result);
     },
   );
@@ -70,7 +74,12 @@ const time = (t: number) => new Date(t).toLocaleTimeString();
 
 function App() {
   const client = createTscacheClient();
-  const cache = createMemo(() => client().cache(config));
+  const cache = createMemo(() => {
+    const connected = client();
+    return connected
+      .cache(config)
+      .then((handle) => insights.instrument(handle, connected));
+  });
   const [start, setStart] = createSignal(Date.now() - FORTNIGHT);
   const loaded = createMemo(() =>
     cache().get({ start: start(), end: Date.now() }),
@@ -106,6 +115,12 @@ function App() {
             {isPending(() => loaded()) ? "loading" : "ready"}
           </Loading>
         </output>
+      </p>
+      <p class="insights" data-testid="insights">
+        <output data-testid="provenance">{insight().source}</output>
+        <br />
+        <output data-testid="time-to-chart">{insight().timing}</output> ·{" "}
+        <output data-testid="chart-spread">{insight().spread}</output>
       </p>
       <Loading fallback={<div class="chart" />}>
         <Chart result={loaded()} onNearLeftEdge={earlier} />

@@ -21,6 +21,18 @@
         "vitest": "^5.0.5",
       },
     },
+    "examples/benchmark": {
+      "name": "@examples/benchmark",
+      "dependencies": {
+        "@anishbenji/tscache": "workspace:*",
+        "@examples/mock-backend": "workspace:*",
+        "uplot": "^1.6.32",
+      },
+      "devDependencies": {
+        "@tanstack/query-core": "5.105.0",
+        "vite": "^8.3.5",
+      },
+    },
     "examples/mock-backend": {
       "name": "@examples/mock-backend",
       "dependencies": {
@@ -357,6 +369,8 @@
 
     "@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.2.2", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA=="],
 
+    "@examples/benchmark": ["@examples/benchmark@workspace:examples/benchmark"],
+
     "@examples/mock-backend": ["@examples/mock-backend@workspace:examples/mock-backend"],
 
     "@examples/react-lwcharts": ["@examples/react-lwcharts@workspace:examples/react-lwcharts"],
@@ -588,6 +602,8 @@
     "@solidjs/web": ["@solidjs/web@2.0.0-rc.20", "", { "dependencies": { "seroval": "1.7.0", "seroval-plugins": "1.7.0" }, "peerDependencies": { "solid-js": "^2.0.0-rc.20" } }, "sha512-ACGUZ1XBNxiHnWW274na+1JZfuIhiS/BN5XM72wVKNYSopR/NyjVPR4O/nvshtbYlEk1lKJ9d1uBaXDaz6ddYg=="],
 
     "@sveltejs/acorn-typescript": ["@sveltejs/acorn-typescript@1.0.13", "", { "peerDependencies": { "acorn": "^8.9.0" } }, "sha512-wgKggnhZVL9Bfx1OaKKTrYY9BFRk6C8UAkQNUcIv1+llzYrIqy+RZm5HPKzn0NpEBvTVhTqB4kQyllZywsRBRQ=="],
+
+    "@tanstack/query-core": ["@tanstack/query-core@5.105.0", "", {}, "sha512-7p56vRmT/z4UJ6sctGIdl5WRUQyUv53IUpUwEKi2g97zMbO7zh8ZsCLffGAvCPBR4xD72e3VXsDyLwXHhoNTMQ=="],
 
     "@tscache/integrations": ["@tscache/integrations@workspace:integrations"],
 
