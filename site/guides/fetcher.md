@@ -42,6 +42,10 @@ cache held there that the response lacks are removed. So:
   response. Do not assemble one response from two versions.
 - **Timestamps** on the cache's grid (`request.interval`, `request.alignmentOffset`), ascending,
   unique, with every field present. A response that fails validation makes the range `'fetch-failed'`.
+- **Missing values** as `NaN` in float fields. A value is converted to its field's dtype without a
+  check, so a JSON `null` is stored as `0` and an out-of-range integer wraps
+  ([Batches](/concepts/grid#batches)); the fetcher above maps `null` to `NaN`. An integer field cannot
+  mark a missing value ([Integer fields](/guides/patterns#integer-fields-cannot-be-missing)).
 
 The range is already coalesced: adjacent misses are merged, and a miss next to known data is extended by
 one interval into it.
