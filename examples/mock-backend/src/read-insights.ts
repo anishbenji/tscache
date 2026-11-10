@@ -17,8 +17,14 @@
 // useSyncExternalStore, Solid with a signal, a vanilla page with
 // `mountInsights`.
 
-import type { CacheHandle, GetResult, Range } from "@anishbenji/tscache";
-import { type FetchInsight, moment, onInsight } from "./insights";
+import type {
+  CacheHandle,
+  GetResult,
+  HostingMode,
+  Range,
+  TscacheClient,
+} from "@anishbenji/tscache";
+import { type FetchInsight, moment, onInsight, PAGE } from "./insights";
 
 /** One read, as drawn. */
 export interface ReadInsight {
@@ -63,8 +69,14 @@ export interface Insights {
   readonly state: InsightsState;
   /** Calls `listener` after each change of `state`; returns the unsubscribe. */
   subscribe(listener: () => void): () => void;
-  /** `handle`, with each get() timed for this page's insights. */
-  instrument(handle: CacheHandle): CacheHandle;
+  /**
+   * `handle`, with each get() timed for this page's insights. `client` is
+   * the handle's client: its hosting says which engine serves the reads.
+   */
+  instrument(
+    handle: CacheHandle,
+    client: Pick<TscacheClient, "mode">,
+  ): CacheHandle;
   /**
    * The chart library's setData for `result` has returned: times the draw
    * up to the next frame. Call it in the same task. A result is counted
@@ -74,6 +86,15 @@ export interface Insights {
   dispose(): void;
 }
 
+/**
+ * The engine that serves a page's reads: the shared worker, or the page's
+ * own dedicated or in-process engine, its fetches named by `page`.
+ */
+export interface Engine {
+  mode: HostingMode;
+  page: string;
+}
+
 /** A get() that has answered and waits for its draw. */
 interface Answered {
   cacheId: string;
@@ -81,13 +102,57 @@ interface Answered {
   /** When get() was called and when it answered (moment()). */
   askedAt: number;
   answeredAt: number;
+  engine: Engine;
+}
+
+/**
+ * Whether `insight` is a fetch of the engine that serves the read. A shared
+ * engine's fetches serve every tab on it, whichever tab's context they ran
+ * with; a private engine's serve its own page only. Two SharedWorkers of
+ * different script URLs on one origin, sharing a cache id, are not told
+ * apart: no demo page runs that way.
+ */
+function servedBy(engine: Engine, insight: FetchInsight): boolean {
+  if (insight.hosting !== engine.mode) return false;
+  return engine.mode === "shared" || insight.page === engine.page;
+}
+
+/** A read the reports kept may still change: asked, and answered or not. */
+export interface TrackedRead {
+  askedAt: number;
+  answeredAt?: number;
+}
+
+/**
+ * The reports worth keeping: those that a tracked read (in flight, waiting
+ * for its frame, or on screen) can still match, since a read matches only
+ * reports that ended while it was in flight, and those that ended within
+ * `keepMs` of the newest report, for a read whose start has not been seen
+ * yet. Bounded however long the page goes without drawing.
+ */
+export function retainedReports(
+  reports: readonly FetchInsight[],
+  reads: readonly TrackedRead[],
+  keepMs: number,
+): FetchInsight[] {
+  let newest = Number.NEGATIVE_INFINITY;
+  for (const r of reports) newest = Math.max(newest, r.endedAt);
+  return reports.filter(
+    (r) =>
+      r.endedAt >= newest - keepMs ||
+      reads.some(
+        (read) =>
+          r.endedAt >= read.askedAt &&
+          (read.answeredAt === undefined || r.endedAt <= read.answeredAt),
+      ),
+  );
 }
 
 /** How many reads the spread is taken over: the page's latest ones. */
 const SPREAD_READS = 200;
 /**
- * Fetch reports that ended this long before the oldest read still waiting
- * for its frame, or before now when none waits, are dropped.
+ * Fetch reports that no tracked read can match are kept only this long
+ * after the newest report (`retainedReports`).
  */
 const KEEP_MS = 120_000;
 
@@ -130,6 +195,7 @@ export function provenance(
   const during = insights.filter(
     (insight) =>
       insight.ok &&
+      servedBy(read.engine, insight) &&
       insight.cacheId === read.cacheId &&
       insight.endedAt >= read.askedAt &&
       insight.endedAt <= read.answeredAt &&
@@ -172,17 +238,18 @@ export function createInsights(): Insights {
     if (document.visibilityState === "hidden") hides++;
   };
 
+  /** Reads asked whose get() has not answered yet. */
+  const inFlight = new Set<TrackedRead>();
+
   /**
-   * Drops the reports no read can still match: those that ended before
-   * every read waiting for its frame, and the read on screen, was asked.
-   * A frame a hidden page held back for minutes keeps its read's reports.
+   * Drops the reports no read can still match (`retainedReports`): the
+   * reads in flight, those waiting for their frame, a frame a hidden page
+   * held back for minutes included, and the read on screen.
    */
-  function prune(now: number): void {
-    let oldest = now;
-    for (const read of waiting) oldest = Math.min(oldest, read.askedAt);
-    if (shown !== undefined) oldest = Math.min(oldest, shown.read.askedAt);
-    const cutoff = oldest - KEEP_MS;
-    reports = reports.filter((r) => r.endedAt >= cutoff);
+  function prune(): void {
+    const reads: TrackedRead[] = [...inFlight, ...waiting];
+    if (shown !== undefined) reads.push(shown.read);
+    reports = retainedReports(reports, reads, KEEP_MS);
   }
 
   function isHidden(): boolean {
@@ -202,6 +269,7 @@ export function createInsights(): Insights {
    */
   function received(insight: FetchInsight): void {
     reports.push(insight);
+    prune();
     const last = state.last;
     if (shown === undefined || last === undefined) return;
     const now = provenance(shown.read, shown.result, reports);
@@ -218,7 +286,7 @@ export function createInsights(): Insights {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    instrument(handle) {
+    instrument(handle, client) {
       if (stop === undefined) {
         const stopListening = onInsight(received);
         const watches = typeof document !== "undefined";
@@ -231,16 +299,23 @@ export function createInsights(): Insights {
           }
         };
       }
+      const engine: Engine = { mode: client.mode, page: PAGE };
       const get: CacheHandle["get"] = async (range, options) => {
-        const askedAt = moment();
-        const result = await handle.get(range, options);
-        answered.set(result, {
-          cacheId: handle.id,
-          range,
-          askedAt,
-          answeredAt: moment(),
-        });
-        return result;
+        const asked: TrackedRead = { askedAt: moment() };
+        inFlight.add(asked);
+        try {
+          const result = await handle.get(range, options);
+          answered.set(result, {
+            cacheId: handle.id,
+            range,
+            askedAt: asked.askedAt,
+            answeredAt: moment(),
+            engine,
+          });
+          return result;
+        } finally {
+          inFlight.delete(asked);
+        }
       };
       // The handle's members read private fields, so each runs on the
       // handle itself; only get() is replaced.
@@ -276,7 +351,7 @@ export function createInsights(): Insights {
           hidden,
         };
         shown = { read, result };
-        prune(framedAt);
+        prune();
         state = { last, spread: spreadOf(times) };
         notify();
       });

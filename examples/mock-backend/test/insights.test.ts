@@ -5,6 +5,8 @@ import {
   type FetchInsight,
   INSIGHTS_CHANNEL,
   onInsight,
+  PAGE,
+  pageContext,
   withInsights,
 } from "../src/insights";
 import {
@@ -15,6 +17,7 @@ import {
   insightLines,
   provenance,
   quantile,
+  retainedReports,
   spreadOf,
 } from "../src/read-insights";
 
@@ -52,6 +55,8 @@ function insight(overrides: Partial<FetchInsight>): FetchInsight {
     endedAt: 1300,
     ok: true,
     worker: "worker-1",
+    hosting: "shared",
+    page: "page-1",
     ...overrides,
   };
 }
@@ -63,11 +68,32 @@ function minutes(from: number, to: number): Float64Array {
   return Float64Array.from(out);
 }
 
+/** A client on the shared worker, as the instrumented handles' clients. */
+const SHARED = { mode: "shared" as const };
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("pageContext", () => {
+  it("adds the page's id to a fetcher context, keeping the rest", () => {
+    expect(pageContext({ token: "t" })).toEqual({
+      token: "t",
+      insightsPage: PAGE,
+    });
+  });
+});
+
 describe("withInsights", () => {
+  it("names the page whose context the fetch ran with, and its hosting", async () => {
+    const fetcher = withInsights(async () => ({ timestamps: [], fields: {} }));
+    const range = { start: T0, end: T0 };
+    const reported = nextInsight();
+    await fetcher.fetch({ ...request(range), context: pageContext({}) });
+    // This test runs in Node, outside any worker: in-process.
+    expect(await reported).toMatchObject({ page: PAGE, hosting: "in-process" });
+  });
+
   it("reports each fetch with its range, bars, bytes and pages", async () => {
     const fetcher = withInsights(async (_request, meter) => {
       meter.page(120);
@@ -114,6 +140,7 @@ describe("provenance", () => {
     range: { start: T0, end: T0 + 19 * MINUTE },
     askedAt: 1000,
     answeredAt: 2000,
+    engine: { mode: "shared" as const, page: "page-1" },
   };
   const result = { timestamps: minutes(T0, T0 + 19 * MINUTE) };
 
@@ -162,6 +189,54 @@ describe("provenance", () => {
       networkMs: 0,
       joined: false,
     });
+  });
+
+  it("leaves out the fetches of an engine that does not serve the read", () => {
+    // Two tabs fell back to dedicated workers of their own, on one cache id:
+    // tab B's overlapping fetch brought tab A nothing.
+    const own = { ...read, engine: { mode: "dedicated" as const, page: "A" } };
+    const during = { startedAt: 1100, endedAt: 1500 };
+    const theirs = insight({ ...during, hosting: "dedicated", page: "B" });
+    const mine = insight({ ...during, hosting: "dedicated", page: "A" });
+    expect(provenance(own, result, [theirs]).fetches).toBe(0);
+    expect(provenance(own, result, [mine]).fetchedBars).toBe(10);
+    // Nor do a shared worker's fetches serve a dedicated engine.
+    const shared = insight({ ...during, hosting: "shared", page: "A" });
+    expect(provenance(own, result, [shared]).fetches).toBe(0);
+    // A shared engine serves every tab on it, whichever tab's context the
+    // fetch carried; another tab's private engine serves none of them.
+    expect(
+      provenance(read, result, [insight({ ...during, page: "B" })]).fetches,
+    ).toBe(1);
+    expect(provenance(read, result, [mine]).fetches).toBe(0);
+  });
+});
+
+describe("retainedReports", () => {
+  const at = (endedAt: number) => insight({ endedAt });
+
+  it("keeps what a tracked read can still match, and the recent rest", () => {
+    const reports = [at(100), at(1500), at(5000), at(9000), at(9500)];
+    const reads = [
+      // Shown, answered: only reports inside its window can change it.
+      { askedAt: 1000, answeredAt: 2000 },
+      // In flight: any report that ends from now on.
+      { askedAt: 9400 },
+    ];
+    expect(retainedReports(reports, reads, 1000).map((r) => r.endedAt)).toEqual(
+      [1500, 9000, 9500],
+    );
+  });
+
+  it("stays bounded when the page has stopped drawing", () => {
+    // A history tab on screen since 1000, while a polling tab reports a
+    // fetch every second for an hour.
+    const shown = [{ askedAt: 1000, answeredAt: 2000 }];
+    let reports: FetchInsight[] = [];
+    for (let t = 10_000; t < 3_610_000; t += 1000) {
+      reports = retainedReports([...reports, at(t)], shown, 120_000);
+    }
+    expect(reports.length).toBeLessThanOrEqual(121);
   });
 });
 
@@ -265,6 +340,7 @@ describe("createInsights", () => {
     insights.subscribe(() => changes.push(insights.state));
     const instrumented = insights.instrument(
       handle as unknown as CacheHandle,
+      SHARED,
     ) as unknown as Handle;
 
     const result = await instrumented.get();
@@ -305,7 +381,10 @@ describe("createInsights", () => {
     } satisfies GetResult;
     const handle = { id: "crypto/BTC", get: async () => answer };
     const insights = createInsights();
-    const instrumented = insights.instrument(handle as unknown as CacheHandle);
+    const instrumented = insights.instrument(
+      handle as unknown as CacheHandle,
+      SHARED,
+    );
     const result = await instrumented.get(range);
     insights.drawn(result);
     frames[0]?.();
@@ -326,6 +405,57 @@ describe("createInsights", () => {
     await corrected;
     expect(insights.state.last).toMatchObject({ fetchedBars: 5, fetches: 1 });
     expect(insights.state.spread?.count).toBe(1);
+    insights.dispose();
+    vi.restoreAllMocks();
+  });
+
+  it("does not credit another engine's fetch to a read of its cache", async () => {
+    const frames: (() => void)[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const ticks = [1000, 1100, 1200];
+    vi.spyOn(performance, "now").mockImplementation(() => ticks.shift() ?? 0);
+    const origin = performance.timeOrigin;
+    const range = { start: T0, end: T0 + 9 * MINUTE };
+    const answer = {
+      timestamps: minutes(range.start, range.end),
+      fields: {},
+      coverage: [range],
+      misses: [],
+    } satisfies GetResult;
+    const handle = { id: "crypto/BTC", get: async () => answer };
+    const insights = createInsights();
+    // This tab fell back to a dedicated worker of its own.
+    const instrumented = insights.instrument(handle as unknown as CacheHandle, {
+      mode: "dedicated",
+    });
+    const result = await instrumented.get(range);
+    insights.drawn(result);
+    frames[0]?.();
+    // Another tab's dedicated worker fetched an overlapping range during
+    // the read, and its report arrives now; then this tab's own does.
+    const changed = new Promise<void>((resolve) => {
+      insights.subscribe(resolve);
+    });
+    const during = { startedAt: origin + 1010, endedAt: origin + 1090 };
+    const channel = new BroadcastChannel(INSIGHTS_CHANNEL);
+    channel.postMessage(
+      insight({ ...during, range, hosting: "dedicated", page: "another tab" }),
+    );
+    channel.postMessage(
+      insight({
+        ...during,
+        range: { start: T0 + 5 * MINUTE, end: T0 + 9 * MINUTE },
+        hosting: "dedicated",
+        page: PAGE,
+      }),
+    );
+    channel.close();
+    await changed;
+    // Only this tab's fetch counts: five bars, not ten.
+    expect(insights.state.last).toMatchObject({ fetchedBars: 5, fetches: 1 });
     insights.dispose();
     vi.restoreAllMocks();
   });
@@ -354,7 +484,10 @@ describe("createInsights", () => {
     } satisfies GetResult;
     const handle = { id: "crypto/BTC", get: async () => answer };
     const insights = createInsights();
-    const instrumented = insights.instrument(handle as unknown as CacheHandle);
+    const instrumented = insights.instrument(
+      handle as unknown as CacheHandle,
+      SHARED,
+    );
     // The read's own fetch, reported before its answer.
     const reported = new Promise<void>((resolve) => {
       const stop = onInsight(() => {

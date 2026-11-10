@@ -3,6 +3,7 @@
 // only the access token; the refresh token never leaves the page.
 
 import type { ExampleContext } from "@examples/mock-backend/fetcher";
+import { pageContext } from "@examples/mock-backend/insights";
 import type { StoredTokens } from "./auth-refresh";
 
 const KEY = "tscache-example:tokens";
@@ -65,7 +66,7 @@ export async function refreshTokens(
 }
 
 export function toContext(access: string): ExampleContext {
-  return { token: access };
+  return pageContext({ token: access });
 }
 
 export function accessOf(context: unknown): string | undefined {

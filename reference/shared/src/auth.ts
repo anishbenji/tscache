@@ -31,6 +31,7 @@
 
 import type { TscacheClient } from "@anishbenji/tscache";
 import type { ExampleContext } from "@examples/mock-backend/fetcher";
+import { pageContext } from "@examples/mock-backend/insights";
 
 interface Tokens {
   access: string;
@@ -81,7 +82,7 @@ async function signIn(): Promise<Tokens> {
 }
 
 function contextOf(access: string): ExampleContext {
-  return { token: access };
+  return pageContext({ token: access });
 }
 
 /**

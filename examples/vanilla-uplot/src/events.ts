@@ -103,6 +103,6 @@ addEventListener("resize", () => {
 watchFetches();
 void keepClient(async (client) => {
   show("mode", client.mode);
-  cache = insights.instrument(await client.cache(config));
+  cache = insights.instrument(await client.cache(config), client);
   await load(wholeWeek());
 });

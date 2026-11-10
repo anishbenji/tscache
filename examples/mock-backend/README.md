@@ -106,7 +106,8 @@ fetch counters.
 
 The default export is the fetch wrapped by `withInsights` (`src/insights.ts`):
 each fetch is timed, its pages' body bytes are counted, and a report
-(`{ cacheId, range, bars, bytes, pages, ms, startedAt, endedAt, ok }`) goes
+(`{ cacheId, range, bars, bytes, pages, ms, startedAt, endedAt, ok, worker,
+hosting, page }`) goes
 out on the `BroadcastChannel` `tscache-demo-insights` before the answer
 returns to the cache. The benchmark page's modes without tscache call this
 default export in the page, as tscache's worker does; the unwrapped fetch,
@@ -115,15 +116,20 @@ exported as `fetchSeries`, serves only the page's preview chart.
 ## Insights
 
 `src/read-insights.ts` is what every demo page shows about its reads. A page
-wraps its cache handle with `insights.instrument(handle)`, which times each
-`get()`, and calls `insights.drawn(result)` right after the chart library's
+wraps its cache handle with `insights.instrument(handle, client)`, which
+times each `get()`, and gives its client a fetcher context made with
+`pageContext()`, which names the page in the fetch reports, and calls `insights.drawn(result)` right after the chart library's
 `setData` returned. The panel then says how many of the drawn bars came from
 the cache and how many from the network ("from cache N bars · from network M
 bars (K ms)"), and the read's time to chart ("data → chart X ms (get Y + draw
 Z)"), with the last value, the p50 and the p95 of the page's reads. A read's
-fetched bars are those in its range that a fetch brought while it was in
-flight, from any tab of the origin; a read that joined a fetch already in
-flight says so. The state is one immutable object replaced on each change, so
+fetched bars are those in its range that a fetch of its own engine brought
+while it was in flight: on a SharedWorker, a fetch any tab's read started; on
+a dedicated worker or in process, a fetch of this page's engine only, told
+apart by the page each report names. A read that joined a fetch already in
+flight says so. A page keeps only the reports that a read in flight, waiting
+for its frame or on screen can still match, and those of the last two
+minutes. The state is one immutable object replaced on each change, so
 each framework binds it as it binds any store. It is demo instrumentation:
 the library has no such API.
 

@@ -5,6 +5,7 @@
 import { createClient, type TscacheClient } from "@anishbenji/tscache";
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
+import { pageContext } from "@examples/mock-backend/insights";
 import { onFetchNotice } from "@examples/mock-backend/notices";
 import {
   createInsights,
@@ -30,7 +31,7 @@ export async function keepClient(
 ): Promise<void> {
   const client = await createClient({
     workerUrl,
-    fetcher: { module: fetcherModule },
+    fetcher: { module: fetcherModule, context: pageContext({}) },
   });
   client.on("workerLost", ({ reason }) => {
     log(`worker lost (${reason}); connecting a new client`);

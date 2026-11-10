@@ -128,7 +128,7 @@ function Dashboard(props: DashboardProps) {
 function App() {
   const { client, cache } = createSession();
   // The handle the page reads through, timed for the insights panel.
-  const reads = createMemo(() => insights.instrument(cache()));
+  const reads = createMemo(() => insights.instrument(cache(), client()));
   const [view, setView] = createSignal<View>(lastHours(6));
   const frame = createMemo<Frame>(async () => {
     const handle = reads();

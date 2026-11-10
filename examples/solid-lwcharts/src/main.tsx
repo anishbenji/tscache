@@ -74,9 +74,12 @@ const time = (t: number) => new Date(t).toLocaleTimeString();
 
 function App() {
   const client = createTscacheClient();
-  const cache = createMemo(() =>
-    client().cache(config).then(insights.instrument),
-  );
+  const cache = createMemo(() => {
+    const connected = client();
+    return connected
+      .cache(config)
+      .then((handle) => insights.instrument(handle, connected));
+  });
   const [start, setStart] = createSignal(Date.now() - FORTNIGHT);
   const loaded = createMemo(() =>
     cache().get({ start: start(), end: Date.now() }),

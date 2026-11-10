@@ -62,7 +62,7 @@ function Live(props: ServerRead) {
   // The handle the page reads through, timed for the insights panel.
   const insights = createInsights();
   onCleanup(() => insights.dispose());
-  const reads = createMemo(() => insights.instrument(cache()));
+  const reads = createMemo(() => insights.instrument(cache(), client()));
   const [insight, setInsight] = createSignal(insightLines(insights.state));
   onSettled(() =>
     insights.subscribe(() => setInsight(insightLines(insights.state))),

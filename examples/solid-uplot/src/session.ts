@@ -12,6 +12,7 @@ import {
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import { datasets } from "@examples/mock-backend/datasets";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
+import { pageContext } from "@examples/mock-backend/insights";
 import {
   type Accessor,
   createMemo,
@@ -38,7 +39,7 @@ export function createSession(): Session {
   const client: SourceAccessor<TscacheClient> = createMemo(async () => {
     const next = await createClient({
       workerUrl,
-      fetcher: { module: fetcherModule },
+      fetcher: { module: fetcherModule, context: pageContext({}) },
     });
     next.on("workerLost", ({ reason }) => {
       log(`worker lost (${reason}); connecting a new client`);

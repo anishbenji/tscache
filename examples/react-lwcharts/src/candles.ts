@@ -75,7 +75,7 @@ export function useCandles(
       (opened) => {
         if (!mounted) return;
         log(`opened cache ${opened.id}`);
-        cache = insights.instrument(opened);
+        cache = insights.instrument(opened, client);
         void poll();
       },
       (error) => log(`could not open the cache: ${message(error)}`),

@@ -5,7 +5,7 @@
 // origin hears. The pages match the reports to their reads
 // (read-insights.ts). Demo instrumentation only: the library is unchanged.
 
-import type { Range } from "@anishbenji/tscache";
+import type { HostingMode, Range } from "@anishbenji/tscache";
 import type {
   Fetcher,
   FetchRequest,
@@ -38,10 +38,53 @@ export interface FetchInsight {
    * fetcher module loads, so a new worker reports a new one.
    */
   worker: string;
+  /** Where the fetcher ran: a SharedWorker, a dedicated worker or a page. */
+  hosting: HostingMode;
+  /**
+   * The page whose fetcher context the fetch ran with (`pageContext`), if
+   * any. A dedicated or in-process engine serves that page alone; a shared
+   * one runs with the latest context any of its tabs gave it.
+   */
+  page: string | undefined;
 }
 
 /** This context's id in the reports (FetchInsight.worker). */
 const WORKER = crypto.randomUUID();
+
+/** This page's id, which `pageContext` puts in its fetcher context. */
+export const PAGE: string = WORKER;
+
+/**
+ * `context` with this page's id added, for createClient's and updateAuth's
+ * fetcher context: the fetch reports then name the page, so a page can tell
+ * its own dedicated or in-process engine's fetches from another tab's.
+ */
+export function pageContext<T extends object>(
+  context: T,
+): T & { insightsPage: string } {
+  return { ...context, insightsPage: PAGE };
+}
+
+function pageOf(context: unknown): string | undefined {
+  if (typeof context !== "object" || context === null) return undefined;
+  const page: unknown = (context as { insightsPage?: unknown }).insightsPage;
+  return typeof page === "string" ? page : undefined;
+}
+
+/** Where this code runs, as the reports name it. */
+function hostingHere(): HostingMode {
+  const scope = globalThis as {
+    SharedWorkerGlobalScope?: abstract new () => unknown;
+    DedicatedWorkerGlobalScope?: abstract new () => unknown;
+  };
+  const is = (ctor: (abstract new () => unknown) | undefined) =>
+    typeof ctor === "function" && globalThis instanceof ctor;
+  if (is(scope.SharedWorkerGlobalScope)) return "shared";
+  if (is(scope.DedicatedWorkerGlobalScope)) return "dedicated";
+  return "in-process";
+}
+
+const HOSTING = hostingHere();
 
 /**
  * Now, in ms since the epoch at sub-millisecond resolution: the time line a
@@ -104,6 +147,8 @@ export function withInsights(fetch: MeteredFetch): Fetcher {
           endedAt,
           ok,
           worker: WORKER,
+          hosting: HOSTING,
+          page: pageOf(request.context),
         });
       };
       try {

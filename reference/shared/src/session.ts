@@ -262,7 +262,7 @@ export function startSession({ open, served, feed }: SessionOptions): Session {
     },
     subscribe: connection.subscribe,
     cache: async (client, config) =>
-      insights.instrument(await connection.cache(client, config)),
+      insights.instrument(await connection.cache(client, config), client),
     dispose: () => connection.dispose(),
   };
 
