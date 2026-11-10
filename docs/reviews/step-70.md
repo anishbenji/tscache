@@ -1,6 +1,6 @@
 # Step 70 — The restated-history flake in the vanilla-uplot spec
 
-Branch: `fix/70-restated-history-flake` · Status: built
+Branch: `fix/70-restated-history-flake` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -56,6 +56,18 @@ One round on 2026-11-10 after the branch was rebased onto main 5635b56. No P0 or
 | #    | Sev | Finding                                                    | Decision | Resolution                                                           |
 | ---- | --- | ---------------------------------------------------------- | -------- | -------------------------------------------------------------------- |
 | PR-1 | P2  | The Scope table named a commit hash from before the rebase | accepted | The table now names commits by subject, which a rebase cannot change |
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-10). The reviewer confirmed PR-1 is fixed and ran the diff and type checks.
+
+| #   | Sev | Finding | Decision | Resolution |
+| --- | --- | ------- | -------- | ---------- |
+| —   | —   | None    | —        | —          |
+
+## Contract-test changes
+
+None.
 
 ## Not verified
 
