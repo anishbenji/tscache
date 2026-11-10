@@ -75,6 +75,12 @@ No findings (2026-11-10). The reviewer confirmed the pre-review findings PR-1 to
 | --- | --- | ------- | -------- | ---------- |
 | —   | —   | None    | —        | —          |
 
+## After the PR (CodeQL), not the gate
+
+| #    | Sev | Finding                                                                                                                                                                             | Decision | Resolution                                                                                                                                                                                                    |
+| ---- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CQ-1 | P2  | CodeQL "Inefficient regular expression": the lazy `[\s\S]*?` inside the repeated comment group of the hint test's pattern can backtrack exponentially on many repetitions of `*//*` | accepted | Comments are matched in the unrolled form `/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/`, which matches each input one way; an adversarial string of 5,000 repetitions scans in under 1 ms; the test file passes (5 tests) |
+
 ## Contract-test changes
 
 None.

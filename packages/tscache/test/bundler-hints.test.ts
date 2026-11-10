@@ -31,10 +31,13 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
  * as `#import(` is not the operator; `import()` in
  * prose (a closing parenthesis right after) is not a call and is skipped.
  * The specifier may not start with `/`: otherwise the comment group could
- * backtrack and report a commented literal import as non-literal.
+ * backtrack and report a commented literal import as non-literal. A comment
+ * is matched in the unrolled form `/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/`, which
+ * has one way to match each input, so the scan stays linear (a lazy
+ * `[\s\S]*?` inside the repeated group can backtrack exponentially).
  */
 const DYNAMIC =
-  /(?<![\w#.$])import\(((?:\s*\/\*[\s\S]*?\*\/)*)\s*(?=[^\s"'`)/])/g;
+  /(?<![\w#.$])import\(((?:\s*\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/)*)\s*(?=[^\s"'`)/])/g;
 
 /** The comments of each non-literal `import(` in `text`. */
 function nonLiteralImports(text: string): string[] {
