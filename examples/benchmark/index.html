@@ -38,9 +38,12 @@
     <p>
       Every mode fetches through the same fetcher code and the same mock
       backend, with the same latency per page, and draws with the same uPlot
-      chart. Each mode of each run starts empty (new tabs, a new tscache cache
-      id and a new SharedWorker, so no run reuses a warm worker), and the
-      backend's counters are read as deltas. Time to chart runs from the
+      chart. The fetcher's requests skip the browser's HTTP cache
+      (<code>cache: "no-store"</code>), whose lock would otherwise hold
+      identical requests made at once from several tabs behind the first and
+      slow the modes that make them. Each mode of each run starts empty
+      (new tabs, a new tscache cache id and a new SharedWorker, so no run
+      reuses a warm worker), and the backend's counters are read as deltas. Time to chart runs from the
       read's start to the frame after <code>setData</code> returned. A view
       is answered without a request when no fetch of its cache ended while
       it was in flight; one that joined a fetch already in flight waited for

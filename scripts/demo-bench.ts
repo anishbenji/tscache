@@ -171,14 +171,14 @@ function savingSplit(results: Results): string {
     ? `the same ${int(memo.requestsOne)} requests as the memo and TanStack Query`
     : `${int(tscache.requestsOne)} requests, against the memo's and TanStack Query's ${int(memo.requestsOne)}`;
   const views = (list: View[]) => list.length;
-  return `- In a single tab (phase one) tscache makes ${oneTab}, and moves fewer bars
-  (${int(barsOne(results, "tscache"))} against ${int(barsOne(results, "memo"))}): its zoomed-out view fetches only the
-  bars it lacks. Of the ${int(none.requests - tscache.requests)} requests it saves against no cache over both phases
-  (${int(views(plan.one) + TABS * views(plan.three))} views), ${int(none.requests - perTab.total)} are exact repeats within a tab, which any cache saves, and
-  the memo and TanStack Query save them too. A cache keyed by exact range but shared by the tabs, with
-  requests in flight joined, would make ${int(shared.total)} (worked out from the ranges; no mode runs it): ${int(perTab.total - shared.total)}
-  are saved by sharing across tabs. The remaining ${int(shared.total - tscache.requests)} are saved because tscache reads the shifted
-  ranges of phase two from the bars it holds and fetches only the ${NEW_BARS} new ones.`;
+  return `- In a single tab (phase one) tscache makes ${oneTab}, and moves fewer
+  bars (${int(barsOne(results, "tscache"))} against ${int(barsOne(results, "memo"))}): its zoomed-out view fetches only the bars it lacks. Of
+  the ${int(none.requests - tscache.requests)} requests it saves against no cache over both phases (${int(views(plan.one) + TABS * views(plan.three))} views), ${int(none.requests - perTab.total)} are exact
+  repeats within a tab, which any cache saves: the memo and TanStack Query save them too. A cache keyed
+  by exact range but shared by the tabs, with requests in flight joined, would make ${int(shared.total)} (worked out
+  from the ranges; no mode runs it), so ${int(perTab.total - shared.total)} are saved by sharing across tabs. The remaining ${int(shared.total - tscache.requests)}
+  are saved because tscache reads the shifted ranges of phase two from the bars it holds and fetches
+  only the ${NEW_BARS} new ones.`;
 }
 
 function document(all: Results[], browser: string): string {
@@ -220,7 +220,10 @@ SharedWorker. Every range is computed from one anchor in yesterday's final histo
 - **tscache**: one client per tab, all on one shared cache.
 
 Every mode fetches with the same fetcher code from the same mock backend and draws with the same uPlot
-chart. Each mode of each run starts empty (new tabs, a new tscache cache id and a new SharedWorker), the
+chart. The fetcher's requests are \`cache: "no-store"\`, like the backend's pages: without it,
+Chromium's HTTP cache lock held identical requests made at once from several tabs behind the first,
+which roughly doubled the p95 of the modes that make such requests (the baselines) and lengthened their
+workload. The comparison is of caching in the application, so all four modes skip the HTTP cache. Each mode of each run starts empty (new tabs, a new tscache cache id and a new SharedWorker), the
 backend's counters are read as deltas, and the modes take turns in an order rotated each run. Backend requests, bars and
 bytes are what the backend served; time to chart runs from the read's start to the frame after
 \`setData\` returned, p50 and p95 over every view of every tab of a run; workload time covers both
