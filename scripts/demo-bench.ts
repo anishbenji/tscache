@@ -6,9 +6,11 @@
 // It builds the package and the page, serves the page with `vite preview`
 // (its mock backend included) on DEMO_BENCH_PORT (default 5390), opens it
 // once per latency with `autorun=1`, waits for the table and writes every
-// latency's table, with each run's counts below it. Report-only: it fails
-// on a page that does not finish, never on a number. A heavy job: run it
-// through the machine's heavy-job lock.
+// latency's table, with each run's counts below it. It judges no
+// result. It fails when a page does not finish, and on two checks of the
+// method: a tscache run that reused a worker, and a memo whose request count
+// differs from what the workload's ranges allow.
+// A heavy job: run it through the machine's heavy-job lock.
 
 import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";

@@ -108,8 +108,9 @@ The default export is the fetch wrapped by `withInsights` (`src/insights.ts`):
 each fetch is timed, its pages' body bytes are counted, and a report
 (`{ cacheId, range, bars, bytes, pages, ms, startedAt, endedAt, ok }`) goes
 out on the `BroadcastChannel` `tscache-demo-insights` before the answer
-returns to the cache. The unwrapped fetch is exported as `fetchSeries`, which
-the benchmark page calls directly in its modes without tscache.
+returns to the cache. The benchmark page's modes without tscache call this
+default export in the page, as tscache's worker does; the unwrapped fetch,
+exported as `fetchSeries`, serves only the page's preview chart.
 
 ## Insights
 
