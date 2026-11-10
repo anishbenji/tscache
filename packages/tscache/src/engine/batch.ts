@@ -208,9 +208,9 @@ function scanInto(
       );
     }
     // An integer field takes only integers in its range (N68, decision 38):
-    // a fraction fails `trunc(v) === v`, NaN fails every comparison,
-    // ±Infinity fails the range, and -0 passes (trunc(-0) === -0).
-    if (!float && !(Math.trunc(v) === v && v >= min && v <= max)) {
+    // a fraction fails `Number.isInteger`, as do NaN and ±Infinity,
+    // and -0 passes (it is an integer).
+    if (!float && !(Number.isInteger(v) && v >= min && v <= max)) {
       valueError(
         name,
         dtype,
