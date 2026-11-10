@@ -1,6 +1,6 @@
 # Step 67 — Demo insights and the benchmark page
 
-Branch: `feat/67-demo-insights` · Status: built, awaiting the director's design review and the Codex round; the independent fairness review's changes are done (section below)
+Branch: `feat/67-demo-insights` · Reviewer: GPT-6.1 Sol (high) · Rounds: 6 · Status: settled · Verdict after triage: merge
 
 The plan's section "### 67" in the pre-publish plan (2026-11-09) has two parts, both in demo, example and reference code only. Nothing under `packages/tscache/` changes, and the library's API is unchanged.
 
@@ -236,3 +236,7 @@ None. The new tests are demo tests; no contract test changed.
 ## Decision concerns
 
 None.
+
+## Round 6 — reviewer verdict: merge
+
+No findings (2026-11-10). The reviewer confirmed R5-1 and the earlier accepted findings are fixed.
