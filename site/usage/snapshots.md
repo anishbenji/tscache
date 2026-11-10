@@ -16,11 +16,23 @@ result. `snapshot.range` is the request snapped outward.
 
 A snapshot holds binary buffers. `encodeSnapshot(snapshot)` returns it with each mask and field buffer
 as base64 text: a plain JSON value. `decodeSnapshot(encoded)` restores it. `NaN`, which `JSON` would
-turn into `null`, survives. Both use `btoa`/`atob`, so they run in browsers and Node alike.
+turn into `null`, survives. Both use the runtime's base64 (`Uint8Array.prototype.toBase64` and
+`fromBase64` where they exist, `btoa`/`atob` otherwise), so they run in browsers and Node alike.
 
 <<< @/snippets/snapshots-server.ts#server{ts}
 
-Escaping for a `<script>` element is yours: replace every `<` in the JSON, as above. `decodeSnapshot`
+::: danger Escape every `<` before the JSON goes into the page
+`JSON.stringify` leaves `<` as it is, and the HTML parser ends a `<script>` element at the first
+`</script>` it meets, inside a JSON string or not. A field name, a dataset `version`, or anything else in
+the element (the columns beside the snapshot) that contains `</script>` would end the element early:
+the rest of the JSON is parsed as HTML, the browser's `JSON.parse` of the element's text throws, and
+when the string comes from data, the text after it runs as markup and script in your page (cross-site
+scripting). Replacing every `<` with `\u003c`, as the snippet does, keeps the JSON valid and decoding to
+the same value, and leaves the parser nothing to end the element with. tscache does not do it for you:
+`encodeSnapshot` returns a JSON value, not HTML.
+:::
+
+`decodeSnapshot`
 checks the shape only and throws `TscacheError` for anything that is not an encoded snapshot; whether the
 snapshot fits the cache is `hydrate`'s to check.
 
