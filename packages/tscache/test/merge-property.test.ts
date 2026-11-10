@@ -205,9 +205,10 @@ describe("SegmentStore seeded properties — architecture §4.3, §5, N11, N14, 
         const prices = slots.map(() =>
           next(0, 9) === 0 ? Number.NaN : next(-1000, 1000) / 10,
         );
-        // Inside the i16 range: N68 (decision 29) rejects out-of-range values,
-        // which put-field-values.test.ts covers; the fraction keeps truncation.
-        const volumes = slots.map(() => next(-32_768, 32_767) + 0.75);
+        // Integers inside the i16 range: N68 (decisions 29 and 38) rejects
+        // out-of-range and fractional values, which put-field-values.test.ts
+        // covers.
+        const volumes = slots.map(() => next(-32_768, 32_767));
         const input = {
           timestamps: slots.map((slot) => msOf(slot, config)),
           fields: { price: prices, volume: volumes },

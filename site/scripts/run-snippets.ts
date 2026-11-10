@@ -247,13 +247,13 @@ async function checkConversions(): Promise<void> {
       [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY],
       [1e40, Number.POSITIVE_INFINITY],
     ],
-    int: [...nonNumbers, [Number.NaN, rejected], [1.5, 1]],
+    int: [...nonNumbers, [Number.NaN, rejected], [1.5, rejected], [2, 2]],
     byte: [
       ...nonNumbers,
       [Number.NaN, rejected],
       [300, rejected],
       [-1, rejected],
-      [1.5, 1],
+      [1.5, rejected],
     ],
   };
   let t = 0;

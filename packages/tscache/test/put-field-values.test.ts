@@ -139,7 +139,7 @@ describe.each(["validateBatch", "CacheState.put"] as const)(
             code: "field-mismatch",
             offenderIndex: 1,
             offenderTimestamp: 13,
-            expected: `a finite number whose truncation is in [${min}, ${max}]`,
+            expected: `an integer in [${min}, ${max}]`,
           });
           expect(error.message).toContain('"x"');
           expect(error.message).toContain(String(value));
@@ -152,16 +152,85 @@ describe.each(["validateBatch", "CacheState.put"] as const)(
     it.each([
       {
         dtype: "i32",
-        values: [1.9, -1.9, -(2 ** 31)],
+        values: [1, -1, -(2 ** 31)],
         expected: [1, -1, -2_147_483_648],
       },
-      { dtype: "u8", values: [-0.5, 255.9, 1.5], expected: [0, 255, 1] },
+      { dtype: "u8", values: [-0, 255, 1], expected: [0, 255, 1] },
     ] as const)(
-      "truncates finite $dtype values before testing the range",
+      "stores integral $dtype values as given (decision 38)",
       ({ dtype, values, expected }) => {
         expect(Array.from(write(input([...values]), dtype) ?? [])).toEqual(
           expected,
         );
+      },
+    );
+
+    it.each([1.5, -1.5, 0.5, 255.9])(
+      "rejects the non-integer %s in u8 (decision 38)",
+      (value) => {
+        const error = putError(() => write(input([0, value, 0]), "u8"));
+        expect(error).toMatchObject({
+          code: "field-mismatch",
+          offenderIndex: 1,
+          offenderTimestamp: 13,
+          offenderField: "x",
+          expected: "an integer in [0, 255]",
+        });
+        expect(error.message).toContain(String(value));
+      },
+    );
+
+    it("accepts -0 and integral floats such as 2.0 in integer fields (decision 38)", () => {
+      expect(Array.from(write(input([-0, 2.0, 255.0]), "u8") ?? [])).toEqual([
+        0, 2, 255,
+      ]);
+      expect(Array.from(write(input([-0, 2.0, -3.0]), "i32") ?? [])).toEqual([
+        0, 2, -3,
+      ]);
+    });
+
+    it.each([
+      {
+        name: "an integral Float64Array into u8 is accepted",
+        values: new Float64Array([2, 255]),
+        dtype: "u8",
+        result: [2, 255],
+      },
+      {
+        name: "a Float64Array with 300 into u8 rejects",
+        values: new Float64Array([2, 300]),
+        dtype: "u8",
+        result: 1,
+      },
+      {
+        name: "a Float32Array with 1.5 into i32 rejects",
+        values: new Float32Array([2, 1.5]),
+        dtype: "i32",
+        result: 1,
+      },
+      {
+        name: "an Int32Array with -1 into u16 rejects",
+        values: new Int32Array([2, -1]),
+        dtype: "u16",
+        result: 1,
+      },
+    ] satisfies {
+      name: string;
+      values: FieldArray;
+      dtype: Dtype;
+      result: number[] | number;
+    }[])(
+      "checks a typed array of another dtype: $name (decision 38)",
+      ({ values, dtype, result }) => {
+        const batch = { timestamps: [3, 13], fields: { x: values } };
+        if (Array.isArray(result)) {
+          expect(Array.from(write(batch, dtype) ?? [])).toEqual(result);
+        } else {
+          expect(putError(() => write(batch, dtype))).toMatchObject({
+            code: "field-mismatch",
+            offenderIndex: result,
+          });
+        }
       },
     );
 
@@ -272,7 +341,7 @@ describe.each(["validateBatch", "CacheState.put"] as const)(
           code: "field-mismatch",
           offenderIndex: 0,
           offenderTimestamp: 3,
-          expected: `a finite number whose truncation is in [${min}, ${max}]`,
+          expected: `an integer in [${min}, ${max}]`,
         });
       },
     );

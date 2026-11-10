@@ -176,9 +176,9 @@ function valueError(
 /**
  * Copies a field that may hold invalid values into `data`, a fresh array of
  * its dtype, throwing for the first value the field cannot hold (N68, §4.3):
- * a non-number in any field; in an integer field, a value that is not finite
- * or whose truncation is outside the dtype's range. The scan and the copy are
- * one pass, so each value is read once.
+ * a non-number in any field; in an integer field, a value that is not an
+ * integer inside the dtype's range. The scan and the copy are one pass, so
+ * each value is read once.
  */
 function scanInto(
   data: FieldArray,
@@ -207,19 +207,20 @@ function scanInto(
         "a number",
       );
     }
-    // NaN fails both comparisons; ±Infinity truncates to itself.
-    const t = float ? v : Math.trunc(v);
-    if (!float && !(t >= min && t <= max)) {
+    // An integer field takes only integers in its range (N68, decision 38):
+    // a fraction fails `trunc(v) === v`, NaN fails every comparison,
+    // ±Infinity fails the range, and -0 passes (trunc(-0) === -0).
+    if (!float && !(Math.trunc(v) === v && v >= min && v <= max)) {
       valueError(
         name,
         dtype,
         i,
         timestamps,
         `${v}`,
-        `a finite number whose truncation is in [${min}, ${max}]`,
+        `an integer in [${min}, ${max}]`,
       );
     }
-    data[i] = t;
+    data[i] = v;
   }
 }
 

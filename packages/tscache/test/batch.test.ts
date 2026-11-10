@@ -11,7 +11,7 @@ const config = resolveCacheConfig({
 });
 const batch: PutBatch = {
   timestamps: [-17, 3, 23],
-  fields: { volume: [1.9, -2.9, 3.9], price: [10, Number.NaN, 30] },
+  fields: { volume: [1, -2, 3], price: [10, Number.NaN, 30] },
 };
 
 describe("validateBatch accepted inputs — architecture §2.2, §2.4, §4.3", () => {
@@ -31,7 +31,7 @@ describe("validateBatch accepted inputs — architecture §2.2, §2.4, §4.3", (
   it("copies typed-array views and neither mutates nor retains its input", () => {
     const timestamps = new Float64Array([999, -17, 3, 23, 999]);
     const price = new Float32Array([999, 10, 20, 30, 999]);
-    const volume = [1.9, -2.9, 3.9];
+    const volume = [1, -2, 3];
     const input = {
       timestamps: timestamps.subarray(1, 4),
       fields: { price: price.subarray(1, 4), volume },
@@ -54,8 +54,8 @@ describe("validateBatch accepted inputs — architecture §2.2, §2.4, §4.3", (
   });
 
   it.each([
-    new Float64Array([1.5]),
-    new Float32Array([1.5]),
+    new Float64Array([1]),
+    new Float32Array([1]),
     new Int32Array([1]),
     new Uint32Array([1]),
     new Int16Array([1]),
@@ -63,7 +63,7 @@ describe("validateBatch accepted inputs — architecture §2.2, §2.4, §4.3", (
     new Int8Array([1]),
     new Uint8Array([1]),
     new Uint8ClampedArray([1]),
-    [1.5],
+    [1],
   ])(
     "accepts numeric field array %j independently of the schema dtype",
     (values) => {
@@ -92,10 +92,10 @@ describe("validateBatch accepted inputs — architecture §2.2, §2.4, §4.3", (
       },
     });
     const values = [1.1, -1.9, 65_537.9, 4_294_967_297.9, Number.NaN];
-    // N68 (decision 29): integer fields reject NaN and out-of-range values,
-    // so they get values inside every integer dtype's range, which still
-    // truncate toward zero.
-    const integers = [1.1, 1.9, 0, 127.9, 0.5];
+    // N68 (decisions 29 and 38): integer fields reject NaN, out-of-range and
+    // fractional values, so they get integers inside every integer dtype's
+    // range.
+    const integers = [1, 2, 0, 127, 0];
     const fields = Object.fromEntries(
       Object.keys(all.fields).map((name) => [
         name,

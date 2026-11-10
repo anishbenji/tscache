@@ -215,7 +215,7 @@ export interface PutBatch {
   /**
    * One array per schema field. Every value must be a number the field can
    * hold, else the whole batch rejects (N68): never `null`; in an integer
-   * field, finite and in the dtype's range after truncation toward zero.
+   * field, an integer inside the dtype's range (`1.5` rejects).
    */
   fields: Record<string, ArrayBufferView | number[]>;
   meta?: {
