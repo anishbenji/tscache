@@ -22,7 +22,7 @@ Settled by the director under the user's standing grant; the user may veto any o
 - N68.2: the error is `PutError` `'field-mismatch'`, naming the first offender's field, index, timestamp, value (as `show()` prints it) and what was expected, in `offenderIndex`, `offenderTimestamp`, `expected` and a new `offenderField` (see open point 2).
 - N68.3: a value that is not of type `number` (`null`, `undefined`, a sparse-array hole, a string, a boolean, a bigint, an object) is rejected in every field, with no coercion.
 - N68.4: float fields accept every number, `NaN` and `±Infinity` included; `f32` stores the nearest float32, as today.
-- N68.5: integer fields reject `NaN` and `±Infinity`, truncate a finite value toward zero, and reject it when the truncation lies outside the dtype's range.
+- N68.5: integer fields reject `NaN`, `±Infinity` and values outside the dtype's range. (Fractions were truncated under this item; user decision 38 replaced that: they are rejected.)
 - N68.6: a typed array of the field's own dtype is accepted without a scan; every other typed array and every `number[]` is checked by the rules above.
 - N69.1: a snapshot whose `finalizedUntil` is set and whose coverage reaches a slot at or after it is rejected by snapshot validation with `TscacheError` (`invalid snapshot: …`); points there, outside its coverage, stay legal.
 - N69.2: the check runs in the engine's snapshot validation (§4.5 step (4)), so `hydrate` throws before anything changes, as for every malformed snapshot.
@@ -35,14 +35,14 @@ Spec choices made while writing (also open to veto):
 
 ## Open points
 
-1. **Should a fractional value for an integer field be rejected too?** Decision 29 names only non-numbers and out-of-range values, so N68 keeps the documented truncation (`1.5` for an `i32` field is stored as `1`). For rejecting: a fraction in an integer field usually means a schema mistake (a price or a fractional crypto volume in an `i32` column), and truncation silently loses data; the integer fields are scanned anyway, so the extra check costs almost nothing; tightening after 0.1.0 is a breaking change, as decision 29 noted for the rest. For keeping: truncation is documented and invents no value (unlike `null` stored as `0`); the consumer chose the dtype; a backend that sends `10.0` as `10.000000001` after a float round trip would start failing. Lean: keep truncation, but decide before 0.1.0.
+1. **Fractional values for integer fields:** resolved by user decision 38, option B (2026-11-10): rejected, not truncated, because loosening later is non-breaking and tightening is not. Measured first (see "Decision 38" below).
 2. **`PutError.offenderField`** is a new optional public property (§2.6) and travels in the RPC error data (§4.7; additive, `PROTOCOL_VERSION` stays 1). No existing property fits: `offenderIndex` and `offenderTimestamp` locate the point, not the column. The alternative is to name the field only in the message. Recommended: add it, since an app can then report the column without parsing text. Its contract test should be a test of its own, so it can be dropped if the user vetoes the property.
 3. **Stored records (§4.10) and N69.** Page snapshots never carry `finalizedUntil` (§4.10.2), and a page snapshot with one is already invalid (§4.10.5 step 5), so the new rule changes no load. The analogous case on load, a page whose coverage reaches past the cache record's watermark, is already clipped with `rewrite: true` (§4.10.5 step 6), which never makes a provisional slot authoritative. Whether such a page should instead be skipped whole is not specified here, since it would change persistence behaviour; recommended: leave it as it is.
 4. **User-facing documentation** to change in phase 3: `site/concepts/grid.md` (the truncation sentence), `site/concepts/segments.md` and `docs/guides/patterns.md` (missing values: a JSON backend's `null` must be mapped to `NaN` in the fetcher, or the response is rejected), and the changelog entry, which is a breaking change for any caller that relied on the coercion.
 
 ## Director answers (phase 3)
 
-- Open point 1 (fractional values for integer fields) is parked with the user as decision 38; the implementation truncates, as specified.
+- Open point 1 (fractional values for integer fields) went to the user as decision 38, settled as option B: integer fields reject a non-integer value.
 - Open point 2: `offenderField` is added as specified (a director decision under the grant; the user may veto it).
 - Open point 3: no persistence change, as specified.
 
@@ -65,7 +65,7 @@ Behaviours that need a test (N68, through `validateBatch` and through `CacheStat
 - `NaN`, `Infinity`, `-Infinity` and `-0` are accepted in `f64` and `f32` and read back unchanged (`NaN` as `NaN`).
 - `f32` stores `Math.fround(v)`; `1e300` in an `f32` field is stored as `Infinity`.
 - For each integer dtype: its minimum and maximum are accepted; minimum − 1 and maximum + 1 reject with `expected` naming that range; `NaN`, `Infinity` and `-Infinity` reject.
-- Truncation: `1.9` → `1`, `-1.9` → `-1`, `-0.5` in `u8` → `0`, `255.9` in `u8` → `255`; `256` and `-1` in `u8`, `-1` in `u32` and `2 ** 31` in `i32` reject; `-(2 ** 31)` in `i32` is accepted.
+- Integers only (decision 38): `1.5`, `-1.5`, `0.5` and `255.9` in `u8` reject; `-0` and `2.0` are accepted; `256` and `-1` in `u8`, `-1` in `u32` and `2 ** 31` in `i32` reject; `-(2 ** 31)` in `i32` is accepted.
 - A typed array of the field's own dtype is accepted (`Float64Array` with `NaN` in `f64`, `Uint8Array [0, 255]` in `u8`).
 - A typed array of another type is checked: `Float64Array [NaN]` in `i32`, `Int32Array [300]` in `u8` and `Uint32Array [2 ** 31]` in `i32` reject; `Uint8ClampedArray` in `u8` is accepted; `Float64Array [0.1]` in `f32` is stored rounded; `Int32Array [16 777 217]` in `f32` is stored as `16 777 216`.
 - First offender: with offenders in the first schema field at index 3 and in the second at index 0, the first field's is reported; within a field the lowest index is.
@@ -95,7 +95,7 @@ Codex's four contract test files (`put-field-values`, `put-field-error-wire`, `f
 - `engine/snapshot.ts`: the N69 bound in step (4), in the coverage loop after that range's earlier checks.
 - `errors.ts`, `rpc/protocol.ts`: `PutError.offenderField`, carried in the wire error data.
 - Measurements (working tree against `main` 8aa6486, Bun, `bun scripts/bench.ts compare --base main --runtime bun --only put-page,put-live-bar,append-bars,fill-month`, under the heavy-job lock): `put-page` 1.021, `put-live-bar` 1.005, `append-bars` 1.062, `fill-month` 1.022 (head/base medians), all `ok`; A/A control quiet. A first version ran `append-bars` at 1.159 (an array allocated per field for the range, and the scan function on the hot path); computing the range only when scanning and keeping the fast path inline fixed it. Entry sizes (`bun scripts/size.ts`, brotli): `index (lazy)` 12 442 B against a budget of 12 464 B (main 11.90 kB), `worker` 13 603 B of 13 728 B, `engine` 10 022 B of 10 272 B; no budget changed. Fallow reports one complexity warning, `scanInto` (cyclomatic 10), which does not fail the check.
-- Message wording: the value message ends with `expected …` instead of a separate reason (`field "x" (u8) value 300 at index 2, t = 20: expected a finite number whose truncation is in [0, 255]`), which saves bytes; §4.3's examples are updated to match.
+- Message wording: the value message ends with `expected …` instead of a separate reason (`field "x" (u8) value 300 at index 2, t = 20: expected an integer in [0, 255]`), which saves bytes; §4.3's examples are updated to match.
 
 ## Contract-test changes
 
@@ -106,6 +106,23 @@ Existing tests whose assertions pinned the coercion that decisions 29 and 30 rem
 - `packages/tscache/test/cache-hydrate-rejections.test.ts`, V07 "checks every payload before applying even the first valid part or metadata" (decision 30, N69; approved by the director). Old: the fixture's `finalizedUntil: 63` with a second coverage range `{ start: 63, end: 73 }`, which N69 now rejects in step (4) before the malformed payload is decoded. New: `s.finalizedUntil = 83`, so that coverage is legal and V07 still pins the `invalid segment payload:` error it exists for; a comment names N69.
 - `packages/tscache/test/merge-property.test.ts`, "random upsert/replace puts match a Map after every operation" (decision 29, N68; approved by the director). Old: `i16` volumes drawn as `next(-100_000, 100_000) + 0.75`, modelled with typed-array wrapping. New: `next(-32_768, 32_767) + 0.75`, inside the range, so the property still checks truncation and new-wins; out-of-range values are covered by `put-field-values.test.ts`, which a comment names.
 - `site/scripts/run-snippets.ts`, `checkConversions` (the `docs:run` check of the "Batches" table in `site/concepts/grid.md`, added by step 71; decisions 29 and 30, N68; approved by the director). Old: one put of `[null, undefined, NaN, 1.5, 300, -1, 1e40]` into an `f64`, `f32`, `i32` and `u8` field, expecting the coerced values (`null` as `0`, `300` in `u8` as `44`, `-1` as `255`). New: one put per value and field, checked against the new table: `null`, `undefined` and `"1"` reject with `'field-mismatch'` in every field; `NaN` and `±Infinity` are stored in `f64` and `f32`, and `1e40` in `f32` reads `Infinity`; `NaN`, `300` and `-1` reject in `u8`; `1.5` in `i32` and `u8` reads `1`. It stays a check of the documented table: a deliberately wrong expectation (`300` in `u8` expected as `44`) made `docs:run` fail with `byte given 300: rejected, the docs say 44`, and was then undone.
+
+- Decision 38 (user, 2026-11-10, option B: an integer field rejects a non-integer value; N68). Codex's `put-field-values.test.ts`: in the integer-range cases `expected` changes from `` `a finite number whose truncation is in [${min}, ${max}]` `` to `` `an integer in [${min}, ${max}]` ``; "truncates finite $dtype values before testing the range" becomes "stores integral $dtype values as given (decision 38)", its inputs changing from `[1.9, -1.9, -(2 ** 31)]` (i32, expected `[1, -1, -2147483648]`) and `[-0.5, 255.9, 1.5]` (u8, expected `[0, 255, 1]`) to `[1, -1, -(2 ** 31)]` and `[-0, 255, 1]` with the same expectations. Added for B: `1.5`, `-1.5`, `0.5` and `255.9` in `u8` reject with `expected: "an integer in [0, 255]"`; `-0` and integral floats (`2.0`, `255.0`, `-3.0`) are accepted in `u8` and `i32`; typed arrays of another dtype are checked (an integral `Float64Array` into `u8` accepted; a `Float64Array` holding `300` into `u8`, a `Float32Array` holding `1.5` into `i32` and an `Int32Array` holding `-1` into `u16` reject).
+- Decision 38, the existing tests whose integer-field inputs were fractional (from the scratch measurement branch, `e926db6`). `batch.test.ts`: the fixture and "converts sorted offset-aligned timestamps…" volumes `[1.9, -2.9, 3.9]` → `[1, -2, 3]`; "accepts numeric field array … independently of the schema dtype" `Float64Array([1.5])`, `Float32Array([1.5])` and `[1.5]` → `[1]`; "converts all eight schema dtypes" integer inputs `[1.1, 1.9, 0, 127.9, 0.5]` → `[1, 2, 0, 127, 0]`. `cache-put.test.ts` "accepts typed-array batches…" and `engine-ops.test.ts` "typed-array inputs convert…": volume `Float64Array([1.9, -2.9])` → `Float64Array([1, -2])` (expected `[1, -2]` unchanged). `merge-property.test.ts`: `i16` volumes `next(-32_768, 32_767) + 0.75` → `next(-32_768, 32_767)`.
+- Decision 38, `site/scripts/run-snippets.ts` `checkConversions`: `1.5` in `i32` and in `u8` expected `1` → rejected; `2` in `i32` added as accepted. A deliberately wrong value (`1.5` in `i32` expected as `1`) made `docs:run` fail with `int given 1.5: rejected, the docs say 1`, and was undone.
+
+## Decision 38: the cost of option B, measured
+
+Bun bench gate cases, head/base against `main` b3f0b98, three rounds each, under the heavy-job lock. A is truncation (8cf8bdb), B rejects fractions (`scratch/75-integer-check`, e926db6).
+
+| Case           |           A |           B |
+| -------------- | ----------: | ----------: |
+| `put-page`     | 0.998–1.017 | 0.992–1.015 |
+| `put-live-bar` | 0.996–1.012 | 1.001–1.012 |
+| `append-bars`  | 1.061–1.074 | 1.023–1.067 |
+| `fill-month`   | 1.015–1.017 | 1.022–1.032 |
+
+The A/A control was inside its bounds in every round except B's third (1.039, flagged noisy). The gate cases put typed arrays of the fields' own dtypes, which neither option scans; the end-to-end scenarios with the JSON fetcher (`--fetchers json,json`, whose integer column is a `number[]` and is scanned) were within noise for both (A 0.98–1.03, B 0.99–1.05; `reload-first-read` excluded, since its fetch-count check fails for the JSON fetcher on the base too). Under B, `index (lazy)` was 12 428 B against A's 12 436 B. The cost is not material.
 
 ## Pre-review (Claude), not the gate
 
