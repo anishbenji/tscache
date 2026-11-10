@@ -11,8 +11,9 @@ With tokens, the flow is:
 
 1. The page passes the token in the fetcher's `context` (`createClient({ fetcher: { module, context } })`).
 2. The fetcher sends it, and **throws `AuthInvalidError`** when the backend refuses it.
-3. The worker marks credentials invalid and **broadcasts `authInvalid` to every tab**, once each time credentials become invalid,
-   with the `context` the refused fetch carried.
+3. The worker marks credentials invalid and **broadcasts `authInvalid` to every tab connected to it**,
+   once each time credentials become invalid, with the `context` the refused fetch carried. With a
+   SharedWorker that is every tab of the origin; in a fallback it is one tab (see below).
 4. While credentials are invalid, no fetch runs: `get` does not wait, and the affected ranges come back
    at once as misses with reason `'auth-pending'`.
 5. Any tab refreshes and calls `client.updateAuth(newContext)`. The fetcher's optional `updateAuth` hook
@@ -27,9 +28,19 @@ The detection is by marker, `error.code === 'tscache:auth-invalid'`, never `inst
 bundled with its own copy of the class works. A failure from a fetch that started under credentials
 since replaced is ignored, so a late refusal of an old token does not undo a refresh.
 
+::: info In a dedicated worker or in-process, auth is per tab
+The dedicated-worker and in-process hostings ([Workers and fallback](/guides/workers)) run one worker,
+or one engine, per tab. There the credential state belongs to that tab alone: `authInvalid` reaches
+only the tab whose fetch was refused, and `updateAuth` restores only that tab's worker. The other tabs
+keep fetching with their own context until the backend refuses it, and each then hears its own
+`authInvalid`. The refresh snippet below still converges, one tab at a time: a tab that takes the lock
+after another tab's refresh finds newer stored tokens and adopts them. `client.mode` tells which
+hosting a tab has.
+:::
+
 ## Refreshing once across tabs
 
-Every tab hears `authInvalid`. With a rotating refresh token, each refresh token works once, and many
+With a SharedWorker, every tab hears `authInvalid`. With a rotating refresh token, each refresh token works once, and many
 servers revoke the whole session when a spent one comes back; if every tab refreshed, all but the first
 would present a spent token. The examples' snippet refreshes under a Web Lock, one tab at a time: a tab
 that gets the lock after another's refresh compares the stored access token with the refused one (the

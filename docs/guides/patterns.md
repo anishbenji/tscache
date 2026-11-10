@@ -67,7 +67,10 @@ Cookie-based authentication needs no tscache code: cookies go with the worker's 
 
 With tokens, the fetcher receives them in its `context`, throws `AuthInvalidError` (from
 `@anishbenji/tscache/fetcher`) when the backend refuses one, and every tab hears `authInvalid` with the refused
-context (design (b), architecture §6.2, N33). Any tab may refresh and call `updateAuth`, after which the
+context (design (b), architecture §6.2, N33). That holds with a SharedWorker; with dedicated workers or
+in-process, each tab has its own worker and credential state, so `authInvalid` reaches only the tab
+whose fetch was refused and `updateAuth` restores only that tab. The other tabs hear their own
+`authInvalid` when the backend refuses them, and the Web Locks snippet below still converges tab by tab. Any tab may refresh and call `updateAuth`, after which the
 next `get` fetches again; nothing is paused or retried for a `get` that already returned. Refreshing with a rotating refresh token needs one tab at a time; the Web Locks
 snippet in [`examples/react-lwcharts/src/auth-refresh.ts`](../../examples/react-lwcharts/src/auth-refresh.ts)
 does it, and its header lists what it assumes. The main assumption is that a refresh issues a new access
