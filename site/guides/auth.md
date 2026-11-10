@@ -29,9 +29,10 @@ bundled with its own copy of the class works. A failure from a fetch that starte
 since replaced is ignored, so a late refusal of an old token does not undo a refresh.
 
 ::: info In a dedicated worker or in-process, auth is per tab
-The dedicated-worker and in-process hostings ([Workers and fallback](/guides/workers)) run one worker,
-or one engine, per tab. There the credential state belongs to that tab alone: `authInvalid` reaches
-only the tab whose fetch was refused, and `updateAuth` restores only that tab's worker. The other tabs
+The dedicated-worker hosting runs one worker per tab, and the in-process hosting, which has no worker,
+gives each client an engine of its own ([Workers and fallback](/guides/workers)). There the credential
+state belongs to that tab alone: `authInvalid` reaches only the tab whose fetch was refused, and
+`updateAuth` restores only that tab's worker, or in-process that client's engine. The other tabs
 keep fetching with their own context until the backend refuses it, and each then hears its own
 `authInvalid`. The refresh snippet below still converges, one tab at a time: a tab that takes the lock
 after another tab's refresh finds newer stored tokens and adopts them. `client.mode` tells which
