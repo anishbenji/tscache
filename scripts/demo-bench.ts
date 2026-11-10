@@ -7,8 +7,11 @@
 // (its mock backend included) on DEMO_BENCH_PORT (default 5390), opens it
 // once per latency with `autorun=1`, waits for the table and writes every
 // latency's table, with each run's counts below it. It judges no
-// result. It fails when a page does not finish, and on two checks of the
-// method: a tscache run that reused a worker, and a memo whose request count
+// result. Its options go through the page's own validation
+// (examples/benchmark/src/run.ts) before anything is built. It fails on an
+// option the page would reject, when a page does not finish, and on three
+// checks of the method: a tscache run that reused a worker, a page whose run
+// differs from the validated configuration, and a memo whose request count
 // differs from what the workload's ranges allow.
 // A heavy job: run it through the machine's heavy-job lock.
 
@@ -25,6 +28,12 @@ import {
   type Row,
   type RunResult,
 } from "../examples/benchmark/src/report";
+import {
+  DEFAULT_RUNS,
+  LATENCIES,
+  parseRunConfig,
+  type RunConfig,
+} from "../examples/benchmark/src/run";
 import {
   exactKeyRequests,
   MODE_LABELS,
@@ -43,6 +52,8 @@ const OUTPUT = "docs/benchmarks/demo-comparison.md";
 const RUN_TIMEOUT_MS = 30 * 60_000;
 
 interface Results {
+  /** The configuration the page ran, as it validated it. */
+  config: RunConfig;
   conditions: Conditions;
   /** The end of phase one's newest screen. */
   anchor: number;
@@ -57,8 +68,28 @@ function option(name: string, fallback: string): string {
   return at === -1 ? fallback : (process.argv[at + 1] ?? fallback);
 }
 
-const latencies = option("--latency", "50,300,1000").split(",").map(Number);
-const runs = Number(option("--runs", "5"));
+/**
+ * One validated configuration per latency, by the page's own parser
+ * (examples/benchmark/src/run.ts): a bad option fails here, before
+ * anything is built.
+ */
+const configs = option("--latency", LATENCIES.join(","))
+  .split(",")
+  .map((latency) =>
+    parseRunConfig({
+      latency,
+      runs: option("--runs", String(DEFAULT_RUNS)),
+      modes: null,
+      autorun: "1",
+    }),
+  );
+const invalid = configs.flatMap((parsed) => (parsed.ok ? [] : parsed.errors));
+if (invalid.length > 0) {
+  throw new Error(`demo-bench: ${[...new Set(invalid)].join(" ")}`);
+}
+const runConfigs = configs.flatMap((parsed) =>
+  parsed.ok ? [parsed.config] : [],
+);
 const port = Number(process.env.DEMO_BENCH_PORT ?? 5390);
 const origin = `http://127.0.0.1:${port}/`;
 
@@ -291,9 +322,12 @@ async function main(): Promise<void> {
   const browser = await chromium.launch();
   try {
     const all: Results[] = [];
-    for (const latency of latencies) {
+    for (const config of runConfigs) {
+      const latency = config.latencyMs;
       const page = await browser.newPage();
-      await page.goto(`${origin}?runs=${runs}&latency=${latency}&autorun=1`);
+      await page.goto(
+        `${origin}?runs=${config.runs}&latency=${latency}&autorun=1`,
+      );
       const status = page.getByTestId("status");
       await status.filter({ hasText: /^(done|failed)/ }).waitFor({
         timeout: RUN_TIMEOUT_MS,
@@ -305,6 +339,11 @@ async function main(): Promise<void> {
       ) as Results;
       if (!results.workers.fresh) {
         throw new Error(`latency ${latency}: a tscache run reused a worker`);
+      }
+      if (JSON.stringify(results.config) !== JSON.stringify(config)) {
+        throw new Error(
+          `latency ${latency}: the page ran ${JSON.stringify(results.config)}, not ${JSON.stringify(config)}`,
+        );
       }
       all.push(results);
       console.log(`latency ${latency} ms: done`);

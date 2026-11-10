@@ -6,7 +6,7 @@ import type {
 } from "../../examples/benchmark/src/report";
 import { NEW_BARS, TABS, views } from "../../examples/benchmark/src/workload";
 import { appUrl } from "./apps";
-import { control } from "./support";
+import { control, stats } from "./support";
 
 // examples/benchmark: the workload once per mode, and only the counts it
 // makes the backend serve, which the workload fixes; no timing is checked
@@ -175,4 +175,37 @@ test("a failed rerun leaves no results to copy from the run before", async ({
   } finally {
     await control(page, { failNext: 0 });
   }
+});
+
+for (const [what, runs] of [
+  ["blank", ""],
+  ["fractional", "1.5"],
+] as const) {
+  test(`a ${what} run count fails before anything runs`, async ({ page }) => {
+    await page.goto("/?latency=50&modes=memo");
+    const status = page.getByTestId("status");
+    await expect(status).toHaveText("ready");
+    const before = await stats(page);
+    await page.locator("#runs").fill(runs);
+    await page.getByRole("button", { name: "Run the benchmark" }).click();
+    await expect(status).toHaveText(/^failed: Runs per mode /);
+    await expect(page.locator("#results tbody tr")).toHaveCount(0);
+    await expect(page.getByTestId("results-json")).toHaveText("");
+    await expect(
+      page.getByRole("button", { name: "Copy as Markdown" }),
+    ).toBeDisabled();
+    // Nothing ran: the backend served no series page.
+    const after = await stats(page);
+    expect(after.pages).toEqual(before.pages);
+  });
+}
+
+test("an unknown mode in the URL fails before anything runs", async ({
+  page,
+}) => {
+  await page.goto("/?runs=1&latency=50&modes=memo,redis&autorun=1");
+  const status = page.getByTestId("status");
+  await expect(status).toHaveText(/^failed: The modes list has "redis"/);
+  await expect(page.locator("#results tbody tr")).toHaveCount(0);
+  await expect(page.getByTestId("results-json")).toHaveText("");
 });

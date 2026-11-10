@@ -34,10 +34,10 @@ import {
   rows,
   type Served,
 } from "./report";
+import { parseRunConfig, type RunConfig, type RunState, view } from "./run";
 import {
   anchorFor,
   INTERVAL,
-  isMode,
   MODES,
   type Mode,
   SERIES,
@@ -47,10 +47,6 @@ import {
 } from "./workload";
 import "./style.css";
 import { Mailbox, openTogether } from "./tabs";
-
-const LATENCIES = [50, 300, 1000];
-const DEFAULT_LATENCY = 300;
-const DEFAULT_RUNS = 5;
 
 function element<T extends Element>(selector: string): T {
   const found = document.querySelector<T>(selector);
@@ -337,29 +333,55 @@ function showTable(conditions: Conditions, table: Row[]): void {
   );
 }
 
-let last: { conditions: Conditions; table: Row[] } | undefined;
-
-/** Takes the last run's results off the page. */
-function clearResults(): void {
-  last = undefined;
-  element('[data-testid="conditions"]').textContent = "Running.";
-  element('[data-testid="hit-ratio"]').textContent = "";
-  element('[data-testid="workers"]').textContent = "";
-  element('[data-testid="results-json"]').textContent = "";
-  element("#results thead").replaceChildren();
-  element("#results tbody").replaceChildren();
+/** What a run that reached done publishes: made from it alone. */
+interface Published {
+  conditions: Conditions;
+  table: Row[];
+  workers: ReturnType<typeof freshWorkers>;
+  /** The results as JSON, for scripts and tests (`results-json`). */
+  json: string;
 }
 
-async function runAll(
-  latencyMs: number,
-  runs: number,
-  modes: readonly Mode[],
-): Promise<void> {
-  runButton.disabled = true;
-  copyButton.disabled = true;
-  // A run starts with nothing of the run before on the page, so a failed run
-  // leaves no table, no results and nothing to copy.
-  clearResults();
+/** The page's one run state (run.ts); `render` shows it. */
+let state: RunState<Published> = { kind: "idle" };
+/** The workload's preview has been read; until then nothing can run. */
+let previewed = false;
+
+function setState(next: RunState<Published>): void {
+  state = next;
+  render();
+}
+
+/**
+ * Shows the state: the status, Run, and the results, which exist only in
+ * done. Every other state takes the last results off the page.
+ */
+function render(): void {
+  const shown = view(state);
+  status.value = previewed || state.kind !== "idle" ? shown.status : "loading";
+  runButton.disabled = !previewed || !shown.canRun;
+  copyButton.disabled = shown.results === undefined;
+  const { results } = shown;
+  if (results === undefined) {
+    element('[data-testid="conditions"]').textContent =
+      state.kind === "running" ? "Running." : "Not run yet.";
+    element('[data-testid="hit-ratio"]').textContent = "";
+    element('[data-testid="workers"]').textContent = "";
+    element('[data-testid="results-json"]').textContent = "";
+    element("#results thead").replaceChildren();
+    element("#results tbody").replaceChildren();
+    return;
+  }
+  showTable(results.conditions, results.table);
+  element('[data-testid="workers"]').textContent =
+    `A new SharedWorker for each tscache run: ${results.workers.runs} runs, ${results.workers.workers} workers.`;
+  element('[data-testid="results-json"]').textContent = results.json;
+}
+
+/** Runs `config`, the validated configuration, to done or failed. */
+async function runAll(config: RunConfig): Promise<void> {
+  const { latencyMs, runs, modes } = config;
+  setState({ kind: "running", config, progress: "running" });
   try {
     // Each click starts with no reports; its checks read its own runs only.
     reports.length = 0;
@@ -369,34 +391,43 @@ async function runAll(
     const results: RunResult[] = [];
     for (let run = 0; run < runs; run++) {
       for (const mode of rotated(modes, run)) {
-        status.value = `running ${mode}, run ${run + 1} of ${runs}`;
+        setState({
+          kind: "running",
+          config,
+          progress: `running ${mode}, run ${run + 1} of ${runs}`,
+        });
         results.push(await runMode(mode, run, `${nonce}-${run}-${mode}`, plan));
       }
     }
-    const conditions = { latencyMs, runs, browser: browserName() };
-    const table = rows(results, MODES);
     const workers = await workersChecked(
       modes.includes("tscache") ? runs : 0,
       nonce,
     );
-    last = { conditions, table };
-    showTable(conditions, table);
-    element('[data-testid="workers"]').textContent = workers.fresh
-      ? `A new SharedWorker for each tscache run: ${workers.runs} runs, ${workers.workers} workers.`
-      : `A tscache run reused a worker: ${workers.runs} runs, ${workers.workers} workers.`;
-    element('[data-testid="results-json"]').textContent = JSON.stringify({
+    if (!workers.fresh) {
+      throw new Error(
+        `a tscache run reused a worker: ${workers.runs} runs, ${workers.workers} workers`,
+      );
+    }
+    const conditions = { latencyMs, runs, browser: browserName() };
+    const table = rows(results, MODES);
+    const json = JSON.stringify({
+      config,
       conditions,
       anchor: plan.one.at(0)?.range.end,
       rows: table,
       runs: results,
       workers,
     });
-    status.value = "done";
+    setState({
+      kind: "done",
+      config,
+      results: { conditions, table, workers, json },
+    });
   } catch (error) {
-    status.value = `failed: ${error instanceof Error ? error.message : error}`;
-  } finally {
-    runButton.disabled = false;
-    copyButton.disabled = last === undefined;
+    setState({
+      kind: "failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -435,31 +466,55 @@ async function preview(): Promise<void> {
 }
 
 const params = new URLSearchParams(location.search);
-const asked = Number(params.get("latency"));
-latencySelect.value = String(
-  LATENCIES.includes(asked) ? asked : DEFAULT_LATENCY,
-);
-const askedRuns = Number(params.get("runs"));
-runsInput.value = String(
-  Number.isSafeInteger(askedRuns) && askedRuns > 0 ? askedRuns : DEFAULT_RUNS,
-);
-const modes = (params.get("modes")?.split(",") ?? [...MODES]).filter(isMode);
+// The URL's parameters, parsed once; a bad one fails before anything runs.
+const fromUrl = parseRunConfig({
+  latency: params.get("latency"),
+  runs: params.get("runs"),
+  modes: params.get("modes"),
+  autorun: params.get("autorun"),
+});
+if (fromUrl.ok) {
+  latencySelect.value = String(fromUrl.config.latencyMs);
+  runsInput.value = String(fromUrl.config.runs);
+}
+
+/** The controls, with the URL's modes, as a validated configuration. */
+function fromControls(): ReturnType<typeof parseRunConfig> {
+  return parseRunConfig({
+    latency: latencySelect.value,
+    runs: runsInput.value,
+    modes: params.get("modes"),
+    autorun: null,
+  });
+}
 
 runButton.addEventListener("click", () => {
-  void runAll(Number(latencySelect.value), Number(runsInput.value), modes);
+  if (state.kind === "running") return;
+  const parsed = fromControls();
+  if (!parsed.ok) {
+    setState({ kind: "failed", error: parsed.errors.join(" ") });
+    return;
+  }
+  void runAll(parsed.config);
 });
 copyButton.addEventListener("click", () => {
-  if (last === undefined) return;
-  void navigator.clipboard.writeText(markdown(last.conditions, last.table));
+  if (state.kind !== "done") return;
+  const { conditions, table } = state.results;
+  void navigator.clipboard.writeText(markdown(conditions, table));
 });
 
+render();
 preview().then(
   () => {
-    status.value = "ready";
-    runButton.disabled = false;
-    if (params.get("autorun") === "1") runButton.click();
+    previewed = true;
+    if (!fromUrl.ok) {
+      setState({ kind: "failed", error: fromUrl.errors.join(" ") });
+      return;
+    }
+    render();
+    if (fromUrl.config.autorun) runButton.click();
   },
   (error: unknown) => {
-    status.value = `failed: ${String(error)}`;
+    setState({ kind: "failed", error: `the preview: ${String(error)}` });
   },
 );

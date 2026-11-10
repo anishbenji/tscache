@@ -49,6 +49,11 @@ generates by running this page headless at all three latencies. Its design
 and fairness rules are in `docs/reviews/step-67.md`.
 
 For automation, the page reads `?latency=`, `?runs=`, `?modes=` (a comma
-list) and `?autorun=1`, and writes its results as JSON into
+list) and `?autorun=1`. These and the controls are parsed into one validated
+configuration (`src/run.ts`), which `scripts/demo-bench.ts` uses too; a blank,
+fractional or out-of-range count, a latency not offered or an unknown mode
+fails with a message before anything runs. A run is idle, running, done or
+failed, and only a run that reached done shows a table, results and Copy. The
+page writes its results as JSON into
 `[data-testid="results-json"]`. `e2e/examples/benchmark.spec.ts` runs the
 workload once per mode and checks the request counts; it checks no timing.
