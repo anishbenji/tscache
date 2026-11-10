@@ -4,7 +4,9 @@ Browser time-series cache: SharedWorker multi-tab sharing, worker-side fetch
 orchestration, and coverage tracking that distinguishes "not fetched yet" from
 "confirmed empty" (weekends, sensor dropouts).
 
-**Status: pre-release.** The design is settled; see
+**Status: 0.x.** The npm package is
+[`@anishbenji/tscache`](packages/tscache/README.md). Within 0.x a minor release
+may break the API; a patch release never does. See
 [`docs/architecture.md`](docs/architecture.md) for the API surface, RPC
 protocol and decision register, and [`docs/roadmap.md`](docs/roadmap.md) for
 what v1 leaves out. The questions deferred to the review after the build are

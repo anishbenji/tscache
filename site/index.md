@@ -5,11 +5,14 @@ counts. It is built for a chart that scrolls through history and follows a live 
 once.
 
 - **One cache for every tab.** The cache runs in a `SharedWorker`, so every same-origin tab reads the same
-  data, and a range one tab fetched is never fetched again by another. Where there is no
-  `SharedWorker` (Chrome on Android), it falls back to a dedicated `Worker` per tab, then to the page
-  itself.
-- **The worker fetches.** You give it a fetcher module; a `get` for a range the cache does not hold
-  fetches only what is missing, once, however many tabs ask at the same moment.
+  data. Where there is no `SharedWorker` (Chrome on Android), it falls back to a dedicated `Worker`,
+  then to the page itself; those give each tab a cache of its own, shared with no other tab.
+- **The worker fetches.** You give it a fetcher module, and a `get` fetches only the ranges its cache
+  neither holds nor already has in flight, widened by one interval where a miss meets cached data so the
+  series joins up (that edge point is fetched again). Under the SharedWorker, concurrent reads of a range from
+  several tabs wait on one fetch, and finalized history one tab fetched is not fetched again by
+  another. Points at or after the `finalizedUntil` watermark are provisional: every read that includes
+  them fetches them again.
 - **Known gaps are first-class.** The cache records what it _knows_ (coverage) separately from the points
   that _exist_. A weekend without candles, or an hour a sensor was offline, is a confirmed gap: it is
   never fetched again, and it is not confused with "not loaded yet".
@@ -31,11 +34,12 @@ once.
 ## What it leaves out
 
 Version 1 has no aggregation or resampling (a series at one minute and at one hour are two caches), no
-persistence across page loads, no eviction or memory limit, no subscriptions, and no irregular
-timestamps. The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
+eviction or memory limit, no subscriptions, and no irregular timestamps. The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
 
 ## Status
 
-tscache is pre-release. The design is settled and recorded in the
+tscache is at 0.x and follows semantic versioning within it: a minor release may break the API, a
+patch release never does. Pin a minor range (`~0.1.0`) to take fixes without breaking changes. The
+design is recorded in the
 [architecture document](https://github.com/anishbenji/tscache/blob/main/docs/architecture.md); [Architecture for contributors](/contributing)
 summarises it.

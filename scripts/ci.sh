@@ -58,7 +58,10 @@ bun run --cwd site api
 bunx knip
 bun run fallow
 bunx vitest run --passWithNoTests
-(cd packages/tscache && npm pack --dry-run)
+# What npm would publish: exactly the manifest, README, license and the
+# built code with its declarations, every entry among it; no test, fixture
+# or source map (scripts/check-pack.ts).
+bun run check:pack
 # The integration snippets type-check against the built package, as an
 # app would see it (starter §5, §7).
 bun run check:integrations
