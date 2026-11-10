@@ -32,7 +32,7 @@ function forgetYesterday(cache: CacheHandle): Promise<void> {
 ```
 
 With a SharedWorker one tab's timer serves every tab, since they read the same cache; with dedicated
-workers (Chrome for Android) each tab runs its own.
+workers (a browser without SharedWorker, such as Samsung Internet) each tab runs its own.
 
 ## Restatements need a version
 
@@ -58,8 +58,8 @@ the [roadmap](../roadmap.md).
 With a SharedWorker every same-origin tab reads the same caches. `cache.clear()` and `client.clearAll()`
 empty them for all tabs, and every tab hears `cacheCleared`. Use them for resets that should apply
 everywhere (a logout, a version change you detected yourself), not for one view's housekeeping; to
-refetch a range for one view, `invalidate` it. On Chrome for Android, which has no SharedWorker, each tab
-has its own dedicated worker and a clear stays in that tab.
+refetch a range for one view, `invalidate` it. In a browser without SharedWorker (Samsung Internet, for
+example), each tab has its own dedicated worker and a clear stays in that tab.
 
 ## Credentials
 

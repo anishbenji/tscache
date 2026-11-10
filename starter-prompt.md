@@ -51,7 +51,7 @@ Primary use cases: financial candles (OHLCV), live server metrics, IoT telemetry
 
 ### 3.4 Worker architecture
 
-- Fallback chain: **SharedWorker → dedicated Worker → in-process**, with consumer able to pin a starting mode (fallback continues down-chain from the pin). Document prominently: **Chrome on Android has no SharedWorker** — the dedicated-worker path is mainstream, not exotic.
+- Fallback chain: **SharedWorker → dedicated Worker → in-process**, with consumer able to pin a starting mode (fallback continues down-chain from the pin). Document prominently: **Chrome on Android has no SharedWorker** — the dedicated-worker path is mainstream, not exotic. [Correction, 2026-11-10: Chrome for Android and Android WebView have shipped SharedWorker since version 148 (Chrome Platform Status, https://chromestatus.com/feature/6265472244514816). Samsung Internet and Opera Mobile still have none, so the dedicated-worker path remains a supported fallback; `site/guides/workers.md` has the support table.]
 - **One engine class, three hostings:** the in-process engine has zero DOM/worker imports at module top level (lazy construction) → SSR/Node-safe; the RPC layer is a thin shell around it. Unit tests run against the engine directly. In-process is sufficient for Node (no `worker_threads` in v1).
 - **Same-origin tabs only** for sharing. Ship a stable worker entry point as a package subpath; document bundler setup (Vite/webpack).
 - **Boundary transfer:** structured payloads with **transferable typed arrays** (zero-copy move). Reads copy out of cache-owned buffers (mandatory — never transfer cache-owned memory). **No SharedArrayBuffer in v1** (COOP/COEP burden); roadmap opt-in.
