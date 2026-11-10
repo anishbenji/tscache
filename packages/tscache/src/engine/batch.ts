@@ -5,7 +5,14 @@
  */
 
 import { PutError, type PutErrorCode, show } from "../errors";
-import { type Grid, isAligned, type SlotRange, slotOf, snapIn } from "../grid";
+import {
+  type Grid,
+  isAligned,
+  msOf,
+  type SlotRange,
+  slotOf,
+  snapIn,
+} from "../grid";
 import { FIELD_ARRAYS } from "../segment/dtype";
 import { getOwn, setOwn } from "../segment/own";
 import type { Columns } from "../segment/types";
@@ -156,11 +163,13 @@ function valueError(
   name: string,
   dtype: Dtype,
   i: number,
-  timestamps: NumericArray,
+  slots: Float64Array,
+  grid: Grid,
   value: string,
   expected: string,
 ): never {
-  const at = timestamps[i] as number;
+  // The checked timestamp, from its slot: a getter run since cannot change it.
+  const at = msOf(slots[i] as number, grid);
   throw new PutError(
     `field "${name}" (${dtype}) value ${value} at index ${i}, t = ${at}: expected ${expected}`,
     {
@@ -185,7 +194,8 @@ function scanInto(
   name: string,
   dtype: Dtype,
   values: NumericArray,
-  timestamps: NumericArray,
+  slots: Float64Array,
+  grid: Grid,
 ): void {
   const float = dtype[0] === "f";
   // An integer dtype's inclusive range, from its element size; a float
@@ -202,7 +212,8 @@ function scanInto(
         name,
         dtype,
         i,
-        timestamps,
+        slots,
+        grid,
         show(v) + (v === null ? "" : ` (${typeof v})`),
         "a number",
       );
@@ -215,7 +226,8 @@ function scanInto(
         name,
         dtype,
         i,
-        timestamps,
+        slots,
+        grid,
         `${v}`,
         `an integer in [${min}, ${max}]`,
       );
@@ -278,6 +290,12 @@ export function validateBatch(
     authority = snapIn(range, config);
     assertInside(timestamps, n, range);
   }
+  // Slots now, before any field array is read: a field's getter may rewrite
+  // the timestamps, and the batch is converted with the ones checked above.
+  const slots = new Float64Array(n);
+  for (let i = 0; i < n; i++)
+    slots[i] = slotOf(timestamps[i] as number, config);
+
   // (5) Values (N68): field by field in schema order, each copied into a
   // fresh array of its dtype before anything is kept.
   const fields: Record<string, FieldArray> = {};
@@ -297,12 +315,8 @@ export function validateBatch(
       (dtype[0] === "f" || typedArrayKind.call(values) === Field.name)
     ) {
       data.set(values);
-    } else scanInto(data, name, dtype, values, timestamps);
+    } else scanInto(data, name, dtype, values, slots, config);
     setOwn(fields, name, data);
   });
-
-  const slots = new Float64Array(n);
-  for (let i = 0; i < n; i++)
-    slots[i] = slotOf(timestamps[i] as number, config);
   return { points: { slots, fields }, authority };
 }

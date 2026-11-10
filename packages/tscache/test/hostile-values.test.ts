@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateBatch } from "../src/engine/batch";
+import { CacheState } from "../src/engine/cache";
 import { resolveCacheConfig } from "../src/engine/validate";
 import { ConfigError, InvalidRangeError, PutError, show } from "../src/errors";
 import { snapIn, snapOut } from "../src/grid";
@@ -211,6 +212,59 @@ describe("timestamps that lie about their length", () => {
         name: "PutError",
         code: "misaligned",
         offenderIndex: 1,
+      }),
+    );
+  });
+});
+
+// A field value's getter runs after the timestamp checks; it must not be able
+// to change the timestamps the batch is converted with (step 75 pre-review
+// round 2): slots are computed before any field array is read.
+describe("a field getter that rewrites the checked timestamps", () => {
+  const cfg = resolveCacheConfig({
+    id: "rewrite",
+    interval: 10,
+    fields: { x: "f64", y: "f64" },
+  });
+  function rewriting(rewrite: (timestamps: number[]) => void, y: unknown[]) {
+    const timestamps = [0, 10, 20];
+    const x = [1, 2, 3];
+    Object.defineProperty(x, 0, {
+      get() {
+        rewrite(timestamps);
+        return 1;
+      },
+    });
+    return { timestamps, fields: { x, y } } as unknown as PutBatch;
+  }
+
+  it.each([
+    { name: "reordered", rewrite: (t: number[]) => t.splice(1, 2, 20, 10) },
+    { name: "misaligned", rewrite: (t: number[]) => t.splice(1, 1, 15) },
+  ])(
+    "converts the checked timestamps when they are $name later",
+    ({ rewrite }) => {
+      const batch = rewriting(rewrite, [4, 5, 6]);
+      expect(Array.from(validateBatch(batch, cfg).points.slots)).toEqual([
+        0, 1, 2,
+      ]);
+      const c = new CacheState(cfg);
+      c.put(rewriting(rewrite, [4, 5, 6]));
+      expect(c.get({ start: 0, end: 20 }).timestamps).toEqual(
+        new Float64Array([0, 10, 20]),
+      );
+    },
+  );
+
+  it("reports the checked timestamp of a rejected value", () => {
+    const batch = rewriting((t) => t.splice(1, 1, 99), [4, null, 6]);
+    expect(() => validateBatch(batch, cfg)).toThrow(
+      expect.objectContaining({
+        name: "PutError",
+        code: "field-mismatch",
+        offenderIndex: 1,
+        offenderTimestamp: 10,
+        offenderField: "y",
       }),
     );
   });
