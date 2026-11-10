@@ -4,6 +4,7 @@ import type {
   Row,
   RunResult,
 } from "../../examples/benchmark/src/report";
+import { type RunConfig, runQuery } from "../../examples/benchmark/src/run";
 import { NEW_BARS, TABS, views } from "../../examples/benchmark/src/workload";
 import { appUrl } from "./apps";
 import { control, stats } from "./support";
@@ -16,6 +17,7 @@ test.use({ baseURL: appUrl("benchmark") });
 test.describe.configure({ mode: "serial" });
 
 interface Results {
+  config: RunConfig;
   rows: Row[];
   runs: RunResult[];
   workers: ReturnType<typeof freshWorkers>;
@@ -208,4 +210,30 @@ test("an unknown mode in the URL fails before anything runs", async ({
   await expect(status).toHaveText(/^failed: The modes list has "redis"/);
   await expect(page.locator("#results tbody tr")).toHaveCount(0);
   await expect(page.getByTestId("results-json")).toHaveText("");
+});
+
+test("an autorun publishes the configuration its URL asked for", async ({
+  page,
+}) => {
+  test.setTimeout(RUN_TIMEOUT + 30_000);
+  // As scripts/demo-bench.ts asks for a run, and checks what the page ran.
+  const asked: RunConfig = {
+    latencyMs: 50,
+    runs: 2,
+    modes: ["tscache", "memo"],
+  };
+  await page.goto(`/${runQuery(asked, { autorun: true })}`);
+  await expect(page.getByTestId("status")).toHaveText("done", {
+    timeout: RUN_TIMEOUT,
+  });
+  const results = JSON.parse(
+    (await page.getByTestId("results-json").textContent()) ?? "{}",
+  ) as Results;
+  expect(results.config).toEqual(asked);
+  expect(results.runs.map((r) => r.mode)).toEqual([
+    "tscache",
+    "memo",
+    "memo",
+    "tscache",
+  ]);
 });

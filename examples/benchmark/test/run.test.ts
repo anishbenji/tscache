@@ -5,6 +5,8 @@ import {
   LATENCIES,
   MAX_RUNS,
   parseRunConfig,
+  type RunConfig,
+  runQuery,
   view,
 } from "../src/run";
 import { MODES } from "../src/workload";
@@ -30,8 +32,8 @@ describe("parseRunConfig", () => {
         latencyMs: DEFAULT_LATENCY,
         runs: DEFAULT_RUNS,
         modes: [...MODES],
-        autorun: false,
       },
+      autorun: false,
     });
   });
 
@@ -49,8 +51,8 @@ describe("parseRunConfig", () => {
         latencyMs: 50,
         runs: 3,
         modes: ["tscache", "memo"],
-        autorun: true,
       },
+      autorun: true,
     });
     expect(parse({ runs: String(MAX_RUNS) }).ok).toBe(true);
   });
@@ -108,12 +110,29 @@ describe("parseRunConfig", () => {
   });
 });
 
+describe("runQuery", () => {
+  it.each<RunConfig>([
+    { latencyMs: 50, runs: 1, modes: [...MODES] },
+    { latencyMs: 1000, runs: MAX_RUNS, modes: ["tscache", "none"] },
+  ])("asks the page for exactly the configuration it runs: %o", (config) => {
+    // scripts/demo-bench.ts opens the page with this query, and fails unless
+    // the page publishes the configuration it asked for.
+    const params = new URLSearchParams(runQuery(config, { autorun: true }));
+    const parsed = parseRunConfig({
+      latency: params.get("latency"),
+      runs: params.get("runs"),
+      modes: params.get("modes"),
+      autorun: params.get("autorun"),
+    });
+    expect(parsed).toEqual({ ok: true, config, autorun: true });
+  });
+});
+
 describe("view", () => {
   const config = {
     latencyMs: 300 as const,
     runs: 2,
     modes: [...MODES],
-    autorun: false,
   };
 
   it("offers results and Copy only once a run is done", () => {

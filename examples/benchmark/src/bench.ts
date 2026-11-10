@@ -488,15 +488,20 @@ function fromControls(): ReturnType<typeof parseRunConfig> {
   });
 }
 
-runButton.addEventListener("click", () => {
+/**
+ * The one way into a run, whatever asks for it: a click, with the
+ * controls, or an autorun, with the URL's configuration as validated.
+ */
+function requestRun(parsed: ReturnType<typeof parseRunConfig>): void {
   if (state.kind === "running") return;
-  const parsed = fromControls();
   if (!parsed.ok) {
     setState({ kind: "failed", error: parsed.errors.join(" ") });
     return;
   }
   void runAll(parsed.config);
-});
+}
+
+runButton.addEventListener("click", () => requestRun(fromControls()));
 copyButton.addEventListener("click", () => {
   if (state.kind !== "done") return;
   const { conditions, table } = state.results;
@@ -508,11 +513,11 @@ preview().then(
   () => {
     previewed = true;
     if (!fromUrl.ok) {
-      setState({ kind: "failed", error: fromUrl.errors.join(" ") });
+      requestRun(fromUrl);
       return;
     }
     render();
-    if (fromUrl.config.autorun) runButton.click();
+    if (fromUrl.autorun) requestRun(fromUrl);
   },
   (error: unknown) => {
     setState({ kind: "failed", error: `the preview: ${String(error)}` });

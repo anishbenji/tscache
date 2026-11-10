@@ -33,6 +33,7 @@ import {
   LATENCIES,
   parseRunConfig,
   type RunConfig,
+  runQuery,
 } from "../examples/benchmark/src/run";
 import {
   exactKeyRequests,
@@ -325,9 +326,7 @@ async function main(): Promise<void> {
     for (const config of runConfigs) {
       const latency = config.latencyMs;
       const page = await browser.newPage();
-      await page.goto(
-        `${origin}?runs=${config.runs}&latency=${latency}&autorun=1`,
-      );
+      await page.goto(`${origin}${runQuery(config, { autorun: true })}`);
       const status = page.getByTestId("status");
       await status.filter({ hasText: /^(done|failed)/ }).waitFor({
         timeout: RUN_TIMEOUT_MS,

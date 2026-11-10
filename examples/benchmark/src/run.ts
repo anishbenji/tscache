@@ -15,14 +15,16 @@ export const DEFAULT_RUNS = 5;
 /** The most runs per mode the page accepts (its input's maximum). */
 export const MAX_RUNS = 20;
 
-/** A run, as validated: nothing else starts one. */
+/**
+ * A run, as validated: nothing else starts one, and a run that reaches done
+ * publishes exactly this. How the run was started (a click, or `autorun`)
+ * is not part of it.
+ */
 export interface RunConfig {
   latencyMs: Latency;
   runs: number;
   /** The modes to run, in their order, each once. */
   modes: Mode[];
-  /** Start as soon as the page is ready (`autorun=1`). */
-  autorun: boolean;
 }
 
 /**
@@ -38,7 +40,12 @@ export interface RunInputs {
 }
 
 export type Parsed =
-  | { ok: true; config: RunConfig }
+  | {
+      ok: true;
+      config: RunConfig;
+      /** Start the run as soon as the page is ready (`autorun=1`). */
+      autorun: boolean;
+    }
   | { ok: false; errors: string[] };
 
 const WHOLE = /^[0-9]+$/;
@@ -100,8 +107,26 @@ export function parseRunConfig(inputs: RunInputs): Parsed {
     ? { ok: false, errors }
     : {
         ok: true,
-        config: { latencyMs, runs, modes, autorun: inputs.autorun === "1" },
+        config: { latencyMs, runs, modes },
+        autorun: inputs.autorun === "1",
       };
+}
+
+/**
+ * The page's URL query for `config`, which `parseRunConfig` reads back as
+ * that configuration: how scripts/demo-bench.ts asks for a run.
+ */
+export function runQuery(
+  config: RunConfig,
+  { autorun }: { autorun: boolean },
+): string {
+  const query = new URLSearchParams({
+    latency: String(config.latencyMs),
+    runs: String(config.runs),
+    modes: config.modes.join(","),
+  });
+  if (autorun) query.set("autorun", "1");
+  return `?${query}`;
 }
 
 /**
