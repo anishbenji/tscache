@@ -43,11 +43,14 @@ cache held there that the response lacks are removed. So:
 - **Timestamps** on the cache's grid (`request.interval`, `request.alignmentOffset`), ascending,
   unique, with every field present. A response that fails validation makes the range `'fetch-failed'`.
 - **Missing values** as `NaN` in float fields, and every value one its field can hold
-  ([Batches](/concepts/grid#batches)). JSON has no `NaN` and writes it as `null`, and a `null` is
-  rejected, not stored as `0`: map each missing value to `NaN` for a float field, as the fetcher above
-  does (`column.map((v) => v ?? Number.NaN)`). An integer field cannot mark a missing value
-  ([Integer fields](/guides/patterns#integer-fields-cannot-be-missing)), and rejects `NaN`, fractions
-  (round them in the fetcher) and values outside its dtype's range.
+  ([Batches](/concepts/grid#batches)). JSON has no `NaN` and writes it as `null`, and a put rejects
+  `null` in every field. The fetcher above maps it to `NaN` in its float fields only
+  (`else if (float) column.push(NaN)`, with `FLOAT_FIELDS` naming them, since the worker does not
+  pass the dtypes). An integer field cannot mark a missing value
+  ([Integer fields](/guides/patterns#integer-fields-cannot-be-missing)) and rejects `NaN`, fractions
+  and values outside its dtype's range, so a `null` there fails the whole response: the fetcher above
+  throws, naming the field and timestamp, and the range is `'fetch-failed'`. Round in the fetcher if
+  the backend sends fractions for an integer field.
 
 The range is already coalesced: adjacent misses are merged, and a miss next to known data is extended by
 one interval into it.

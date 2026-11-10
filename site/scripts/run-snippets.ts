@@ -80,22 +80,35 @@ function within(
 
 const backend = createBackend({ latencyMs: 0, pushMs: 200 });
 /**
- * A series whose JSON page holds a null, as a JSON backend sends for a
- * missing value: the fetcher snippet must hand it to the cache as NaN.
+ * Series whose JSON page holds a null, as a JSON backend sends for a missing
+ * value: the fetcher snippet must hand it to the cache as NaN in a float
+ * field (`close`), and fail the response for an integer field (`volume`, a
+ * u32), where N68 rejects both null and NaN.
  */
 const NULLS_SERIES = "test/nulls";
-const nullsPage = {
-  timestamps: [0, MINUTE],
-  fields: { close: [1.5, null] },
-  meta: { version: "1", finalizedUntil: 2 * MINUTE },
+const INTEGER_NULLS_SERIES = "test/integer-nulls";
+const nullPages: Record<string, unknown> = {
+  [NULLS_SERIES]: {
+    timestamps: [0, MINUTE],
+    fields: { close: [1.5, null] },
+    meta: { version: "1", finalizedUntil: 2 * MINUTE },
+  },
+  [INTEGER_NULLS_SERIES]: {
+    timestamps: [0, MINUTE],
+    fields: { volume: [7, null] },
+    meta: { version: "1", finalizedUntil: 2 * MINUTE },
+  },
 };
 const server = Bun.serve({
   port: 0,
-  fetch: async (request) =>
-    new URL(request.url).pathname === `/api/series/${NULLS_SERIES}`
-      ? Response.json(nullsPage)
-      : ((await backend(request)) ??
-        new Response("not found", { status: 404 })),
+  fetch: async (request) => {
+    const series = new URL(request.url).pathname.replace("/api/series/", "");
+    const page = nullPages[series];
+    if (page !== undefined) return Response.json(page);
+    return (
+      (await backend(request)) ?? new Response("not found", { status: 404 })
+    );
+  },
 });
 const origin = server.url.origin;
 
@@ -324,6 +337,21 @@ const RUNS: Record<string, Run> = {
     check(
       close.length === 2 && close[0] === 1.5 && Number.isNaN(close[1]),
       `null mapped to ${JSON.stringify(close)}`,
+    );
+    // In an integer field the fetcher fails the response instead.
+    let refused: unknown;
+    try {
+      await fetcher.fetch({
+        ...request,
+        cacheId: INTEGER_NULLS_SERIES,
+        range: { start: 0, end: MINUTE },
+      });
+    } catch (error) {
+      refused = error;
+    }
+    check(
+      refused instanceof Error && refused.message.includes("volume"),
+      `an integer field's null gave ${String(refused)}`,
     );
   },
   async "fetcher-columns.ts"() {
