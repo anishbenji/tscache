@@ -108,7 +108,7 @@ interface CacheConfig {
   interval: number;
   /** Timestamps satisfy (t - alignmentOffset) % interval === 0. Default 0. */
   alignmentOffset?: number;
-  /** Field name → dtype. 'f64' is the documented default dtype. */
+  /** Field name → dtype. Every field names its dtype; 'f64' is the usual choice. */
   fields: Record<string, Dtype>;
   /** Dense segment splits where more than K consecutive slots hold no point
    *  (N14). Default 4. */
