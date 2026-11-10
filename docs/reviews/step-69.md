@@ -1,6 +1,6 @@
 # Step 69 — Fetcher import under webpack-family bundlers, error names under minification
 
-Branch: `fix/69-fetcher-import-bundlers` · Reviewer: — · Rounds: 0 · Status: built · Verdict after triage: —
+Branch: `fix/69-fetcher-import-bundlers` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 Two findings from a review of the repository in November 2026, backed by the bundler probe recorded below. The in-process hosting loads the fetcher with `import(module)`, which carried only a Vite hint; webpack 5 and Rspack replace such an import with an empty context that always rejects, and Turbopack with a stub that throws, so `createClient` with a fetcher rejected on the in-process hosting in those builds. Separately, `TscacheError` named every instance with `new.target.name`, which a minifier renames.
 
@@ -66,6 +66,14 @@ For Next.js server code only, `serverExternalPackages: ["@anishbenji/tscache"]` 
 | PR-2 | P2  | This file and `docs/guides/worker-setup.md` cite a review file that is not in the repository       | accepted | docs: say what the bundler probe verified without citing an absent file; the probe table is in "Evidence" above (docs(review): step 69 pre-review triage) |
 | PR-3 | P2  | The Scope table names commits by hashes from before the rebase                                     | accepted | Scope names commits by subject (docs(review): step 69 pre-review triage)                                                                                  |
 | PR-4 | nit | The hint scan reports `import(/* x */ "./lit")` as a non-literal import                            | accepted | test: keep a commented literal import out of the hint scan                                                                                                |
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-10). The reviewer confirmed the pre-review findings PR-1 to PR-4 are fixed, ran the error and bundler-hint tests (22 passed) and the type check; it did not rerun the webpack, Rspack or Next.js builds.
+
+| #   | Sev | Finding | Decision | Resolution |
+| --- | --- | ------- | -------- | ---------- |
+| —   | —   | None    | —        | —          |
 
 ## Contract-test changes
 
