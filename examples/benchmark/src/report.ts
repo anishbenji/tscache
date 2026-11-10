@@ -297,18 +297,24 @@ export interface WorkerReport {
 }
 
 /**
- * Whether every tscache run ran on a worker of its own: each run's cache
- * (`<series>/<nonce>-<run>-tscache`) saw exactly one worker, and no two
- * runs saw the same one.
+ * Whether every tscache run of one click of Run ran on a worker of its own:
+ * each run's cache (`<series>/<nonce>-<run>-tscache`, `nonce` the click's)
+ * saw exactly one worker, and no two runs saw the same one. Reports of an
+ * earlier click's runs are left out.
  */
-export function freshWorkers(reports: readonly WorkerReport[]): {
+export function freshWorkers(
+  reports: readonly WorkerReport[],
+  nonce: string,
+): {
   runs: number;
   workers: number;
   fresh: boolean;
 } {
   const byRun = new Map<string, Set<string>>();
   for (const { cacheId, worker } of reports) {
-    if (!cacheId.endsWith("-tscache")) continue;
+    if (!cacheId.endsWith("-tscache") || !cacheId.includes(`/${nonce}-`)) {
+      continue;
+    }
     const seen = byRun.get(cacheId) ?? new Set<string>();
     seen.add(worker);
     byRun.set(cacheId, seen);

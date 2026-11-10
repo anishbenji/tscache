@@ -46,6 +46,7 @@ import {
   workload,
 } from "./workload";
 import "./style.css";
+import { Mailbox, openTogether } from "./tabs";
 
 const LATENCIES = [50, 300, 1000];
 const DEFAULT_LATENCY = 300;
@@ -97,12 +98,12 @@ async function setLatency(latencyMs: number): Promise<void> {
 
 // --- Tabs ------------------------------------------------------------------
 
-/** What each open tab waits for, by tab id. */
-const waiting = new Map<string, (message: TabMessage) => void>();
+/** What each open tab waits for, by tab id and message type. */
+const mailbox = new Mailbox();
 
 addEventListener("message", (event: MessageEvent<TabMessage>) => {
   if (event.origin !== location.origin) return;
-  waiting.get(event.data.tab)?.(event.data);
+  mailbox.deliver(event.data);
 });
 
 interface Tab {
@@ -112,40 +113,35 @@ interface Tab {
   close(): Promise<void>;
 }
 
-/** The next message of tab `id`; rejects on a failure it reports. */
-function next(id: string): Promise<TabMessage> {
-  return new Promise((resolve, reject) => {
-    waiting.set(id, (message) => {
-      waiting.delete(id);
-      if (message.type === "failed") reject(new Error(message.error));
-      else resolve(message);
-    });
-  });
-}
-
-/** Opens a tab of `mode` for run `run`, once its source is open. */
+/**
+ * Opens a tab of `mode` for run `run`, once its source is open. A tab that
+ * fails to open is removed.
+ */
 async function openTab(mode: Mode, run: string, n: number): Promise<Tab> {
   const id = `${run}/${n}`;
   const frame = document.createElement("iframe");
   const query = new URLSearchParams({ mode, run, tab: id });
   frame.src = `tab.html?${query}`;
   frame.title = `tab ${n}`;
-  const ready = next(id);
+  const ready = mailbox.next(id, "ready");
   tabs.append(frame);
-  const opened = await ready;
-  if (opened.type !== "ready") throw new Error(`tab ${id}: ${opened.type}`);
+  let opened: Awaited<typeof ready>;
+  try {
+    opened = await ready;
+  } catch (error) {
+    frame.remove();
+    throw error;
+  }
   return {
     setupMs: opened.setupMs,
     async run(views) {
-      const done = next(id);
+      const done = mailbox.next(id, "done");
       const message: PageMessage = { type: "run", views };
       frame.contentWindow?.postMessage(message, location.origin);
-      const answer = await done;
-      if (answer.type !== "done") throw new Error(`tab ${id}: ${answer.type}`);
-      return answer.views;
+      return (await done).views;
     },
     async close() {
-      const disposed = next(id);
+      const disposed = mailbox.next(id, "disposed");
       const message: PageMessage = { type: "dispose" };
       frame.contentWindow?.postMessage(message, location.origin);
       try {
@@ -204,9 +200,10 @@ async function settled(done: () => boolean): Promise<boolean> {
  */
 async function workersChecked(
   runs: number,
+  nonce: string,
 ): Promise<ReturnType<typeof freshWorkers>> {
-  await settled(() => freshWorkers(reports).runs >= runs);
-  return freshWorkers(reports);
+  await settled(() => freshWorkers(reports, nonce).runs >= runs);
+  return freshWorkers(reports, nonce);
 }
 
 /**
@@ -263,7 +260,10 @@ async function runMode(
     const one = await first.run(plan.one);
     const middle = await counters();
     opened.push(
-      ...(await Promise.all([openTab(mode, id, 2), openTab(mode, id, 3)])),
+      ...(await openTogether([
+        () => openTab(mode, id, 2),
+        () => openTab(mode, id, 3),
+      ])),
     );
     const three = await Promise.all(opened.map((tab) => tab.run(plan.three)));
     const workloadMs = performance.now() - startedAt;
@@ -347,6 +347,8 @@ async function runAll(
   runButton.disabled = true;
   copyButton.disabled = true;
   try {
+    // Each click starts with no reports; its checks read its own runs only.
+    reports.length = 0;
     await setLatency(latencyMs);
     const plan = workload(anchorFor(Date.now()));
     const nonce = crypto.randomUUID().slice(0, 8);
@@ -359,7 +361,10 @@ async function runAll(
     }
     const conditions = { latencyMs, runs, browser: browserName() };
     const table = rows(results, MODES);
-    const workers = await workersChecked(modes.includes("tscache") ? runs : 0);
+    const workers = await workersChecked(
+      modes.includes("tscache") ? runs : 0,
+      nonce,
+    );
     last = { conditions, table };
     showTable(conditions, table);
     element('[data-testid="workers"]').textContent = workers.fresh

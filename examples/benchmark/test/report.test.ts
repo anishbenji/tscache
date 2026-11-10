@@ -195,20 +195,33 @@ describe("freshWorkers", () => {
 
   it("holds when each tscache run had a worker of its own", () => {
     expect(
-      freshWorkers([
-        report("0", "a"),
-        report("0", "a"),
-        report("1", "b"),
-        { cacheId: "crypto/BENCH", worker: "page" },
-      ]),
+      freshWorkers(
+        [
+          report("0", "a"),
+          report("0", "a"),
+          report("1", "b"),
+          { cacheId: "crypto/BENCH", worker: "page" },
+        ],
+        "n",
+      ),
     ).toEqual({ runs: 2, workers: 2, fresh: true });
   });
 
+  it("counts only the runs of the given click's nonce", () => {
+    // An earlier click's run, on its own worker, is not this click's.
+    const earlier = { cacheId: "crypto/BENCH/m-0-tscache", worker: "a" };
+    expect(freshWorkers([earlier, report("0", "a")], "n")).toEqual({
+      runs: 1,
+      workers: 1,
+      fresh: true,
+    });
+  });
+
   it("fails when a run reused a worker, or one run saw two", () => {
-    expect(freshWorkers([report("0", "a"), report("1", "a")]).fresh).toBe(
+    expect(freshWorkers([report("0", "a"), report("1", "a")], "n").fresh).toBe(
       false,
     );
-    expect(freshWorkers([report("0", "a"), report("0", "b")]).fresh).toBe(
+    expect(freshWorkers([report("0", "a"), report("0", "b")], "n").fresh).toBe(
       false,
     );
   });
