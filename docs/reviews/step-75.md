@@ -1,6 +1,6 @@
 # Step 75 — Input validation: field values (N68) and snapshot coverage (N69)
 
-Branch: `feat/75-input-validation` · Reviewer: — · Rounds: 0 · Status: specification written · Verdict after triage: —
+Branch: `feat/75-input-validation` · Reviewer: — · Rounds: 0 · Status: implemented; two existing tests blocked, awaiting the director · Verdict after triage: —
 
 ## Scope
 
@@ -39,6 +39,12 @@ Spec choices made while writing (also open to veto):
 2. **`PutError.offenderField`** is a new optional public property (§2.6) and travels in the RPC error data (§4.7; additive, `PROTOCOL_VERSION` stays 1). No existing property fits: `offenderIndex` and `offenderTimestamp` locate the point, not the column. The alternative is to name the field only in the message. Recommended: add it, since an app can then report the column without parsing text. Its contract test should be a test of its own, so it can be dropped if the user vetoes the property.
 3. **Stored records (§4.10) and N69.** Page snapshots never carry `finalizedUntil` (§4.10.2), and a page snapshot with one is already invalid (§4.10.5 step 5), so the new rule changes no load. The analogous case on load, a page whose coverage reaches past the cache record's watermark, is already clipped with `rewrite: true` (§4.10.5 step 6), which never makes a provisional slot authoritative. Whether such a page should instead be skipped whole is not specified here, since it would change persistence behaviour; recommended: leave it as it is.
 4. **User-facing documentation** to change in phase 3: `site/concepts/grid.md` (the truncation sentence), `site/concepts/segments.md` and `docs/guides/patterns.md` (missing values: a JSON backend's `null` must be mapped to `NaN` in the fetcher, or the response is rejected), and the changelog entry, which is a breaking change for any caller that relied on the coercion.
+
+## Director answers (phase 3)
+
+- Open point 1 (fractional values for integer fields) is parked with the user as decision 38; the implementation truncates, as specified.
+- Open point 2: `offenderField` is added as specified (a director decision under the grant; the user may veto it).
+- Open point 3: no persistence change, as specified.
 
 ## Existing tests the new rules contradict
 
@@ -80,3 +86,26 @@ Behaviours that need a test (N69, through `CacheState.hydrate` and `Engine.hydra
 - The rejection happens before the version precondition: a snapshot of another version that also breaks the rule throws rather than returning `skipped: 'version-mismatch'`.
 - A snapshot taken from any cache state (`get` with `snapshot: true`, `Engine.snapshot`) still passes validation (the round-trip property (a) of §4.5 keeps holding).
 - Restore is unchanged: a page snapshot that carries `finalizedUntil` is skipped with `rewrite: true`, as before (§4.10.5 property (d)).
+
+## Implementation (phase 3)
+
+Codex's four contract test files (`put-field-values`, `put-field-error-wire`, `fetch-field-values`, `snapshot-own-watermark`) failed 139 and passed 84 before the implementation; afterwards all 223 pass, unchanged.
+
+- `engine/batch.ts`: step (5) of `validateBatch`. Each field is scanned and copied in one pass (each value read once); a typed array of the field's own dtype, and any numeric typed array for a float field, is copied with `set` and not scanned. The integer ranges are derived from the storage arrays' names and element sizes rather than tabulated, which keeps the `index (lazy)` entry inside its size budget. The optional skip for a narrower integer typed array (§4.3 "may skip") is not taken, for the same reason; such an array is scanned and passes.
+- `engine/snapshot.ts`: the N69 bound in step (4), in the coverage loop after that range's earlier checks.
+- `errors.ts`, `rpc/protocol.ts`: `PutError.offenderField`, carried in the wire error data.
+- Message wording: the value message ends with `expected …` instead of a separate reason (`field "x" (u8) value 300 at index 2, t = 20: expected a finite number whose truncation is in [0, 255]`), which saves bytes; §4.3's examples are updated to match.
+
+## Contract-test changes
+
+Existing tests whose assertions pinned the coercion that decisions 29 and 30 removed; the specification changed, so their assertions follow it.
+
+- `packages/tscache/test/batch.test.ts`, "converts all eight schema dtypes by typed-array assignment" (decision 29, N68). Old: the values `[1.1, -1.9, 65 537.9, 4 294 967 297.9, NaN]` went into all eight fields and were expected wrapped (`new Int32Array(values)` and so on). New: the float fields keep those values; the integer fields get `[1.1, 1.9, 0, 127.9, 0.5]`, inside every integer dtype's range, and are expected truncated (`new Int32Array(integers)` and so on). The rejected values are covered by `put-field-values.test.ts`.
+- `packages/tscache/test/hostile-values.test.ts`, "as a field value → stored as a number, or PutError", renamed "as a field value → PutError naming the value (N68)" (decision 29). Old: either stored as `NaN` (a function) or `PutError` with `code: 'field-mismatch', offenderIndex: -1`. New: always `PutError` with `code: 'field-mismatch', offenderIndex: 0, offenderTimestamp: 0, offenderField: 'x', expected: 'a number'`.
+
+## Existing tests blocked (not changed; for the director)
+
+Two more existing tests contradict the new rules. The brief says to report rather than edit them, so they are unchanged and fail, and the implementation is not committed (the branch must stay green).
+
+- `packages/tscache/test/cache-hydrate-rejections.test.ts`, V07 "checks every payload before applying even the first valid part or metadata". The fixture has `finalizedUntil: 63` and a second coverage range `{ start: 63, end: 73 }`, which N69 now rejects in step (4) (`invalid snapshot: coverage[1] reaches past finalizedUntil 63`) before the malformed payload the test expects (`invalid segment payload:`). Codex's test "checks the own bound before decoding a malformed payload" pins the opposite order, as §4.5 specifies. Proposed change: set `s.finalizedUntil = 83` in V07, so its coverage is legal again and the payload is still what fails, with a watermark the receiver would adopt.
+- `packages/tscache/test/merge-property.test.ts`, "random upsert/replace puts match a Map after every operation" (three seeds). The generator draws `i16` volumes as `next(-100_000, 100_000) + 0.75` and models typed-array wrapping (`new Int16Array([volume])[0]`); N68 now rejects those values. Proposed change: draw `next(-32_768, 32_767) + 0.75`, inside the range, so truncation is still exercised and the model stays valid.
