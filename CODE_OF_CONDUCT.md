@@ -60,13 +60,9 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement privately through
-GitHub:
-
-- open the repository's **Security** tab, choose **Report a vulnerability**, and
-  start the title with "Code of conduct"; the report is visible only to the
-  maintainer; or
-- contact the maintainer through their GitHub profile,
-  <https://github.com/anishbenji>.
+GitHub: open the repository's **Security** tab, choose **Report a vulnerability**,
+and start the title with "Code of conduct". The report is visible only to the
+maintainer.
 
 Behavior that breaks GitHub's own rules can also be reported to GitHub with
 **Report content** on the comment, issue or pull request.
