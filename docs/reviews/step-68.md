@@ -1,6 +1,6 @@
 # Step 68 — The handshake timeout bounds only the wait for hello
 
-Branch: `fix/68-handshake-hello-timeout` · Reviewer: not yet reviewed · Status: implemented, awaiting review
+Branch: `fix/68-handshake-hello-timeout` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## The defect
 
@@ -54,6 +54,18 @@ No code bugs.
 | --- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | 1   | P1       | The hello-time lock watch adds a step-down trigger beyond the wording of N25 and the "after the handshake" of N32, without recorded user approval.                                            | Code kept. Implementation notes on the N25 and N32 rows. Confirmed by the user, 2026-11-10, decision 24 option A. |
 | 2   | P2       | Docs drift: §4.8 "Worker loss (N32)" said the client queues after the handshake; §4.7 `PortClient.connect` lacked `signal` and `afterHello`; the guides' trigger lists lacked the new reason. | Fixed in §4.8, §4.7, `site/guides/workers.md` and `site/troubleshooting.md`.                                      |
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-10, head b0d08f2, rebased onto main 5635b56). The reviewer confirmed that the accepted pre-review findings are fixed and re-raised nothing. It ran the type check and 61 handshake, client and RPC tests; the full gate (`bun run ci`) had passed on the same head before the round (Vitest 2157, Playwright 163).
+
+| #   | Sev | Finding | Decision | Resolution |
+| --- | --- | ------- | -------- | ---------- |
+| —   | —   | None    | —        | —          |
+
+## Contract-test changes
+
+None.
 
 ## Not verified
 
