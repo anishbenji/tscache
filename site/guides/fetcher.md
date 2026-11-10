@@ -42,10 +42,12 @@ cache held there that the response lacks are removed. So:
   response. Do not assemble one response from two versions.
 - **Timestamps** on the cache's grid (`request.interval`, `request.alignmentOffset`), ascending,
   unique, with every field present. A response that fails validation makes the range `'fetch-failed'`.
-- **Missing values** as `NaN` in float fields. A value is converted to its field's dtype without a
-  check, so a JSON `null` is stored as `0` and an out-of-range integer wraps
-  ([Batches](/concepts/grid#batches)); the fetcher above maps `null` to `NaN`. An integer field cannot
-  mark a missing value ([Integer fields](/guides/patterns#integer-fields-cannot-be-missing)).
+- **Missing values** as `NaN` in float fields, and every value one its field can hold
+  ([Batches](/concepts/grid#batches)). JSON has no `NaN` and writes it as `null`, and a `null` is
+  rejected, not stored as `0`: map each missing value to `NaN` for a float field, as the fetcher above
+  does (`column.map((v) => v ?? Number.NaN)`). An integer field cannot mark a missing value
+  ([Integer fields](/guides/patterns#integer-fields-cannot-be-missing)), and rejects `NaN` and values
+  outside its dtype's range.
 
 The range is already coalesced: adjacent misses are merged, and a miss next to known data is extended by
 one interval into it.
@@ -147,7 +149,7 @@ Nothing is narrowed or rounded. Joining into the first page's array instead woul
 u16 300 written into a u8 array reads as 44. Every dtype of this format is exact in float64, and JSON
 numbers are float64 already, so a mixed column always widens; a 64-bit integer dtype, if one were added,
 would be refused rather than rounded. A JSON column holding anything but numbers is refused when the
-page is normalized, since JSON writes `NaN` as `null`, which a typed array would store as 0. Pages whose
+page is normalized, since JSON writes `NaN` as `null`, which the put would reject. Pages whose
 field names differ, in number, name or order, are refused; the names are compared one by one, never
 through a string built from them.
 
@@ -179,8 +181,8 @@ to watch:
 - **Types.** tscache takes timestamps as a `Float64Array` or a `number[]`, and Arrow's 64-bit integer
   columns decode to `BigInt64Array`: send timestamps as float64, or convert an int64 or timestamp column
   to a `Float64Array` (one copy).
-- **Nulls.** tscache fields have no nulls. A null in a float column must become `NaN`, and an integer
-  column cannot hold one; check each column's null count.
+- **Nulls.** tscache fields have no nulls, and a put rejects one. A null in a float column must become
+  `NaN`, and an integer column cannot hold one; check each column's null count.
 
 ## A real one
 

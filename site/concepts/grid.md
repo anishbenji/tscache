@@ -117,11 +117,24 @@ A `put` batch (and a fetcher's response) is validated as a whole before anything
 2. every field has as many values as there are timestamps (`'length-mismatch'`);
 3. timestamps are aligned, strictly ascending and unique; the first offender is reported with its index
    and value (`'misaligned'`, `'unsorted'`, `'duplicate'`);
-4. with `options.range`, every timestamp lies inside it (`'range-mismatch'`).
+4. with `options.range`, every timestamp lies inside it (`'range-mismatch'`);
+5. every value is one its field can hold (`'field-mismatch'`, naming the field, index, timestamp and
+   value; the error's `offenderField` is the field).
 
-Values are converted to the field's dtype by typed-array assignment, so `1.5` given for an `i32` field is
-stored as `1`. `NaN` is a legal value. An empty batch is legal: with a range it states that the range
-holds no points.
+What each field accepts:
+
+- **Every field** rejects a value that is not a number: `null`, `undefined`, a hole in an array, a
+  string (`"1"` included), a boolean, a bigint or an object.
+- **Float fields** (`f64`, `f32`) accept every number, `NaN`, `Infinity` and `-Infinity` included.
+  `f32` stores the nearest float32.
+- **Integer fields** (`i32`, `u32`, `i16`, `u16`, `i8`, `u8`) accept a finite number whose truncation
+  toward zero lies in the dtype's range, and store the truncation: `1.5` given for an `i32` field is
+  stored as `1`. `NaN`, `±Infinity` and a value outside the range (`300` or `-1` for `u8`) are
+  rejected.
+
+Nothing is coerced: a `null` from a JSON backend is rejected, not stored as `0`. A typed array of the
+field's own dtype is accepted as it is, without a scan. An empty batch is legal: with a range it states
+that the range holds no points.
 
 The conversions below never reject the batch and never warn, so a value that is not a valid number for
 its field is stored as some other number. Only an element that cannot be converted to a number at all (a

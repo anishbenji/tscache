@@ -45,7 +45,11 @@ cache and emits `cacheCleared` with reason `'version-mismatch'` (architecture §
 
 Presence is recorded per point, not per field: a point either exists with every field, or does not
 exist. A float field can mark one missing value with `NaN`; an integer field (`i32`, `u8`, ...) has no
-such value, so a point that exists stores a number in it. If a field can be missing on its own:
+such value, so a point that exists stores a number in it. A put rejects any value that is not a number
+(`null` and `undefined` included) and, for an integer field, `NaN`, `±Infinity` and values outside the
+dtype's range, with `PutError` `'field-mismatch'` (architecture N68). JSON has no `NaN`, so a fetcher
+that reads JSON maps each missing value (`null`) to `NaN` for a float field. If a field can be missing on
+its own:
 
 - store it as `f32` or `f64` and write `NaN` for missing (exact for integers up to 2^24 and 2^53), or
 - keep a separate cache for it, so its absence is a missing point there.

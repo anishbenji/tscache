@@ -4,6 +4,28 @@ All notable changes to `@anishbenji/tscache`. The package follows semantic
 versioning within 0.x: a minor release may break the API, a patch release never
 does.
 
+## [Unreleased]
+
+### Breaking changes
+
+- **A put rejects field values its field cannot hold** (architecture N68).
+  A value that is not a number (`null`, `undefined`, a hole in an array, a
+  string, a boolean) in any field, and `NaN`, `±Infinity` or a value outside
+  the dtype's range in an integer field, now reject the whole batch with
+  `PutError` `'field-mismatch'`; before, they were coerced (`null` stored as
+  `0`, `300` in a `u8` field as `44`). The same applies to fetcher responses,
+  which then report `'fetch-failed'`. Float fields still accept `NaN`: a JSON
+  fetcher maps its `null`s to `NaN`. Integer fields still truncate a fraction
+  toward zero.
+- **`hydrate` refuses a snapshot whose coverage reaches its own
+  `finalizedUntil`** (architecture N69), with `TscacheError`, before anything
+  changes. Snapshots the library takes are unaffected.
+
+### Added
+
+- `PutError.offenderField` names the field of a rejected value, and travels
+  across the worker boundary.
+
 ## [0.1.0] - 2026-11-09
 
 The first release. A browser cache for timestamp-aligned time series, built
