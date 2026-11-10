@@ -47,7 +47,7 @@ timing assertions and no retries.
   fix the cause.
 - Adding or upgrading a dependency is a decision: open an issue first.
 - Open the pull request against `main` and fill in its template. It merges once
-  the `ci` check passes and the maintainer approves.
+  the `ci` and `bench` checks pass and the maintainer approves.
 
 ## Reporting problems
 
