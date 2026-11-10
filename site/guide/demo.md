@@ -31,8 +31,9 @@ What to watch for:
 - **Cache or network.** Every page labels the read on screen: how many of its bars came from the
   cache and how many from the network, and its time to chart (from `get()` to the frame after the
   chart library drew it), with the median and the 95th percentile of the page's reads.
-- **The benchmark.** The Benchmark entry runs one workload with no cache, a per-tab memo, TanStack
-  Query and tscache, and tabulates the backend requests, bars, bytes and time to chart of each. The
+- **The benchmark.** The Benchmark entry runs one workload with no cache, a per-tab memo keyed by
+  exact range, TanStack Query with exact-range keys per tab, and tscache, and tabulates the backend
+  requests, the views answered without a request, bars, bytes and time to chart of each. The
   numbers the documentation quotes come from `docs/benchmarks/demo-comparison.md`, which
   `bun scripts/demo-bench.ts` generates.
 

@@ -170,9 +170,9 @@ async function fetchRange(
 
 /**
  * Fetches the whole range, page by page, and announces the fetch on the
- * examples' notice channel. Exported for the benchmark page, whose modes
- * without tscache call it in the page, so every mode fetches and decodes
- * with the same code.
+ * examples' notice channel. Exported for the benchmark page's preview; its
+ * modes without tscache call the default export in the page, so every mode
+ * fetches and decodes with the same code.
  */
 export const fetchSeries: MeteredFetch = async (request, meter) => {
   let pages = 0;
