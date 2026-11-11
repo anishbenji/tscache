@@ -58,9 +58,11 @@ uses `node:` modules; the one call to `Bun.spawnSync` (`git ls-files`) is the de
   region includes (`<<< @/snippets/x.ts#region`), HTML blocks and placeholders such as `path#symbol`
   (no extension) are not inline code tokens of that shape, so they are not anchors. A container's
   title (`::: tip <title>`) is parsed as the inline Markdown VitePress renders it as, so an anchor
-  there is checked, on the container's line. An anchor inside an HTML `<a>` element, whether written
-  inline in a paragraph or opened by an HTML block around paragraphs, is reported: its `href` is not
-  read, so the link must be written in Markdown. An inline code token shaped like an anchor (a code
+  there is checked, on the container's line. The check does not model HTML: after a raw `<a` anywhere on
+  a page (a tag, inline or in an HTML block, an attribute, a comment or a script string), every later
+  anchor on the page is reported, and nothing closes it, since no hand-written reading of HTML can say
+  whether that anchor renders inside a link. Links must be written in Markdown; no page writes a raw
+  `<a>` today. An inline code token shaped like an anchor (a code
   file and `#`) whose symbol is neither a name nor `Top.member` (`#Engine.cache()`, `#A.B.c`) is
   reported as not checkable, rather than skipped.
 - **Links.** The renderer resolves every link form to the `href` the page shows: inline links with or
@@ -115,6 +117,9 @@ re-exports.
 
 - An anchor written as HTML (`<code>…</code>`, or inside an HTML block) is not an inline code token,
   so it is not checked; no page writes one.
+- A page that holds a raw `<a` anywhere, even in a `<script setup>` string, fails for every anchor
+  after it, although the anchor may render outside any link: the check errs on the strict side
+  rather than read HTML.
 - A member with a computed name (`[key]: 1`) is not a member; a quoted name is, but no anchor can name
   it, since the anchor pattern takes identifiers only.
 - `Top.member` does not follow types: a `const` annotated with an interface, or initialised by a call
@@ -124,7 +129,7 @@ re-exports.
 
 ### Tests
 
-`site/scripts/check-doc-anchors.test.ts`, 80 tests, no clock or sleep (and covered by `bun scripts/test-clocks.ts`, whose globs now include `site/scripts/`). Pages: an anchor that
+`site/scripts/check-doc-anchors.test.ts`, 79 tests, no clock or sleep (and covered by `bun scripts/test-clocks.ts`, whose globs now include `site/scripts/`). Pages: an anchor that
 resolves; a missing file; a missing symbol; a link to another file; titled links in each title form;
 full, collapsed and shortcut references, label case and the first definition winning; a definition
 right after a heading; a definition-shaped line inside a paragraph; angle-bracket and multi-line
@@ -325,7 +330,7 @@ No contradiction affects behaviour. Items 3 to 5 are text that predates later st
 For the rebuilt check (the first commit's results, with the scanner, are in the round sections and in
 the step's history):
 
-- `bunx vitest run site/scripts/check-doc-anchors.test.ts`: 80 passed.
+- `bunx vitest run site/scripts/check-doc-anchors.test.ts`: 79 passed.
 - `bun site/scripts/check-doc-anchors.ts` on the final tree: "doc-anchors: 246 anchors in 42 pages
   resolve", the same count the scanner reported before it was removed.
 - A deliberately broken anchor and a deliberately wrong link target fail it. With the tour's
@@ -521,3 +526,18 @@ HTML link depth counted any `</a>` text, so one inside a quoted attribute
 as bare. The check now reads whole `<a>` and `</a>` tags with their quoted attribute values and skips
 comments. Tests: double- and single-quoted attributes, a comment, and an `<abbr>` that is not a link.
 The reviewer found nothing else; the TypeScript reading and the Markdown link forms drew no finding.
+
+## Pre-review before round 4 (Claude), not the gate
+
+One P1 and two P2 findings, fixed in `fix(docs): step 61, stop modelling HTML links`:
+
+1. (P1) A `</a>` in another tag's attribute (`<span title="</a>">`), in raw text (`<textarea>`), or an
+   `<a>` with an unquoted attribute holding a quote still closed or hid the HTML link, so an anchor in
+   it passed. HTML link handling had drawn a finding in four passes running, so it was redesigned: the
+   check no longer tokenizes HTML. Any raw `<a` on a page makes every later anchor on it a problem,
+   and nothing closes it. Every form found so far is a test case. Parsing the rendered page with
+   Vue's compiler, as VitePress does, would be exact but needs a new dependency; it is not needed
+   while no page writes a raw `<a>`.
+2. (P2) A `<script setup>` string holding `<a` now fails the page's later anchors: an intended,
+   documented strict rejection, with a test.
+3. (P2) The header, the `HTML_LINK` TSDoc and this file now state the rule as built.

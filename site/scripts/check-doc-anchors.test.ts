@@ -21,6 +21,8 @@ const MISMATCH = `the link points to ${WRONG}, not ${BLOB}${SOURCE}`;
 const PART =
   "an anchor in a link must be the link's whole text, so its target can be checked";
 const SLOT_OF = { [SOURCE]: "export function slotOf() {}" };
+const HTML =
+  "an anchor after a raw HTML <a> on its page cannot be checked; write links in Markdown";
 
 const find = await anchorReader();
 const findAnchors = (markdown: string, file = "site/page.md"): Anchor[] =>
@@ -42,31 +44,35 @@ const declares = (source: string, symbol: string, path?: string) =>
 const I = "$" + "{";
 
 describe("check-doc-anchors: pages", () => {
-  it("reports an anchor inside an inline HTML link, whose target it does not read", () => {
-    const html = `See <a href="${WRONG}">${SPAN}</a>.\n`;
-    expect(problems(html, SLOT_OF)).toEqual([
-      "an anchor in an HTML link cannot be checked; write the link in Markdown",
-    ]);
-    expect(problems(`See <b>${SPAN}</b>.\n`, SLOT_OF)).toEqual([]);
-  });
-
-  it("reports an anchor inside an <a> that an HTML block opens", () => {
-    const wrapped = `<a href="${WRONG}">\n\n${SPAN}\n\n</a>\n\nAfter: ${SPAN}\n`;
-    expect(problems(wrapped, SLOT_OF)).toEqual([
-      "an anchor in an HTML link cannot be checked; write the link in Markdown",
-    ]);
-  });
-
-  it("counts only real HTML tags: not a closing tag in an attribute or a comment", () => {
-    const html =
-      "an anchor in an HTML link cannot be checked; write the link in Markdown";
-    const quoted = `<a href="${WRONG}" title="</a>">${SPAN}</a>\n`;
-    const single = `<a href='${WRONG}' title='</a>'>${SPAN}</a>\n`;
-    const commented = `<a href="${WRONG}"><!-- </a> -->${SPAN}</a>\n`;
-    for (const page of [quoted, single, commented]) {
-      expect(problems(page, SLOT_OF), page).toEqual([html]);
+  it("reports every anchor after a raw HTML <a> on its page, whatever closes it", () => {
+    const after = `${SPAN}\n`;
+    for (const html of [
+      `See <a href="${WRONG}">${SPAN}</a>.\n`,
+      `<a href="${WRONG}">\n\n${SPAN}\n\n</a>\n\nAfter: ${SPAN}\n`,
+      `<a href="${WRONG}" title="</a>">${SPAN}</a>\n\n${after}`,
+      `<a href="${WRONG}"><span title="</a>">${SPAN}</span></a>\n`,
+      `<a href="${WRONG}">\n<textarea></a></textarea>\n\n${SPAN}\n\n</a>\n`,
+      `<div>\n<a href=${WRONG} title=x"y>\n\n${SPAN}\n\n</a></div>\n`,
+      `<a href="${WRONG}"><!-- </a> -->${SPAN}</a>\n`,
+    ]) {
+      const found = problems(html, SLOT_OF);
+      expect(found.length, html).toBeGreaterThan(0);
+      expect(new Set(found), html).toEqual(new Set([HTML]));
     }
-    expect(problems(`<abbr title="x">${SPAN}</abbr>\n`, SLOT_OF)).toEqual([]);
+  });
+
+  it("rejects a page whose script holds an <a, and leaves pages with other HTML alone", () => {
+    const script = `<script setup>\nconst s = "<a href='x'>";\n</script>\n\nText ${SPAN}\n`;
+    expect(problems(script, SLOT_OF)).toEqual([HTML]);
+    expect(problems(`Before ${SPAN}\n\n<a href="x">x</a>\n`, SLOT_OF)).toEqual(
+      [],
+    );
+    expect(
+      problems(
+        `See <b>${SPAN}</b>, <abbr title="x">${SPAN}</abbr>.\n`,
+        SLOT_OF,
+      ),
+    ).toEqual([]);
   });
 
   it("reports a token shaped like an anchor whose symbol it cannot check", () => {

@@ -10,11 +10,13 @@
 //     exactly as the site renders it: references, titles and every link form
 //     resolve to the `href` the page shows. An anchor in a link must be the
 //     link's whole text, and the link must point at the anchor's file on
-//     GitHub. An anchor inside an HTML `<a>` element, inline or opened by an
-//     HTML block, is reported, since its target is not read. A token shaped
-//     like an anchor whose symbol is not a name or `Top.member` is reported. Container titles (`::: tip <title>`) are read as
-//     the inline Markdown VitePress renders them as. Fenced code, includes
-//     and HTML blocks hold no inline code token, so they hold no anchor.
+//     GitHub. The check does not model HTML: after a raw `<a` anywhere on a
+//     page (a tag, an attribute, a comment or a script string), every later
+//     anchor on the page is reported, since its link cannot be trusted. A
+//     token shaped like an anchor whose symbol is not a name or `Top.member`
+//     is reported. Container titles (`::: tip <title>`) are read as the
+//     inline Markdown VitePress renders them as. Fenced code, includes and
+//     HTML blocks hold no inline code token, so they hold no anchor.
 //   - Sources are parsed by TypeScript 6's compiler API (the site's TypeDoc
 //     pins it; TypeScript 7 has no JS API). A symbol resolves when the file
 //     declares it at top level (a function, class, variable, type,
@@ -42,7 +44,7 @@ const ANCHOR =
 /** What a link target reads as when the anchor is only part of a link's text. */
 export const PART_OF_TEXT = "a link whose text holds more than the anchor";
 
-/** What a link target reads as when the anchor sits inside an inline HTML `<a>` element. */
+/** What a link target reads as when a raw HTML `<a` comes before the anchor on its page. */
 export const HTML_LINK = "an HTML link";
 
 /** An inline code token shaped like an anchor's start, a code file and `#`, whatever follows. */
@@ -86,8 +88,8 @@ export async function anchorReader(): Promise<FindAnchors> {
     const env: { content?: string } = {};
     const tokens = md.parse(markdown, env);
     const first = firstLine(markdown, env.content);
-    // HTML `<a>` elements open across blocks (an HTML block can wrap paragraphs), so their depth is
-    // tracked for the whole page; any anchor inside one is reported.
+    // A raw HTML `<a` anywhere on the page (an HTML block can wrap paragraphs) makes every later
+    // anchor on the page unreadable; see `htmlLinks`.
     const html = { open: 0 };
     return tokens.flatMap((block, i) => {
       const line = first + lineOf(tokens, i);
@@ -185,18 +187,12 @@ function anchorsIn(
 }
 
 /**
- * An HTML comment, or a whole `<a>` or `</a>` tag read with its quoted attribute values, so a `</a>`
- * inside a comment or an attribute is not taken for a tag.
+ * Notes a raw HTML `<a` anywhere in `html` (a tag, an attribute, a comment or a script alike). The
+ * check does not model HTML: once a page holds one, no later anchor's link can be trusted, so every
+ * later anchor on the page is reported, and nothing closes it. No page writes a raw `<a>` today.
  */
-const HTML_A =
-  /<!--[\s\S]*?(?:-->|$)|<(\/?)a(?=[\s>/])(?:"[^"]*"|'[^']*'|[^'">])*>/gi;
-
-/** Counts the HTML `<a>` elements that `html` opens and closes into the page's open depth. */
-function htmlLinks(html: string, depth: { open: number }): void {
-  for (const [tag, slash] of html.matchAll(HTML_A)) {
-    if (tag.startsWith("<!--")) continue;
-    depth.open = Math.max(0, depth.open + (slash === "/" ? -1 : 1));
-  }
+function htmlLinks(html: string, page: { open: number }): void {
+  if (/<a[\s>/]/i.test(html)) page.open = 1;
 }
 
 /**
@@ -428,7 +424,7 @@ function linkProblem(a: Anchor): string {
     return "an anchor in a link must be the link's whole text, so its target can be checked";
   }
   if (a.target === HTML_LINK) {
-    return "an anchor in an HTML link cannot be checked; write the link in Markdown";
+    return "an anchor after a raw HTML <a> on its page cannot be checked; write links in Markdown";
   }
   return `the link points to ${a.target}, not ${BLOB}${a.path}`;
 }
