@@ -13,7 +13,7 @@ The 0.1.0 release rehearsal of 2026-11-11 installed the packed package into a fr
 
 **The `?fetcher` declaration (finding 3).** The quick start imported `./fetcher.ts?fetcher` and left its type declaration to a link, so `tsc`, and with it `npm run build` in the vanilla-ts template, failed with `TS2307: Cannot find module './fetcher.ts?fetcher'`. The README now shows the declaration between the fetcher and the page code, copied from the `*?fetcher` block of `site/snippets/env.d.ts`, which the getting-started guide includes. It shows only that block: the vanilla-ts template's `tsconfig.json` loads Vite's client types, which already declare `?worker&url`, and the rehearsal failed only on `?fetcher`. The README says so in one parenthesis. The closing paragraph no longer lists the declarations among what the guide covers.
 
-**What `finalizedUntil` means (finding 4).** The fetcher's comment showed `meta: { version, finalizedUntil }` with no gloss, and the rehearsal sent the range's end, which leaves the last point provisional and refetched by every read. The comment now gives the definition from `site/guides/fetcher.md` ("the first timestamp that is not final yet"), the effect of the watermark from `site/concepts/freshness.md` (points at or after it are fetched again), and what omitting it does: every point and every gap in the response is final and never fetched again. The last clause follows `site/concepts/freshness.md` ("Otherwise a slot returned without a point becomes a confirmed gap and is never fetched again") and the code: `meta` and both of its fields are optional in `FetchResponse` (`packages/tscache/src/types.ts`), and a cache whose watermark is undefined treats no point as provisional (`packages/tscache/src/engine/cache.ts`, the `finalizedUntil` getter; `#putValid` moves the watermark only when the response carries one).
+**What `finalizedUntil` means (finding 4).** The fetcher's comment showed `meta: { version, finalizedUntil }` with no gloss, and the rehearsal sent the range's end, which leaves the last point provisional and refetched by every read. The comment now gives the definition from `site/guides/fetcher.md` ("the first timestamp that is not final yet"), the effect of the watermark from `site/concepts/freshness.md` (points at or after it are fetched again), and what omitting it does: the watermark only moves forward, so a response without it leaves it where it is, and only a cache that never had one treats every point and gap as final. This follows the code: `meta` and both of its fields are optional in `FetchResponse` (`packages/tscache/src/types.ts`); `#putValid` moves the watermark only when the response carries one and `#advance` never moves it back; `#cover` cuts coverage at the watermark (`packages/tscache/src/engine/cache.ts`); and a cache whose watermark was never set treats no point as provisional (`site/concepts/freshness.md`, "Otherwise a slot returned without a point becomes a confirmed gap and is never fetched again").
 
 **The site.** The getting-started guide (`site/guide/getting-started.md`) already shows the declaration (`<<< @/snippets/env.d.ts`) next to the Vite config, and its fetcher snippet (`site/snippets/fetcher.ts`) documents `finalizedUntil` as "The first timestamp that is not final yet." Neither gap exists there, so the site is unchanged.
 
@@ -36,6 +36,23 @@ Not verified: a fresh `npm create vite` app installing the packed tarball (the r
 ## Contradictions found
 
 None between the code and the docs on these two points.
+
+## Pre-review (Claude), not the gate
+
+Before Codex round 1, a fresh-context Opus pre-review found:
+
+1. (P1) The `finalizedUntil` comment said a response without it makes every point and gap final. The
+   watermark persists and only moves forward, so once set, points at or after it stay provisional
+   whatever later responses omit (reproduced with a scratch test: a later response without `meta`
+   left slots after the watermark uncovered). Fixed: the comment says it only moves forward, a
+   response without it leaves it where it is, and only a cache that never had one treats everything
+   as final. The justification above is corrected.
+2. (P2) The quick start did not say where `env.d.ts` goes; the vanilla-ts template's `tsconfig.json`
+   includes `src` only, so a root `env.d.ts` would leave the `TS2307` error. Fixed: the files are
+   labelled `src/fetcher.ts`, `src/env.d.ts` and `src/main.ts`, and the text says to put the
+   declaration in a file the `tsconfig.json` includes.
+
+Both fixed in `docs(readme): the watermark persists, and where the declarations go`.
 
 ## Review rounds
 

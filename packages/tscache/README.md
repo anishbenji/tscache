@@ -55,7 +55,7 @@ Write a fetcher. The worker loads it with `import()` and calls its default
 export with the range to fetch:
 
 ```ts
-// fetcher.ts
+// src/fetcher.ts
 import type { Fetcher } from "@anishbenji/tscache/fetcher";
 
 const fetcher: Fetcher = {
@@ -67,8 +67,9 @@ const fetcher: Fetcher = {
     if (!response.ok) throw new Error(`backend answered ${response.status}`);
     // { timestamps, fields, meta: { version, finalizedUntil } }
     // finalizedUntil: the first timestamp that is not final yet. Points at or
-    // after it are fetched again; without it, every point and every gap in
-    // the response is final and never fetched again.
+    // after it are fetched again. It only moves forward: a response without it
+    // leaves it where it is, and a cache that never had one treats every point
+    // and gap as final.
     return response.json();
   },
 };
@@ -76,11 +77,12 @@ const fetcher: Fetcher = {
 export default fetcher;
 ```
 
-For TypeScript, declare the `?fetcher` import once (Vite's client types
-already declare `?worker&url`):
+For TypeScript, declare the `?fetcher` import once, in a file your
+`tsconfig.json` includes, such as `src/` (Vite's client types already declare
+`?worker&url`):
 
 ```ts
-// env.d.ts
+// src/env.d.ts
 declare module "*?fetcher" {
   const url: string;
   export default url;
@@ -90,6 +92,7 @@ declare module "*?fetcher" {
 Then create a client on the page, open a cache and read a range:
 
 ```ts
+// src/main.ts
 import { createClient } from "@anishbenji/tscache";
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "./fetcher.ts?fetcher";
