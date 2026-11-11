@@ -10,6 +10,20 @@ root.
 - [**Data model**](./data-model): the grid, slots, segments, coverage, versions and watermarks inside one
   cache.
 
+The flows, each a sequence diagram with a walkthrough and the code behind it:
+
+- [**Startup and fallback**](./startup): the hosting chain and the handshake.
+- [**A read, end to end**](./read): `get()` from a tab to the worker and back, with in-flight
+  subtraction and coalescing.
+- [**Sharing across tabs**](./tabs): the first tab starts the SharedWorker, later tabs join, a tab
+  closes, the worker dies.
+- [**Fences and invalidation**](./fences): the clear generation and the invalidate fence.
+- [**Auth refresh**](./auth): a refused token, the `authInvalid` broadcast, `updateAuth`, and the next
+  read.
+- [**Persistence**](./persistence): restore at `cache()`, write-back, and a quota stop.
+- [**Live feeds**](./live-feeds): the reference clients' elected feed tab, which puts bars into the
+  shared cache.
+
 ## The system
 
 <figure class="hiw-figure">
@@ -96,6 +110,8 @@ Drawn from:
 - [`packages/tscache/src/rpc/port-client.ts#PortClient`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/rpc/port-client.ts)
 
 ## One read, briefly
+
+[A read, end to end](./read) follows these steps in a sequence diagram.
 
 1. `cache.get(range)` sends a `get` request through the `PortClient`.
 2. The `RpcServer` hands it to `Orchestrator.get`, with a request id of the form `clientId:seq`.

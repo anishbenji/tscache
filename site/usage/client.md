@@ -79,7 +79,9 @@ share data.
 
 When the worker behind a client goes away (in Chromium, a SharedWorker dies with the renderer of the tab
 that created it), every pending and later call rejects with `TscacheError` and the client emits
-`workerLost` once. Create a new client; it starts a new worker with an empty cache.
+`workerLost` once. Create a new client; it starts a new worker, whose memory starts empty. A cache with
+`persist: true` restores what the old worker had written to IndexedDB at the new client's
+`client.cache()` ([Persistence](/guides/persistence)).
 
 <<< @/snippets/client.ts#lost{ts}
 
