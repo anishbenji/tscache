@@ -58,7 +58,7 @@ The reproduction does not stay as a regression test, against the usual practice 
 
 - `scripts/flake-hunt.sh -n 20 --load e2e/reference/clients.spec.ts` after the fix, through the heavy-job lock: 1380 passed (1.3 h), 0 failures in 20 repeats of each of the spec's 69 tests.
 - The first version of the fix, which waited for exactly the shown start less six hours, under the same command: 1348 passed, 2 failed, 30 did not run (1.3 h). Both failures were reference-solid's Lightweight Charts scroll-back test, timing out in the new wait with the page showing a span of 5 h 59 min and "nothing missing". The wait now takes the shown span and the slack described in Fix. The reproduction above was run again with the final wait: 15 of 15 failed with the old assertion, 15 of 15 passed with the fix.
-- `bun run ci` through the heavy-job lock on the branch head: its result is in the step's report to the director. `bun scripts/test-clocks.ts` alone: 158 files clean. `bunx tsc -p e2e`: no errors. `bunx biome check e2e/reference/clients.spec.ts`: clean.
+- `bun run ci` through the heavy-job lock on the branch head (5d5393f): exit 0, Vitest 2249 passed, Playwright 175 passed. `bun scripts/test-clocks.ts` alone: 158 files clean. `bunx tsc -p e2e`: no errors. `bunx biome check e2e/reference/clients.spec.ts`: clean.
 
 ## Contract-test changes
 
@@ -68,3 +68,7 @@ None.
 
 - The fix on GitHub's runner. The next weekly `Flake hunt` run, or one dispatched with `files: e2e/reference/clients.spec.ts`, is that check.
 - The failure arising naturally on this machine: 0 in 20 repeats before the fix. The root cause rests on the CI log's fetch span, the deterministic reproduction and the session's scroll pause.
+
+## Pre-review
+
+Opus pre-review before round 1: no P0 or P1. One suspected P2, recorded here and not fixed: the new wait guarantees the end-of-drag read's fetch notice, not its redraw, so `scrolled` may still hold the mid-drag bar count. The drag-forward check `toBeLessThan(scrolled - 100)` then fails only if the mid-drag read added just 101 or 102 bars and at least one live bar arrived since opening. The same gap existed before this step, it has not been seen to fail, and closing it would need another 20-repeat hunt; it stays as a known margin.
