@@ -1,6 +1,6 @@
 # Step 79 — Two README gaps the release rehearsal found
 
-Branch: `docs/79-readme-first-run` · Reviewer: GPT-6.1 Sol · Rounds: — · Status: awaiting review · Verdict after triage: —
+Branch: `docs/79-readme-first-run` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -54,6 +54,22 @@ Before Codex round 1, a fresh-context Opus pre-review found:
 
 Both fixed in `docs(readme): the watermark persists, and where the declarations go`.
 
-## Review rounds
+## Second pre-review (Claude), not the gate
 
-Left for the director.
+Two P2 findings, fixed after round 1 in `docs(readme): use the read's result, and the index sizes`:
+
+1. The quick start's last block declared `result` and never read it, so the vanilla-ts template's
+   `noUnusedLocals` still failed `tsc` (TS6133); the earlier check had turned that option off. The
+   block now logs `result.timestamps.length` and `result.misses`. Checked by writing the README's
+   four blocks to their labelled paths in a copy of the rehearsal's vanilla-ts app, with its
+   `tsconfig.json` unchanged (`noUnusedLocals` and `noUnusedParameters` on, `include: ["src"]`) and
+   the 0.1.0 tarball installed: `tsc -p .` exits 0, and exits 1 with `TS2307` once `src/env.d.ts` is
+   removed.
+2. The `docs/INDEX.md` sizes for the README and `docs/reviews/` were stale after the fixes;
+   re-measured on the final head.
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-11). The reviewer confirmed both fixes from the first pre-review are present.
+The second pre-review's two P2 fixes landed after the round; they change one line of the README
+snippet and the index sizes.

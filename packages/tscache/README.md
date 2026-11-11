@@ -114,6 +114,7 @@ const result = await candles.get({ start: now - 6 * 60 * MINUTE, end: now });
 // result.timestamps and result.fields: the points, one typed array per field
 // result.coverage: the ranges the cache knows for certain
 // result.misses: the ranges it does not, each with a reason
+console.log(result.timestamps.length, result.misses);
 ```
 
 A read never rejects because data is unavailable: a failed fetch comes back as
