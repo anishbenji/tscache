@@ -57,6 +57,18 @@ describe("check-doc-anchors: pages", () => {
     ]);
   });
 
+  it("counts only real HTML tags: not a closing tag in an attribute or a comment", () => {
+    const html =
+      "an anchor in an HTML link cannot be checked; write the link in Markdown";
+    const quoted = `<a href="${WRONG}" title="</a>">${SPAN}</a>\n`;
+    const single = `<a href='${WRONG}' title='</a>'>${SPAN}</a>\n`;
+    const commented = `<a href="${WRONG}"><!-- </a> -->${SPAN}</a>\n`;
+    for (const page of [quoted, single, commented]) {
+      expect(problems(page, SLOT_OF), page).toEqual([html]);
+    }
+    expect(problems(`<abbr title="x">${SPAN}</abbr>\n`, SLOT_OF)).toEqual([]);
+  });
+
   it("reports a token shaped like an anchor whose symbol it cannot check", () => {
     const odd = `- [\`${SOURCE}#Engine.cache()\`](${WRONG})\n- \`${SOURCE}#A.B.c\`\n`;
     const message =

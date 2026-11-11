@@ -184,11 +184,19 @@ function anchorsIn(
   return anchors;
 }
 
+/**
+ * An HTML comment, or a whole `<a>` or `</a>` tag read with its quoted attribute values, so a `</a>`
+ * inside a comment or an attribute is not taken for a tag.
+ */
+const HTML_A =
+  /<!--[\s\S]*?(?:-->|$)|<(\/?)a(?=[\s>/])(?:"[^"]*"|'[^']*'|[^'">])*>/gi;
+
 /** Counts the HTML `<a>` elements that `html` opens and closes into the page's open depth. */
 function htmlLinks(html: string, depth: { open: number }): void {
-  const opens = html.match(/<a[\s>]/gi)?.length ?? 0;
-  const closes = html.match(/<\/a\s*>/gi)?.length ?? 0;
-  depth.open = Math.max(0, depth.open + opens - closes);
+  for (const [tag, slash] of html.matchAll(HTML_A)) {
+    if (tag.startsWith("<!--")) continue;
+    depth.open = Math.max(0, depth.open + (slash === "/" ? -1 : 1));
+  }
 }
 
 /**

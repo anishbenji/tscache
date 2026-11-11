@@ -1,6 +1,6 @@
 # Step 61 — The code tour and the anchor check
 
-Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: redesign the check on real parsers, then re-review (redesign done; round 3 next)
+Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in review · Verdict after triage: fix and re-review (round 4 next)
 
 Two parts. A check, run in `bun run ci`, that fails when a `path#symbol` anchor in `site/` no longer
 resolves, and a "Code tour" page in "How it works" that reads the package source in the order a
@@ -124,7 +124,7 @@ re-exports.
 
 ### Tests
 
-`site/scripts/check-doc-anchors.test.ts`, 79 tests, no clock or sleep (and covered by `bun scripts/test-clocks.ts`, whose globs now include `site/scripts/`). Pages: an anchor that
+`site/scripts/check-doc-anchors.test.ts`, 80 tests, no clock or sleep (and covered by `bun scripts/test-clocks.ts`, whose globs now include `site/scripts/`). Pages: an anchor that
 resolves; a missing file; a missing symbol; a link to another file; titled links in each title form;
 full, collapsed and shortcut references, label case and the first definition winning; a definition
 right after a heading; a definition-shaped line inside a paragraph; angle-bracket and multi-line
@@ -325,7 +325,7 @@ No contradiction affects behaviour. Items 3 to 5 are text that predates later st
 For the rebuilt check (the first commit's results, with the scanner, are in the round sections and in
 the step's history):
 
-- `bunx vitest run site/scripts/check-doc-anchors.test.ts`: 79 passed.
+- `bunx vitest run site/scripts/check-doc-anchors.test.ts`: 80 passed.
 - `bun site/scripts/check-doc-anchors.ts` on the final tree: "doc-anchors: 246 anchors in 42 pages
   resolve", the same count the scanner reported before it was removed.
 - A deliberately broken anchor and a deliberately wrong link target fail it. With the tour's
@@ -512,3 +512,12 @@ anchors`:
 
 Removing the HTML-block rule makes the new test fail. A round 3 chain had started before this
 pre-review ended and was stopped before the reviewer wrote a round file; round 3 runs on this head.
+
+## Round 3 — reviewer verdict: merge after fixes
+
+One P1 (2026-11-11), reproduced and fixed in `fix(docs): step 61 round 3, read whole HTML tags`: the
+HTML link depth counted any `</a>` text, so one inside a quoted attribute
+(`<a href="…" title="</a>">`) or an HTML comment closed the link early and the anchor inside passed
+as bare. The check now reads whole `<a>` and `</a>` tags with their quoted attribute values and skips
+comments. Tests: double- and single-quoted attributes, a comment, and an `<abbr>` that is not a link.
+The reviewer found nothing else; the TypeScript reading and the Markdown link forms drew no finding.
