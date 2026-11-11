@@ -1,6 +1,6 @@
 # Step 77 — The scroll-back flake in the reference clients spec
 
-Branch: `fix/77-clients-scrollback-flake` · Reviewer: GPT-6.1 Sol (high) · Rounds: — · Status: — · Verdict after triage: —
+Branch: `fix/77-clients-scrollback-flake` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -59,6 +59,10 @@ The reproduction does not stay as a regression test, against the usual practice 
 - `scripts/flake-hunt.sh -n 20 --load e2e/reference/clients.spec.ts` after the fix, through the heavy-job lock: 1380 passed (1.3 h), 0 failures in 20 repeats of each of the spec's 69 tests.
 - The first version of the fix, which waited for exactly the shown start less six hours, under the same command: 1348 passed, 2 failed, 30 did not run (1.3 h). Both failures were reference-solid's Lightweight Charts scroll-back test, timing out in the new wait with the page showing a span of 5 h 59 min and "nothing missing". The wait now takes the shown span and the slack described in Fix. The reproduction above was run again with the final wait: 15 of 15 failed with the old assertion, 15 of 15 passed with the fix.
 - `bun run ci` through the heavy-job lock on the branch head (5d5393f): exit 0, Vitest 2249 passed, Playwright 175 passed. `bun scripts/test-clocks.ts` alone: 158 files clean. `bunx tsc -p e2e`: no errors. `bunx biome check e2e/reference/clients.spec.ts`: clean.
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-11). The reviewer judged that the pre-review's redraw margin predates this diff and did not raise it.
 
 ## Contract-test changes
 
