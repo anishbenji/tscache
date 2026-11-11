@@ -1,6 +1,6 @@
 # Step 61 — The code tour and the anchor check
 
-Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: fix and re-review (round 2 next)
+Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: redesign the check on real parsers, then re-review
 
 Two parts. A check, run in `bun run ci`, that fails when a `path#symbol` anchor in `site/` no longer
 resolves, and a "Code tour" page in "How it works" that reads the package source in the order a
@@ -388,3 +388,23 @@ behind the scanner and links with more text`:
 5. (P2) The JSX limit understated its effect. Restated here and in the script's header.
 
 This is the second pre-review for round 2, the most the brief allows; round 2 follows.
+
+## Round 2 — reviewer verdict: merge after fixes
+
+Three P1 findings (2026-11-11), all accepted:
+
+1. A shortcut reference whose text holds more than the anchor (``[the `…#slotOf` helper]`` with a
+   definition) escapes the target check; `insideLink` looks only for inline and full reference
+   suffixes.
+2. A reference definition right after a heading, with no blank line, is ignored, although VitePress
+   renders the link with it: a wrong destination passes, and a correct full reference fails.
+3. The name of a named function or class expression (`export const impl = function ghost() {}`)
+   counts as a top-level declaration.
+
+Triage: the Markdown reading and the TypeScript scanning have each drawn findings in both rounds and
+in both pre-reviews, which the review loop treats as a call to redesign rather than patch. Both
+parsers the check needs are already in the repository with no new dependency: the site workspace
+pins TypeScript 6 under an npm alias (`typescript: npm:typescript@6.0.3`, for TypeDoc), whose compiler
+API reads declarations exactly, and VitePress's own Markdown renderer gives the link tokens exactly
+as the site renders them. The check is rebuilt on those two (next commits), with every finding so far
+kept as a regression test, before round 3.
