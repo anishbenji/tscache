@@ -83,6 +83,13 @@ const config = defineConfig({
             { text: "Overview", link: "/how-it-works/" },
             { text: "Package map", link: "/how-it-works/package-map" },
             { text: "Data model", link: "/how-it-works/data-model" },
+            { text: "Startup and fallback", link: "/how-it-works/startup" },
+            { text: "A read, end to end", link: "/how-it-works/read" },
+            { text: "Sharing across tabs", link: "/how-it-works/tabs" },
+            { text: "Fences and invalidation", link: "/how-it-works/fences" },
+            { text: "Auth refresh", link: "/how-it-works/auth" },
+            { text: "Persistence", link: "/how-it-works/persistence" },
+            { text: "Live feeds", link: "/how-it-works/live-feeds" },
           ],
         },
         {
