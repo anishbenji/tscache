@@ -9,6 +9,8 @@ root.
   package's imports.
 - [**Data model**](./data-model): the grid, slots, segments, coverage, versions and watermarks inside one
   cache.
+- [**Code tour**](./code-tour): the source read in the order a request travels, from the entries to the
+  Vite plugin, with the demo-hub scenario that shows each part at work.
 
 The flows, each a sequence diagram with a walkthrough and the code behind it:
 

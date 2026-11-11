@@ -90,6 +90,7 @@ const config = defineConfig({
             { text: "Auth refresh", link: "/how-it-works/auth" },
             { text: "Persistence", link: "/how-it-works/persistence" },
             { text: "Live feeds", link: "/how-it-works/live-feeds" },
+            { text: "Code tour", link: "/how-it-works/code-tour" },
           ],
         },
         {
