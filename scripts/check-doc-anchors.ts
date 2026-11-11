@@ -22,9 +22,11 @@
 // scanner rather than a parser: it blanks comments, strings, template
 // literals and regular expressions, then walks the brackets. It cannot see
 // names a parser would find through destructuring, a second declarator
-// (`const a = 1, b = 2`), `export *`, or JSX text; and a block it takes for
-// an object literal (a `case x: {` block) can lend it a false member, which
-// only makes the check more lenient.
+// (`const a = 1, b = 2`) or `export *`; it cannot read JSX (a closing tag's
+// `/` starts what it takes for a regular expression); and a block it takes
+// for an object literal (a `case x: {` block) can lend it a false member.
+// Where a misread wipes a bracket, the brackets stop balancing; a symbol the
+// check then cannot find is reported with the line where that happened.
 //
 //   bun scripts/check-doc-anchors.ts           checks every page under site/
 //   bun scripts/check-doc-anchors.ts <files>   checks those pages
@@ -50,6 +52,9 @@ const CODE_SPAN =
 
 /** What a link target reads as when the link after an anchor cannot be parsed. */
 export const UNREADABLE = "a link the check cannot read";
+
+/** What a link target reads as when the anchor is only part of a link's text. */
+export const PART_OF_TEXT = "a link whose text holds more than the anchor";
 
 export interface Anchor {
   file: string;
@@ -90,15 +95,28 @@ function proseLines(markdown: string): [number, string][] {
 export function findAnchors(file: string, markdown: string): Anchor[] {
   const lines = proseLines(markdown);
   const refs = new Map<string, string>();
-  for (const [, text] of lines) {
+  const definitions = new Set<number>();
+  let prev: [number, string] | undefined;
+  for (const [line, text] of lines) {
     const def = DEFINITION.exec(text);
-    const name = labelOf(def?.[1] ?? "");
-    // The first definition of a label wins, as in CommonMark.
-    if (def !== null && !refs.has(name)) refs.set(name, def[2] as string);
+    // A definition cannot interrupt a paragraph: it starts a block (after a blank line, a fence or
+    // the page's start) or follows another definition.
+    const starts =
+      prev === undefined ||
+      prev[0] !== line - 1 ||
+      prev[1].trim() === "" ||
+      definitions.has(prev[0]);
+    if (def !== null && starts) {
+      definitions.add(line);
+      const name = labelOf(def[1] as string);
+      // The first definition of a label wins, as in CommonMark.
+      if (!refs.has(name)) refs.set(name, def[2] as string);
+    }
+    prev = [line, text];
   }
   // A definition line is not rendered; its label is checked where a link uses it.
   return lines
-    .filter(([, text]) => !DEFINITION.test(text))
+    .filter(([line]) => !definitions.has(line))
     .flatMap(([line, text]) => anchorsOn(file, line, text, refs));
 }
 
@@ -121,7 +139,11 @@ function anchorsOn(
     if (anchor === null) return [];
     const path = anchor[1] as string;
     const symbol = anchor[2] as string;
-    const target = targetOf(match, text, refs);
+    const start = match.index + (match[1] ?? "").length;
+    const end = start + (match[2] ?? "").length + 2;
+    const target =
+      targetOf(match, text, refs) ??
+      (insideLink(text, start, end) ? PART_OF_TEXT : undefined);
     return [
       { file, line, path, symbol, ...(target === undefined ? {} : { target }) },
     ];
@@ -150,6 +172,20 @@ function targetOf(
 }
 
 /**
+ * Whether the code span between `start` and `end` sits inside a link's text with other text beside
+ * it (`[the `a#b` helper](…)`), whose target the check does not compare, so it is reported.
+ */
+function insideLink(text: string, start: number, end: number): boolean {
+  const before = text.slice(0, start);
+  const opens = before.lastIndexOf("[");
+  if (opens === -1 || before.indexOf("]", opens) !== -1) return false;
+  const after = text.slice(end);
+  const closes = after.indexOf("]");
+  if (closes === -1 || after.lastIndexOf("[", closes) !== -1) return false;
+  return /^[([]/.test(after.slice(closes + 1));
+}
+
+/**
  * The destination of a reference link whose text, the code span `code`, is followed by `after`. A
  * full or collapsed reference is a link even when its label is undefined; a shortcut is one only
  * when defined.
@@ -172,6 +208,11 @@ export interface Declarations {
   members: Set<string>;
   /** The members of each top-level declaration that has a body. */
   membersOf: Map<string, Set<string>>;
+  /**
+   * The line where the scanned brackets stop balancing, when they do: the scanner has misread the
+   * source there (or the source does not parse), so what it found after that line is not reliable.
+   */
+  unbalanced?: number;
 }
 
 /** Characters that end a value, after which a `/` divides (besides names, numbers and `)`). */
@@ -213,6 +254,8 @@ class Blanker {
   readonly #parens: boolean[] = [];
   /** Whether the last code character closed a control keyword's condition. */
   #afterCondition = false;
+  /** Whether the current word follows `.` or `#`, so it is a property name, never a keyword. */
+  #property = false;
 
   constructor(src: string) {
     this.#src = src;
@@ -235,8 +278,22 @@ class Blanker {
       this.#interpolations.pop();
       return this.#templateText(i + 1);
     }
+    const postfix = this.#postfix(c, i);
+    if (postfix > 0) return i + postfix;
     this.#code(c, i);
     return i + 1;
+  }
+
+  /**
+   * The length of a postfix operator at `i` that leaves a value a value (`x!`, `i++`, `i--`), or 0.
+   * It is skipped, so a `/` after it still divides.
+   */
+  #postfix(c: string, i: number): number {
+    if (!this.#divides()) return 0;
+    const next = this.#src[i + 1];
+    if (c === "!" && next !== "=") return 1;
+    if ((c === "+" || c === "-") && next === c) return 2;
+    return 0;
   }
 
   #slash(i: number): number {
@@ -251,12 +308,16 @@ class Blanker {
   /**
    * Whether a `/` here is a division: only right after a value, that is a name or number (not a
    * keyword such as `return`), a `)` that does not close a control keyword's condition, a `]`, or
-   * the end of a string, template or regular expression. Anywhere else it starts a regular
-   * expression, so a misread wipes at most the rest of one line instead of leaving a stray brace.
+   * the end of a string, template or regular expression; a postfix `!`, `++` or `--` leaves a value a
+   * value, and a word after `.` or `#` is a property name, not a keyword. Anywhere else it starts a
+   * regular expression. A misread that wipes a bracket unbalances the tree, which `declarations`
+   * reports, so it is never a silent wrong answer.
    */
   #divides(): boolean {
     const prev = this.#prev;
-    if (WORD.test(prev)) return !REGEX_AFTER_WORD.has(this.#word);
+    if (WORD.test(prev)) {
+      return this.#property || !REGEX_AFTER_WORD.has(this.#word);
+    }
     if (prev === ")") return !this.#afterCondition;
     return VALUE_END.has(prev);
   }
@@ -345,7 +406,8 @@ class Blanker {
 
   /** Tracks whether `c` closes a control keyword's condition, after which a `/` starts a regex. */
   #condition(c: string): void {
-    if (c === "(") this.#parens.push(CONTROL.has(this.#word));
+    if (c === "(")
+      this.#parens.push(!this.#property && CONTROL.has(this.#word));
     this.#afterCondition = c === ")" ? (this.#parens.pop() ?? false) : false;
   }
 
@@ -354,10 +416,20 @@ class Blanker {
     else if (c === "}") this.#depth--;
     if (/\s/.test(c)) return;
     this.#condition(c);
-    const joined = this.#prevAt === i - 1 && WORD.test(this.#prev);
-    this.#word = WORD.test(c) ? (joined ? this.#word : "") + c : "";
+    this.#words(c, i);
     this.#prev = c;
     this.#prevAt = i;
+  }
+
+  /** Extends or starts the word `c` belongs to, noting whether a new word is a property name. */
+  #words(c: string, i: number): void {
+    if (!WORD.test(c)) {
+      this.#word = "";
+      return;
+    }
+    const joined = this.#prevAt === i - 1 && WORD.test(this.#prev);
+    if (!joined) this.#property = this.#prev === "." || this.#prev === "#";
+    this.#word = (joined ? this.#word : "") + c;
   }
 }
 
@@ -409,27 +481,45 @@ function braceKind(code: string, at: number): Kind {
   return "block";
 }
 
-/** Parses the blanked source into its bracket tree. */
-function tree(code: string): Group {
+const CLOSERS = new Set(Object.values(CLOSE));
+
+/**
+ * Parses the blanked source into its bracket tree. `broken` is the offset where the brackets first
+ * stop balancing (a closer that does not match, or an opener never closed), if they do.
+ */
+function tree(code: string): { root: Group; broken: number | undefined } {
   const root: Group = { kind: "root", children: [], text: "" };
-  const stack: Frame[] = [{ group: root, close: "", own: [] }];
+  const stack: Frame[] = [{ group: root, close: "", own: [], at: -1 }];
+  let broken: number | undefined;
   for (let i = 0; i < code.length; i++) {
-    const c = code[i] as string;
-    const top = stack.at(-1) as Frame;
-    if (c in CLOSE) stack.push(open(top, c, () => braceKind(code, i)));
-    else if (c === top.close) close(stack);
-    else top.own.push(c);
+    if (!place(stack, code, i)) broken ??= i;
   }
-  // Unclosed groups keep what they had.
+  // Unclosed groups keep what they had; the outermost unclosed opener breaks the balance.
+  const unclosed = stack[1]?.at;
   while (stack.length > 0) close(stack);
-  return root;
+  if (unclosed === undefined) return { root, broken };
+  return { root, broken: Math.min(broken ?? unclosed, unclosed) };
 }
 
-/** A group being read: its own-level characters so far, and its closer. */
+/** Reads the character at `i` into the tree; false when it is a closer that matches no opener. */
+function place(stack: Frame[], code: string, i: number): boolean {
+  const c = code[i] as string;
+  const top = stack.at(-1) as Frame;
+  if (c in CLOSE) stack.push(open(top, c, i, () => braceKind(code, i)));
+  else if (c === top.close) close(stack);
+  else {
+    top.own.push(c);
+    return !CLOSERS.has(c);
+  }
+  return true;
+}
+
+/** A group being read: its own-level characters so far, its closer and its opener's offset. */
 interface Frame {
   group: Group;
   close: string;
   own: string[];
+  at: number;
 }
 
 const OPENED: Record<string, { placeholder: string; kind?: Kind }> = {
@@ -439,12 +529,12 @@ const OPENED: Record<string, { placeholder: string; kind?: Kind }> = {
 };
 
 /** Opens a child of `top` at the bracket `c`; `brace` judges a brace. */
-function open(top: Frame, c: string, brace: () => Kind): Frame {
+function open(top: Frame, c: string, at: number, brace: () => Kind): Frame {
   const opened = OPENED[c] as { placeholder: string; kind?: Kind };
   const group: Group = { kind: opened.kind ?? brace(), children: [], text: "" };
   top.group.children.push(group);
   top.own.push(opened.placeholder);
-  return { group, close: CLOSE[c] as string, own: [] };
+  return { group, close: CLOSE[c] as string, own: [], at };
 }
 
 function close(stack: Frame[]): void {
@@ -513,7 +603,7 @@ function bodyOf(root: Group, from: number): Group | undefined {
 
 /** Reads the names a TypeScript or JavaScript source declares. */
 export function declarations(source: string): Declarations {
-  const root = tree(blank(source));
+  const { root, broken } = tree(blank(source));
   const top = new Set<string>();
   const membersOf = new Map<string, Set<string>>();
   for (const match of root.text.matchAll(TOP_LEVEL)) {
@@ -541,7 +631,16 @@ export function declarations(source: string): Declarations {
     group.children.forEach(visit);
   };
   visit(root);
-  return { top, members, membersOf };
+  const unbalanced =
+    broken === undefined
+      ? undefined
+      : source.slice(0, broken).split("\n").length;
+  return {
+    top,
+    members,
+    membersOf,
+    ...(unbalanced === undefined ? {} : { unbalanced }),
+  };
 }
 
 /** Whether `symbol` (a name, or `Top.member`) is declared. */
@@ -568,9 +667,8 @@ export function checkPage(
     const anchor = `${a.path}#${a.symbol}`;
     const report = (message: string) =>
       problems.push({ file, line: a.line, anchor, message });
-    if (a.target !== undefined && a.target !== BLOB + a.path) {
-      report(`the link points to ${a.target}, not ${BLOB}${a.path}`);
-    }
+    if (a.target !== undefined && a.target !== BLOB + a.path)
+      report(linkProblem(a));
     if (!cache.has(a.path)) {
       const text = read(a.path);
       cache.set(a.path, text === undefined ? undefined : declarations(text));
@@ -579,10 +677,25 @@ export function checkPage(
     if (decls === undefined)
       report(`${a.path} is not a file in the repository`);
     else if (!resolves(decls, a.symbol)) {
-      report(`${a.path} declares no ${a.symbol}`);
+      report(
+        decls.unbalanced === undefined
+          ? `${a.path} declares no ${a.symbol}`
+          : `${a.path} declares no ${a.symbol} that the check can see; it cannot read the file ` +
+              `past line ${decls.unbalanced}, where its brackets stop balancing`,
+      );
     }
   }
   return problems;
+}
+
+/** What is wrong with the link around an anchor whose target is not the anchor's file. */
+function linkProblem(a: Anchor): string {
+  if (a.target === PART_OF_TEXT) {
+    return "an anchor in a link must be the link's whole text, so its target can be checked";
+  }
+  if (a.target === UNREADABLE)
+    return "the check cannot read the link around this anchor";
+  return `the link points to ${a.target}, not ${BLOB}${a.path}`;
 }
 
 /**

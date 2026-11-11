@@ -84,6 +84,29 @@ describe("check-doc-anchors: pages", () => {
     expect(problems(`- [${span}]\n`, files)).toEqual([]);
   });
 
+  it("reports an anchor that is only part of a link's text", () => {
+    const files = { [SOURCE]: "export function slotOf() {}" };
+    const span = `\`${SOURCE}#slotOf\``;
+    const whole =
+      "an anchor in a link must be the link's whole text, so its target can be checked";
+    expect(
+      problems(`- [the ${span} helper](https://example.com/wrong)\n`, files),
+    ).toEqual([whole]);
+    expect(problems(`- [${span} helper](${BLOB}${SOURCE})\n`, files)).toEqual([
+      whole,
+    ]);
+    expect(
+      problems(`- [**${span}**][g]\n\n[g]: ${BLOB}${SOURCE}\n`, files),
+    ).toEqual([whole]);
+    expect(problems(`- see [the docs](x) and ${span}\n`, files)).toEqual([]);
+  });
+
+  it("reads a definition-shaped line inside a paragraph as text", () => {
+    const files = { [SOURCE]: "export function slotOf() {}" };
+    const continued = `Some prose\n[\`${SOURCE}#gone\`]: is rendered as text\n`;
+    expect(problems(continued, files)).toEqual([`${SOURCE} declares no gone`]);
+  });
+
   it("reports a link it cannot read rather than treating the anchor as bare", () => {
     const files = { [SOURCE]: "export function slotOf() {}" };
     const odd = `- [\`${SOURCE}#slotOf\`](<${BLOB}${SOURCE}>)\n`;
@@ -259,12 +282,36 @@ describe("check-doc-anchors: what does not declare a name", () => {
     ["a closing parenthesis", "(a + b)"],
     ["a closing bracket", "list[0]"],
     ["a string", "'10'"],
+    ["a non-null assertion", "n!"],
+    ["an increment", "i++"],
+    ["a decrement", "i--"],
+    ["a keyword used as a property name", "s.in"],
+    ["a private name that is a keyword", "this.#in"],
   ])("reads a / after %s as a division", (_, value) => {
+    // Read as a regular expression, the / would wipe the `(` and `{` and unbalance the tree.
     const source = [
-      `const ratio = ${value} / count; const re = /[}]/;`,
+      `if (${value} / count > 1) {`,
+      "}",
       "class C { actual() {} }",
     ].join("\n");
-    expect(declares(source, "C.actual")).toBe(true);
+    const decls = declarations(source);
+    expect(decls.unbalanced).toBeUndefined();
+    expect(resolves(decls, "C.actual")).toBe(true);
+  });
+
+  it("names the line where a misread unbalances the brackets", () => {
+    const source = [
+      "const a = 1;",
+      "const b = (2;",
+      "class C { actual() {} }",
+    ].join("\n");
+    expect(declarations(source).unbalanced).toBe(2);
+    expect(declarations("const a = 1;\n\nconst b = 2);\n").unbalanced).toBe(3);
+    const files = { [SOURCE]: source };
+    expect(problems(page("C.gone"), files)).toEqual([
+      `${SOURCE} declares no C.gone that the check can see; it cannot read the file past line 2, ` +
+        "where its brackets stop balancing",
+    ]);
   });
 
   it("keeps every offset and line where it was", () => {

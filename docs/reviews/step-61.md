@@ -42,8 +42,10 @@ so the scanner and everything the test imports use `node:fs` only; the script's 
   `https://github.com/anishbenji/tscache/blob/main/<path>`. The check reads inline links
   (`[`…`](target)`, with or without a title) and reference links (`[`…`][label]`, `[`…`][]`, and a
   shortcut `[`…`]` with a definition on the page). A form that opens a link but that it cannot read
-  (`](<…>)`, a reference to an undefined label) is reported, never treated as bare. A bare anchor, not
-  linked, is checked for its file and symbol only.
+  (`](<…>)`, a reference to an undefined label) is reported, never treated as bare, and so is an
+  anchor that is only part of a link's text (`[the `…` helper](…)`). A definition is one only where
+  CommonMark allows it (at a block's start or after another definition), not inside a paragraph. A
+  bare anchor, not linked, is checked for its file and symbol only.
 - **Files.** The path must name a file under the repository root that Git lists (tracked, or new and
   not ignored): a build output such as `packages/tscache/dist/` has no page on GitHub, so it does not
   resolve. The check exits 1 when `git ls-files` fails or lists no page, rather than passing with
@@ -74,9 +76,12 @@ scanner instead of a parser. A first pass replaces comments, the contents of str
 template literals (interpolations included, nested ones tracked) and regular-expression literals with
 spaces, keeping every newline and offset. A `/` is a division only right after a value: a name or
 number (not a keyword such as `return`), a `)` that does not close the condition of `if`, `while`,
-`for` or `with`, a `]`, or the end of a string, template or regular expression. Anywhere else,
-including after `${` and `...`, it starts a regular expression; a misread then wipes at most the rest
-of one line rather than leaving a stray brace. A second pass builds the
+`for` or `with`, a `]`, or the end of a string, template or regular expression. A postfix `!`, `++`
+or `--` leaves a value a value, and a word after `.` or `#` is a property name, not a keyword.
+Anywhere else, including after `${` and `...`, it starts a regular expression. The check does not
+rely on that rule being complete: a misread that wipes a bracket leaves the brackets unbalanced, and
+a symbol the check cannot then find is reported with the line where they stop balancing, rather than
+as a plain missing symbol. All 351 tracked TypeScript files of the repository balance. A second pass builds the
 tree of `{}`, `()` and `[]` pairs and judges each brace by the text before it: a class body after
 `class`, an object (members) after `interface`, `enum`, `=`, `(`, `,`, `:`, `[`, `?`, `|`, `&`, `<`
 or `return`, and a block otherwise (after `)`, `=>`, a keyword such as `else`).
@@ -89,7 +94,8 @@ It cannot see:
   names, or `export default` of an expression;
 - quoted or computed member names (`"a-b": 1`, `[key]: 1`), and parameters other than constructor
   parameter properties;
-- JSX text, which it would lex as code; no anchor names a `.tsx` file today.
+- JSX: a closing tag's `/` starts what the scanner takes for a regular expression, so a `.tsx` file's
+  brackets stop balancing; no anchor names a `.tsx` file today.
 
 A brace it takes for an object literal although it is a block (`case x: { … }`) can lend a statement
 a false member, which makes the check more lenient. A type literal among type arguments or parameters
@@ -106,7 +112,7 @@ export clauses.
 
 ### Tests
 
-`scripts/check-doc-anchors.test.ts`, 60 tests, no clock: an anchor that resolves; a missing file; a
+`scripts/check-doc-anchors.test.ts`, 68 tests, no clock: an anchor that resolves; a missing file; a
 missing symbol; a link that points at another file; the reported file, line and anchor; a bare anchor;
 what is not an anchor (a placeholder, fenced code, a region include, a Markdown path); each
 declaration kind above, one test each; each member kind; `Top.member` against the declaration's own
@@ -114,8 +120,13 @@ body, and its failures; and what declares nothing (a comment, a string, a templa
 expression, a function's local, a call), with a division and a regular expression containing `}`
 before a declaration, and the scanner keeping every offset and line; and the repository reader, which
 reads a listed file and refuses an unlisted one and a path that leaves the repository; titled,
-reference and unreadable links; and a `/` after a condition, an interpolation and a spread (a regular
-expression) and after each kind of value (a division).
+reference and unreadable links, an anchor that is only part of a link's text, and a definition-shaped
+line inside a paragraph; a `/` after a condition, an interpolation and a spread (a regular
+expression) and after each kind of value, postfix operators and property names included (a
+division, in fixtures where a misread would unbalance the brackets); and the line reported when the
+brackets stop balancing. Each rule of the regex-or-division decision and the balance check was
+mutated in turn (always a regular expression, no postfix rule, no property rule, no stray-closer
+detection) and each mutation fails at least one test.
 
 ### Anchors fixed in today's site/
 
@@ -275,7 +286,7 @@ No contradiction affects behaviour. Items 3 to 5 are text that predates later st
 
 ## Verification
 
-- `bunx vitest run scripts/check-doc-anchors.test.ts`: 60 passed.
+- `bunx vitest run scripts/check-doc-anchors.test.ts`: 68 passed.
 - `bun scripts/check-doc-anchors.ts` on the final tree: "doc-anchors: 156 anchors in 35 pages
   resolve" (71 before the tour, 85 on it).
 - A deliberately broken anchor fails it. With the tour's `orchestrator.ts#coalesce` renamed to
@@ -356,3 +367,24 @@ forms`):
    the page's reference definitions and resolves every form; one it cannot read is reported.
 
 One P2, fixed: the test counts in this file were stale (now 60).
+
+## Second pre-review before round 2 (Claude), not the gate
+
+No P0. Three P1 and two P2 findings, all reproduced, fixed in `fix(docs): step 61, a balance check
+behind the scanner and links with more text`:
+
+1. **More divisions read as regular expressions:** after `x!`, `i++`, and a keyword used as a
+   property name (`s.in / s.out`). Fixed in the rule (postfix operators keep a value, a word after
+   `.` or `#` is a property name). Because the same rule drew a third finding, the scanner no longer
+   depends on the rule being complete: the bracket tree reports where it stops balancing, and a
+   symbol the check cannot find in such a file is reported with that line. Every tracked TypeScript
+   file balances, and the old and new scanners find the same declarations in all 351.
+2. **No test failed when every `/` was read as a regular expression.** The division fixtures now
+   unbalance the brackets when misread, and each rule was checked by mutation (see Tests).
+3. **An anchor that is only part of a link's text** (`[the `…` helper](…)`) was treated as bare.
+   It is now reported: the link's text must be the anchor alone, so its target can be checked.
+4. (P2) A definition-shaped line inside a paragraph was taken for a definition. Definitions now
+   count only where CommonMark allows them.
+5. (P2) The JSX limit understated its effect. Restated here and in the script's header.
+
+This is the second pre-review for round 2, the most the brief allows; round 2 follows.
