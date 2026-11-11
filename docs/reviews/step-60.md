@@ -1,6 +1,6 @@
 # Step 60 — How it works, part 2: the flows
 
-Branch: `docs/60-how-it-works-flows` · Status: built, not yet reviewed
+Branch: `docs/60-how-it-works-flows` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 Seven new pages in the docs site's "How it works" section, each a Mermaid sequence diagram (the startup
 page adds a flowchart of the hosting chain) with a short walkthrough and the `path#symbol` list it is
@@ -263,3 +263,8 @@ source. No P0 or P1. Four P2 findings and one note, each checked against the cod
 4. `docs/INDEX.md` updated the counts but not the sizes. Both sizes updated.
 5. (Note) `live-feeds.md` said the other tabs' redraw always reads with `cacheOnly: true`;
    `session.ts` `onBatch` starts a fetching catch-up for bars after a gap. Reworded.
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-11). The reviewer confirmed the pre-review fixes are present, checked 126
+source-link paths and the index counts, and ran `git diff --check`.
