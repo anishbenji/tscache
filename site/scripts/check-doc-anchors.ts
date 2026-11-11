@@ -1,7 +1,7 @@
 // Fails when a `path#symbol` anchor in the docs site no longer resolves.
 //
 // The "How it works" pages name the code they describe as an inline-code
-// anchor, `packages/tscache/src/<path>.ts#<symbol>`, usually as the text of
+// anchor, `packages/tscache/src/<path>.ts#<symbol>`, as the whole text of
 // a link to the file on GitHub. An anchor resolves when the file exists and
 // declares the symbol. `A.b` names a member `b` of the top-level `A`.
 //
@@ -10,11 +10,10 @@
 //     exactly as the site renders it: references, titles and every link form
 //     resolve to the `href` the page shows. An anchor in a link must be the
 //     link's whole text, and the link must point at the anchor's file on
-//     GitHub. The check does not model HTML: after a raw `<a` anywhere on a
-//     page (a tag, an attribute, a comment or a script string), every later
-//     anchor on the page is reported, since its link cannot be trusted. A
-//     token shaped like an anchor whose symbol is not a name or `Top.member`
-//     is reported. Container titles (`::: tip <title>`) are read as the
+//     GitHub. Every anchor must be such a link: the innermost link decides
+//     where a click goes, so no HTML around it can redirect it, and the check
+//     reads no HTML. A token shaped like an anchor whose symbol is not a name
+//     or `Top.member` is reported. Container titles (`::: tip <title>`) are read as the
 //     inline Markdown VitePress renders them as. Fenced code, includes and
 //     HTML blocks hold no inline code token, so they hold no anchor.
 //   - Sources are parsed by TypeScript 6's compiler API (the site's TypeDoc
@@ -44,8 +43,8 @@ const ANCHOR =
 /** What a link target reads as when the anchor is only part of a link's text. */
 export const PART_OF_TEXT = "a link whose text holds more than the anchor";
 
-/** What a link target reads as when a raw HTML `<a` comes before the anchor on its page. */
-export const HTML_LINK = "an HTML link";
+/** What a link target reads as when the anchor is not the text of a Markdown link at all. */
+export const NOT_LINKED = "no Markdown link";
 
 /** An inline code token shaped like an anchor's start, a code file and `#`, whatever follows. */
 const ANCHOR_LIKE =
@@ -56,8 +55,13 @@ export interface Anchor {
   line: number;
   path: string;
   symbol: string;
-  /** The link's `href` when the anchor is a link's whole text, or `PART_OF_TEXT` or `HTML_LINK`. */
-  target?: string;
+  /**
+   * The `href` of the Markdown link whose whole text is the anchor, or `PART_OF_TEXT` or
+   * `NOT_LINKED`. Every anchor must be such a link to its file on GitHub: the innermost link decides
+   * where a click goes, so no HTML around it (an `<a>`, a component Vue renders as one) can redirect
+   * it, and the check need not read HTML at all.
+   */
+  target: string;
   /** Set when the token looks like an anchor but its symbol is not a name or `Top.member`. */
   malformed?: true;
 }
@@ -88,21 +92,17 @@ export async function anchorReader(): Promise<FindAnchors> {
     const env: { content?: string } = {};
     const tokens = md.parse(markdown, env);
     const first = firstLine(markdown, env.content);
-    // A raw HTML `<a` anywhere on the page (an HTML block can wrap paragraphs) makes every later
-    // anchor on the page unreadable; see `htmlLinks`.
-    const html = { open: 0 };
     return tokens.flatMap((block, i) => {
       const line = first + lineOf(tokens, i);
-      if (block.type === "html_block") htmlLinks(block.content, html);
       if (block.type === "inline") {
-        return anchorsIn(file, block, line, lines, html);
+        return anchorsIn(file, block, line, lines);
       }
       // A container's title (`::: tip <title>`) is rendered as inline Markdown from its `info`.
       const title = containerTitle(block);
       if (title === undefined) return [];
       return md
         .parseInline(title, env)
-        .flatMap((inline) => anchorsIn(file, inline, line, lines, html));
+        .flatMap((inline) => anchorsIn(file, inline, line, lines));
     });
   };
 }
@@ -160,7 +160,6 @@ function anchorsIn(
   block: Token,
   line: number,
   lines: WeakMap<Token, number>,
-  html: { open: number },
 ): Anchor[] {
   const children = block.children ?? [];
   const links: number[] = [];
@@ -168,18 +167,16 @@ function anchorsIn(
   children.forEach((token, i) => {
     if (token.type === "link_open") links.push(i);
     else if (token.type === "link_close") links.pop();
-    else if (token.type === "html_inline") htmlLinks(token.content, html);
     const like =
       token.type === "code_inline" ? ANCHOR_LIKE.exec(token.content) : null;
     if (like === null) return;
-    const target =
-      html.open > 0 ? HTML_LINK : targetOf(children, links.at(-1), i);
+    const target = targetOf(children, links.at(-1), i);
     anchors.push({
       file,
       line: line + (lines.get(token) ?? 0),
       path: like[1] as string,
       symbol: like[2] as string,
-      ...(target === undefined ? {} : { target }),
+      target,
       ...(ANCHOR.test(token.content) ? {} : { malformed: true }),
     });
   });
@@ -187,24 +184,16 @@ function anchorsIn(
 }
 
 /**
- * Notes a raw HTML `<a` anywhere in `html` (a tag, an attribute, a comment or a script alike). The
- * check does not model HTML: once a page holds one, no later anchor's link can be trusted, so every
- * later anchor on the page is reported, and nothing closes it. No page writes a raw `<a>` today.
- */
-function htmlLinks(html: string, page: { open: number }): void {
-  if (/<a[\s>/]/i.test(html)) page.open = 1;
-}
-
-/**
- * The target of the link that opens at `open` around the code token at `at`: its `href` when the
- * token is the link's whole text, `PART_OF_TEXT` when the text holds more.
+ * The target of the Markdown link that opens at `open` around the code token at `at`: its `href`
+ * when the token is the link's whole text, `PART_OF_TEXT` when the text holds more, and `NOT_LINKED`
+ * when no Markdown link encloses it.
  */
 function targetOf(
   children: Token[],
   open: number | undefined,
   at: number,
-): string | undefined {
-  if (open === undefined) return undefined;
+): string {
+  if (open === undefined) return NOT_LINKED;
   const whole = open === at - 1 && children[at + 1]?.type === "link_close";
   return whole ? (children[open]?.attrGet("href") ?? "") : PART_OF_TEXT;
 }
@@ -400,8 +389,7 @@ export function checkAnchors(
       report("not a checkable anchor: name a symbol as `name` or `Top.member`");
       continue;
     }
-    if (a.target !== undefined && a.target !== BLOB + a.path)
-      report(linkProblem(a));
+    if (a.target !== BLOB + a.path) report(linkProblem(a));
     if (!cache.has(a.path)) {
       const text = read(a.path);
       cache.set(
@@ -423,8 +411,8 @@ function linkProblem(a: Anchor): string {
   if (a.target === PART_OF_TEXT) {
     return "an anchor in a link must be the link's whole text, so its target can be checked";
   }
-  if (a.target === HTML_LINK) {
-    return "an anchor after a raw HTML <a> on its page cannot be checked; write links in Markdown";
+  if (a.target === NOT_LINKED) {
+    return `an anchor must be the whole text of a Markdown link to ${BLOB}${a.path}`;
   }
   return `the link points to ${a.target}, not ${BLOB}${a.path}`;
 }

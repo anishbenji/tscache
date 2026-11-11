@@ -9,6 +9,7 @@ import {
   BLOB,
   checkAnchors,
   declarations,
+  NOT_LINKED,
   repoReader,
   resolves,
   run,
@@ -21,8 +22,7 @@ const MISMATCH = `the link points to ${WRONG}, not ${BLOB}${SOURCE}`;
 const PART =
   "an anchor in a link must be the link's whole text, so its target can be checked";
 const SLOT_OF = { [SOURCE]: "export function slotOf() {}" };
-const HTML =
-  "an anchor after a raw HTML <a> on its page cannot be checked; write links in Markdown";
+const UNLINKED = `an anchor must be the whole text of a Markdown link to ${BLOB}${SOURCE}`;
 
 const find = await anchorReader();
 const findAnchors = (markdown: string, file = "site/page.md"): Anchor[] =>
@@ -44,35 +44,31 @@ const declares = (source: string, symbol: string, path?: string) =>
 const I = "$" + "{";
 
 describe("check-doc-anchors: pages", () => {
-  it("reports every anchor after a raw HTML <a> on its page, whatever closes it", () => {
-    const after = `${SPAN}\n`;
+  it("requires every anchor to be a Markdown link, so no HTML around it decides its target", () => {
     for (const html of [
       `See <a href="${WRONG}">${SPAN}</a>.\n`,
-      `<a href="${WRONG}">\n\n${SPAN}\n\n</a>\n\nAfter: ${SPAN}\n`,
-      `<a href="${WRONG}" title="</a>">${SPAN}</a>\n\n${after}`,
+      `<a href="${WRONG}">\n\n${SPAN}\n\n</a>\n`,
+      `<a href="${WRONG}" title="</a>">${SPAN}</a>\n`,
       `<a href="${WRONG}"><span title="</a>">${SPAN}</span></a>\n`,
       `<a href="${WRONG}">\n<textarea></a></textarea>\n\n${SPAN}\n\n</a>\n`,
-      `<div>\n<a href=${WRONG} title=x"y>\n\n${SPAN}\n\n</a></div>\n`,
       `<a href="${WRONG}"><!-- </a> -->${SPAN}</a>\n`,
+      `See <component is="a" href="${WRONG}">${SPAN}</component>.\n`,
+      `See <span is="vue:a" href="${WRONG}">${SPAN}</span>.\n`,
+      `See <b>${SPAN}</b>.\n`,
     ]) {
-      const found = problems(html, SLOT_OF);
-      expect(found.length, html).toBeGreaterThan(0);
-      expect(new Set(found), html).toEqual(new Set([HTML]));
+      expect(problems(html, SLOT_OF), html).toEqual([UNLINKED]);
     }
   });
 
-  it("rejects a page whose script holds an <a, and leaves pages with other HTML alone", () => {
-    const script = `<script setup>\nconst s = "<a href='x'>";\n</script>\n\nText ${SPAN}\n`;
-    expect(problems(script, SLOT_OF)).toEqual([HTML]);
-    expect(problems(`Before ${SPAN}\n\n<a href="x">x</a>\n`, SLOT_OF)).toEqual(
-      [],
-    );
-    expect(
-      problems(
-        `See <b>${SPAN}</b>, <abbr title="x">${SPAN}</abbr>.\n`,
-        SLOT_OF,
-      ),
-    ).toEqual([]);
+  it("accepts a Markdown link to the anchor's file whatever HTML surrounds it", () => {
+    const linked = `[${SPAN}](${BLOB}${SOURCE})`;
+    for (const html of [
+      `<a href="${WRONG}">\n\n${linked}\n\n</a>\n`,
+      `<script setup>\nconst s = "<a href='x'>";\n</script>\n\nText ${linked}\n`,
+      `See <span is="vue:a" href="${WRONG}">${linked}</span>.\n`,
+    ]) {
+      expect(problems(html, SLOT_OF), html).toEqual([]);
+    }
   });
 
   it("reports a token shaped like an anchor whose symbol it cannot check", () => {
@@ -83,7 +79,7 @@ describe("check-doc-anchors: pages", () => {
   });
 
   it("checks an anchor in a container's title, on the title's line", () => {
-    const tip = `Intro.\n\n::: tip \`${SOURCE}#gone\`\nBody.\n:::\n`;
+    const tip = `Intro.\n\n::: tip [\`${SOURCE}#gone\`](${BLOB}${SOURCE})\nBody.\n:::\n`;
     expect(findAnchors(tip).map((a) => [a.symbol, a.line])).toEqual([
       ["gone", 3],
     ]);
@@ -153,6 +149,7 @@ describe("check-doc-anchors: pages", () => {
   it("reads a definition-shaped line inside a paragraph as text", () => {
     const continued = `Some prose\n[\`${SOURCE}#gone\`]: is rendered as text\n`;
     expect(problems(continued, SLOT_OF)).toEqual([
+      UNLINKED,
       `${SOURCE} declares no gone`,
     ]);
   });
@@ -166,12 +163,19 @@ describe("check-doc-anchors: pages", () => {
   });
 
   it("reads a reference to an undefined label as text, as the site renders it", () => {
-    // Neither renders a link, so the anchor is bare: its file and symbol are still checked.
+    // Neither renders a link, so the anchor is not linked; its file and symbol are still checked.
     for (const text of [`[${SPAN}][nowhere]`, `[${SPAN}]`]) {
       expect(findAnchors(`- ${text}\n`)).toEqual([
-        { file: "site/page.md", line: 1, path: SOURCE, symbol: "slotOf" },
+        {
+          file: "site/page.md",
+          line: 1,
+          path: SOURCE,
+          symbol: "slotOf",
+          target: NOT_LINKED,
+        },
       ]);
       expect(problems(`- ${text}\n`, {})).toEqual([
+        UNLINKED,
         `${SOURCE} is not a file in the repository`,
       ]);
     }
@@ -189,7 +193,9 @@ describe("check-doc-anchors: pages", () => {
     ]) {
       expect(problems(`- ${text}\n`, SLOT_OF)).toEqual([PART]);
     }
-    expect(problems(`- see [the docs](x) and ${SPAN}\n`, SLOT_OF)).toEqual([]);
+    expect(problems(`- see [the docs](x) and ${SPAN}\n`, SLOT_OF)).toEqual([
+      UNLINKED,
+    ]);
   });
 
   it("names the page, line and anchor of each problem", () => {
@@ -250,11 +256,12 @@ describe("check-doc-anchors: pages", () => {
     ]);
   });
 
-  it("checks a bare anchor's file and symbol, with no link to compare", () => {
+  it("reports an anchor outside a link, and still checks its file and symbol", () => {
     expect(findAnchors(`See \`${SOURCE}#a\`.`, "p.md")).toEqual([
-      { file: "p.md", line: 1, path: SOURCE, symbol: "a" },
+      { file: "p.md", line: 1, path: SOURCE, symbol: "a", target: NOT_LINKED },
     ]);
     expect(problems(`See \`${SOURCE}#a\`.`, { [SOURCE]: "let b;" })).toEqual([
+      UNLINKED,
       `${SOURCE} declares no a`,
     ]);
   });
@@ -451,7 +458,7 @@ describe("check-doc-anchors: what does not declare a name", () => {
       "app/view.tsx":
         "export const View = () => <p>/</p>;\nexport class After {}",
     };
-    const markdown = `See \`app/view.tsx#After\`.`;
+    const markdown = `See [\`app/view.tsx#After\`](${BLOB}app/view.tsx).`;
     expect(
       checkAnchors(
         findAnchors(markdown),

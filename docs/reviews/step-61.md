@@ -58,11 +58,12 @@ uses `node:` modules; the one call to `Bun.spawnSync` (`git ls-files`) is the de
   region includes (`<<< @/snippets/x.ts#region`), HTML blocks and placeholders such as `path#symbol`
   (no extension) are not inline code tokens of that shape, so they are not anchors. A container's
   title (`::: tip <title>`) is parsed as the inline Markdown VitePress renders it as, so an anchor
-  there is checked, on the container's line. The check does not model HTML: after a raw `<a` anywhere on
-  a page (a tag, inline or in an HTML block, an attribute, a comment or a script string), every later
-  anchor on the page is reported, and nothing closes it, since no hand-written reading of HTML can say
-  whether that anchor renders inside a link. Links must be written in Markdown; no page writes a raw
-  `<a>` today. An inline code token shaped like an anchor (a code
+  there is checked, on the container's line. **Every anchor must be the whole text of a Markdown
+  link to its file on GitHub;** an anchor outside one is reported (and its file and symbol still
+  checked). The innermost link decides where a click goes, so no HTML around a Markdown link (an
+  `<a>`, a `<component is="a">`, an `is="vue:a"` element, a component that renders a link) can
+  redirect it, and the check reads no HTML at all. All 246 anchors on today's pages are such links.
+  An inline code token shaped like an anchor (a code
   file and `#`) whose symbol is neither a name nor `Top.member` (`#Engine.cache()`, `#A.B.c`) is
   reported as not checkable, rather than skipped.
 - **Links.** The renderer resolves every link form to the `href` the page shows: inline links with or
@@ -117,9 +118,6 @@ re-exports.
 
 - An anchor written as HTML (`<code>…</code>`, or inside an HTML block) is not an inline code token,
   so it is not checked; no page writes one.
-- A page that holds a raw `<a` anywhere, even in a `<script setup>` string, fails for every anchor
-  after it, although the anchor may render outside any link: the check errs on the strict side
-  rather than read HTML.
 - A member with a computed name (`[key]: 1`) is not a member; a quoted name is, but no anchor can name
   it, since the anchor pattern takes identifiers only.
 - `Top.member` does not follow types: a `const` annotated with an interface, or initialised by a call
@@ -541,3 +539,14 @@ One P1 and two P2 findings, fixed in `fix(docs): step 61, stop modelling HTML li
 2. (P2) A `<script setup>` string holding `<a` now fails the page's later anchors: an intended,
    documented strict rejection, with a test.
 3. (P2) The header, the `HTML_LINK` TSDoc and this file now state the rule as built.
+
+## Second pre-review before round 4 (Claude), not the gate
+
+One P1, fixed in `fix(docs): step 61, every anchor a Markdown link`: a link that Vue renders without a
+literal `<a` (`<component is="a" href="…">`, `<span is="vue:a" href="…">`, or a component) wrapped an
+anchor that passed as bare. HTML around anchors had drawn a finding in five passes running, so the
+rule changed instead of the HTML reading: every anchor must be the whole text of a Markdown link to
+its file on GitHub. Whatever wraps that link, the innermost link is the one a click follows, so the
+check needs no HTML handling; `htmlLinks` and its page-wide rule are removed. Every HTML form found in
+review is a test that now fails as "not a Markdown link", and three tests show a correct Markdown link
+passing inside HTML. The tests that expected a bare anchor to pass now expect it reported.
