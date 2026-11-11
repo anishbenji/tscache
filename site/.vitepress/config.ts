@@ -137,6 +137,22 @@ const config = defineConfig({
 
 // Renders ```mermaid fences in the browser, with Mermaid's dark theme while
 // the site is dark. securityLevel 'strict' (the plugin defaults to 'loose'):
-// labels are encoded as text and click handlers are off; the generated
-// graph needs neither.
-export default withMermaid({ ...config, mermaid: { securityLevel: "strict" } });
+// labels are encoded as text and click handlers are off; the diagrams need
+// neither. Sequence diagrams wrap their text and keep their natural size
+// (the page scrolls them sideways, diagrams.css): scaled to the column, the
+// flows' text would shrink to a few pixels.
+export default withMermaid({
+  ...config,
+  mermaid: {
+    securityLevel: "strict",
+    sequence: {
+      useMaxWidth: false,
+      wrap: true,
+      width: 140,
+      actorMargin: 30,
+      messageFontSize: 14,
+      noteFontSize: 14,
+      actorFontSize: 14,
+    },
+  },
+});

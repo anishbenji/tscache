@@ -132,3 +132,9 @@
   stroke: var(--vp-c-yellow-1);
   stroke-width: 2.5;
 }
+
+/* Mermaid diagrams: a sequence diagram keeps its natural width (config.ts)
+   and scrolls sideways when it is wider than the column. */
+.mermaid {
+  overflow-x: auto;
+}
