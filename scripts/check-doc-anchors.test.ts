@@ -46,6 +46,22 @@ describe("check-doc-anchors: pages", () => {
     ).toEqual([`${SOURCE} declares no slotOf`]);
   });
 
+  it("compares the target of a link that carries a title", () => {
+    const files = { [SOURCE]: "export function slotOf() {}" };
+    const titled = (target: string) =>
+      `- [\`${SOURCE}#slotOf\`](${target} "title")\n`;
+    expect(problems(titled(BLOB + SOURCE), files)).toEqual([]);
+    expect(problems(titled("https://example.com/wrong"), files)).toEqual([
+      `the link points to https://example.com/wrong, not ${BLOB}${SOURCE}`,
+    ]);
+  });
+
+  it("reports a link it cannot read rather than treating the anchor as bare", () => {
+    const files = { [SOURCE]: "export function slotOf() {}" };
+    const odd = `- [\`${SOURCE}#slotOf\`](<${BLOB}${SOURCE}>)\n`;
+    expect(problems(odd, files)).toHaveLength(1);
+  });
+
   it("reports a link that points at another file", () => {
     const other = `${BLOB}packages/tscache/src/grid.ts`;
     expect(
@@ -188,6 +204,16 @@ describe("check-doc-anchors: what does not declare a name", () => {
       "export function after() {}",
     ].join("\n");
     expect(declares(source, "after")).toBe(true);
+  });
+
+  it("reads a / after a control keyword's condition as a regular expression", () => {
+    const source = [
+      "if (ready) /[{]/.test(value);",
+      "while (f(x)) /[{]/.exec(value);",
+      "const ratio = (a + b) / 2;",
+      "class C { actual() {} }",
+    ].join("\n");
+    expect(declares(source, "C.actual")).toBe(true);
   });
 
   it("keeps every offset and line where it was", () => {

@@ -39,8 +39,15 @@ export const BLOB = "https://github.com/anishbenji/tscache/blob/main/";
 const ANCHOR =
   /^([\w@.-]+(?:\/[\w@.-]+)*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs))#([A-Za-z_$][\w$]*(?:\.#?[A-Za-z_$][\w$]*)?)$/;
 
-/** An inline-code span, with the link around it when it is a link's text. */
-const CODE_SPAN = /(\[?)`([^`]+)`(\]\(([^)\s]*)\))?/g;
+/**
+ * An inline-code span, with the link around it when it is a link's text. The link may carry a title
+ * (`"…"`, `'…'` or `(…)`), which is ignored.
+ */
+const CODE_SPAN =
+  /(\[?)`([^`]+)`(\]\(([^)\s]*)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\))?/g;
+
+/** What a link target reads as when the link after an anchor cannot be parsed. */
+export const UNREADABLE = "a link the check cannot read";
 
 export interface Anchor {
   file: string;
@@ -79,16 +86,28 @@ function toggleFence(fence: string | undefined, marker: string) {
 
 /** The anchors in one line of text. */
 function anchorsOn(file: string, line: number, text: string): Anchor[] {
-  return [...text.matchAll(CODE_SPAN)].flatMap(
-    ([, open, code, link, target]) => {
-      const anchor = ANCHOR.exec(code ?? "");
-      if (anchor === null) return [];
-      const linked = open === "[" && link !== undefined;
-      const path = anchor[1] as string;
-      const symbol = anchor[2] as string;
-      return [{ file, line, path, symbol, ...(linked ? { target } : {}) }];
-    },
-  );
+  return [...text.matchAll(CODE_SPAN)].flatMap((match): Anchor[] => {
+    const anchor = ANCHOR.exec(match[2] ?? "");
+    if (anchor === null) return [];
+    const path = anchor[1] as string;
+    const symbol = anchor[2] as string;
+    const target = targetOf(match, text);
+    return [
+      { file, line, path, symbol, ...(target === undefined ? {} : { target }) },
+    ];
+  });
+}
+
+/**
+ * The link target of a code span that is a link's text, or undefined for a bare span. A link this
+ * pattern cannot parse still names a target, so it reads as `UNREADABLE`, never as a bare anchor.
+ */
+function targetOf(match: RegExpExecArray, text: string): string | undefined {
+  const [whole, open, , link, target] = match;
+  if (open !== "[") return undefined;
+  if (link !== undefined) return target ?? UNREADABLE;
+  const after = text.slice(match.index + whole.length);
+  return after.startsWith("](") ? UNREADABLE : undefined;
 }
 
 /** The names a source file declares, as far as the scanner can see. */
@@ -118,6 +137,8 @@ const REGEX_AFTER_WORD = new Set([
   "throw",
   "new",
 ]);
+/** Keywords whose parenthesised condition can be followed by a regular expression. */
+const CONTROL = new Set(["if", "while", "for", "with"]);
 const QUOTES = new Set(["'", '"']);
 const WORD = /[\w$]/;
 
@@ -133,6 +154,10 @@ class Blanker {
   #prev = "";
   #prevAt = -1;
   #word = "";
+  /** For each open `(`, whether it starts a control keyword's condition. */
+  readonly #parens: boolean[] = [];
+  /** Whether the last code character closed a control keyword's condition. */
+  #afterCondition = false;
 
   constructor(src: string) {
     this.#src = src;
@@ -165,6 +190,7 @@ class Blanker {
     if (next === "*") return this.#wipeTo(i, this.#find("*/", i + 2, 2));
     const regex =
       this.#prev === "" ||
+      this.#afterCondition ||
       REGEX_AFTER.has(this.#prev) ||
       REGEX_AFTER_WORD.has(this.#word);
     if (regex) return this.#regex(i);
@@ -193,6 +219,7 @@ class Blanker {
   #literalEnd(at: number, prev: string): number {
     this.#prev = prev;
     this.#word = "";
+    this.#afterCondition = false;
     return at;
   }
 
@@ -252,10 +279,17 @@ class Blanker {
     return at;
   }
 
+  /** Tracks whether `c` closes a control keyword's condition, after which a `/` starts a regex. */
+  #condition(c: string): void {
+    if (c === "(") this.#parens.push(CONTROL.has(this.#word));
+    this.#afterCondition = c === ")" ? (this.#parens.pop() ?? false) : false;
+  }
+
   #code(c: string, i: number): void {
     if (c === "{") this.#depth++;
     else if (c === "}") this.#depth--;
     if (/\s/.test(c)) return;
+    this.#condition(c);
     const joined = this.#prevAt === i - 1 && WORD.test(this.#prev);
     this.#word = WORD.test(c) ? (joined ? this.#word : "") + c : "";
     this.#prev = c;

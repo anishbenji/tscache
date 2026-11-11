@@ -1,6 +1,6 @@
 # Step 61 — The code tour and the anchor check
 
-Branch: `docs/61-code-tour` · Status: built, not yet reviewed
+Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: fix and re-review
 
 Two parts. A check, run in `bun run ci`, that fails when a `path#symbol` anchor in `site/` no longer
 resolves, and a "Code tour" page in "How it works" that reads the package source in the order a
@@ -315,3 +315,18 @@ code and fixed in `fix(docs): step 61 pre-review fixes to the tour and the ancho
 Smaller points also fixed: `handshakeTimeoutMs` must be finite; `CacheHandle.on` sends nothing;
 `instanceof` naming applies to library errors only; the `Persister` anchor now points at its
 declaration in `persist/persister.ts`, not the re-export; over-wide lines rewrapped.
+
+## Round 1 — reviewer verdict: merge after fixes
+
+Two P1 findings (2026-11-11), both reproduced and fixed in `fix(docs): step 61 round 1, regex after a condition and titled links`:
+
+1. **A `/` after a control keyword's condition was read as a division.** For `if (ready) /[{]/.test(value);`
+   the regular expression's `{` opened a false block and hid later declarations, so a valid anchor
+   failed. Fixed: the scanner records, for each `(`, whether it opens the condition of `if`, `while`,
+   `for` or `with`, and reads a `/` right after the matching `)` as a regular expression. Test: a
+   class declared after two such lines, with a parenthesised division beside them.
+2. **A link with a title was taken for a bare anchor,** so its target was never compared:
+   ``[`…#slotOf`](https://example.com/wrong "title")`` passed. Fixed: the link pattern accepts a
+   `"…"`, `'…'` or `(…)` title, and a link after an anchor that the pattern still cannot parse (for
+   example `](<…>)`) is reported, never treated as bare. Tests: a titled link to the right and the
+   wrong target, and an unparsed link.
