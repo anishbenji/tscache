@@ -50,6 +50,20 @@ describe("check-doc-anchors: pages", () => {
     expect(problems(`See <b>${SPAN}</b>.\n`, SLOT_OF)).toEqual([]);
   });
 
+  it("reports an anchor inside an <a> that an HTML block opens", () => {
+    const wrapped = `<a href="${WRONG}">\n\n${SPAN}\n\n</a>\n\nAfter: ${SPAN}\n`;
+    expect(problems(wrapped, SLOT_OF)).toEqual([
+      "an anchor in an HTML link cannot be checked; write the link in Markdown",
+    ]);
+  });
+
+  it("reports a token shaped like an anchor whose symbol it cannot check", () => {
+    const odd = `- [\`${SOURCE}#Engine.cache()\`](${WRONG})\n- \`${SOURCE}#A.B.c\`\n`;
+    const message =
+      "not a checkable anchor: name a symbol as `name` or `Top.member`";
+    expect(problems(odd, SLOT_OF)).toEqual([message, message]);
+  });
+
   it("checks an anchor in a container's title, on the title's line", () => {
     const tip = `Intro.\n\n::: tip \`${SOURCE}#gone\`\nBody.\n:::\n`;
     expect(findAnchors(tip).map((a) => [a.symbol, a.line])).toEqual([

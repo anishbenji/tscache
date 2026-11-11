@@ -10,13 +10,13 @@ each one to the code that backs it.
 
 ## Scope
 
-| Commit                                                                 | What                                                                                                                                                         |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ci(docs): fail when a path#symbol anchor in site/ no longer resolves` | `scripts/check-doc-anchors.ts`, its Vitest file, and the one-line addition to the root `package.json` `docs:check` script. All 71 existing anchors resolved. |
-| `docs(site): add the code tour to "How it works"`                      | `site/how-it-works/code-tour.md` (85 anchors), its sidebar entry after "Data model" in `site/.vitepress/config.ts`, and a link from the overview page.       |
-| `docs(review): step 61, the code tour and the anchor check`            | This file.                                                                                                                                                   |
-| `ci(docs): rebuild the anchor check on real parsers`                   | After round 2: the check moves to `site/scripts/check-doc-anchors.ts` on VitePress's renderer and TypeScript 6, with its test; the `scripts/` copies go.     |
-| `docs(review): step 61, the anchor check on real parsers`              | This file, for the rebuilt check.                                                                                                                            |
+| Commit                                                                 | What                                                                                                                                                          |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci(docs): fail when a path#symbol anchor in site/ no longer resolves` | `scripts/check-doc-anchors.ts`, its Vitest file, and the one-line addition to the root `package.json` `docs:check` script. All 71 existing anchors resolved.  |
+| `docs(site): add the code tour to "How it works"`                      | `site/how-it-works/code-tour.md` (85 anchors), its sidebar entry last, after "Live feeds", in `site/.vitepress/config.ts`, and a link from the overview page. |
+| `docs(review): step 61, the code tour and the anchor check`            | This file.                                                                                                                                                    |
+| `ci(docs): rebuild the anchor check on real parsers`                   | After round 2: the check moves to `site/scripts/check-doc-anchors.ts` on VitePress's renderer and TypeScript 6, with its test; the `scripts/` copies go.      |
+| `docs(review): step 61, the anchor check on real parsers`              | This file, for the rebuilt check.                                                                                                                             |
 
 The fix commits of the pre-reviews and rounds are listed in their sections below.
 
@@ -58,8 +58,11 @@ uses `node:` modules; the one call to `Bun.spawnSync` (`git ls-files`) is the de
   region includes (`<<< @/snippets/x.ts#region`), HTML blocks and placeholders such as `path#symbol`
   (no extension) are not inline code tokens of that shape, so they are not anchors. A container's
   title (`::: tip <title>`) is parsed as the inline Markdown VitePress renders it as, so an anchor
-  there is checked, on the container's line. An anchor inside an inline HTML `<a>` element in a
-  paragraph is reported: its `href` is not read, so the link must be written in Markdown.
+  there is checked, on the container's line. An anchor inside an HTML `<a>` element, whether written
+  inline in a paragraph or opened by an HTML block around paragraphs, is reported: its `href` is not
+  read, so the link must be written in Markdown. An inline code token shaped like an anchor (a code
+  file and `#`) whose symbol is neither a name nor `Top.member` (`#Engine.cache()`, `#A.B.c`) is
+  reported as not checkable, rather than skipped.
 - **Links.** The renderer resolves every link form to the `href` the page shows: inline links with or
   without a title, angle-bracket and multi-line destinations, and full, collapsed and shortcut
   reference links, with definitions wherever CommonMark allows them (after a heading included, not
@@ -121,7 +124,7 @@ re-exports.
 
 ### Tests
 
-`site/scripts/check-doc-anchors.test.ts`, 77 tests, no clock or sleep (and covered by `bun scripts/test-clocks.ts`, whose globs now include `site/scripts/`). Pages: an anchor that
+`site/scripts/check-doc-anchors.test.ts`, 79 tests, no clock or sleep (and covered by `bun scripts/test-clocks.ts`, whose globs now include `site/scripts/`). Pages: an anchor that
 resolves; a missing file; a missing symbol; a link to another file; titled links in each title form;
 full, collapsed and shortcut references, label case and the first definition winning; a definition
 right after a heading; a definition-shaped line inside a paragraph; angle-bracket and multi-line
@@ -322,7 +325,7 @@ No contradiction affects behaviour. Items 3 to 5 are text that predates later st
 For the rebuilt check (the first commit's results, with the scanner, are in the round sections and in
 the step's history):
 
-- `bunx vitest run site/scripts/check-doc-anchors.test.ts`: 77 passed.
+- `bunx vitest run site/scripts/check-doc-anchors.test.ts`: 79 passed.
 - `bun site/scripts/check-doc-anchors.ts` on the final tree: "doc-anchors: 246 anchors in 42 pages
   resolve", the same count the scanner reported before it was removed.
 - A deliberately broken anchor and a deliberately wrong link target fail it. With the tour's
@@ -493,3 +496,19 @@ The rebuild closed the TypeScript reading. One P1 and four P2 findings, all chec
 5. (P2) The bare-name rule let a name resolve to any object key in the file. Dropped (see "What it
    accepts"); the member tests now name `Top.member`, and a test shows a bare name no longer reaches
    a member.
+
+## Second pre-review before round 3 (Claude), not the gate
+
+One P1 and two P2 findings, fixed in `fix(docs): step 61, HTML links page-wide and malformed
+anchors`:
+
+1. (P1) An `<a>` opened by an HTML block around a paragraph still wrapped an unchecked anchor; the
+   previous fix covered inline HTML only. HTML `<a>` depth is now tracked across the whole page, from
+   HTML blocks and inline HTML alike, and any anchor inside one is reported. Test: an HTML-block link
+   around a paragraph, with an anchor after it that stays bare.
+2. (P2) A token shaped like an anchor whose symbol does not match the anchor pattern was skipped,
+   link and all. It is now reported as not checkable.
+3. (P2) The Scope table placed the sidebar entry after "Data model"; it is last, after "Live feeds".
+
+Removing the HTML-block rule makes the new test fail. A round 3 chain had started before this
+pre-review ended and was stopped before the reviewer wrote a round file; round 3 runs on this head.

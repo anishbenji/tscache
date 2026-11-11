@@ -10,8 +10,9 @@
 //     exactly as the site renders it: references, titles and every link form
 //     resolve to the `href` the page shows. An anchor in a link must be the
 //     link's whole text, and the link must point at the anchor's file on
-//     GitHub. An anchor inside an inline HTML `<a>` is reported, since its
-//     target is not read. Container titles (`::: tip <title>`) are read as
+//     GitHub. An anchor inside an HTML `<a>` element, inline or opened by an
+//     HTML block, is reported, since its target is not read. A token shaped
+//     like an anchor whose symbol is not a name or `Top.member` is reported. Container titles (`::: tip <title>`) are read as
 //     the inline Markdown VitePress renders them as. Fenced code, includes
 //     and HTML blocks hold no inline code token, so they hold no anchor.
 //   - Sources are parsed by TypeScript 6's compiler API (the site's TypeDoc
@@ -44,16 +45,19 @@ export const PART_OF_TEXT = "a link whose text holds more than the anchor";
 /** What a link target reads as when the anchor sits inside an inline HTML `<a>` element. */
 export const HTML_LINK = "an HTML link";
 
-/** Where an inline HTML `<a>` opens, in the stack of open links. */
-const HTML_OPEN = -1;
+/** An inline code token shaped like an anchor's start, a code file and `#`, whatever follows. */
+const ANCHOR_LIKE =
+  /^([\w@.-]+(?:\/[\w@.-]+)*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs))#(.*)$/;
 
 export interface Anchor {
   file: string;
   line: number;
   path: string;
   symbol: string;
-  /** The link's `href` when the anchor is a link's whole text, or `PART_OF_TEXT`. */
+  /** The link's `href` when the anchor is a link's whole text, or `PART_OF_TEXT` or `HTML_LINK`. */
   target?: string;
+  /** Set when the token looks like an anchor but its symbol is not a name or `Top.member`. */
+  malformed?: true;
 }
 
 export interface Problem {
@@ -82,15 +86,21 @@ export async function anchorReader(): Promise<FindAnchors> {
     const env: { content?: string } = {};
     const tokens = md.parse(markdown, env);
     const first = firstLine(markdown, env.content);
+    // HTML `<a>` elements open across blocks (an HTML block can wrap paragraphs), so their depth is
+    // tracked for the whole page; any anchor inside one is reported.
+    const html = { open: 0 };
     return tokens.flatMap((block, i) => {
       const line = first + lineOf(tokens, i);
-      if (block.type === "inline") return anchorsIn(file, block, line, lines);
+      if (block.type === "html_block") htmlLinks(block.content, html);
+      if (block.type === "inline") {
+        return anchorsIn(file, block, line, lines, html);
+      }
       // A container's title (`::: tip <title>`) is rendered as inline Markdown from its `info`.
       const title = containerTitle(block);
       if (title === undefined) return [];
       return md
         .parseInline(title, env)
-        .flatMap((inline) => anchorsIn(file, inline, line, lines));
+        .flatMap((inline) => anchorsIn(file, inline, line, lines, html));
     });
   };
 }
@@ -148,6 +158,7 @@ function anchorsIn(
   block: Token,
   line: number,
   lines: WeakMap<Token, number>,
+  html: { open: number },
 ): Anchor[] {
   const children = block.children ?? [];
   const links: number[] = [];
@@ -155,26 +166,29 @@ function anchorsIn(
   children.forEach((token, i) => {
     if (token.type === "link_open") links.push(i);
     else if (token.type === "link_close") links.pop();
-    else if (token.type === "html_inline") htmlLink(token.content, links);
-    const anchor =
-      token.type === "code_inline" ? ANCHOR.exec(token.content) : null;
-    if (anchor === null) return;
-    const target = targetOf(children, links.at(-1), i);
+    else if (token.type === "html_inline") htmlLinks(token.content, html);
+    const like =
+      token.type === "code_inline" ? ANCHOR_LIKE.exec(token.content) : null;
+    if (like === null) return;
+    const target =
+      html.open > 0 ? HTML_LINK : targetOf(children, links.at(-1), i);
     anchors.push({
       file,
       line: line + (lines.get(token) ?? 0),
-      path: anchor[1] as string,
-      symbol: anchor[2] as string,
+      path: like[1] as string,
+      symbol: like[2] as string,
       ...(target === undefined ? {} : { target }),
+      ...(ANCHOR.test(token.content) ? {} : { malformed: true }),
     });
   });
   return anchors;
 }
 
-/** Opens or closes an inline HTML `<a>` element in the stack of open links. */
-function htmlLink(html: string, links: number[]): void {
-  if (/^<a[\s>]/i.test(html)) links.push(HTML_OPEN);
-  else if (/^<\/a\s*>/i.test(html) && links.at(-1) === HTML_OPEN) links.pop();
+/** Counts the HTML `<a>` elements that `html` opens and closes into the page's open depth. */
+function htmlLinks(html: string, depth: { open: number }): void {
+  const opens = html.match(/<a[\s>]/gi)?.length ?? 0;
+  const closes = html.match(/<\/a\s*>/gi)?.length ?? 0;
+  depth.open = Math.max(0, depth.open + opens - closes);
 }
 
 /**
@@ -187,7 +201,6 @@ function targetOf(
   at: number,
 ): string | undefined {
   if (open === undefined) return undefined;
-  if (open === HTML_OPEN) return HTML_LINK;
   const whole = open === at - 1 && children[at + 1]?.type === "link_close";
   return whole ? (children[open]?.attrGet("href") ?? "") : PART_OF_TEXT;
 }
@@ -379,6 +392,10 @@ export function checkAnchors(
     const anchor = `${a.path}#${a.symbol}`;
     const report = (message: string) =>
       problems.push({ file: a.file, line: a.line, anchor, message });
+    if (a.malformed) {
+      report("not a checkable anchor: name a symbol as `name` or `Top.member`");
+      continue;
+    }
     if (a.target !== undefined && a.target !== BLOB + a.path)
       report(linkProblem(a));
     if (!cache.has(a.path)) {
