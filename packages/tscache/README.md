@@ -66,11 +66,25 @@ const fetcher: Fetcher = {
     );
     if (!response.ok) throw new Error(`backend answered ${response.status}`);
     // { timestamps, fields, meta: { version, finalizedUntil } }
+    // finalizedUntil: the first timestamp that is not final yet. Points at or
+    // after it are fetched again; without it, every point and every gap in
+    // the response is final and never fetched again.
     return response.json();
   },
 };
 
 export default fetcher;
+```
+
+For TypeScript, declare the `?fetcher` import once (Vite's client types
+already declare `?worker&url`):
+
+```ts
+// env.d.ts
+declare module "*?fetcher" {
+  const url: string;
+  export default url;
+}
 ```
 
 Then create a client on the page, open a cache and read a range:
@@ -101,8 +115,7 @@ const result = await candles.get({ start: now - 6 * 60 * MINUTE, end: now });
 
 A read never rejects because data is unavailable: a failed fetch comes back as
 a miss. The [getting-started guide](https://anishbenji.github.io/tscache/guide/getting-started)
-covers the TypeScript declarations for `?fetcher` and `?worker&url`, webpack and
-setups without a bundler, and the full fetcher contract.
+covers webpack, setups without a bundler, and the full fetcher contract.
 
 ## Entries
 
