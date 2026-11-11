@@ -149,7 +149,9 @@ Chromium runs a SharedWorker in the process of the tab that created it. If that 
 and its cache go with it, and the other tabs get no `error` and no port closure. tscache detects it with
 a Web Lock that the worker holds for its lifetime: every other tab's client then rejects its pending and
 later calls with `TscacheError` and emits `workerLost` once. Create a new client to go on; it starts a
-new worker with an empty cache.
+new worker, whose memory starts empty. A cache with `persist: true` restores what the old worker had
+written to IndexedDB when you call `client.cache()` again in the new client ([Persistence](/guides/persistence));
+every other cache starts empty.
 
 <<< @/snippets/client.ts#lost{ts}
 
