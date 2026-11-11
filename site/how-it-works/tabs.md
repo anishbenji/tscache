@@ -27,8 +27,9 @@ sequenceDiagram
   W->>T2: evt (the same)
   Note over T1,T2: Tab 2 closes (pagehide, not into the back/forward cache)
   T2->>W: req dispose
-  W-->>T2: res, then the server forgets the port
   T2->>L: withdraw the queued request
+  Note over T2: in the same step Tab 2 closes its port
+  W--xT2: res, to a port already closed; the server forgets the port
   opt that was the last connection
     W->>D: flush what the debounce still holds
   end
@@ -62,8 +63,9 @@ fetches in flight (a read in one tab can join a fetch started for another,
 ## A tab closes
 
 On `pagehide`, unless the page is entering the back/forward cache, the client disposes itself. It
-posts a `dispose` request, which the server answers before it forgets the port, and it withdraws its
-queued lock request. The client does not wait for that answer. A port
+posts a `dispose` request, closes its port and withdraws its queued lock request, all in one step. The
+server answers the request before it forgets the port, but the client does not wait for that answer,
+which finds the port closed. A port
 `close` event, where the browser fires one, also makes the server forget the port. When the last
 connection goes, the server asks its persistence to write what the debounce still holds
 ([Persistence](./persistence)). The page creates the SharedWorker with `extendedLifetime: true`; in a

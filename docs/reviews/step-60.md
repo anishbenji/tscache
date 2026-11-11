@@ -244,3 +244,22 @@ document nor the code was changed.
 - The anchors against step 61's CI check, which is not on `main` yet.
 - The statement that `extendedLifetime` keeps a worker running after its last tab rests on the comment
   in `client/hosting.ts#openShared` and the persistence guide, not on a test in this step.
+
+## Pre-review (Claude), not the gate
+
+Before Codex round 1, a fresh-context Opus pre-review checked every diagram and walkthrough against the
+source. No P0 or P1. Four P2 findings and one note, each checked against the code and fixed in
+`docs(site): step 60 pre-review fixes`:
+
+1. `read.md` step 9 said no other response lands between the last fetch and the read. The code
+   guarantees only that the read follows the last round with no await in between; another fetch's put
+   can land in the microtask hops before it (reproduced with a scratch test). Reworded.
+2. `tabs.md` drew Tab 2 receiving the `dispose` answer before withdrawing its lock request. `Client.dispose`
+   posts the request, closes the port and terminates the hosting in one step, so the answer finds the
+   port closed. The diagram now draws the withdrawal first and the answer as lost; the text matches.
+3. `fences.md` said a read after a clear never waits for a response that will be dropped, and that a
+   read after an invalidate finds no joinable fetch. A second clear can drop a joined fetch, and a fetch
+   issued after the invalidate is joinable. Both now speak of the fence in question.
+4. `docs/INDEX.md` updated the counts but not the sizes. Both sizes updated.
+5. (Note) `live-feeds.md` said the other tabs' redraw always reads with `cacheOnly: true`;
+   `session.ts` `onBatch` starts a fetching catch-up for bars after a gap. Reworded.

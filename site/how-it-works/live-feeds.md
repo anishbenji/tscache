@@ -50,8 +50,9 @@ sequenceDiagram
    overwrites the bars it carries and claims coverage only for its own span below the watermark. It
    then redraws and passes the batch on the channel.
 4. **The other tabs.** In the shared hosting a tab that hears a batch does not put it, since the
-   holder's put went into the one cache every tab reads. It redraws, and the redraw reads the range with
-   `cacheOnly: true`, so the bar costs no fetch. A tab with a cache of its own, a dedicated worker or
+   holder's put went into the one cache every tab reads. When the bars meet the screen it redraws, and
+   the redraw reads the range with `cacheOnly: true`, so the bar costs no fetch; bars after a gap the
+   feed did not fill start a fetching catch-up instead. A tab with a cache of its own, a dedicated worker or
    in-process, puts the batch into its own cache first.
 5. **Polling.** A polling holder reads the time since its last complete poll with a fetching `get`
    instead, and passes the span; in the shared hosting the other tabs read it back from the cache.

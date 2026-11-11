@@ -70,8 +70,8 @@ sequenceDiagram
 8. **One more round, at most.** If the cache was cleared while the read waited, it plans once more:
    what is still missing, minus the ranges whose fetch failed or came back auth-pending. There is no
    third round.
-9. **The read.** The orchestrator reads the engine once, in the same step as the last fetch settled, so
-   no other response lands in between. Each remaining miss is cut at the edges of the fetches the read
+9. **The read.** The orchestrator reads the engine once, right after the read's last round, with no
+   await in between. Each remaining miss is cut at the edges of the fetches the read
    waited for, and each piece is labelled with its fetch's outcome: `'fetch-failed'` (with the error),
    `'auth-pending'`, or `'uncached'`.
 10. **The response.** The server answers with the result, transferring its typed arrays instead of

@@ -52,7 +52,7 @@ sequenceDiagram
    joins only fetches of the new generation. What a clear during the second round drops comes back as
    an `'uncached'` miss: there is no third round.
 4. **Joins respect the generation.** A fetch of an older generation is never joined, so a read after a
-   clear never waits for a response that will be dropped.
+   clear never waits for a fetch that this clear will drop.
 
 ## The invalidate fence
 
@@ -84,8 +84,8 @@ sequenceDiagram
    before anything is fenced.
 2. **Overlapping fetches are fenced.** Every in-flight fetch for the cache whose range meets the snapped
    range is marked fenced. A fence is never lifted.
-3. **Later reads fetch anew.** A read after the invalidate sees the slots as missing and finds no
-   joinable fetch over them, so it starts its own.
+3. **Later reads fetch anew.** A read after the invalidate sees the slots as missing and finds none
+   of the fenced fetches joinable, so it starts its own or joins one issued after the invalidate.
 4. **Fenced responses still land.** A fenced fetch is still applied when it arrives, as any other fetch;
    the fence only keeps new reads from relying on it. A read that had already joined it before the
    invalidate goes on waiting for it.
