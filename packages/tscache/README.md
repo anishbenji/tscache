@@ -55,7 +55,7 @@ Write a fetcher. The worker loads it with `import()` and calls its default
 export with the range to fetch:
 
 ```ts
-// fetcher.ts
+// src/fetcher.ts
 import type { Fetcher } from "@anishbenji/tscache/fetcher";
 
 const fetcher: Fetcher = {
@@ -66,6 +66,10 @@ const fetcher: Fetcher = {
     );
     if (!response.ok) throw new Error(`backend answered ${response.status}`);
     // { timestamps, fields, meta: { version, finalizedUntil } }
+    // finalizedUntil: the first timestamp that is not final yet. Points at or
+    // after it are fetched again. It only moves forward: a response without it
+    // leaves it where it is, and a cache that never had one treats every point
+    // and gap as final.
     return response.json();
   },
 };
@@ -73,9 +77,22 @@ const fetcher: Fetcher = {
 export default fetcher;
 ```
 
+For TypeScript, declare the `?fetcher` import once, in a file your
+`tsconfig.json` includes, such as `src/` (Vite's client types already declare
+`?worker&url`):
+
+```ts
+// src/env.d.ts
+declare module "*?fetcher" {
+  const url: string;
+  export default url;
+}
+```
+
 Then create a client on the page, open a cache and read a range:
 
 ```ts
+// src/main.ts
 import { createClient } from "@anishbenji/tscache";
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "./fetcher.ts?fetcher";
@@ -97,12 +114,12 @@ const result = await candles.get({ start: now - 6 * 60 * MINUTE, end: now });
 // result.timestamps and result.fields: the points, one typed array per field
 // result.coverage: the ranges the cache knows for certain
 // result.misses: the ranges it does not, each with a reason
+console.log(result.timestamps.length, result.misses);
 ```
 
 A read never rejects because data is unavailable: a failed fetch comes back as
 a miss. The [getting-started guide](https://anishbenji.github.io/tscache/guide/getting-started)
-covers the TypeScript declarations for `?fetcher` and `?worker&url`, webpack and
-setups without a bundler, and the full fetcher contract.
+covers webpack, setups without a bundler, and the full fetcher contract.
 
 ## Entries
 
