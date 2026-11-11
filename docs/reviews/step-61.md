@@ -1,6 +1,6 @@
 # Step 61 — The code tour and the anchor check
 
-Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: redesign the check on real parsers, then re-review
+Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: in review · Verdict after triage: redesign the check on real parsers, then re-review (redesign done; round 3 next)
 
 Two parts. A check, run in `bun run ci`, that fails when a `path#symbol` anchor in `site/` no longer
 resolves, and a "Code tour" page in "How it works" that reads the package source in the order a
@@ -15,123 +15,156 @@ each one to the code that backs it.
 | `ci(docs): fail when a path#symbol anchor in site/ no longer resolves` | `scripts/check-doc-anchors.ts`, its Vitest file, and the one-line addition to the root `package.json` `docs:check` script. All 71 existing anchors resolved. |
 | `docs(site): add the code tour to "How it works"`                      | `site/how-it-works/code-tour.md` (85 anchors), its sidebar entry after "Data model" in `site/.vitepress/config.ts`, and a link from the overview page.       |
 | `docs(review): step 61, the code tour and the anchor check`            | This file.                                                                                                                                                   |
+| `ci(docs): rebuild the anchor check on real parsers`                   | After round 2: the check moves to `site/scripts/check-doc-anchors.ts` on VitePress's renderer and TypeScript 6, with its test; the `scripts/` copies go.     |
+| `docs(review): step 61, the anchor check on real parsers`              | This file, for the rebuilt check.                                                                                                                            |
+
+The fix commits of the pre-reviews and rounds are listed in their sections below.
 
 `package.json` is a protected path, so the user merges this pull request. The change there is the one
-`docs:check` line: `… && bun site/scripts/module-graph.ts --check && bun scripts/check-doc-anchors.ts`.
-`scripts/ci.sh` is unchanged; it already runs `docs:check`.
+`docs:check` line, which now ends `… && bun site/scripts/module-graph.ts --check && bun
+site/scripts/check-doc-anchors.ts`. `vitest.config.ts` gains one `include` entry,
+`site/scripts/**/*.test.ts`. `scripts/ci.sh` is unchanged; it already runs `docs:check`.
 
 ## The anchor check
 
+The check was rebuilt on real parsers after round 2 (see "Redesign after round 2"); this section
+describes the rebuilt check. The pre-review and round sections below describe the scanner it
+replaced, as they were written.
+
 ### Where it lives
 
-`scripts/check-doc-anchors.ts`, the path the plan names, rather than `site/scripts/`. Vitest already
-collects `scripts/**/*.test.ts` (`vitest.config.ts`), and `tsc -p .` in `bun run typecheck` checks
-`scripts/`; a test under `site/scripts/` would have needed a new Vitest include. Vitest runs under Node,
-so the scanner and everything the test imports use `node:fs` only; the script's command-line part uses
-`Bun.spawnSync`, as `scripts/test-clocks.ts` does, behind `import.meta.main`.
+`site/scripts/check-doc-anchors.ts`, beside the module-graph script, with its test in
+`site/scripts/check-doc-anchors.test.ts`. Both parsers it uses are dependencies of the site workspace
+and resolve from there, so it adds none: VitePress (`2.0.0-alpha.21`) and TypeScript 6 under the
+site's npm alias (`typescript: npm:typescript@6.0.3`, pinned for TypeDoc; TypeScript 7 has no JS API).
+Vitest collects `site/scripts/**/*.test.ts` (one new `include` entry in `vitest.config.ts`); `tsc -p
+site/scripts`, already part of `docs:check`, type-checks the script and its test; Knip and Fallow
+already treat `site/scripts/*.ts` as entries. Vitest runs under Node, so everything the test imports
+uses `node:` modules; the one call to `Bun.spawnSync` (`git ls-files`) is the default of `run`'s
+`list` parameter, which the tests replace.
 
 ### What it accepts
 
-- **Anchors.** An inline-code span whose whole text is `<path>#<symbol>`, where `<path>` is a
+- **Pages.** Every page Git lists under `site/` (tracked, or new and not ignored), or the pages given
+  on the command line, is parsed by VitePress's own Markdown renderer (`createMarkdownRenderer`), so a
+  page reads exactly as the site renders it. The renderer runs with VitePress's default options. The
+  site's config (`site/.vitepress/config.ts`) adds two things to Markdown, and neither changes how a
+  page parses: a core rule that fails the build on a link to a missing repository file, and Mermaid's
+  fence renderer. `<!--@include: … -->` is expanded only when VitePress renders a page, not when it
+  parses one; the two includes on the site insert SVG diagrams, which hold no anchor.
+- **Anchors.** An inline code token whose whole content is `<path>#<symbol>`, where `<path>` is a
   repository-relative file ending in `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs` or `.cjs`,
-  and `<symbol>` is an identifier or `Top.member` (the member may be a `#private` name). Placeholders
-  such as `path#symbol` (no extension), VitePress region includes (`<<< @/snippets/x.ts#region`, not
-  inline code) and code inside fenced blocks are not anchors. Every page Git lists under `site/`
-  (tracked or new, not ignored) is read.
-- **Links.** When the anchor is a link's whole text, the target must be exactly
-  `https://github.com/anishbenji/tscache/blob/main/<path>`. The check reads inline links
-  (`[`…`](target)`, with or without a title) and reference links (`[`…`][label]`, `[`…`][]`, and a
-  shortcut `[`…`]` with a definition on the page). A form that opens a link but that it cannot read
-  (`](<…>)`, a reference to an undefined label) is reported, never treated as bare, and so is an
-  anchor that is only part of a link's text (`[the `…` helper](…)`). A definition is one only where
-  CommonMark allows it (at a block's start or after another definition), not inside a paragraph. A
-  bare anchor, not linked, is checked for its file and symbol only.
-- **Files.** The path must name a file under the repository root that Git lists (tracked, or new and
-  not ignored): a build output such as `packages/tscache/dist/` has no page on GitHub, so it does not
-  resolve. The check exits 1 when `git ls-files` fails or lists no page, rather than passing with
-  nothing checked.
-- **Declarations.** `<symbol>` resolves when the file has:
-  - a top-level `function` (generators and `async` included), `class` (`abstract` included), `const`,
-    `let`, `var`, `type`, `interface`, `enum` or `const enum`, exported or not, `declare` included;
-  - a name in a top-level `export { … }` or `export type { … }` clause, re-exports from another module
-    included, under its exported name (`a as b` declares `b`);
-  - a member anywhere in the file of a class body, an interface, an object literal, an object type or
-    an enum: methods, `get`/`set` accessors, properties, `#private` names, shorthand properties, enum
-    members, and constructor parameter properties (`constructor(private readonly x)`).
+  and `<symbol>` is an identifier or `Top.member` (the member may be a `#private` name). Fenced code,
+  region includes (`<<< @/snippets/x.ts#region`), raw HTML and placeholders such as `path#symbol` (no
+  extension) are not inline code tokens of that shape, so they are not anchors.
+- **Links.** The renderer resolves every link form to the `href` the page shows: inline links with or
+  without a title, angle-bracket and multi-line destinations, and full, collapsed and shortcut
+  reference links, with definitions wherever CommonMark allows them (after a heading included, not
+  inside a paragraph; the first definition of a label wins). When the anchor is a link's whole text,
+  the `href` must be exactly `https://github.com/anishbenji/tscache/blob/main/<path>`. When the link's
+  text holds more than the anchor (other text, or emphasis around it), the anchor is reported: "an
+  anchor in a link must be the link's whole text". Outside a link an anchor is checked for its file and
+  symbol only; that includes a reference to an undefined label (`[…][nowhere]`), which the site renders
+  as text, not as a link.
+- **Lines.** markdown-it gives blocks a line range and inline tokens none. The check subclasses the
+  renderer's inline parser state, as VitePress itself does for its CJK rule, and notes for each inline
+  code token how many newlines of its block's text precede the opening backtick. A problem's line is
+  the block's first line plus that count, plus the lines of the frontmatter VitePress strips before
+  parsing. The check fails with an error, rather than guess, if the parsed text is not the page minus
+  a leading frontmatter.
+- **Files.** The path must name a file under the repository root that Git lists: a build output such
+  as `packages/tscache/dist/` has no page on GitHub, so it does not resolve, and a path that leaves the
+  repository is refused even when listed. The check exits 1 when `git ls-files` fails or no page is
+  found, rather than passing with nothing checked.
+- **Declarations.** Each source is parsed with `ts.createSourceFile`, whose dialect follows the
+  file's extension (`.tsx` and `.jsx` parse JSX). `<symbol>` resolves when the file has, at top level:
+  - a function, class, variable (every declarator, and every name a destructuring pattern binds),
+    type alias, interface, enum (`const enum` included) or namespace declaration, exported or not,
+    `declare` included;
+  - a name in an `export { … }` or `export type { … }` clause, re-exports included, under its exported
+    name (`a as b` declares `b`), or `export * as ns`.
 
-  `Top.member` resolves only when `Top` is a top-level declaration and `member` is a member of the body
-  that declaration owns: the class, interface or enum body, or the object literal or object type it is
-  initialised with or annotated with, including the first object argument of a call in its initialiser
-  (`Object.freeze({ … })`).
+  A named function or class expression (`const impl = function ghost() {}`) declares no top-level
+  name, and neither does a `declare module "…"` block or `declare global`.
 
-The export-clause rule is a decision taken here: the brief's list of kinds does not name it, but the
-step 59 anchors on the package map point at the entries (`entries/index.ts#createClient` and four
-more), whose API is a list of re-exports. Without the rule they would fail although they name exactly
-what the entry exports.
+  `Top.member` resolves when `Top` is such a declaration and `member` is a member of its own body: a
+  class member (method, property, accessor, `#private` name, constructor parameter property), an
+  interface member, an enum member, a member of the object type a `type` alias names, a declaration of
+  a namespace's body, or a property of the object literal or class expression that initialises a
+  `const`, `let` or `var` `Top`, seen through parentheses, `as`, `satisfies` and `!`, and through
+  `Object.freeze(…)`. Declarations that merge (a class and an interface of one name) pool their
+  members.
 
-### How it reads a source, and what it cannot see
+  A bare `member`, with no `Top.`, resolves against the top-level names and, as before the redesign,
+  against any member of any class, interface, object type, enum or object literal anywhere in the
+  file. The redesign brief keeps that rule because the existing pages were taken to rely on it. Run
+  over today's pages, no anchor does: every anchor without a `Top.` names a top-level declaration of
+  its file. The rule is kept as the brief directs; whether to drop it, so that a method must be named
+  as `Class.method`, is left to the user.
 
-TypeScript 7 ships no JS API and no dependency may be added, so the check reads declarations with a
-scanner instead of a parser. A first pass replaces comments, the contents of string literals, whole
-template literals (interpolations included, nested ones tracked) and regular-expression literals with
-spaces, keeping every newline and offset. A `/` is a division only right after a value: a name or
-number (not a keyword such as `return`), a `)` that does not close the condition of `if`, `while`,
-`for` or `with`, a `]`, or the end of a string, template or regular expression. A postfix `!`, `++`
-or `--` leaves a value a value, and a word after `.` or `#` is a property name, not a keyword.
-Anywhere else, including after `${` and `...`, it starts a regular expression. The check does not
-rely on that rule being complete: a misread that wipes a bracket leaves the brackets unbalanced, and
-a symbol the check cannot then find is reported with the line where they stop balancing, rather than
-as a plain missing symbol. All 351 tracked TypeScript files of the repository balance. A second pass builds the
-tree of `{}`, `()` and `[]` pairs and judges each brace by the text before it: a class body after
-`class`, an object (members) after `interface`, `enum`, `=`, `(`, `,`, `:`, `[`, `?`, `|`, `&`, `<`
-or `return`, and a block otherwise (after `)`, `=>`, a keyword such as `else`).
+The export-clause rule is a decision taken in the first commit: the step 59 anchors on the package
+map point at the entries (`entries/index.ts#createClient` and four more), whose API is a list of
+re-exports.
 
-It cannot see:
+### What it cannot see
 
-- names bound by destructuring (`const { a } = …`) or by a second declarator (`const a = 1, b = 2`
-  finds `a` only);
-- names an `export * from` re-exports, a `namespace` or `declare module`'s contents as top-level
-  names, or `export default` of an expression;
-- quoted or computed member names (`"a-b": 1`, `[key]: 1`), and parameters other than constructor
-  parameter properties;
-- JSX: a closing tag's `/` starts what the scanner takes for a regular expression, so a `.tsx` file's
-  brackets stop balancing; no anchor names a `.tsx` file today.
-
-A brace it takes for an object literal although it is a block (`case x: { … }`) can lend a statement
-a false member, which makes the check more lenient. A type literal among type arguments or parameters
-before a body (`class C<T extends { a: 1 }> { … }`, `class C extends B<{ a: 1 }> { … }`,
-`interface I<T extends { a: 1 }> { … }`) is taken for the body, so `C.a` resolves and a real member
-such as `C.run` is reported missing; nothing in the package uses that shape today. `import type Foo
-from "./x"` is read as declaring `Foo`. Members are found per chunk of a body's own text split at
-`,`, `;`, newlines and nested blocks, which relies on the code being formatted as Biome formats it.
-
-Run over the package source, it finds what a reader would: for `orchestrator/orchestrator.ts` the
-top-level types and functions (`coalesce`, `planRound`, `blockedBy`, `annotate`, …) and every member of
-`Orchestrator`, its `#private` fields and methods included; for `entries/index.ts` the 37 names of its
-export clauses.
+- An anchor in raw HTML (`<a href="…"><code>…</code></a>`) is not an inline code token, so it is not
+  checked; no page writes one.
+- A member with a computed name (`[key]: 1`) is not a member; a quoted name is, but no anchor can name
+  it, since the anchor pattern takes identifiers only.
+- The bare-member rule is lenient by design: a bare name resolves when any body in the file declares
+  it, not only the one the page means.
+- `Top.member` does not follow types: a `const` annotated with an interface, or initialised by a call
+  other than `Object.freeze`, owns no members.
+- TypeScript's parser recovers from syntax errors; a file that does not parse still yields what it can
+  read. `bun run typecheck` fails on such a file first.
 
 ### Tests
 
-`scripts/check-doc-anchors.test.ts`, 68 tests, no clock: an anchor that resolves; a missing file; a
-missing symbol; a link that points at another file; the reported file, line and anchor; a bare anchor;
-what is not an anchor (a placeholder, fenced code, a region include, a Markdown path); each
-declaration kind above, one test each; each member kind; `Top.member` against the declaration's own
-body, and its failures; and what declares nothing (a comment, a string, a template literal, a regular
-expression, a function's local, a call), with a division and a regular expression containing `}`
-before a declaration, and the scanner keeping every offset and line; and the repository reader, which
-reads a listed file and refuses an unlisted one and a path that leaves the repository; titled,
-reference and unreadable links, an anchor that is only part of a link's text, and a definition-shaped
-line inside a paragraph; a `/` after a condition, an interpolation and a spread (a regular
-expression) and after each kind of value, postfix operators and property names included (a
-division, in fixtures where a misread would unbalance the brackets); and the line reported when the
-brackets stop balancing. Each rule of the regex-or-division decision and the balance check was
-mutated in turn (always a regular expression, no postfix rule, no property rule, no stray-closer
-detection) and each mutation fails at least one test.
+`site/scripts/check-doc-anchors.test.ts`, 74 tests, no clock or sleep. Pages: an anchor that
+resolves; a missing file; a missing symbol; a link to another file; titled links in each title form;
+full, collapsed and shortcut references, label case and the first definition winning; a definition
+right after a heading; a definition-shaped line inside a paragraph; angle-bracket and multi-line
+destinations (the links the old check could not read), at the right and the wrong target; an
+undefined reference, which renders as text; an anchor that is part of a link's text, in an inline
+link, a full reference, a shortcut reference and under emphasis; the reported file, line and anchor;
+the line of anchors in a heading, on a paragraph's second line, after a link split across lines, in a
+list item's continuation, a blockquote and a table cell, after frontmatter, with fenced code skipped;
+a bare anchor; and what is not an anchor (a placeholder, fenced code, a region include, an
+`@include`, raw HTML, a Markdown path). Declarations: each top-level kind, destructuring and second
+declarators included; each member kind; `Top.member` against each kind of body, and its failures (a
+local object, a call's argument, a missing member); what declares nothing (comments, strings,
+templates, regular expressions, locals, calls, named function and class expressions, `declare
+module`, `declare global`); one test that a declaration after each construct that misled the old
+scanner still resolves (regular expressions after a condition, an interpolation and a spread;
+divisions after postfix operators and keyword property names; JSX); and a `.tsx` anchor read as TSX.
+The repository reader: a listed file, an unlisted one and a path that leaves the repository. The
+command: exit 1 when Git fails and when there is no page. Three mutations of the line and link code
+(no per-token line, no frontmatter offset, every link taken as whole-text) each fail a test.
 
 ### Anchors fixed in today's site/
 
-None. The check found all 71 anchors of `site/how-it-works/` resolving (`index.md` 34, `data-model.md`
-28, `package-map.md` 9), and no other page has one.
+None. The rebuilt check finds 246 anchors in 11 pages of `site/how-it-works/`, all resolving and all
+linked to their file: `code-tour.md` 85, `index.md` 34, `data-model.md` 28, `startup.md` 23,
+`persistence.md` 17, `read.md` 13, `tabs.md` 12, `auth.md` 9, `package-map.md` 9, `fences.md` 8 and
+`live-feeds.md` 8. No other page has one.
+
+### The old scanner and the new check over today's tree
+
+- **Pages:** both find the same 246 anchors, on the same lines, with the same link targets, and both
+  pass. No page uses a form on which they disagree.
+- **Declarations,** over all 401 TypeScript files Git lists: the new check never misses a top-level
+  name the scanner found, except `satisfies` in `examples/mock-backend/src/datasets.ts`, a keyword the
+  scanner took for a name. It finds top-level names the scanner could not in 14 files, all from
+  destructuring or a second declarator (`const { build, createServer } = await import("vite")` in the
+  Vite tests, `[insight, setInsight]` in the Solid examples, `startPage` in a `.tsx` file whose
+  brackets the scanner could not balance). For bare members, the scanner reported 128 files with
+  names the parser does not count: `constructor`, words such as `static`, `new` and `Set` taken from
+  type positions, names destructured in parameter lists, and fragments of JSX. Its `Top.member` sets differed
+  in 116 files, mostly members it took from a type annotation or a call's object argument
+  (`const client = await createClient({ mode })` gave it `client.mode`). The parser adds members with
+  quoted names (`"content-type"`), which no anchor can name. None of these differences touches a
+  page's anchor.
 
 ## Traces
 
@@ -286,28 +319,33 @@ No contradiction affects behaviour. Items 3 to 5 are text that predates later st
 
 ## Verification
 
-- `bunx vitest run scripts/check-doc-anchors.test.ts`: 68 passed.
-- `bun scripts/check-doc-anchors.ts` on the final tree: "doc-anchors: 156 anchors in 35 pages
-  resolve" (71 before the tour, 85 on it).
-- A deliberately broken anchor fails it. With the tour's `orchestrator.ts#coalesce` renamed to
-  `#coalesceMisses` and its link pointed at `orchestrator/auth.ts`, `bun run docs:check` exits 1 with
-  two problems on `site/how-it-works/code-tour.md:161`: "the link points to …/orchestrator/auth.ts,
-  not …/orchestrator/orchestrator.ts" and "…/orchestrator.ts declares no coalesceMisses". The edit
-  was undone, and the check passes again.
+For the rebuilt check (the first commit's results, with the scanner, are in the round sections and in
+the step's history):
+
+- `bunx vitest run site/scripts/check-doc-anchors.test.ts`: 74 passed.
+- `bun site/scripts/check-doc-anchors.ts` on the final tree: "doc-anchors: 246 anchors in 42 pages
+  resolve", the same count the scanner reported before it was removed.
+- A deliberately broken anchor and a deliberately wrong link target fail it. With the tour's
+  `orchestrator.ts#coalesce` renamed to `#coalesceMisses` and the `engine/read.ts#read` link pointed
+  at `engine/cache.ts`, the check exits 1 with two problems: `site/how-it-works/code-tour.md:165`
+  "…/orchestrator.ts declares no coalesceMisses" and `site/how-it-works/code-tour.md:223` "the link
+  points to …/engine/cache.ts, not …/engine/read.ts". Both edits were undone, and the check passes
+  again.
 - `bun run docs:check` passes (`tsc -p site`, `tsc -p site/scripts`, the module-graph check, the
   anchor check).
-- `bun run docs:build` builds the site; the tour page renders.
-- `bunx biome check` and `bun run fallow` pass on the changed files (Fallow's complexity gate required
-  splitting the scanner into small functions; it reports no finding).
-- `bunx tsc -p .` type-checks `scripts/`.
-- `~/code/tscache-reports/bin/heavy-run.sh "61 child: ci" bun run ci` on the final head: see the report.
+- `bunx biome check`, `bunx knip` and `bun run fallow` pass on the changed files.
+- Three mutations of the page reader (no per-token line, no frontmatter offset, every link taken as
+  the anchor's whole text) each fail at least one test; each was undone.
+- `~/code/tscache-reports/bin/heavy-run.sh "61 redesign: ci" bun run ci` runs on the final head,
+  after this file's commit; its result is in the report to the director.
 
 ## Not verified
 
 - The tour page was not opened in a browser; the build renders it, and it has no diagram.
 - The demo-hub scenarios were read from the hub's catalog and the examples' source, not run.
-- The scanner was run over `packages/tscache/src/` and the site's anchors, not over other code bases;
-  its limits above are from its design, with a test for each kind it accepts.
+- The renderer's line numbers are tested for the block kinds the pages use (headings, paragraphs,
+  list items, blockquotes, tables) and after frontmatter; other block kinds (footnotes, containers)
+  carry inline content the same way but were not tested.
 
 ## Pre-review (Claude), not the gate
 
@@ -408,3 +446,33 @@ pins TypeScript 6 under an npm alias (`typescript: npm:typescript@6.0.3`, for Ty
 API reads declarations exactly, and VitePress's own Markdown renderer gives the link tokens exactly
 as the site renders them. The check is rebuilt on those two (next commits), with every finding so far
 kept as a regression test, before round 3.
+
+## Redesign after round 2
+
+Two commits: `ci(docs): rebuild the anchor check on real parsers` (the check, its test, the
+`docs:check` line and the Vitest include) and `docs(review): step 61, the anchor check on real parsers`
+(this file). The anchor-check sections above describe the result. The scanner, its bracket-balance
+report and the regular-expression page reader are gone; there is no "unreadable link" any more,
+because the renderer reads every link form the site renders.
+
+What each finding so far became, each with a regression test in
+`site/scripts/check-doc-anchors.test.ts`:
+
+| Finding                                                                | Now                                                                                                                                 |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Pre-review 1: an untracked file (a build output) resolved              | Kept: `repoReader` reads only files Git lists. Test unchanged.                                                                      |
+| Pre-review 2: a failing `git ls-files` passed with nothing checked     | Kept, and now tested: `run` takes the lister, and exits 1 on Git failure and on no page.                                            |
+| Pre-review 3: a type literal among type arguments taken for the body   | Gone: the parser reads the class body. Covered by the `Top.member` tests.                                                           |
+| Pre-review 4: a path that leaves the repository                        | Kept: refused even when listed. Test unchanged.                                                                                     |
+| Round 1, 1; pre-review 2, 1; second pre-review 2, 1: regex or division | Gone: the parser reads regular expressions. One test declares a class after each construct.                                         |
+| Round 1, 2: a titled link taken for a bare anchor                      | Gone: the renderer gives the `href`. Tested with each title form, at the right and wrong target.                                    |
+| Pre-review 2, 2: reference links taken for bare anchors                | Gone: the renderer resolves full, collapsed and shortcut references. Tested in each form.                                           |
+| Second pre-review 2, 2: no test failed when every `/` was a regex      | Moot: the rule no longer exists. The line and link code were mutation-checked instead.                                              |
+| Second pre-review 2, 3, and round 2, 1: an anchor in part of a link    | Read from the token structure. Tested for an inline link, a full and a shortcut reference, and emphasis.                            |
+| Second pre-review 2, 4: a definition-shaped line inside a paragraph    | Gone: the renderer applies CommonMark's rule. Test unchanged in intent.                                                             |
+| Second pre-review 2, 5: JSX unbalanced the scanner                     | Gone: `.tsx` and `.jsx` parse with JSX. Tested with a declaration after JSX and with a `.tsx` anchor.                               |
+| Round 2, 2: a definition right after a heading was ignored             | Gone: the renderer reads it. Tested at the right and the wrong target.                                                              |
+| Round 2, 3: a named function or class expression declared a name       | Gone: an expression's name is not a top-level declaration. Tested for both.                                                         |
+| The unreadable-link rule (`](<…>)`, an undefined label)                | Angle-bracket and multi-line destinations are read and compared; an undefined label renders as text, so its anchor is bare. Tested. |
+
+The traces and the tour page are unchanged; the check passes over them as before.
