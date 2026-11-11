@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -39,6 +42,22 @@ const declares = (source: string, symbol: string, path?: string) =>
 const I = "$" + "{";
 
 describe("check-doc-anchors: pages", () => {
+  it("reports an anchor inside an inline HTML link, whose target it does not read", () => {
+    const html = `See <a href="${WRONG}">${SPAN}</a>.\n`;
+    expect(problems(html, SLOT_OF)).toEqual([
+      "an anchor in an HTML link cannot be checked; write the link in Markdown",
+    ]);
+    expect(problems(`See <b>${SPAN}</b>.\n`, SLOT_OF)).toEqual([]);
+  });
+
+  it("checks an anchor in a container's title, on the title's line", () => {
+    const tip = `Intro.\n\n::: tip \`${SOURCE}#gone\`\nBody.\n:::\n`;
+    expect(findAnchors(tip).map((a) => [a.symbol, a.line])).toEqual([
+      ["gone", 3],
+    ]);
+    expect(problems(tip, SLOT_OF)).toEqual([`${SOURCE} declares no gone`]);
+  });
+
   it("accepts an anchor whose file declares the symbol and whose link points at it", () => {
     expect(problems(page("slotOf"), SLOT_OF)).toEqual([]);
   });
@@ -264,37 +283,45 @@ describe("check-doc-anchors: top-level declarations", () => {
 
 describe("check-doc-anchors: members", () => {
   it.each([
-    ["a method", "class C { run(x: number) { return x; } }", "run"],
-    ["a private method", "class C { #step() {} }", "#step"],
-    ["a static property", "class C { static readonly max = 3; }", "max"],
-    ["a getter", "class C { get size(): number { return 1; } }", "size"],
-    ["a property", "class C { private ready = false; }", "ready"],
+    ["a method", "class C { run(x: number) { return x; } }", "C.run"],
+    ["a private method", "class C { #step() {} }", "C.#step"],
+    ["a static property", "class C { static readonly max = 3; }", "C.max"],
+    ["a getter", "class C { get size(): number { return 1; } }", "C.size"],
+    ["a property", "class C { private ready = false; }", "C.ready"],
     [
       "a constructor parameter property",
       "class C { constructor(private readonly engine: Engine, x: number) {} }",
-      "engine",
+      "C.engine",
     ],
     [
       "an object literal property",
       "const o = { limit: 4, run() {} };",
-      "limit",
+      "o.limit",
     ],
-    ["an object literal method", "const o = { limit: 4, run() {} };", "run"],
-    ["a shorthand property", "const a = 1;\nconst o = { a, b: 2 };", "b"],
-    ["an interface member", "interface I { optional?: string }", "optional"],
-    ["an object type member", "type T = { readonly id: string };", "id"],
-    ["an enum member", "enum E { First, Second = 2 }", "Second"],
-    [
-      "a nested object's member",
-      "function f() { return { deep: 1 }; }",
-      "deep",
-    ],
+    ["an object literal method", "const o = { limit: 4, run() {} };", "o.run"],
+    ["a shorthand property", "const a = 1;\nconst o = { a, b: 2 };", "o.b"],
+    ["an interface member", "interface I { optional?: string }", "I.optional"],
+    ["an object type member", "type T = { readonly id: string };", "T.id"],
+    ["an enum member", "enum E { First, Second = 2 }", "E.Second"],
   ])("finds %s", (_, source, name) => {
     expect(declares(source, name)).toBe(true);
   });
 
+  it("never resolves a bare name to a member, so a renamed function cannot pass on an object key", () => {
+    const source = [
+      "class C { run() {} }",
+      "const c = create({ mode: 1 });",
+      "function f(o: { renamed: 1 }) { return { deep: 1 }; }",
+    ].join("\n");
+    for (const name of ["run", "mode", "renamed", "deep"]) {
+      expect(declares(source, name), name).toBe(false);
+    }
+  });
+
   it("does not take a constructor parameter without a modifier for a member", () => {
-    expect(declares("class C { constructor(x: number) {} }", "x")).toBe(false);
+    expect(declares("class C { constructor(x: number) {} }", "C.x")).toBe(
+      false,
+    );
   });
 
   it("resolves Top.member against the top-level declaration's own body", () => {
@@ -433,6 +460,22 @@ describe("check-doc-anchors: the command", () => {
     expect(await run([], failed)).toBe(1);
     expect(error).toHaveBeenCalledWith(
       "doc-anchors: git ls-files failed: not a repo",
+    );
+  });
+
+  it("exits 1 and names the problem when an anchor does not resolve", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const own = "site/scripts/check-doc-anchors.test.ts";
+    const page = join(mkdtempSync(join(tmpdir(), "doc-anchors-")), "broken.md");
+    writeFileSync(page, `A broken anchor: \`${own}#gone\`.\n`);
+    const listed = () => ({ exitCode: 0, stdout: `${own}\n`, stderr: "" });
+    try {
+      expect(await run([page], listed)).toBe(1);
+    } finally {
+      rmSync(dirname(page), { recursive: true });
+    }
+    expect(error).toHaveBeenCalledWith(
+      `${page}:1: ${own}#gone: ${own} declares no gone`,
     );
   });
 

@@ -55,8 +55,11 @@ uses `node:` modules; the one call to `Bun.spawnSync` (`git ls-files`) is the de
 - **Anchors.** An inline code token whose whole content is `<path>#<symbol>`, where `<path>` is a
   repository-relative file ending in `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs` or `.cjs`,
   and `<symbol>` is an identifier or `Top.member` (the member may be a `#private` name). Fenced code,
-  region includes (`<<< @/snippets/x.ts#region`), raw HTML and placeholders such as `path#symbol` (no
-  extension) are not inline code tokens of that shape, so they are not anchors.
+  region includes (`<<< @/snippets/x.ts#region`), HTML blocks and placeholders such as `path#symbol`
+  (no extension) are not inline code tokens of that shape, so they are not anchors. A container's
+  title (`::: tip <title>`) is parsed as the inline Markdown VitePress renders it as, so an anchor
+  there is checked, on the container's line. An anchor inside an inline HTML `<a>` element in a
+  paragraph is reported: its `href` is not read, so the link must be written in Markdown.
 - **Links.** The renderer resolves every link form to the `href` the page shows: inline links with or
   without a title, angle-bracket and multi-line destinations, and full, collapsed and shortcut
   reference links, with definitions wherever CommonMark allows them (after a heading included, not
@@ -95,12 +98,11 @@ uses `node:` modules; the one call to `Bun.spawnSync` (`git ls-files`) is the de
   `Object.freeze(…)`. Declarations that merge (a class and an interface of one name) pool their
   members.
 
-  A bare `member`, with no `Top.`, resolves against the top-level names and, as before the redesign,
-  against any member of any class, interface, object type, enum or object literal anywhere in the
-  file. The redesign brief keeps that rule because the existing pages were taken to rely on it. Run
-  over today's pages, no anchor does: every anchor without a `Top.` names a top-level declaration of
-  its file. The rule is kept as the brief directs; whether to drop it, so that a method must be named
-  as `Class.method`, is left to the user.
+  A bare name, with no `Top.`, resolves against the top-level names only. The redesign kept the old
+  rule that a bare name also resolves to any member of any body in the file; the pre-review before
+  round 3 showed that it lets a renamed function pass while its old name survives as an object key or
+  option name anywhere in the file, and no page relies on it (every anchor without a `Top.` names a
+  top-level declaration). The director dropped it: a member is always named `Top.member`.
 
 The export-clause rule is a decision taken in the first commit: the step 59 anchors on the package
 map point at the entries (`entries/index.ts#createClient` and four more), whose API is a list of
@@ -108,12 +110,10 @@ re-exports.
 
 ### What it cannot see
 
-- An anchor in raw HTML (`<a href="…"><code>…</code></a>`) is not an inline code token, so it is not
-  checked; no page writes one.
+- An anchor written as HTML (`<code>…</code>`, or inside an HTML block) is not an inline code token,
+  so it is not checked; no page writes one.
 - A member with a computed name (`[key]: 1`) is not a member; a quoted name is, but no anchor can name
   it, since the anchor pattern takes identifiers only.
-- The bare-member rule is lenient by design: a bare name resolves when any body in the file declares
-  it, not only the one the page means.
 - `Top.member` does not follow types: a `const` annotated with an interface, or initialised by a call
   other than `Object.freeze`, owns no members.
 - TypeScript's parser recovers from syntax errors; a file that does not parse still yields what it can
@@ -121,7 +121,7 @@ re-exports.
 
 ### Tests
 
-`site/scripts/check-doc-anchors.test.ts`, 74 tests, no clock or sleep. Pages: an anchor that
+`site/scripts/check-doc-anchors.test.ts`, 77 tests, no clock or sleep (and covered by `bun scripts/test-clocks.ts`, whose globs now include `site/scripts/`). Pages: an anchor that
 resolves; a missing file; a missing symbol; a link to another file; titled links in each title form;
 full, collapsed and shortcut references, label case and the first definition winning; a definition
 right after a heading; a definition-shaped line inside a paragraph; angle-bracket and multi-line
@@ -322,7 +322,7 @@ No contradiction affects behaviour. Items 3 to 5 are text that predates later st
 For the rebuilt check (the first commit's results, with the scanner, are in the round sections and in
 the step's history):
 
-- `bunx vitest run site/scripts/check-doc-anchors.test.ts`: 74 passed.
+- `bunx vitest run site/scripts/check-doc-anchors.test.ts`: 77 passed.
 - `bun site/scripts/check-doc-anchors.ts` on the final tree: "doc-anchors: 246 anchors in 42 pages
   resolve", the same count the scanner reported before it was removed.
 - A deliberately broken anchor and a deliberately wrong link target fail it. With the tour's
@@ -476,3 +476,20 @@ What each finding so far became, each with a regression test in
 | The unreadable-link rule (`](<…>)`, an undefined label)                | Angle-bracket and multi-line destinations are read and compared; an undefined label renders as text, so its anchor is bare. Tested. |
 
 The traces and the tour page are unchanged; the check passes over them as before.
+
+## Pre-review before round 3 (Claude), not the gate
+
+The rebuild closed the TypeScript reading. One P1 and four P2 findings, all checked and fixed in
+`fix(docs): step 61 pre-review before round 3`:
+
+1. (P1) An anchor inside an inline HTML `<a>` in a paragraph passed with no target check. It is now
+   reported; the check reads Markdown links only. The header and this file had said raw HTML holds no
+   inline code, which is true of HTML blocks only.
+2. (P2) Anchors in container titles (`::: tip <title>`) were never read; the site writes inline code
+   in such titles. Titles are now parsed as inline Markdown and checked.
+3. (P2) The moved test file was outside `bun scripts/test-clocks.ts`. Its globs now include
+   `site/scripts/**/*.test.ts`.
+4. (P2) No test showed the command exits 1 on a broken anchor. One now runs it on a temporary page.
+5. (P2) The bare-name rule let a name resolve to any object key in the file. Dropped (see "What it
+   accepts"); the member tests now name `Top.member`, and a test shows a bare name no longer reaches
+   a member.

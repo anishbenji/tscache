@@ -10,15 +10,16 @@
 //     exactly as the site renders it: references, titles and every link form
 //     resolve to the `href` the page shows. An anchor in a link must be the
 //     link's whole text, and the link must point at the anchor's file on
-//     GitHub. Fenced code, includes and raw HTML hold no inline code token,
-//     so they hold no anchor.
+//     GitHub. An anchor inside an inline HTML `<a>` is reported, since its
+//     target is not read. Container titles (`::: tip <title>`) are read as
+//     the inline Markdown VitePress renders them as. Fenced code, includes
+//     and HTML blocks hold no inline code token, so they hold no anchor.
 //   - Sources are parsed by TypeScript 6's compiler API (the site's TypeDoc
 //     pins it; TypeScript 7 has no JS API). A symbol resolves when the file
 //     declares it at top level (a function, class, variable, type,
-//     interface, enum or namespace, or a name in an `export { … }` clause),
-//     or, bare, as a member of any class, interface, object type, enum or
-//     object literal in the file. `Top.member` resolves against `Top`'s own
-//     body only.
+//     interface, enum or namespace, or a name in an `export { … }` clause).
+//     A member is named `Top.member` and resolves against `Top`'s own body
+//     only; a bare name never resolves to a member.
 //
 //   bun site/scripts/check-doc-anchors.ts           checks every page under site/
 //   bun site/scripts/check-doc-anchors.ts <files>   checks those pages
@@ -39,6 +40,12 @@ const ANCHOR =
 
 /** What a link target reads as when the anchor is only part of a link's text. */
 export const PART_OF_TEXT = "a link whose text holds more than the anchor";
+
+/** What a link target reads as when the anchor sits inside an inline HTML `<a>` element. */
+export const HTML_LINK = "an HTML link";
+
+/** Where an inline HTML `<a>` opens, in the stack of open links. */
+const HTML_OPEN = -1;
 
 export interface Anchor {
   file: string;
@@ -75,12 +82,24 @@ export async function anchorReader(): Promise<FindAnchors> {
     const env: { content?: string } = {};
     const tokens = md.parse(markdown, env);
     const first = firstLine(markdown, env.content);
-    return tokens.flatMap((block, i) =>
-      block.type === "inline"
-        ? anchorsIn(file, block, first + lineOf(tokens, i), lines)
-        : [],
-    );
+    return tokens.flatMap((block, i) => {
+      const line = first + lineOf(tokens, i);
+      if (block.type === "inline") return anchorsIn(file, block, line, lines);
+      // A container's title (`::: tip <title>`) is rendered as inline Markdown from its `info`.
+      const title = containerTitle(block);
+      if (title === undefined) return [];
+      return md
+        .parseInline(title, env)
+        .flatMap((inline) => anchorsIn(file, inline, line, lines));
+    });
   };
+}
+
+/** The title of a custom container's opening token (`::: tip <title>`), if it has one. */
+function containerTitle(block: Token): string | undefined {
+  if (!/^container_.+_open$/.test(block.type)) return undefined;
+  const title = block.info.trim().replace(/^\S+\s*/, "");
+  return title === "" ? undefined : title;
 }
 
 /**
@@ -136,6 +155,7 @@ function anchorsIn(
   children.forEach((token, i) => {
     if (token.type === "link_open") links.push(i);
     else if (token.type === "link_close") links.pop();
+    else if (token.type === "html_inline") htmlLink(token.content, links);
     const anchor =
       token.type === "code_inline" ? ANCHOR.exec(token.content) : null;
     if (anchor === null) return;
@@ -151,6 +171,12 @@ function anchorsIn(
   return anchors;
 }
 
+/** Opens or closes an inline HTML `<a>` element in the stack of open links. */
+function htmlLink(html: string, links: number[]): void {
+  if (/^<a[\s>]/i.test(html)) links.push(HTML_OPEN);
+  else if (/^<\/a\s*>/i.test(html) && links.at(-1) === HTML_OPEN) links.pop();
+}
+
 /**
  * The target of the link that opens at `open` around the code token at `at`: its `href` when the
  * token is the link's whole text, `PART_OF_TEXT` when the text holds more.
@@ -161,6 +187,7 @@ function targetOf(
   at: number,
 ): string | undefined {
   if (open === undefined) return undefined;
+  if (open === HTML_OPEN) return HTML_LINK;
   const whole = open === at - 1 && children[at + 1]?.type === "link_close";
   return whole ? (children[open]?.attrGet("href") ?? "") : PART_OF_TEXT;
 }
@@ -169,8 +196,6 @@ function targetOf(
 export interface Declarations {
   /** Top-level declarations and the names of top-level export clauses. */
   top: Set<string>;
-  /** Every member of every class, interface, object type, enum or object literal. */
-  members: Set<string>;
   /** The members of each top-level declaration that has a body. */
   membersOf: Map<string, Set<string>>;
 }
@@ -330,21 +355,13 @@ export function declarations(source: string, path = "source.ts"): Declarations {
       membersOf.set(name, own);
     });
   }
-  const members = new Set<string>();
-  const visit = (node: ts.Node): void => {
-    for (const name of membersOfNode(node) ?? []) members.add(name);
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
-  return { top, members, membersOf };
+  return { top, membersOf };
 }
 
 /** Whether `symbol` (a name, or `Top.member`) is declared. */
 export function resolves(decls: Declarations, symbol: string): boolean {
   const [name, member] = symbol.split(".") as [string, string | undefined];
-  if (member === undefined) {
-    return decls.top.has(name) || decls.members.has(name);
-  }
+  if (member === undefined) return decls.top.has(name);
   return decls.membersOf.get(name)?.has(member) ?? false;
 }
 
@@ -384,6 +401,9 @@ export function checkAnchors(
 function linkProblem(a: Anchor): string {
   if (a.target === PART_OF_TEXT) {
     return "an anchor in a link must be the link's whole text, so its target can be checked";
+  }
+  if (a.target === HTML_LINK) {
+    return "an anchor in an HTML link cannot be checked; write the link in Markdown";
   }
   return `the link points to ${a.target}, not ${BLOB}${a.path}`;
 }
