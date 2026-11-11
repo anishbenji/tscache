@@ -1,6 +1,6 @@
 # Step 61 — The code tour and the anchor check
 
-Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: fix and re-review
+Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: in review · Verdict after triage: fix and re-review (round 2 next)
 
 Two parts. A check, run in `bun run ci`, that fails when a `path#symbol` anchor in `site/` no longer
 resolves, and a "Code tour" page in "How it works" that reads the package source in the order a
@@ -38,9 +38,12 @@ so the scanner and everything the test imports use `node:fs` only; the script's 
   such as `path#symbol` (no extension), VitePress region includes (`<<< @/snippets/x.ts#region`, not
   inline code) and code inside fenced blocks are not anchors. Every page Git lists under `site/`
   (tracked or new, not ignored) is read.
-- **Links.** When the anchor is a link's text, `[`…`](target)`, the target must be exactly
-  `https://github.com/anishbenji/tscache/blob/main/<path>`. A bare anchor, not linked, is checked for
-  its file and symbol only.
+- **Links.** When the anchor is a link's whole text, the target must be exactly
+  `https://github.com/anishbenji/tscache/blob/main/<path>`. The check reads inline links
+  (`[`…`](target)`, with or without a title) and reference links (`[`…`][label]`, `[`…`][]`, and a
+  shortcut `[`…`]` with a definition on the page). A form that opens a link but that it cannot read
+  (`](<…>)`, a reference to an undefined label) is reported, never treated as bare. A bare anchor, not
+  linked, is checked for its file and symbol only.
 - **Files.** The path must name a file under the repository root that Git lists (tracked, or new and
   not ignored): a build output such as `packages/tscache/dist/` has no page on GitHub, so it does not
   resolve. The check exits 1 when `git ls-files` fails or lists no page, rather than passing with
@@ -69,8 +72,11 @@ what the entry exports.
 TypeScript 7 ships no JS API and no dependency may be added, so the check reads declarations with a
 scanner instead of a parser. A first pass replaces comments, the contents of string literals, whole
 template literals (interpolations included, nested ones tracked) and regular-expression literals with
-spaces, keeping every newline and offset. A `/` starts a regular expression after an operator,
-punctuation or a keyword such as `return`, and is a division after a value. A second pass builds the
+spaces, keeping every newline and offset. A `/` is a division only right after a value: a name or
+number (not a keyword such as `return`), a `)` that does not close the condition of `if`, `while`,
+`for` or `with`, a `]`, or the end of a string, template or regular expression. Anywhere else,
+including after `${` and `...`, it starts a regular expression; a misread then wipes at most the rest
+of one line rather than leaving a stray brace. A second pass builds the
 tree of `{}`, `()` and `[]` pairs and judges each brace by the text before it: a class body after
 `class`, an object (members) after `interface`, `enum`, `=`, `(`, `,`, `:`, `[`, `?`, `|`, `&`, `<`
 or `return`, and a block otherwise (after `)`, `=>`, a keyword such as `else`).
@@ -100,14 +106,16 @@ export clauses.
 
 ### Tests
 
-`scripts/check-doc-anchors.test.ts`, 49 tests, no clock: an anchor that resolves; a missing file; a
+`scripts/check-doc-anchors.test.ts`, 60 tests, no clock: an anchor that resolves; a missing file; a
 missing symbol; a link that points at another file; the reported file, line and anchor; a bare anchor;
 what is not an anchor (a placeholder, fenced code, a region include, a Markdown path); each
 declaration kind above, one test each; each member kind; `Top.member` against the declaration's own
 body, and its failures; and what declares nothing (a comment, a string, a template literal, a regular
 expression, a function's local, a call), with a division and a regular expression containing `}`
 before a declaration, and the scanner keeping every offset and line; and the repository reader, which
-reads a listed file and refuses an unlisted one and a path that leaves the repository.
+reads a listed file and refuses an unlisted one and a path that leaves the repository; titled,
+reference and unreadable links; and a `/` after a condition, an interpolation and a spread (a regular
+expression) and after each kind of value (a division).
 
 ### Anchors fixed in today's site/
 
@@ -267,7 +275,7 @@ No contradiction affects behaviour. Items 3 to 5 are text that predates later st
 
 ## Verification
 
-- `bunx vitest run scripts/check-doc-anchors.test.ts`: 46 passed.
+- `bunx vitest run scripts/check-doc-anchors.test.ts`: 60 passed.
 - `bun scripts/check-doc-anchors.ts` on the final tree: "doc-anchors: 156 anchors in 35 pages
   resolve" (71 before the tour, 85 on it).
 - A deliberately broken anchor fails it. With the tour's `orchestrator.ts#coalesce` renamed to
@@ -330,3 +338,21 @@ Two P1 findings (2026-11-11), both reproduced and fixed in `fix(docs): step 61 r
    `"…"`, `'…'` or `(…)` title, and a link after an anchor that the pattern still cannot parse (for
    example `](<…>)`) is reported, never treated as bare. Tests: a titled link to the right and the
    wrong target, and an unparsed link.
+
+## Pre-review before round 2 (Claude), not the gate
+
+No P0. Two P1 findings, both reproduced, each the same kind as a round 1 finding, so both areas were
+redesigned rather than patched again (`fix(docs): step 61, redesign the regex rule and the link
+forms`):
+
+1. **Regex or division.** A `/` after `${` and after `...` was still read as a division, and a `{`
+   inside the regular expression then hid every later declaration. The rule is now reversed: a `/`
+   divides only right after a value, and starts a regular expression anywhere else, so a misread costs
+   at most the rest of one line. Code resumes after `${` as after an opening brace. Run over all 242
+   tracked TypeScript sources of the package, reference clients, integrations and scripts, the old and
+   new scanners find exactly the same declarations.
+2. **Link forms.** A reference link around an anchor (`[…][g]`, `[…][]`, and a shortcut with a
+   definition) was taken for a bare anchor, so its target was never compared. The check now collects
+   the page's reference definitions and resolves every form; one it cannot read is reported.
+
+One P2, fixed: the test counts in this file were stale (now 60).

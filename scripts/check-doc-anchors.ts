@@ -14,7 +14,9 @@
 //     object literal, object type or enum anywhere in the file, and a
 //     constructor parameter property.
 //
-// A link whose text is an anchor must point at that anchor's file on GitHub.
+// A link whose text is an anchor must point at that anchor's file on GitHub,
+// whether it is an inline link (with or without a title) or a reference link;
+// a link form the check cannot read is reported, never treated as bare.
 //
 // TypeScript 7 ships no JS API, so this reads declarations with a small
 // scanner rather than a parser: it blanks comments, strings, template
@@ -65,16 +67,39 @@ export interface Problem {
   message: string;
 }
 
-/** The anchors on one Markdown page, outside fenced code blocks. */
-export function findAnchors(file: string, markdown: string): Anchor[] {
-  const anchors: Anchor[] = [];
+/** A reference-link definition, `[label]: destination`, on a line of its own. */
+const DEFINITION = /^ {0,3}\[([^\]]+)\]:\s*<?([^\s>]+)>?/;
+
+/** A reference label as Markdown matches it: trimmed, inner spaces collapsed, case folded. */
+const labelOf = (text: string) =>
+  text.trim().replace(/\s+/g, " ").toLowerCase();
+
+/** The page's lines outside fenced code blocks, with their line numbers. */
+function proseLines(markdown: string): [number, string][] {
+  const lines: [number, string][] = [];
   let fence: string | undefined;
   markdown.split("\n").forEach((text, i) => {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(text)?.[1];
     if (marker !== undefined) fence = toggleFence(fence, marker);
-    else if (fence === undefined) anchors.push(...anchorsOn(file, i + 1, text));
+    else if (fence === undefined) lines.push([i + 1, text]);
   });
-  return anchors;
+  return lines;
+}
+
+/** The anchors on one Markdown page, outside fenced code blocks. */
+export function findAnchors(file: string, markdown: string): Anchor[] {
+  const lines = proseLines(markdown);
+  const refs = new Map<string, string>();
+  for (const [, text] of lines) {
+    const def = DEFINITION.exec(text);
+    const name = labelOf(def?.[1] ?? "");
+    // The first definition of a label wins, as in CommonMark.
+    if (def !== null && !refs.has(name)) refs.set(name, def[2] as string);
+  }
+  // A definition line is not rendered; its label is checked where a link uses it.
+  return lines
+    .filter(([, text]) => !DEFINITION.test(text))
+    .flatMap(([line, text]) => anchorsOn(file, line, text, refs));
 }
 
 /** The open fence after a fence marker line: opened, closed or unchanged. */
@@ -85,13 +110,18 @@ function toggleFence(fence: string | undefined, marker: string) {
 }
 
 /** The anchors in one line of text. */
-function anchorsOn(file: string, line: number, text: string): Anchor[] {
+function anchorsOn(
+  file: string,
+  line: number,
+  text: string,
+  refs: ReadonlyMap<string, string>,
+): Anchor[] {
   return [...text.matchAll(CODE_SPAN)].flatMap((match): Anchor[] => {
     const anchor = ANCHOR.exec(match[2] ?? "");
     if (anchor === null) return [];
     const path = anchor[1] as string;
     const symbol = anchor[2] as string;
-    const target = targetOf(match, text);
+    const target = targetOf(match, text, refs);
     return [
       { file, line, path, symbol, ...(target === undefined ? {} : { target }) },
     ];
@@ -99,15 +129,39 @@ function anchorsOn(file: string, line: number, text: string): Anchor[] {
 }
 
 /**
- * The link target of a code span that is a link's text, or undefined for a bare span. A link this
- * pattern cannot parse still names a target, so it reads as `UNREADABLE`, never as a bare anchor.
+ * The link target of a code span that is a link's whole text, or undefined when it is not a link.
+ * Inline links (`[…](url)`, with or without a title) and reference links (`[…][label]`, `[…][]`,
+ * and `[…]` with a definition) all resolve to their destination. A form that opens a link but that
+ * the check cannot read (`[…](<url>)`, an undefined `[label]`) reads as `UNREADABLE`, never as a
+ * bare anchor, so its target is never skipped.
  */
-function targetOf(match: RegExpExecArray, text: string): string | undefined {
-  const [whole, open, , link, target] = match;
+function targetOf(
+  match: RegExpExecArray,
+  text: string,
+  refs: ReadonlyMap<string, string>,
+): string | undefined {
+  const [whole, open, code, link, target] = match;
   if (open !== "[") return undefined;
   if (link !== undefined) return target ?? UNREADABLE;
   const after = text.slice(match.index + whole.length);
-  return after.startsWith("](") ? UNREADABLE : undefined;
+  if (!after.startsWith("]")) return undefined;
+  if (after.startsWith("](")) return UNREADABLE;
+  return referenceTarget(after, code ?? "", refs);
+}
+
+/**
+ * The destination of a reference link whose text, the code span `code`, is followed by `after`. A
+ * full or collapsed reference is a link even when its label is undefined; a shortcut is one only
+ * when defined.
+ */
+function referenceTarget(
+  after: string,
+  code: string,
+  refs: ReadonlyMap<string, string>,
+): string | undefined {
+  const reference = /^\]\[([^\]]*)\]/.exec(after);
+  const destination = refs.get(labelOf(reference?.[1] || `\`${code}\``));
+  return reference === null ? destination : (destination ?? UNREADABLE);
 }
 
 /** The names a source file declares, as far as the scanner can see. */
@@ -120,8 +174,9 @@ export interface Declarations {
   membersOf: Map<string, Set<string>>;
 }
 
-/** Characters before a `/` that make it the start of a regular expression. */
-const REGEX_AFTER = new Set("(,=:[!&|?{};+-*%<>~^");
+/** Characters that end a value, after which a `/` divides (besides names, numbers and `)`). */
+const VALUE_END = new Set(["]", "`", "'", '"', "/"]);
+/** Words after which a `/` starts a regular expression although they end in a name character. */
 const REGEX_AFTER_WORD = new Set([
   "return",
   "typeof",
@@ -178,7 +233,7 @@ class Blanker {
     if (QUOTES.has(c)) return this.#string(i, c);
     if (c === "}" && this.#interpolations.at(-1) === this.#depth) {
       this.#interpolations.pop();
-      return this.#literalEnd(this.#templateText(i + 1), "`");
+      return this.#templateText(i + 1);
     }
     this.#code(c, i);
     return i + 1;
@@ -188,14 +243,22 @@ class Blanker {
     const next = this.#src[i + 1];
     if (next === "/") return this.#wipeTo(i, this.#find("\n", i, 0));
     if (next === "*") return this.#wipeTo(i, this.#find("*/", i + 2, 2));
-    const regex =
-      this.#prev === "" ||
-      this.#afterCondition ||
-      REGEX_AFTER.has(this.#prev) ||
-      REGEX_AFTER_WORD.has(this.#word);
-    if (regex) return this.#regex(i);
+    if (!this.#divides()) return this.#regex(i);
     this.#code("/", i);
     return i + 1;
+  }
+
+  /**
+   * Whether a `/` here is a division: only right after a value, that is a name or number (not a
+   * keyword such as `return`), a `)` that does not close a control keyword's condition, a `]`, or
+   * the end of a string, template or regular expression. Anywhere else it starts a regular
+   * expression, so a misread wipes at most the rest of one line instead of leaving a stray brace.
+   */
+  #divides(): boolean {
+    const prev = this.#prev;
+    if (WORD.test(prev)) return !REGEX_AFTER_WORD.has(this.#word);
+    if (prev === ")") return !this.#afterCondition;
+    return VALUE_END.has(prev);
   }
 
   /** The end of the first `text` at or after `from`, or the source's end. */
@@ -255,22 +318,23 @@ class Blanker {
 
   #template(i: number): number {
     if (this.#interpolations.length === 0) this.#templateStart = i;
-    return this.#literalEnd(this.#templateText(i + 1), "`");
+    return this.#templateText(i + 1);
   }
 
-  /** Scans template text from `from`; returns where code resumes. */
+  /** Scans template text from `from`; returns where code resumes, with the state code resumes in. */
   #templateText(from: number): number {
     let j = from;
     while (j < this.#src.length) {
       const c = this.#src[j];
-      if (c === "`") return this.#templateEnd(j + 1);
+      if (c === "`") return this.#literalEnd(this.#templateEnd(j + 1), "`");
       if (c === "$" && this.#src[j + 1] === "{") {
         this.#interpolations.push(this.#depth);
-        return j + 2;
+        // Code resumes as after an opening brace, where a `/` starts a regular expression.
+        return this.#literalEnd(j + 2, "{");
       }
       j += c === "\\" ? 2 : 1;
     }
-    return this.#templateEnd(this.#src.length);
+    return this.#literalEnd(this.#templateEnd(this.#src.length), "`");
   }
 
   /** Wipes the outermost template once its closing backtick is reached. */

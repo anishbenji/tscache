@@ -56,6 +56,34 @@ describe("check-doc-anchors: pages", () => {
     ]);
   });
 
+  it("compares the target of a reference link in each form", () => {
+    const files = { [SOURCE]: "export function slotOf() {}" };
+    const span = `\`${SOURCE}#slotOf\``;
+    const wrong = "https://example.com/wrong";
+    const mismatch = `the link points to ${wrong}, not ${BLOB}${SOURCE}`;
+    const defined = (use: string, label: string, target: string) =>
+      `- ${use}\n\n[${label}]: ${target}\n`;
+    expect(
+      problems(defined(`[${span}][g]`, "g", BLOB + SOURCE), files),
+    ).toEqual([]);
+    expect(problems(defined(`[${span}][G]`, "g", wrong), files)).toEqual([
+      mismatch,
+    ]);
+    expect(problems(defined(`[${span}][]`, span, wrong), files)).toEqual([
+      mismatch,
+    ]);
+    expect(problems(defined(`[${span}]`, span, wrong), files)).toEqual([
+      mismatch,
+    ]);
+  });
+
+  it("reports a reference to an undefined label, and keeps undefined brackets bare", () => {
+    const files = { [SOURCE]: "export function slotOf() {}" };
+    const span = `\`${SOURCE}#slotOf\``;
+    expect(problems(`- [${span}][nowhere]\n`, files)).toHaveLength(1);
+    expect(problems(`- [${span}]\n`, files)).toEqual([]);
+  });
+
   it("reports a link it cannot read rather than treating the anchor as bare", () => {
     const files = { [SOURCE]: "export function slotOf() {}" };
     const odd = `- [\`${SOURCE}#slotOf\`](<${BLOB}${SOURCE}>)\n`;
@@ -211,6 +239,29 @@ describe("check-doc-anchors: what does not declare a name", () => {
       "if (ready) /[{]/.test(value);",
       "while (f(x)) /[{]/.exec(value);",
       "const ratio = (a + b) / 2;",
+      "class C { actual() {} }",
+    ].join("\n");
+    expect(declares(source, "C.actual")).toBe(true);
+  });
+
+  it("reads a / that opens an interpolation or follows a spread as a regular expression", () => {
+    const source = [
+      `const t = \`${I}/[{]/.source}\`;`,
+      "const a = [.../[{]/.exec(x)];",
+      "class C { actual() {} }",
+    ].join("\n");
+    expect(declares(source, "C.actual")).toBe(true);
+  });
+
+  it.each([
+    ["a name", "total"],
+    ["a number", "10"],
+    ["a closing parenthesis", "(a + b)"],
+    ["a closing bracket", "list[0]"],
+    ["a string", "'10'"],
+  ])("reads a / after %s as a division", (_, value) => {
+    const source = [
+      `const ratio = ${value} / count; const re = /[}]/;`,
       "class C { actual() {} }",
     ].join("\n");
     expect(declares(source, "C.actual")).toBe(true);
