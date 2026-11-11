@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   BLOB,
@@ -5,6 +6,7 @@ import {
   checkPage,
   declarations,
   findAnchors,
+  repoReader,
   resolves,
 } from "./check-doc-anchors";
 
@@ -33,7 +35,9 @@ describe("check-doc-anchors: pages", () => {
   });
 
   it("reports a missing file", () => {
-    expect(problems(page("slotOf"), {})).toEqual([`${SOURCE} does not exist`]);
+    expect(problems(page("slotOf"), {})).toEqual([
+      `${SOURCE} is not a file in the repository`,
+    ]);
   });
 
   it("reports a missing symbol", () => {
@@ -193,5 +197,25 @@ describe("check-doc-anchors: what does not declare a name", () => {
     expect(blanked.split("\n")).toHaveLength(source.split("\n").length);
     expect(blanked).toContain("let b;");
     expect(blanked).not.toContain("y");
+  });
+});
+
+describe("check-doc-anchors: reading the repository", () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const own = "scripts/check-doc-anchors.ts";
+
+  it("reads a file Git lists", () => {
+    expect(repoReader(root, new Set([own]))(own)).toContain(
+      "export function repoReader",
+    );
+  });
+
+  it("refuses a file that exists but Git does not list, such as a build output", () => {
+    expect(repoReader(root, new Set())(own)).toBeUndefined();
+  });
+
+  it("refuses a path that leaves the repository, even when listed", () => {
+    const outside = "../outside.ts";
+    expect(repoReader(root, new Set([outside]))(outside)).toBeUndefined();
   });
 });

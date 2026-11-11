@@ -41,7 +41,10 @@ so the scanner and everything the test imports use `node:fs` only; the script's 
 - **Links.** When the anchor is a link's text, `[`…`](target)`, the target must be exactly
   `https://github.com/anishbenji/tscache/blob/main/<path>`. A bare anchor, not linked, is checked for
   its file and symbol only.
-- **Files.** The path must name a file under the repository root.
+- **Files.** The path must name a file under the repository root that Git lists (tracked, or new and
+  not ignored): a build output such as `packages/tscache/dist/` has no page on GitHub, so it does not
+  resolve. The check exits 1 when `git ls-files` fails or lists no page, rather than passing with
+  nothing checked.
 - **Declarations.** `<symbol>` resolves when the file has:
   - a top-level `function` (generators and `async` included), `class` (`abstract` included), `const`,
     `let`, `var`, `type`, `interface`, `enum` or `const enum`, exported or not, `declare` included;
@@ -83,8 +86,11 @@ It cannot see:
 - JSX text, which it would lex as code; no anchor names a `.tsx` file today.
 
 A brace it takes for an object literal although it is a block (`case x: { … }`) can lend a statement
-a false member, and a type literal inside `extends A<{ … }>` can be taken for a class's body. Both make
-the check more lenient, never stricter. Members are found per chunk of a body's own text split at
+a false member, which makes the check more lenient. A type literal among type arguments or parameters
+before a body (`class C<T extends { a: 1 }> { … }`, `class C extends B<{ a: 1 }> { … }`,
+`interface I<T extends { a: 1 }> { … }`) is taken for the body, so `C.a` resolves and a real member
+such as `C.run` is reported missing; nothing in the package uses that shape today. `import type Foo
+from "./x"` is read as declaring `Foo`. Members are found per chunk of a body's own text split at
 `,`, `;`, newlines and nested blocks, which relies on the code being formatted as Biome formats it.
 
 Run over the package source, it finds what a reader would: for `orchestrator/orchestrator.ts` the
@@ -94,13 +100,14 @@ export clauses.
 
 ### Tests
 
-`scripts/check-doc-anchors.test.ts`, 46 tests, no clock: an anchor that resolves; a missing file; a
+`scripts/check-doc-anchors.test.ts`, 49 tests, no clock: an anchor that resolves; a missing file; a
 missing symbol; a link that points at another file; the reported file, line and anchor; a bare anchor;
 what is not an anchor (a placeholder, fenced code, a region include, a Markdown path); each
 declaration kind above, one test each; each member kind; `Top.member` against the declaration's own
 body, and its failures; and what declares nothing (a comment, a string, a template literal, a regular
 expression, a function's local, a call), with a division and a regular expression containing `}`
-before a declaration, and the scanner keeping every offset and line.
+before a declaration, and the scanner keeping every offset and line; and the repository reader, which
+reads a listed file and refuses an unlisted one and a path that leaves the repository.
 
 ### Anchors fixed in today's site/
 
@@ -282,3 +289,29 @@ No contradiction affects behaviour. Items 3 to 5 are text that predates later st
 - The demo-hub scenarios were read from the hub's catalog and the examples' source, not run.
 - The scanner was run over `packages/tscache/src/` and the site's anchors, not over other code bases;
   its limits above are from its design, with a test for each kind it accepts.
+
+## Pre-review (Claude), not the gate
+
+Before Codex round 1, a fresh-context Opus pre-review checked the tour against the source and the
+anchor check for wrong accepts and rejects. No P0 or P1. Eight P2 findings, each checked against the
+code and fixed in `fix(docs): step 61 pre-review fixes to the tour and the anchor check`:
+
+1. The check accepted a file Git does not track (a build output under `dist/`), whose GitHub link is
+   dead. Fixed: `repoReader` reads only files `git ls-files` lists; tests for an unlisted file.
+2. A failing `git ls-files` let the check pass with no page checked. Fixed: it exits 1 when Git fails
+   or lists no page. (`scripts/test-clocks.ts` has the same gap; left for a later step.)
+3. A type literal among a class's or interface's type arguments is taken for its body, so a real
+   member is reported missing. Not fixed in the scanner (no source uses the shape); listed above among
+   its limits, with `import type Foo from`, and the earlier "never stricter" claim corrected.
+4. The refusal of a path that leaves the repository had no test. Fixed: one test.
+5. Stop 4 credited `createServer` with choosing the persistence; the entry chooses and passes its
+   choice. Reworded.
+6. Stop 8 said writes are behind; removals request a flush at once. Reworded.
+7. Stop 8 said every call waits while the persistence chunk loads; only opens, ops on a cache whose
+   open waits, and everything after the first op that waits do. Reworded, as `persist/hosted.ts` says.
+8. Stop 5 said only the older fortnight is fetched (the provisional right-edge slot is too) and that
+   the fetcher module loads once per server (a failed import is retried). Reworded.
+
+Smaller points also fixed: `handshakeTimeoutMs` must be finite; `CacheHandle.on` sends nothing;
+`instanceof` naming applies to library errors only; the `Persister` anchor now points at its
+declaration in `persist/persister.ts`, not the re-export; over-wide lines rewrapped.

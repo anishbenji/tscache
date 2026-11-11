@@ -52,7 +52,8 @@ Read:
 What to notice:
 
 - `createClient` validates its options before it creates anything: `workerUrl` is required unless the
-  chain starts at `'in-process'`, and `handshakeTimeoutMs` (default 5000) must be a positive number.
+  chain starts at `'in-process'`, and `handshakeTimeoutMs` (default 5000) must be a finite positive
+  number.
 - `connect` walks `CHAIN` from `options.mode`. Only a `HostingError` steps down to the next hosting;
   any other error, a `ProtocolMismatchError` included, rejects `createClient`. Each step is kept and
   emitted as `modeFallback` on the next macrotask, once the caller has had a chance to subscribe.
@@ -64,7 +65,8 @@ What to notice:
   `openDedicated` learns of its worker's failure from the worker's `error` event instead.
 - `openInProcess` loads `client/in-process.ts` with `import()`, so a page served by a worker never
   downloads the engine; a chunk that fails to load is a `HostingError`.
-- `CacheHandle` sends one request per method with its cache id filled in. `put` transfers the batch's
+- `CacheHandle` sends one request per method with its cache id filled in (`on` only subscribes, and
+  sends nothing). `put` transfers the batch's
   buffers, so the caller's arrays are detached afterwards; `hydrate` sends its snapshot without a
   transfer list, so the snapshot stays usable.
 - `Client` disposes itself on the page's `pagehide`, unless the page enters the back/forward cache
@@ -110,8 +112,9 @@ What to notice:
   and `cache` of a cache with `persist: true` answers only once `Persistence.open` has settled.
 - `RpcServer.#request` transfers a `get` result's buffers (`transferablesOf`) instead of copying them,
   and answers a `dispose` before it drops the port.
-- Errors cross the port as plain `WireError` objects. `toWireError` names an error by its class, found
-  with `instanceof`, because a minifier may rename the constructor; `fromWireError` rebuilds the class
+- Errors cross the port as plain `WireError` objects. `toWireError` names a library error by its class,
+  found with `instanceof`, because a minifier may rename the constructor (other errors keep their
+  `name`); `fromWireError` rebuilds the class
   and turns an unknown name into a `TscacheError`.
 - Events fan out to every ready port. A port the server drops on its own initiative gets a `bye` first,
   because a browser `MessagePort` fires no close event; when the last connection goes, the server
@@ -141,9 +144,10 @@ What to notice:
 - In a SharedWorker, the `connect` listener goes on at load, so no connection is missed, but ports wait
   until the worker holds its lifetime lock; every `hello` can then name the lock. One server serves
   every port.
-- `createServer` builds one `Engine` and one `RpcServer` around it, and chooses the persistence: in the
-  SharedWorker a `HostedPersistence`, in the dedicated worker a `ClearOnlyPersistence`, and none where
-  `lazyIdbStore` finds no IndexedDB.
+- `createServer` builds one `Engine` and one `RpcServer` around it, with the persistence the entry
+  asks for: the SharedWorker passes an IndexedDB opener and gets a `HostedPersistence`, the dedicated
+  worker passes `clearOnly` and gets a `ClearOnlyPersistence`, and where `lazyIdbStore` finds no
+  IndexedDB there is no opener and no persistence.
 - `connectInProcess` builds the same pair, an `Engine` and an `RpcServer`, in the page, and connects to
   it over a `MessageChannel`: the in-process hosting runs the same protocol as the workers.
 
@@ -192,11 +196,14 @@ What to notice:
   nothing and its misses come back `'auth-pending'` at once.
 - `Orchestrator.updateAuth` applies updates one at a time: the fetcher's `updateAuth` hook hears a
   clone of the new context, then the context and the auth generation switch together.
-- `Orchestrator.load` imports the fetcher module once per server, so once per SharedWorker. A connection naming another module
-  gets a `ConfigError`; one bringing a different context goes through `updateAuth`.
+- `Orchestrator.load` imports the fetcher module once per server, so once per SharedWorker, once an
+  import has succeeded; a failed import leaves the slot free for the next connection to retry. A
+  connection naming another module gets a `ConfigError`; one bringing a different context goes
+  through `updateAuth`.
 
 In the demo hub: **Candles with weekend gaps**: load an earlier fortnight; the page asks for the whole
-range and only the new fortnight is fetched. **Two tabs, one SharedWorker**: expire the access token;
+range and only what the cache does not cover is fetched: the older fortnight and the provisional slot
+at the right edge. **Two tabs, one SharedWorker**: expire the access token;
 one tab refreshes it, the others carry on, and the backend counts one refresh.
 
 ## 6. The engine
@@ -282,7 +289,7 @@ Read:
 
 - [`packages/tscache/src/persist/hosted.ts#HostedPersistence`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/persist/hosted.ts)
 - [`packages/tscache/src/persist/clear-only.ts#ClearOnlyPersistence`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/persist/clear-only.ts)
-- [`packages/tscache/src/persist/lazy.ts#Persister`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/persist/lazy.ts)
+- [`packages/tscache/src/persist/persister.ts#Persister`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/persist/persister.ts)
 - [`packages/tscache/src/persist/persister.ts#Persister.open`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/persist/persister.ts)
 - [`packages/tscache/src/persist/persister.ts#Persister.#plan`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/persist/persister.ts)
 - [`packages/tscache/src/persist/persister.ts#Persister.#rejected`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/persist/persister.ts)
@@ -297,13 +304,14 @@ What to notice:
   cache's state through internal functions that no package entry exports, and installs `restore`'s
   implementation with `installRestore` when it is constructed.
 - `HostedPersistence` loads `persist/lazy.ts`, the persister and the IndexedDB adapter, with
-  `import()` at the first persisted cache or the first `clearAll`. Calls that arrive meanwhile wait
-  and reach the persister in arrival order. A chunk that fails to load, or does not load in time,
-  turns persistence off for the worker's life.
+  `import()` at the first persisted cache or the first `clearAll`. Meanwhile the opens, the ops on a
+  cache whose open waits, and, once one op waits, every later op and `clearAll` wait and reach the
+  persister in arrival order; ops on other caches run at once. A chunk that fails to load, or does
+  not load in time, turns persistence off for the worker's life.
 - `Persister.open` loads a cache's records under one deadline (`timeoutMs`, default 5000 ms). Writes
-  are behind: a flush is due `debounceMs` (1000) after the latest change and no later than
-  `maxDelayMs` (5000) after the first, and is planned from memory alone (`Persister.#plan`) without
-  reading the disk.
+  are behind, except removals, which request a flush at once: a flush is due `debounceMs` (1000)
+  after the latest change and no later than `maxDelayMs` (5000) after the first, and is planned from
+  memory alone (`Persister.#plan`) without reading the disk.
 - `durably` holds an op's answer until a removal it, or another op meanwhile, recorded is on disk or
   the cache's persistence has stopped, so an `invalidate` or a `clear` is not answered while the disk
   still holds what it removed.
@@ -311,7 +319,8 @@ What to notice:
   (`Persister.#rejected`); the stop reaches every tab as `persistStopped`.
 - `openIdbStore` opens one database per origin, `tscache` at version 1, with a `caches` and a `pages`
   object store; a `PageRecord` holds a snapshot of one page's covered ranges.
-- `ClearOnlyPersistence`, in the dedicated-worker and in-process hostings, persists nothing; its
+- `ClearOnlyPersistence`, in the dedicated-worker and in-process hostings where IndexedDB exists,
+  persists nothing; its
   `clearAll` empties the database too.
 
 In the demo hub: no scenario persists a cache. Every example app and reference client builds its

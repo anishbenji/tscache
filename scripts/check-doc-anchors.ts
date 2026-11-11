@@ -478,7 +478,8 @@ export function checkPage(
       cache.set(a.path, text === undefined ? undefined : declarations(text));
     }
     const decls = cache.get(a.path);
-    if (decls === undefined) report(`${a.path} does not exist`);
+    if (decls === undefined)
+      report(`${a.path} is not a file in the repository`);
     else if (!resolves(decls, a.symbol)) {
       report(`${a.path} declares no ${a.symbol}`);
     }
@@ -486,28 +487,36 @@ export function checkPage(
   return problems;
 }
 
-/** Reads a file under the repository root, refusing paths that leave it. */
-function readRepoFile(path: string): string | undefined {
-  const full = resolve(ROOT, path);
-  if (relative(ROOT, full).startsWith("..")) return undefined;
-  if (!existsSync(full) || !statSync(full).isFile()) return undefined;
-  return readFileSync(full, "utf8");
+/**
+ * A reader for files under `root` that Git tracks or would track (`listed`), refusing paths that
+ * leave the root. An ignored file, such as a build output, has no page on GitHub, so it does not
+ * resolve.
+ */
+export function repoReader(
+  root: string,
+  listed: ReadonlySet<string>,
+): (path: string) => string | undefined {
+  return (path) => {
+    const full = resolve(root, path);
+    const rel = relative(root, full);
+    if (rel.startsWith("..") || !listed.has(rel)) return undefined;
+    if (!existsSync(full) || !statSync(full).isFile()) return undefined;
+    return readFileSync(full, "utf8");
+  };
 }
 
-/** The site's Markdown pages, tracked or new. */
-function sitePages(): string[] {
+/** The repository's files, tracked or new but not ignored; exits when Git cannot list them. */
+function repoFiles(): string[] {
   const listed = Bun.spawnSync(
-    [
-      "git",
-      "ls-files",
-      "--cached",
-      "--others",
-      "--exclude-standard",
-      "--",
-      "site/*.md",
-    ],
+    ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
     { cwd: ROOT },
   );
+  if (listed.exitCode !== 0) {
+    console.error(
+      `doc-anchors: git ls-files failed: ${listed.stderr.toString()}`,
+    );
+    process.exit(1);
+  }
   return listed.stdout
     .toString()
     .split("\n")
@@ -515,8 +524,19 @@ function sitePages(): string[] {
 }
 
 if (import.meta.main) {
+  const files = repoFiles();
   const given = process.argv.slice(2);
-  const pages = given.length > 0 ? given : sitePages();
+  const pages =
+    given.length > 0
+      ? given
+      : files.filter(
+          (file) => file.startsWith("site/") && file.endsWith(".md"),
+        );
+  if (pages.length === 0) {
+    console.error("doc-anchors: no pages to check");
+    process.exit(1);
+  }
+  const readRepoFile = repoReader(ROOT, new Set(files));
   const cache = new Map<string, Declarations | undefined>();
   let count = 0;
   const problems = pages.flatMap((page) => {
