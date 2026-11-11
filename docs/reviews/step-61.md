@@ -1,6 +1,6 @@
 # Step 61 — The code tour and the anchor check
 
-Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: in review · Verdict after triage: fix and re-review (round 4 next)
+Branch: `docs/61-code-tour` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: settled · Verdict after triage: merge
 
 Two parts. A check, run in `bun run ci`, that fails when a `path#symbol` anchor in `site/` no longer
 resolves, and a "Code tour" page in "How it works" that reads the package source in the order a
@@ -550,3 +550,8 @@ its file on GitHub. Whatever wraps that link, the innermost link is the one a cl
 check needs no HTML handling; `htmlLinks` and its page-wide rule are removed. Every HTML form found in
 review is a test that now fails as "not a Markdown link", and three tests show a correct Markdown link
 passing inside HTML. The tests that expected a bare anchor to pass now expect it reported.
+
+## Round 4 — reviewer verdict: merge
+
+No findings (2026-11-11). The reviewer confirmed the earlier accepted findings are fixed, ran the check
+(246 anchors in 42 pages resolve), `tsc -p site/scripts` and `git diff --check`.
