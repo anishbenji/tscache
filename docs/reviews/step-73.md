@@ -75,3 +75,9 @@ One pre-review before Codex round 1. It reran the byte check (77 rows, `cmp` ide
 | Finding                                                                                                                  | Severity | Verdict | Fix                                                                                                                                                           |
 | ------------------------------------------------------------------------------------------------------------------------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | No procedure for adding or amending a decision after the split; the PR template still asks for "the architecture.md row" | P2       | Valid   | `docs/INDEX.md`'s `docs/decisions/` row says how a new decision and an amendment are recorded; the PR template points at the decision file and its index line |
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-13). The reviewer confirmed the pre-review P2 is fixed, all 77 decisions match the
+original text, the index links resolve and the starter prompt is unchanged. `bun run ci` exited 0 on the
+round's head (0618f0f).
