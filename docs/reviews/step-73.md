@@ -44,7 +44,7 @@ Agents read `docs/architecture.md` (450 KB on `main`) again and again to find on
 - **Citations still resolve.** Every decision number the review checklist cites (N1, N2, N3, N5, N6, N7, N8, N68) has a file, and so does every `N<number>` in `AGENTS.md`, `docs/*.md`, `site/`, `packages/tscache/src/` and `README.md` (a loop over `git grep -o "N[0-9]\+"` that printed nothing). Section citations of §7 and §8 resolve because both headings are unchanged. `git grep starter-prompt` outside `docs/reviews/` now finds only the new path and the status line noted above.
 - **Formatting.** `bunx biome ci .` (Biome formats Markdown here): `Checked 732 files … No fixes applied. Found 1 warning.`; the warning is the existing `useDomNodeTextContent` lint in `e2e/examples/react-lwcharts.spec.ts`. The pre-commit hooks (Biome, gitleaks, commitlint) passed on each commit.
 - **The review script.** `bash -n scripts/codex-review.sh` passes, and `bash scripts/review-watch.test.sh` passes; the change is only text inside the two prompts.
-- **The gate.** `~/code/tscache-reports/bin/heavy-run.sh "73 child: ci" bun run ci` on the final head, which includes `bun run docs:check` (the anchor check of step 61 among it) and the site build's dead-link check; the result is in the child's report to the director.
+- **The gate.** `~/code/tscache-reports/bin/heavy-run.sh "73 child: ci" bun run ci` on the final head, which includes `bun run docs:check` (the anchor check of step 61 among it) and the site build's dead-link check; it exited 0 on 57abf24 (126 test files, 2578 tests; 175 Playwright tests; `doc-anchors: 246 anchors in 42 pages resolve`).
 
 Not verified: how the files and the index render on GitHub (Biome accepts their Markdown, and the index is an ordinary table with relative links); no repository check reads links in `docs/` outside the site, so the relative links were checked only by the `diff` above.
 
@@ -66,3 +66,12 @@ Kept as they are; this step moves text and corrects nothing.
 2. The status line of `docs/architecture.md` says the §8 decision points were "all resolved with the user on 2026-06-11"; only N1–N8 were, as the §8 heading says.
 3. Sizes in `docs/INDEX.md` have drifted since their 2026-11-11 measurement: on `main`, `docs/review-checklist.md` is 7.9 KB against the 7.8 KB listed, and `docs/reviews/` holds 76 files against the 74 listed (steps 61 and 75 merged since).
 4. The review prompts in `scripts/codex-review.sh` call every step "step NN of the commit plan in starter §11", but that plan ended at ⑭ and later steps are numbered outside it (`AGENTS.md`, Steps).
+
+## Pre-review (Claude), not the gate
+
+One pre-review before Codex round 1. It reran the byte check (77 rows, `cmp` identical), the index links
+(77, none duplicated) and the citations (N1–N69 all have files). One finding.
+
+| Finding                                                                                                                  | Severity | Verdict | Fix                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No procedure for adding or amending a decision after the split; the PR template still asks for "the architecture.md row" | P2       | Valid   | `docs/INDEX.md`'s `docs/decisions/` row says how a new decision and an amendment are recorded; the PR template points at the decision file and its index line |

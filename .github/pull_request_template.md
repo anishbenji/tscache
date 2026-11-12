@@ -4,7 +4,7 @@
 
 ## Decisions
 
-<!-- New or changed decisions, with the architecture.md row. "None" if none. -->
+<!-- New or changed decisions, with their docs/decisions/ file and architecture §8 index line. "None" if none. -->
 
 ## Review outcome
 
