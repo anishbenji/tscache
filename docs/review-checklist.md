@@ -1,6 +1,6 @@
 # Review Checklist
 
-Every review of a step branch checks the diff against this list. Section references point to `starter-prompt.md` (S§) and `docs/architecture.md` (A§; each decision of A§7–§8 is a file under `docs/decisions/`), which remain normative; this list only says where reviews must look hardest. Skip sections the diff does not touch.
+Every review of a step branch checks the diff against this list. Section references point to `docs/history/starter-prompt.md` (S§) and `docs/architecture.md` (A§; each decision of A§7–§8 is a file under `docs/decisions/`), which remain normative; this list only says where reviews must look hardest. Skip sections the diff does not touch.
 
 ## Severity
 

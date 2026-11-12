@@ -78,7 +78,7 @@ Replace `NN`, `<name>`, `<modules>` and `feat/NN-slug` before sending. Prompts C
 
 ```text
 You are the contract-test author for step NN (<name>) (see AGENTS.md → Roles).
-Read docs/architecture.md (§2, §4, §5), the file of every decision that touches this step (docs/decisions/), and starter-prompt.md §3.
+Read docs/architecture.md (§2, §4, §5), the file of every decision that touches this step (docs/decisions/), and docs/history/starter-prompt.md §3.
 Write failing Vitest tests in packages/tscache/test/ that pin the specified behaviour of <modules>, importing from the paths in architecture §4. Cover happy paths, every documented rejection, fenceposts (inclusive ends, single-slot ranges, snap-outward, segment slot cap, gap exactly K vs K+1), and property-style checks where the doc asks for them.
 Test the contract, not an implementation: no assertions on private helpers or internal layout the doc does not specify.
 Do not create or edit anything under src/. Do not add dependencies; if a property test needs a library, say so instead. Do not commit.
