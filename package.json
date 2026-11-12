@@ -19,7 +19,7 @@
     "check:pack": "bun scripts/check-pack.ts",
     "docs:dev": "bun run --cwd site dev",
     "docs:build": "bun run --cwd site build",
-    "docs:check": "tsc -p site && tsc -p site/scripts && bun site/scripts/module-graph.ts --check",
+    "docs:check": "tsc -p site && tsc -p site/scripts && bun site/scripts/module-graph.ts --check && bun site/scripts/check-doc-anchors.ts",
     "docs:run": "bun site/scripts/run-snippets.ts",
     "test": "vitest run --passWithNoTests",
     "build": "bun run --filter @anishbenji/tscache build",

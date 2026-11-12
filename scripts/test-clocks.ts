@@ -99,6 +99,7 @@ function testFiles(): string[] {
     "integrations/test/**",
     "reference/*/test/**",
     "scripts/**/*.test.ts",
+    "site/scripts/**/*.test.ts",
     "e2e/**",
   ]);
   return (

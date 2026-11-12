@@ -31,6 +31,7 @@ export default defineConfig({
       "reference/*/test/**/*.test.ts",
       "e2e/examples/*.test.ts",
       "scripts/**/*.test.ts",
+      "site/scripts/**/*.test.ts",
     ],
     passWithNoTests: true,
     // CacheState.restore's implementation, which the persister installs in
