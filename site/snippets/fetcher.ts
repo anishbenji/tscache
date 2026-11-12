@@ -20,6 +20,13 @@ export interface Context {
   origin?: string;
 }
 
+/**
+ * The float fields of this app's caches (dtype `f64` or `f32` in their
+ * CacheConfig); `volume` is a `u32`. The worker does not tell a fetcher the
+ * dtypes, so the fetcher knows them, as it knows the backend's protocol.
+ */
+const FLOAT_FIELDS = new Set(["open", "high", "low", "close"]);
+
 /** One page of the backend's answer. */
 interface Page {
   timestamps: number[];
@@ -75,10 +82,17 @@ const fetcher: Fetcher = {
       for (const t of page.timestamps) timestamps.push(t);
       for (const [name, values] of Object.entries(page.fields)) {
         fields[name] ??= [];
-        // The cache would store null as 0, a value like any other: make it
-        // NaN, a float field's missing value (an integer field stores 0
-        // either way).
-        for (const value of values) fields[name].push(value ?? NaN);
+        const column = fields[name];
+        // A put rejects null in every field (N68). In a float field a missing
+        // value is NaN. An integer field has none, and rejects NaN and, by
+        // decision 38, fractions too: a null there is the backend's error,
+        // and failing the range ('fetch-failed') says so.
+        const float = FLOAT_FIELDS.has(name);
+        for (const [i, value] of values.entries()) {
+          if (value !== null) column.push(value);
+          else if (float) column.push(NaN);
+          else throw new Error(`${name} has no value at ${page.timestamps[i]}`);
+        }
       }
       // The earliest watermark: a later page must not vouch for an
       // earlier page's provisional points.

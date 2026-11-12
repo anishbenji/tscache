@@ -138,7 +138,7 @@ describe("CacheState put and config — architecture §2.2–§2.4, §4.5, N3, N
       timestamps: new Float64Array([-7, 3]),
       fields: {
         price: new Float32Array([Number.NaN, 1.5]),
-        volume: new Float64Array([1.9, -2.9]),
+        volume: new Float64Array([1, -2]),
       },
     });
     expect(c.get({ start: -7, end: 3 })).toEqual(

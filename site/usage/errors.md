@@ -20,9 +20,10 @@ the page, with its fields.
 | Field               | Holds                                                                                                      |
 | ------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `code`              | `'misaligned'`, `'unsorted'`, `'duplicate'`, `'field-mismatch'`, `'length-mismatch'` or `'range-mismatch'` |
-| `offenderIndex`     | the index of the first offending timestamp; `-1` for a structural problem                                  |
-| `offenderTimestamp` | its value, when it is a number                                                                             |
-| `expected`          | what was expected, e.g. `"t ≡ 0 (mod 60000)"`                                                              |
+| `offenderIndex`     | the index of the first offending timestamp or value; `-1` for a structural problem                         |
+| `offenderTimestamp` | the timestamp at that index, when it is a number                                                           |
+| `offenderField`     | for a rejected field value (`'field-mismatch'`), the field it belongs to; unset otherwise                  |
+| `expected`          | what was expected, e.g. `"t ≡ 0 (mod 60000)"`, `"a number"`                                                |
 
 <<< @/snippets/cache.ts#put-error{ts}
 

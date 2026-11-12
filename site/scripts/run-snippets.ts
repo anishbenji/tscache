@@ -80,22 +80,35 @@ function within(
 
 const backend = createBackend({ latencyMs: 0, pushMs: 200 });
 /**
- * A series whose JSON page holds a null, as a JSON backend sends for a
- * missing value: the fetcher snippet must hand it to the cache as NaN.
+ * Series whose JSON page holds a null, as a JSON backend sends for a missing
+ * value: the fetcher snippet must hand it to the cache as NaN in a float
+ * field (`close`), and fail the response for an integer field (`volume`, a
+ * u32), where N68 rejects both null and NaN.
  */
 const NULLS_SERIES = "test/nulls";
-const nullsPage = {
-  timestamps: [0, MINUTE],
-  fields: { close: [1.5, null] },
-  meta: { version: "1", finalizedUntil: 2 * MINUTE },
+const INTEGER_NULLS_SERIES = "test/integer-nulls";
+const nullPages: Record<string, unknown> = {
+  [NULLS_SERIES]: {
+    timestamps: [0, MINUTE],
+    fields: { close: [1.5, null] },
+    meta: { version: "1", finalizedUntil: 2 * MINUTE },
+  },
+  [INTEGER_NULLS_SERIES]: {
+    timestamps: [0, MINUTE],
+    fields: { volume: [7, null] },
+    meta: { version: "1", finalizedUntil: 2 * MINUTE },
+  },
 };
 const server = Bun.serve({
   port: 0,
-  fetch: async (request) =>
-    new URL(request.url).pathname === `/api/series/${NULLS_SERIES}`
-      ? Response.json(nullsPage)
-      : ((await backend(request)) ??
-        new Response("not found", { status: 404 })),
+  fetch: async (request) => {
+    const series = new URL(request.url).pathname.replace("/api/series/", "");
+    const page = nullPages[series];
+    if (page !== undefined) return Response.json(page);
+    return (
+      (await backend(request)) ?? new Response("not found", { status: 404 })
+    );
+  },
 });
 const origin = server.url.origin;
 
@@ -203,42 +216,89 @@ const load = (file: string) => import(new URL(file, SNIPPETS).href);
 type Run = (logs: unknown[][]) => Promise<void>;
 
 /**
- * The value-conversion table of site/concepts/grid.md ("Batches"), against
- * an in-process engine: when the engine's conversion changes, this fails
- * until the page says what it does.
+ * What each field accepts, as site/concepts/grid.md ("Batches") documents it
+ * (N68), against an in-process engine: when the engine's rules change, this
+ * fails until the page says what they are. Each case puts one value into one
+ * field (the others get 0) and expects either the stored number or a
+ * rejection with `PutError` `'field-mismatch'`.
  */
 async function checkConversions(): Promise<void> {
   const { createClient } = await import("@anishbenji/tscache");
   const client = await createClient({ mode: "in-process" });
+  const fields = {
+    float: "f64",
+    single: "f32",
+    int: "i32",
+    byte: "u8",
+  } as const;
   const cache = await client.cache({
     id: "test/conversions",
     interval: MINUTE,
-    fields: { float: "f64", single: "f32", int: "i32", byte: "u8" },
+    fields,
   });
-  const given = [null, undefined, Number.NaN, 1.5, 300, -1, 1e40];
-  const timestamps = given.map((_, i) => i * MINUTE);
-  const column = given as unknown as number[];
-  await cache.put({
-    timestamps,
-    fields: { float: column, single: column, int: column, byte: column },
-  });
-  const read: GetResult = await cache.get(
-    { start: 0, end: timestamps.at(-1) ?? 0 },
-    { cacheOnly: true },
-  );
-  const expected: Record<string, number[]> = {
-    float: [0, Number.NaN, Number.NaN, 1.5, 300, -1, 1e40],
-    single: [0, Number.NaN, Number.NaN, 1.5, 300, -1, Number.POSITIVE_INFINITY],
-    int: [0, 0, 0, 1, 300, -1, 0],
-    byte: [0, 0, 0, 1, 44, 255, 0],
+  const rejected = "rejected";
+  const nonNumbers: [unknown, typeof rejected][] = [
+    [null, rejected],
+    [undefined, rejected],
+    ["1", rejected],
+  ];
+  const documented: Record<
+    keyof typeof fields,
+    [unknown, number | typeof rejected][]
+  > = {
+    float: [
+      ...nonNumbers,
+      [Number.NaN, Number.NaN],
+      [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
+      [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY],
+      [1.5, 1.5],
+    ],
+    single: [
+      ...nonNumbers,
+      [Number.NaN, Number.NaN],
+      [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
+      [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY],
+      [1e40, Number.POSITIVE_INFINITY],
+    ],
+    int: [...nonNumbers, [Number.NaN, rejected], [1.5, rejected], [2, 2]],
+    byte: [
+      ...nonNumbers,
+      [Number.NaN, rejected],
+      [300, rejected],
+      [-1, rejected],
+      [1.5, rejected],
+    ],
   };
-  for (const [name, values] of Object.entries(expected)) {
-    const stored = [...(read.fields[name] ?? [])];
-    check(
-      stored.length === values.length &&
-        stored.every((v, i) => Object.is(v, values[i])),
-      `${name} stored ${JSON.stringify(stored.map(String))}, the docs say ${JSON.stringify(values.map(String))}`,
-    );
+  let t = 0;
+  for (const [name, cases] of Object.entries(documented)) {
+    for (const [value, expected] of cases) {
+      t += MINUTE;
+      const columns = Object.fromEntries(
+        Object.keys(fields).map((f) => [f, [f === name ? value : 0]]),
+      ) as unknown as Record<string, number[]>;
+      let outcome: number | string;
+      try {
+        await cache.put({ timestamps: [t], fields: columns });
+        const read: GetResult = await cache.get(
+          { start: t, end: t },
+          { cacheOnly: true },
+        );
+        outcome = read.fields[name]?.[0] ?? "missing";
+      } catch (error) {
+        const { name: kind, code } = error as {
+          name?: unknown;
+          code?: unknown;
+        };
+        outcome =
+          kind === "PutError" && code === "field-mismatch"
+            ? rejected
+            : `${String(kind)} ${String(code)}`;
+      }
+      check(
+        Object.is(outcome, expected),
+        `${name} given ${String(value)}: ${String(outcome)}, the docs say ${String(expected)}`,
+      );
+    }
   }
   await client.dispose();
 }
@@ -277,6 +337,21 @@ const RUNS: Record<string, Run> = {
     check(
       close.length === 2 && close[0] === 1.5 && Number.isNaN(close[1]),
       `null mapped to ${JSON.stringify(close)}`,
+    );
+    // In an integer field the fetcher fails the response instead.
+    let refused: unknown;
+    try {
+      await fetcher.fetch({
+        ...request,
+        cacheId: INTEGER_NULLS_SERIES,
+        range: { start: 0, end: MINUTE },
+      });
+    } catch (error) {
+      refused = error;
+    }
+    check(
+      refused instanceof Error && refused.message.includes("volume"),
+      `an integer field's null gave ${String(refused)}`,
     );
   },
   async "fetcher-columns.ts"() {

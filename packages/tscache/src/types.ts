@@ -212,6 +212,11 @@ export interface EncodedSnapshot extends Omit<Snapshot, "segments"> {
 export interface PutBatch {
   /** Sorted ascending, aligned, no duplicates — else the whole batch rejects. */
   timestamps: Float64Array | number[];
+  /**
+   * One array per schema field. Every value must be a number the field can
+   * hold, else the whole batch rejects (N68): never `null`; in an integer
+   * field, an integer inside the dtype's range (`1.5` rejects).
+   */
   fields: Record<string, ArrayBufferView | number[]>;
   meta?: {
     version?: string;
@@ -336,6 +341,7 @@ export interface FetchRequest {
 /** A fetcher's answer: a PutBatch for the whole requested range (§2.5). */
 export interface FetchResponse {
   timestamps: Float64Array | number[];
+  /** As `PutBatch.fields` (N68): map a JSON `null` to `NaN` for a float field. */
   fields: Record<string, ArrayBufferView | number[]>;
   meta?: { version?: string; finalizedUntil?: number };
 }

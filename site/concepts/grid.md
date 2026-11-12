@@ -117,26 +117,27 @@ A `put` batch (and a fetcher's response) is validated as a whole before anything
 2. every field has as many values as there are timestamps (`'length-mismatch'`);
 3. timestamps are aligned, strictly ascending and unique; the first offender is reported with its index
    and value (`'misaligned'`, `'unsorted'`, `'duplicate'`);
-4. with `options.range`, every timestamp lies inside it (`'range-mismatch'`).
+4. with `options.range`, every timestamp lies inside it (`'range-mismatch'`);
+5. every value is one its field can hold (`'field-mismatch'`, naming the field, index, timestamp and
+   value; the error's `offenderField` is the field).
 
-Values are converted to the field's dtype by typed-array assignment, so `1.5` given for an `i32` field is
-stored as `1`. `NaN` is a legal value. An empty batch is legal: with a range it states that the range
-holds no points.
+What each field accepts:
 
-The conversions below never reject the batch and never warn, so a value that is not a valid number for
-its field is stored as some other number. Only an element that cannot be converted to a number at all (a
-BigInt, a symbol, an object whose conversion throws) rejects the batch with `PutError` `'field-mismatch'`:
+- **Every field** rejects a value that is not a number: `null`, `undefined`, a hole in an array, a
+  string (`"1"` included), a boolean, a bigint or an object.
+- **Float fields** (`f64`, `f32`) accept every number, `NaN`, `Infinity` and `-Infinity` included.
+  `f32` stores the nearest float32.
+- **Integer fields** (`i32`, `u32`, `i16`, `u16`, `i8`, `u8`) accept only an integer inside the
+  dtype's range (`-0` and an integral float such as `2.0` included), stored as given. A fraction
+  (`1.5` for an `i32` field), `NaN`, `±Infinity` and a value outside the range (`300` or `-1` for
+  `u8`) are rejected: round in the fetcher if the backend sends fractions for an integer field.
 
-| Value given      | Float field (`f32`, `f64`)                  | Integer field (`i32`, `u8`, ...)                                    |
-| ---------------- | ------------------------------------------- | ------------------------------------------------------------------- |
-| `null`           | `0`                                         | `0`                                                                 |
-| `undefined`      | `NaN`                                       | `0`                                                                 |
-| `NaN`            | `NaN`                                       | `0`                                                                 |
-| A fraction       | kept (`f32` rounds it to the nearest `f32`) | truncated toward zero: `1.5` is `1`                                 |
-| Outside the type | `f32`: `Infinity` beyond about 3.4 × 10^38  | wraps around the type's range: `300` in `u8` is `44`, `-1` is `255` |
+Nothing is coerced: a `null` from a JSON backend is rejected, not stored as `0`. A typed array of the
+field's own dtype is accepted as it is, without a scan. An empty batch is legal: with a range it states
+that the range holds no points.
 
-A JSON backend has no `NaN`, so it usually sends `null` for a missing value, and the cache would store a
-bar of price `0`, indistinguishable from data. Map `null` to `NaN` for float fields in the fetcher
-([Fetchers](/guides/fetcher)), and check integer fields' ranges there if the backend can exceed them.
+A JSON backend has no `NaN`, so it usually sends `null` for a missing value. Map `null` to `NaN` for
+float fields in the fetcher ([Fetchers](/guides/fetcher)); a response that still holds one is rejected,
+and its range is reported `'fetch-failed'`.
 
 <<< @/snippets/cache.ts#put-error{ts}

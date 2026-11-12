@@ -93,7 +93,7 @@ describe("Engine operation delegation — architecture §2.3–§2.4, §4.5–§
       timestamps: new Float64Array([3, 13]),
       fields: {
         price: new Float32Array([Number.NaN, 1.5]),
-        volume: new Float64Array([1.9, -2.9]),
+        volume: new Float64Array([1, -2]),
       },
     };
     engine.put(id, input);

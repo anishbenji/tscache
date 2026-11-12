@@ -361,6 +361,10 @@ describe("hydrate validates in full before changing state — architecture §4.5
 
   it("V07 checks every payload before applying even the first valid part or metadata", () => {
     const s = snapshotFixture();
+    // N69 (decision 30) rejects coverage at or after the snapshot's own
+    // watermark before any payload is decoded; a watermark above the second
+    // range keeps that coverage legal, so the payload is still what fails.
+    s.finalizedUntil = 83;
     s.coverage = [
       { start: 3, end: 43 },
       { start: 63, end: 73 },

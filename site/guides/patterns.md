@@ -33,9 +33,9 @@ If the backend changes covered history and says nothing, no library mechanism ca
 
 Presence is per point. A float field can hold `NaN` for a missing value; an integer field cannot. Store
 such a field as `f32`/`f64` with `NaN`, or in a cache of its own
-([Segments and slots](/concepts/segments)). A `null` given for any field is stored as `0`, without an
-error or a warning ([Batches](/concepts/grid#batches)), so map a JSON backend's `null` to `NaN` in the
-fetcher.
+([Segments and slots](/concepts/segments)). A `null` given for any field rejects the whole batch
+with `PutError` `'field-mismatch'` ([Batches](/concepts/grid#batches)), so map a JSON backend's `null`
+to `NaN` in the fetcher.
 
 ## Several resolutions
 

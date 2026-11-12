@@ -22,7 +22,7 @@ Every review of a step branch checks the diff against this list. Section referen
 - [ ] Alignment honours `alignmentOffset`; `interval` has no default.
 - [ ] Ranges are inclusive at both ends. Unaligned `get`/`invalidate` inputs snap outward (floor start, ceil end).
 - [ ] ms↔slot conversion happens at one site; all internal range math uses integer slot indices.
-- [ ] Presence is per point, not per field; `NaN` is a legal field value.
+- [ ] Presence is per point, not per field; `NaN` is a legal value of a float field. A put rejects a non-number in any field and a fraction, `NaN`, `±Infinity` or an out-of-range value in an integer field, never coercing it (N68, decision 38).
 - [ ] Dtypes are exactly `f64 f32 i32 u32 i16 u16 i8 u8`.
 
 ## 3. Coverage (S§3.2–§3.3, A§6.1)

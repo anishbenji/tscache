@@ -45,18 +45,18 @@ cache and emits `cacheCleared` with reason `'version-mismatch'` (architecture §
 
 Presence is recorded per point, not per field: a point either exists with every field, or does not
 exist. A float field can mark one missing value with `NaN`; an integer field (`i32`, `u8`, ...) has no
-such value, so a point that exists stores a number in it. If a field can be missing on its own:
+such value, so a point that exists stores a number in it. A put rejects any value that is not a number
+(`null` and `undefined` included) and, for an integer field, a fraction, `NaN`, `±Infinity` and values
+outside the dtype's range, with `PutError` `'field-mismatch'` (architecture N68). JSON has no `NaN`, so a fetcher
+that reads JSON maps each missing value (`null`) to `NaN` for a float field. If a field can be missing on
+its own:
 
 - store it as `f32` or `f64` and write `NaN` for missing (exact for integers up to 2^24 and 2^53), or
 - keep a separate cache for it, so its absence is a missing point there.
 
-Values are converted to the field's dtype by typed-array assignment, which never warns and rejects only
-an element that cannot be converted to a number at all (a BigInt, a symbol, an object whose conversion
-throws: `PutError` `'field-mismatch'`). A `null` becomes `0` in every field, so a JSON backend, which has no `NaN`, must have its
-missing values mapped to `NaN` for float fields by the fetcher; otherwise the cache stores a value of
-`0`, indistinguishable from data. `undefined` becomes `NaN` in a float field and `0` in an integer
-field. An integer outside its type wraps around: `300` in a `u8` field is stored as `44`, `-1` as
-`255`. The table is in `site/concepts/grid.md` ("Batches").
+Nothing is coerced. A fraction for an integer field is rejected (`1.5` for an `i32` field; architecture
+N68, decision 38), as is a `null` a fetcher did not map to `NaN`: the response is rejected and the range
+reported `'fetch-failed'`. Round in the fetcher if the backend sends fractions for an integer field. The rules are in `site/concepts/grid.md` ("Batches").
 
 `examples/solid-uplot` shows the problem with a sensor's integer field. Per-field presence masks are on
 the [roadmap](../roadmap.md).
