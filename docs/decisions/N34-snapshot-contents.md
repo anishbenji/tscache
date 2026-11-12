@@ -1,0 +1,7 @@
+# N34: What a snapshot carries
+
+Row N34 of the decision table in `docs/architecture.md` §8, whose introduction says how its rows were taken. The text below is that row, moved here unchanged in step 73. Decisions are locked (`AGENTS.md`); the architecture section lists every decision with a one-line summary.
+
+## Resolution
+
+**Segment payloads clipped to the range, in an envelope** `{ format, interval, alignmentOffset, fields, range, version?, finalizedUntil?, coverage, segments }`: the grid and schema of the cache, the request it answers (snapped outward), the covered sub-ranges of the request, the dataset version and watermark in force, and the payloads of the present points inside the range. This honours the one-format invariant (§3.4), and the envelope is the cache record of the persistence sketch (`docs/roadmap.md`). The grid and schema are checked against the receiving cache before anything is applied, so a snapshot that holds no segment (a confirmed gap) is checked too; each payload is then checked by the `segmentFromPayload` rules (§4.2). Contract with step ⑮ (§2.8). Rejected: the read result plus metadata (a second serialised format, which starter §3.7 locks against, and persistence would still need the payload path); whole segments that intersect the range (a daily series keeps decades in one segment, so a 200-candle page would carry everything the server ever fetched). User-confirmed 2026-10-23

@@ -1,0 +1,7 @@
+# N55: Where stored coverage lives
+
+Row N55 of the decision table in `docs/architecture.md` §8, whose introduction says how its rows were taken. The text below is that row, moved here unchanged in step 73. Decisions are locked (`AGENTS.md`); the architecture section lists every decision with a one-line summary.
+
+## Resolution
+
+**With its page: each page record is the snapshot of its page's covered ranges**, carrying coverage, the points inside that coverage, grid, schema and version; the cache record carries the config, version and watermark only. A record is then valid on its own whoever wrote it, a lost page takes its coverage with it (starter §3.7's reconcile rule by construction), and lazy loading and eviction get self-contained pages. Rejected: coverage in the cache record (the roadmap sketch), where with two writers one engine's coverage list can describe pages the other wrote, confirming gaps where points exist unless every hosting read-merges-writes the whole list. Design, 2026-10-30; user-confirmed 2026-10-30. **Changed in substance after review round 2:** the record's segments hold only the points inside its coverage, where the first design stored every present point of the hull (invalidated or provisional ones included) and never loaded those. A record now holds exactly what a load applies, so "the disk equals `recordsOf(S)`" is a mechanical check (§4.10.5 property (a), §4.10.6 property (g)) and no stored point exists that memory would refuse. Redesign, 2026-10-30

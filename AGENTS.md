@@ -2,7 +2,7 @@
 
 Shared rules for every coding agent on this repo: Claude (via T3 Code or Claude Code) and Codex (via T3 Code or the Codex CLI). `CLAUDE.md` imports this file; Codex reads it natively.
 
-Read `docs/INDEX.md` first, then only the architecture sections and decision rows your task touches; the index shows how to read single rows. Decisions in starter §3 and architecture §7–§8 are **locked — never relitigate silently**. Open or new decisions go to the user with alternatives and pros/cons; the user makes the call.
+Read `docs/INDEX.md` first, then only the architecture sections and decisions your task touches; the index shows how to read one decision (`docs/decisions/`). Decisions in starter §3 and architecture §7–§8 are **locked — never relitigate silently**. Open or new decisions go to the user with alternatives and pros/cons; the user makes the call.
 
 ## Roles
 
@@ -40,7 +40,7 @@ The per-step pipeline, the review loop, copy-paste prompts and the adversarial-r
 
 ## Resolved decisions
 
-The resolved decisions are the rows of architecture §7 (starter §9, 2026-06-11) and §8 (N1 onward); read the rows your task touches.
+The resolved decisions are indexed in architecture §7 (starter §9, 2026-06-11) and §8 (N1 onward), one file each under `docs/decisions/`; read the files your task touches.
 
 ## Code Review Rules
 

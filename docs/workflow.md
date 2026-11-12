@@ -9,7 +9,7 @@ The primary driver is **T3 Code**. When a director thread runs the project, it d
 | File                                           | Read by                                                     | Purpose                                                                                                                                                         |
 | ---------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AGENTS.md`                                    | Codex natively; Claude through `CLAUDE.md`                  | Shared rules, roles, review rules                                                                                                                               |
-| `docs/INDEX.md`                                | Everyone, at the start of a task                            | Which document to read when, with sizes and owners, and how to read single decision rows of `docs/architecture.md`                                              |
+| `docs/INDEX.md`                                | Everyone, at the start of a task                            | Which document to read when, with sizes and owners, and how to read one decision (`docs/decisions/`)                                                            |
 | `CLAUDE.md`                                    | Claude                                                      | Imports `AGENTS.md`, plus Claude-only notes                                                                                                                     |
 | `.claude/settings.json`                        | Claude Code, and Agent SDK hosts that load project settings | Permissions, Bash guard hook, Codex plugin                                                                                                                      |
 | `.claude/hooks/guard-bash.sh`, `guard-bash.ts` | Claude                                                      | Tripwire for literal `bun test` and git-hook bypasses; threat model in the `.ts` header, regression cases in `guard-bash.test.sh`. `bun run ci` is the backstop |
@@ -78,7 +78,7 @@ Replace `NN`, `<name>`, `<modules>` and `feat/NN-slug` before sending. Prompts C
 
 ```text
 You are the contract-test author for step NN (<name>) (see AGENTS.md → Roles).
-Read docs/architecture.md (§2, §4, §5 and every decision row that touches this step) and starter-prompt.md §3.
+Read docs/architecture.md (§2, §4, §5), the file of every decision that touches this step (docs/decisions/), and starter-prompt.md §3.
 Write failing Vitest tests in packages/tscache/test/ that pin the specified behaviour of <modules>, importing from the paths in architecture §4. Cover happy paths, every documented rejection, fenceposts (inclusive ends, single-slot ranges, snap-outward, segment slot cap, gap exactly K vs K+1), and property-style checks where the doc asks for them.
 Test the contract, not an implementation: no assertions on private helpers or internal layout the doc does not specify.
 Do not create or edit anything under src/. Do not add dependencies; if a property test needs a library, say so instead. Do not commit.
