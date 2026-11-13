@@ -63,15 +63,15 @@ fi
 
 if [[ -n $focus ]]; then
   prompt="Adversarial read-only review. Do not edit, create, stage or commit anything.
-Review \`git diff main...$branch\` and \`git log main..$branch\` — step $step of the commit plan in starter-prompt.md §11.
+Review \`git diff main...$branch\` and \`git log main..$branch\` — step $step of the commit plan in docs/history/starter-prompt.md §11.
 Challenge the approach, not just the code: hidden assumptions, failure modes, and whether a simpler design within the locked decisions would be safer. Focus: $focus.
-Locked decisions (starter-prompt.md §3, docs/architecture.md §7–§8) are not findings. If you think one is wrong, put it under \"Decision concerns\".
+Locked decisions (docs/history/starter-prompt.md §3; docs/architecture.md §7–§8, one file each in docs/decisions/) are not findings. If you think one is wrong, put it under \"Decision concerns\".
 $history
 Use the output format in docs/review-checklist.md."
   effort=xhigh
 else
   prompt="Read-only code review. Do not edit, create, stage or commit anything.
-Review \`git diff main...$branch\` and \`git log main..$branch\` — step $step of the commit plan in starter-prompt.md §11.
+Review \`git diff main...$branch\` and \`git log main..$branch\` — step $step of the commit plan in docs/history/starter-prompt.md §11.
 Check the diff against docs/review-checklist.md, docs/architecture.md and AGENTS.md.
 $history
 Report findings in the checklist's output format, most severe first, then the verdict. Only report issues tied to a line and a concrete failure scenario."
