@@ -1,6 +1,6 @@
 # Step 86 — Development-tooling security updates within the declared ranges
 
-Branch: `chore/86-audit-fix` · Reviewer: GPT-6.1 Sol (high) · Rounds: pending · Status: in review · Verdict after triage: pending
+Branch: `chore/86-audit-fix` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -68,3 +68,7 @@ One P2 (the `mermaid` 12 route also breaks the `vitepress-plugin-mermaid` peer r
 ## Security lane (Claude), not the gate
 
 run 1, head cfc6d67: P0 0, P1 0, P2 0
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-13). The reviewer confirmed the pre-review fixes and that both lockfile upgrades stay within the existing ranges and the approved scope; `git diff --check` passed.
