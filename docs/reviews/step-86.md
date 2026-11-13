@@ -60,3 +60,11 @@ The first full `bun run ci` on 21f0303 exited 1: six tests timed out at 5 s in `
 | `bun install --frozen-lockfile`                                                       | No changes, exit 0.                                                                                                 |
 | `npm view mermaid@<v> dependencies.katex`, `npm view typedoc versions`                | The ranges in the table above.                                                                                      |
 | `~/code/tscache-reports/bin/heavy-run.sh "86 child: ci" bun run ci` on the final head | Exit 0.                                                                                                             |
+
+## Pre-review (Fable), not the gate
+
+One P2 (the `mermaid` 12 route also breaks the `vitepress-plugin-mermaid` peer range) and two nits (the `js-yaml` fix versions; the header fields); all fixed in `docs(review): step 86 pre-review fixes`.
+
+## Security lane (Claude), not the gate
+
+run 1, head cfc6d67: P0 0, P1 0, P2 0
