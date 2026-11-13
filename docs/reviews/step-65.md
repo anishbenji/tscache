@@ -186,6 +186,8 @@ run 1, head d8c8571: P0 0, P1 0, P2 0
 
 run 2, head 8fdceae: P0 0, P1 0, P2 0
 
+run 3, head 2172058: P0 0, P1 0, P2 0
+
 ## Round 1 — reviewer verdict: merge after fixes
 
 | #    | Sev | Finding                                                                                                                                                                                                                                                                                      | Decision | Resolution                                                                            |
