@@ -154,3 +154,21 @@ const candles = await client.cache({
   the memory of a SharedWorker other tabs still use, which writes back what it changes; to clear that
   worker as well, call `clearAll` from one of its tabs. When the clear fails (IndexedDB unavailable or
   refusing it for five seconds), the call still resolves, and the next `clearAll` tries again.
+
+## Known limits of 0.1.0
+
+Three gaps have no code yet; the documentation site states each where an application meets it, and the
+designs follow after the release.
+
+- **Memory is neither bounded nor reported.** No eviction, budget or size call exists; a SharedWorker
+  keeps every cache until the last tab of the origin closes. One year of one-minute OHLCV with five `f64`
+  fields is 525,600 bars of 40 bytes and one presence bit, about 21 MB per series. `clear()` frees a
+  cache's points (`site/guides/patterns.md`, Memory; roadmap: eviction and memory limits).
+- **Deploy skew has no recovery path.** A protocol mismatch rejects `createClient` with
+  `ProtocolMismatchError` and nothing more; with hashed worker URLs two deploys run two SharedWorkers
+  side by side, unreported, and both write the origin's IndexedDB database. A fixed worker URL keeps one
+  worker but needs a fixed fetcher URL too, since a worker refuses a second fetcher module
+  (`site/guides/workers.md`, Stale scripts after a deploy).
+- **No change notifications.** Apart from the opt-in `mergeWarning`, readers hear only `cacheCleared`; a
+  view that must redraw calls `get` again, with `cacheOnly: true` after another tab's signal
+  (`site/guides/live-feeds.md`; roadmap: subscriptions).

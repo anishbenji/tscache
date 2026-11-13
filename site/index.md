@@ -36,6 +36,20 @@ once.
 Version 1 has no aggregation or resampling (a series at one minute and at one hour are two caches), no
 eviction or memory limit, no subscriptions, and no irregular timestamps. The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
 
+### Known limits
+
+Three limits of 0.1.0 that an application has to design around:
+
+- **Memory is neither bounded nor reported.** A cache keeps everything it was asked for until its worker
+  ends, and a SharedWorker runs while any tab of the origin uses it. A year of one-minute OHLCV bars is
+  about 21 MB per series. [Memory](/guides/patterns#memory) says how to keep it in check.
+- **A deploy can leave tabs on two versions.** With a hashed worker URL, old and new tabs run separate
+  SharedWorkers that share nothing, silently; with a fixed URL, a protocol change makes `createClient`
+  reject with `ProtocolMismatchError` until the old tabs close.
+  [Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy) has the details.
+- **Readers are not told when data changes.** A view that must redraw reads again.
+  [Redrawing when the cache changes](/guides/live-feeds#redrawing-when-the-cache-changes) shows how.
+
 ## Status
 
 tscache is at 0.x and follows semantic versioning within it: a minor release may break the API, a

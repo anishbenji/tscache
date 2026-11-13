@@ -17,7 +17,15 @@ stopped running during the handshake"); `modeFallback` says which.
 ## `createClient` rejects with `ProtocolMismatchError`
 
 The worker script is from another version of tscache: a cached script after a deploy, or a SharedWorker
-kept alive by a tab opened before the upgrade. Close the old tabs and reload.
+kept alive by a tab opened before the upgrade. Close the old tabs and reload. A page cannot close the
+user's other tabs; until they close, it can create its client again with `mode: 'dedicated'`, a cache
+of its own that persists nothing ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
+
+## `createClient` rejects with `this worker already runs fetcher`
+
+The running SharedWorker loaded another fetcher module URL, usually a tab from an earlier deploy when the
+worker URL is fixed and the fetcher's is hashed. A worker runs one fetcher module; serve the fetcher at a
+fixed URL too ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
 
 ## `createClient` rejects naming the fetcher module
 
