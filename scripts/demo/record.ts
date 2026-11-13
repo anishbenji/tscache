@@ -36,6 +36,7 @@ import {
   type Page,
 } from "@playwright/test";
 import { demoPorts, hubPort } from "./catalog";
+import { Owner } from "./owned";
 import { Processes, type Started } from "./processes";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -70,7 +71,10 @@ interface Counters {
   streams: number;
 }
 
-/** How long a request to the demo's backend may take, so no path hangs on one. */
+/**
+ * How long any HTTP request of the recorder may take (to the backend, the
+ * server-rendered page and the hub), so no exit path hangs on one.
+ */
 const BACKEND_MS = 5000;
 
 /**
@@ -530,7 +534,9 @@ const scenarios: Scenario[] = [
       // The server's in-process cache outlives requests: one render first,
       // so the recorded render is one of a server that has served the page
       // before.
-      const warm = await fetch(`${appOrigin}ssr`);
+      const warm = await fetch(`${appOrigin}ssr`, {
+        signal: AbortSignal.timeout(BACKEND_MS),
+      });
       if (!warm.ok) throw new Error(`/ssr: ${warm.status}`);
       await resetCounters(r.page);
       const before = await counters();
@@ -883,7 +889,10 @@ async function waitForHub(demo: Started): Promise<void> {
   while (Date.now() < deadline && !cancelled) {
     if (demo.output().includes(HUB_LINE)) {
       try {
-        if ((await fetch(`${hubOrigin}healthz`)).ok) return;
+        const health = await fetch(`${hubOrigin}healthz`, {
+          signal: AbortSignal.timeout(BACKEND_MS),
+        });
+        if (health.ok) return;
       } catch {
         // Not answering yet.
       }
@@ -896,61 +905,43 @@ async function waitForHub(demo: Started): Promise<void> {
 const processes = new Processes();
 let exiting: Promise<never> | undefined;
 
-/** A cleanup, registered when its resource was acquired. */
-interface Owned {
-  /** Undoes the resource; awaited, in reverse order of acquisition. */
-  release(): unknown;
-  /** Runs synchronously as shutdown begins, before anything is awaited. */
-  stop?(): void;
-}
-
 /**
- * What this run has acquired and not yet released, in the order it was
- * acquired. Shutdown undoes exactly this, so an exit before a resource was
- * acquired undoes nothing for it.
+ * What this run has acquired and not yet released (scripts/demo/owned.ts).
+ * Shutdown undoes exactly this, so an exit before a resource was acquired
+ * undoes nothing for it, and one acquired after shutdown began (an await
+ * that finished late) is stopped at once and released too.
  */
-const owned: Owned[] = [];
+const owner = new Owner();
 
 /**
  * Registers the cleanup of a resource just acquired; returns the call that
  * removes it once the resource is released the ordinary way.
  */
 function own(release: () => unknown, stop?: () => void): () => void {
-  const entry: Owned = stop === undefined ? { release } : { release, stop };
-  owned.push(entry);
-  return () => {
-    const at = owned.indexOf(entry);
-    if (at !== -1) owned.splice(at, 1);
-  };
+  return owner.own(release, stop);
 }
 
 /**
  * The one way out, as in scripts/demo.ts. It marks the recorder cancelled,
  * so no step starts new work, and runs every registered `stop` (a running
  * ffmpeg is signalled), all before anything is awaited. Then it releases
- * what this run owns, in reverse order of acquisition, each release on its
- * own so one that fails does not keep the rest: the running ffmpeg (its
- * exit), the backend clock's reset, each browser context (which waits for
- * Playwright's video encoder), Chromium, the stage, the demo with
- * everything it started, and the raw videos with any unfinished conversion.
- * Then it exits. The demo's processes run in groups of their own, so a
- * Ctrl-C in the terminal reaches only this process, and only this stops
- * them.
+ * what this run owns, newest first, until nothing is left, anything owned
+ * meanwhile included. In the order things are acquired, that is: the
+ * running ffmpeg (its exit), the browser context of the scenario recording
+ * (closing it waits for Playwright's video encoder), the backend clock's
+ * reset (registered by the first scenario's quiet minute, before its
+ * context), Chromium, the stage, the demo with everything it started, and
+ * the raw videos with any unfinished conversion. Then it exits. The demo's
+ * processes run in groups of their own, so a Ctrl-C in the terminal reaches
+ * only this process, and only this stops them.
  */
 function shutdown(code: number, reason?: string): Promise<never> {
   if (exiting !== undefined) return exiting;
   cancelled = true;
-  const held = owned.splice(0).reverse();
-  for (const entry of held) entry.stop?.();
+  const released = owner.releaseAll();
   exiting = (async () => {
     if (reason !== undefined) console.error(reason);
-    for (const entry of held) {
-      try {
-        await entry.release();
-      } catch {
-        // The resource is gone already, or its owner is: the rest still go.
-      }
-    }
+    await released;
     process.exit(code);
   })();
   return exiting;
