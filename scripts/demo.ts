@@ -79,7 +79,10 @@ async function build(label: string, cmd: string[]): Promise<void> {
   console.log(`built ${label}`);
 }
 
-/** Starts the app's `vite preview`, its output kept for `ready`. */
+/**
+ * Starts the app's `vite preview`, its output kept for `ready` and the
+ * failure message, its stderr copied to ours as it arrives.
+ */
 function serve(app: App): Started {
   const run = processes.start(
     [
@@ -94,7 +97,7 @@ function serve(app: App): Started {
       String(ports[app]),
       "--strictPort",
     ],
-    { cwd: rootDir, capture: true },
+    { cwd: rootDir, capture: true, stderr: process.stderr },
   );
   void run.exited.then((code) => {
     if (processes.stopping) return;
