@@ -38,6 +38,7 @@ import {
 import { demoPorts, hubPort } from "./catalog";
 import { Owner } from "./owned";
 import { Processes, type Started } from "./processes";
+import { request } from "./request";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 /**
@@ -72,12 +73,6 @@ interface Counters {
 }
 
 /**
- * How long any HTTP request of the recorder may take (to the backend, the
- * server-rendered page and the hub), so no exit path hangs on one.
- */
-const BACKEND_MS = 5000;
-
-/**
  * Set once `waitForHub` has accepted the hub of this run's own launcher:
  * from then on the backend on `appOrigin` is this run's. Before that the port
  * may be another demo's, so nothing is sent to it.
@@ -92,9 +87,7 @@ function ownedBackend(): void {
 
 async function counters(): Promise<Counters> {
   ownedBackend();
-  const response = await fetch(`${appOrigin}api/stats`, {
-    signal: AbortSignal.timeout(BACKEND_MS),
-  });
+  const response = await request(`${appOrigin}api/stats`);
   if (!response.ok) throw new Error(`stats: ${response.status}`);
   const stats = (await response.json()) as Omit<
     Counters,
@@ -112,11 +105,10 @@ async function counters(): Promise<Counters> {
 let clockOwned = false;
 
 async function send(body: Record<string, unknown>): Promise<void> {
-  const response = await fetch(`${appOrigin}api/control`, {
+  const response = await request(`${appOrigin}api/control`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(BACKEND_MS),
   });
   if (!response.ok) throw new Error(`control: ${response.status}`);
 }
@@ -534,9 +526,7 @@ const scenarios: Scenario[] = [
       // The server's in-process cache outlives requests: one render first,
       // so the recorded render is one of a server that has served the page
       // before.
-      const warm = await fetch(`${appOrigin}ssr`, {
-        signal: AbortSignal.timeout(BACKEND_MS),
-      });
+      const warm = await request(`${appOrigin}ssr`);
       if (!warm.ok) throw new Error(`/ssr: ${warm.status}`);
       await resetCounters(r.page);
       const before = await counters();
@@ -889,9 +879,7 @@ async function waitForHub(demo: Started): Promise<void> {
   while (Date.now() < deadline && !cancelled) {
     if (demo.output().includes(HUB_LINE)) {
       try {
-        const health = await fetch(`${hubOrigin}healthz`, {
-          signal: AbortSignal.timeout(BACKEND_MS),
-        });
+        const health = await request(`${hubOrigin}healthz`);
         if (health.ok) return;
       } catch {
         // Not answering yet.
