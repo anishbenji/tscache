@@ -1,6 +1,6 @@
 # Step 82 — State three known limits plainly in the guides
 
-Branch: `docs/82-limits` · Reviewer: (director) · Rounds: (director) · Status: built, awaiting review
+Branch: `docs/82-limits` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge (one P2 fixed)
 
 ## Scope
 
