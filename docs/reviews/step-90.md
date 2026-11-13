@@ -1,6 +1,6 @@
 # Step 90 — Release docs after 0.1.0
 
-Branch: `docs/90-releasing-current-state` · Reviewer: none yet (the director runs the review) · Rounds: 0 · Status: pre-reviewed, awaiting the gate
+Branch: `docs/90-releasing-current-state` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -52,3 +52,7 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-14). The reviewer confirmed the four pre-review fixes; `git diff --check` passed.
