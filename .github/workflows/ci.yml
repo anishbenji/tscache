@@ -91,7 +91,8 @@ jobs:
   # job only in the cases packages/tscache/bench/gated.json lists, the ones
   # calibration on this runner (bench-calibrate.yml) showed the gate judges
   # reliably; every other case reports, in the job summary and an artifact.
-  # The check is not required in branch protection yet: the user decides.
+  # The main ruleset (protect-main) requires this check and ci (user decision,
+  # 2026-11-09; docs/supply-chain.md).
   bench:
     if: ${{ !inputs.skip-bench }}
     runs-on: ubuntu-24.04
