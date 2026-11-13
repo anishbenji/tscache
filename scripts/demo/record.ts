@@ -7,9 +7,11 @@
 // - docs/media/<name>.gif, for the README (GitHub, npm and editors show it);
 // - site/public/media/<name>.mp4 (H.264) and .webm (VP9), for the site.
 //
-// It starts the demo itself (scripts/demo.ts; --reuse-builds passes through)
-// and stops it at the end; Ctrl-C, SIGTERM or SIGHUP stops it, Chromium and
-// everything the demo started too. Every scenario runs on the vanilla reference
+// It starts the demo itself (scripts/demo.ts; --reuse-builds passes through),
+// on the demo's ports (DEMO_PORT moves them), and refuses to start when one is
+// taken, such as by a `bun run demo` already running. It stops the demo at
+// the end; Ctrl-C, SIGTERM or SIGHUP stops it, Chromium and everything the
+// demo started too. Every scenario runs on the vanilla reference
 // client in a fresh browser context, so a fresh SharedWorker. The recorded
 // page is a stage this script serves: a caption, a strip of the app's
 // mock-backend counters since the scenario began, and the app itself in one
@@ -22,6 +24,7 @@
 
 import { copyFileSync, renameSync, unlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,7 +36,7 @@ import {
   type Page,
 } from "@playwright/test";
 import { demoPorts, hubPort } from "./catalog";
-import { Processes } from "./processes";
+import { Processes, type Started } from "./processes";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 /**
@@ -785,14 +788,60 @@ function option(name: string): string | undefined {
   return at === -1 ? undefined : process.argv[at + 1];
 }
 
-async function waitForHub(): Promise<void> {
+/**
+ * Whether 127.0.0.1:`at` is free: binds it and lets it go, so whatever holds
+ * it receives nothing, not even a connection.
+ */
+function bindable(at: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once("error", () => resolve(false));
+    server.listen({ port: at, host: "127.0.0.1", exclusive: true }, () =>
+      server.close(() => resolve(true)),
+    );
+  });
+}
+
+/**
+ * Fails at once, before anything is built or started, when a port the demo
+ * needs (the hub's and every app's) is taken, such as by a `bun run demo`
+ * already running: the recorder would otherwise record that demo, send its
+ * controls to its backends and rebuild the dist/ it serves.
+ */
+async function demoPortsFree(): Promise<void> {
+  const needed = [port, ...Object.values(demoPorts(port))];
+  const taken: number[] = [];
+  for (const at of needed) if (!(await bindable(at))) taken.push(at);
+  if (taken.length === 0) return;
+  const which =
+    taken.length === 1
+      ? `port ${taken[0]} is`
+      : `ports ${taken.join(", ")} are`;
+  throw new Error(
+    `${which} already in use, and the recorder needs ports ${port} to ${port + needed.length - 1} ` +
+      "for a demo of its own. Stop the demo or whatever holds them (is `bun run demo` running?), " +
+      "or set DEMO_PORT to move the recorder's demo. Nothing was started.",
+  );
+}
+
+/** Marks the launcher's line once its hub is up (scripts/demo.ts). */
+const HUB_LINE = "tscache demo hub:";
+
+/**
+ * Waits for the hub of the recorder's own launcher: only once `demo` has
+ * printed its hub line, so a hub something else started on the port in the
+ * meantime is never taken for it.
+ */
+async function waitForHub(demo: Started): Promise<void> {
   // The demo builds every app first, which takes minutes.
   const deadline = Date.now() + 15 * MINUTE;
   while (Date.now() < deadline && !cancelled) {
-    try {
-      if ((await fetch(`${hubOrigin}healthz`)).ok) return;
-    } catch {
-      // Not listening yet.
+    if (demo.output().includes(HUB_LINE)) {
+      try {
+        if ((await fetch(`${hubOrigin}healthz`)).ok) return;
+      } catch {
+        // Not answering yet.
+      }
     }
     await Bun.sleep(500);
   }
@@ -860,6 +909,7 @@ async function main(): Promise<void> {
       `--only names none of ${known.map((s) => s.name).join(", ")}`,
     );
   }
+  await demoPortsFree();
   await mkdir(GIF_DIR, { recursive: true });
   await mkdir(VIDEO_DIR, { recursive: true });
   rawDir = await mkdtemp(join(tmpdir(), "tscache-record-"));
@@ -867,14 +917,18 @@ async function main(): Promise<void> {
     ? ["--reuse-builds"]
     : [];
   stopIfCancelled();
+  // Its output is kept, for the hub line, and printed if it fails.
   const demo = processes.start(["bun", "scripts/demo.ts", ...demoArgs], {
     cwd: ROOT,
+    capture: true,
   });
   void demo.exited.then((code) => {
-    if (!cancelled) void shutdown(1, `the demo exited with ${code}`);
+    if (!cancelled) {
+      void shutdown(1, `the demo exited with ${code}:\n${demo.output()}`);
+    }
   });
   stage = startStage();
-  await waitForHub();
+  await waitForHub(demo);
   // The recorder handles the signals itself: Playwright's handlers would
   // close Chromium and exit without stopping the demo.
   stopIfCancelled();

@@ -44,7 +44,9 @@ server rendering on [Server rendering](/guides/ssr) and the reconnect under
 [Catching up after a gap](/guides/live-feeds#catching-up-after-a-gap). `bun scripts/demo/record.ts`
 makes them again: it starts the demo, records each scenario headless in Chromium, checks that the app
 shows what the caption says, and writes the GIFs the README shows (`docs/media/`) and the videos the
-site shows (`site/public/media/`). It needs `ffmpeg` on the `PATH`.
+site shows (`site/public/media/`). It needs `ffmpeg` on the `PATH`, and runs a demo of its own on the
+same ports: stop a running `bun run demo` first, or set `DEMO_PORT`; it stops at once, starting nothing,
+when a port is taken.
 
 The launcher is
 [`scripts/demo.ts`](https://github.com/anishbenji/tscache/blob/main/scripts/demo.ts), and the hub's

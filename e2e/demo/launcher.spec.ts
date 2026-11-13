@@ -804,3 +804,35 @@ test("the conversion tests reach the conversion whatever the demo's data does", 
     }
   }
 });
+
+test("a recorder whose hub port is taken stops at once and sends that port nothing", async () => {
+  test.setTimeout(60_000);
+  const hub = await freePorts();
+  const apps = appPortsAfter(hub);
+  const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
+  // Another demo, or anything else, already on the hub's port.
+  const taken = await listen(hub);
+  let connections = 0;
+  taken.server.on("connection", () => {
+    connections += 1;
+  });
+  let launched: Launch | undefined;
+  try {
+    launched = launch(
+      hub,
+      ["--reuse-builds", "--only", CONVERSION.name],
+      { ...CONVERSION.env, RECORD_FFMPEG: "true", TMPDIR: temp },
+      recorderPath,
+    );
+    expect(await launched.exit()).toBe(1);
+    expect(launched.stderr()).toContain(`port ${hub} is already in use`);
+    // It checked the port without connecting, and started no demo.
+    expect(connections).toBe(0);
+    expect(await allFree(apps)).toBe(true);
+    expect(await rawVideoDirs(temp)).toEqual([]);
+  } finally {
+    cleanUp(launched, apps);
+    await taken.close();
+    await rm(temp, { recursive: true, force: true });
+  }
+});
