@@ -139,6 +139,13 @@ The videos are embedded where each scenario is explained: sharing on the home pa
 
 ## Verification
 
+**After the recorder moved to step 89** (round 4), on the final head `f5dc9e5`:
+
+- `~/code/tscache-reports/bin/heavy-run.sh "65 child: ci" bun run ci`, first run: exit 1. 128 Vitest files (2594 tests) passed; in Playwright 1 failed, 11 did not run and 163 passed, the failure in `e2e/reference/clients.spec.ts:495`, reference-vanilla, "a failed history fetch shows as missing, and Retry fetches it (R1-3)", a spec this branch does not change, at a load average of 10.13 rising to 95.87. Re-run once: exit 0, 128 Vitest files (2594 tests) and 175 Playwright tests passed, at a load average of 203.98 falling to 36.96.
+- `bunx tsc -p .` and `bunx tsc -p e2e`: no errors. `bun run knip`: exit 0. `bun run fallow`: exit 0. `bun run docs:check`: exit 0, "doc-anchors: 246 anchors in 42 pages resolve". `bun run docs:build`: "build complete".
+
+**History: with the recorder on the branch** (before round 4; the recorder's lines moved to step 89 with it):
+
 - `bun install --frozen-lockfile`: exit 0. `bun run build`: exit 0.
 - `brew install ffmpeg`: ffmpeg 9.0.2 (with libx264, libvpx-vp9 and the palette filters), a local tool on the build machine.
 - `~/code/tscache-reports/bin/heavy-run.sh "65 child: record" bun scripts/demo/record.ts --reuse-builds`: exit 0, after a first full run that built every app; three full runs gave the same counts, and the committed media are the last. Its output is the observations and sizes above. Each GIF was checked by extracting frames with ffmpeg and looking at them: the captions, the counters and the pages match the observations, and the open-stream counter reads 0 for about 0.8 s in the reconnect clip.
@@ -337,10 +344,10 @@ The ownership stack was found sound; three P2s inside it.
 
 ## Round 4 — reviewer verdict: merge after fixes
 
-| #    | Sev | Finding                                                                                 | Decision | Resolution                                                                                                          |
-| ---- | --- | --------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
-| R4-1 | P1  | The required CI gate failed in the round's run                                          | accepted | Not this branch: step 74's property tests timed out under machine load; handled separately as step 88. Re-run below |
-| R4-2 | P1  | The recorder's request timeout, accepted before round 4 (PR6-3), has no regression test | accepted | The recorder moved out of this PR to step 89, below; the timeout's test comes with it                               |
+| #    | Sev | Finding                                                                                 | Decision | Resolution                                                                                                                                                                        |
+| ---- | --- | --------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R4-1 | P1  | The required CI gate failed in the round's run                                          | accepted | Not this branch: step 74's property tests timed out under machine load; handled separately as step 88. The gate on the final head is under Verification, after the recorder moved |
+| R4-2 | P1  | The recorder's request timeout, accepted before round 4 (PR6-3), has no regression test | accepted | The recorder moved out of this PR to step 89, below; the timeout's test comes with it                                                                                             |
 
 **The finding check** (`~/code/tscache-reports/reviews/step-65/check-4.md`) rated both VALID.
 
