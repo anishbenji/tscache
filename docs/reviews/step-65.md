@@ -19,6 +19,8 @@ The pre-publish plan (2026-11-09, "### 65") makes the documentation site public 
 | `fix(demo): replace the media only after a whole conversion`         | Second pre-review findings 1 and 2: the conversion into the temporary directory and the install, `shutdown` stopping ffmpeg, `RECORD_MEDIA_ROOT`, the conversion test, and the check that tab 2 draws tab 1's bars.                    |
 | `docs: name the four recordings on the demo hub page`                | Second pre-review finding 3.                                                                                                                                                                                                           |
 | `docs(review): step 65 second pre-review triage`                     | This file's second pre-review section and the sizes in `docs/INDEX.md`.                                                                                                                                                                |
+| `fix(demo): cancel the recorder as one step once shutdown begins`    | Codex round 1, R1-1, by a redesign: one cancellation flag for every step that starts work, ffmpeg stopped first, and a launcher test of the race.                                                                                      |
+| `docs(review): step 65 round 1 triage`                               | The round 1 section, the settings section (Pages enabled by the director), and the sizes in `docs/INDEX.md`.                                                                                                                           |
 
 ## The Pages workflow
 
@@ -40,7 +42,7 @@ The pre-publish plan (2026-11-09, "### 65") makes the documentation site public 
 
 ### The repository setting the director changes before the merge
 
-No repository setting was changed by this step. The director enables Pages, with GitHub Actions as its source, before the merge, so the first push to `main` deploys (without it, `pages.yml` fails at `configure-pages`, which finds no Pages site):
+No repository setting was changed by this step's child. **Done:** the director enabled Pages before the merge, and the `github-pages` environment deploys from `main` only, exactly the output `docs/supply-chain.md` expects (below). The director enables Pages, with GitHub Actions as its source, before the merge, so the first push to `main` deploys (without it, `pages.yml` fails at `configure-pages`, which finds no Pages site):
 
 ```sh
 gh api -X POST repos/anishbenji/tscache/pages -f build_type=workflow
@@ -72,7 +74,7 @@ gh api repos/anishbenji/tscache/pages --jq '{build_type, html_url}'
 
 - **The stage.** Every scenario runs on the vanilla reference client (`reference/vanilla`, the hub's "Reference client: vanilla", port 5408) in a fresh browser context, so a fresh SharedWorker and empty storage. The recorded page is a stage the script serves on `127.0.0.1`: a caption, a strip of the app's mock-backend counters since the scenario began (read from `GET /api/stats`: `pages` summed as backend fetches, `points` as bars served, `refused`, `refreshes`, and `streams`, which is shown as is), and the app in one or two iframes. The iframes are same-site with the stage (one host, other port), so the app's storage is not partitioned, and two iframes of the app's origin share its SharedWorker, Web Locks, BroadcastChannel and localStorage as two tabs do. The README and the captions on the site say that the two tabs are two frames of one page. (Playwright's Chromium also runs with `ThirdPartyStoragePartitioning` disabled, so the recording would share the worker even across sites; the stage does not rely on that, since it is same-site.)
 - **Checks.** Each scenario checks what its captions claim before the recording is kept, and fails otherwise; it prints what it observed. The captions that carry numbers take them from the backend's counters and the page's own summary, never from a constant.
-- **Clips.** Each recording is trimmed to the scenario (from its start mark to its end), then written as an MP4 (H.264, CRF 26, `yuv420p`, `+faststart`), a WebM (VP9, CRF 38) and a GIF (8 fps, 720 px wide, a 96-colour palette made from the clip, Bayer dither). The videos keep the recorded 960 × 600. The three files are written into the recorder's temporary directory and moved over the committed ones together, once all three exist, so a failed or interrupted conversion leaves the committed media as they were.
+- **Clips.** Each recording is trimmed to the scenario (from its start mark to its end), then written as an MP4 (H.264, CRF 26, `yuv420p`, `+faststart`), a WebM (VP9, CRF 38) and a GIF (8 fps, 720 px wide, a 96-colour palette made from the clip, Bayer dither). The videos keep the recorded 960 × 600. The three files are written into the recorder's temporary directory and moved over the committed ones together, once all three exist, so a failed or interrupted conversion leaves the committed media as they were. Once shutdown begins (a signal, a failed step, or the demo exiting), no new process starts and no media file changes: one `cancelled` flag is set synchronously as `shutdown` begins, every step that starts work (each ffmpeg, each scenario, Chromium, the demo, the install) checks it first in the same synchronous run, `shutdown` stops a running ffmpeg before it awaits anything else, and `install` never runs once the flag is set, even when that ffmpeg had just finished.
 
 What each shows, with the run's observations (final recording, 2026-11-13) and the code each claim rests on:
 
@@ -173,3 +175,26 @@ Checks after the fixes: `bunx tsc -p .` and `bunx tsc -p e2e`, no errors; `bunx 
 ## Security lane (Claude), not the gate
 
 run 1, head d8c8571: P0 0, P1 0, P2 0
+
+## Round 1 — reviewer verdict: merge after fixes
+
+| #    | Sev | Finding                                                                                                                                                                                                                                                                                      | Decision | Resolution                                                                            |
+| ---- | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------- |
+| R1-1 | P1  | SIGTERM to the recorder during the last conversion: `shutdown` awaited Chromium, the clock reset and `processes.stop()` (up to 5 s) before it looked at `converting`, so ffmpeg could finish meanwhile, `convert` installed the media, and new ffmpeg processes could start after the signal | accepted | Redesigned, below (`fix(demo): cancel the recorder as one step once shutdown begins`) |
+
+**The finding check** rated it P2 and reproduced it; the director accepted it as must-fix.
+
+**Why a redesign.** This was the third round running with a finding in the recorder's shutdown path (PR-1, the interrupt; PR2-1, the atomic install; now this race). By the convergence rule (`docs/workflow.md`, Review loop, step 7) the one spot was not patched; cancellation is now one mechanism in `scripts/demo/record.ts`:
+
+- **One flag.** `cancelled` is set synchronously as `shutdown` begins, before anything is awaited. `stopIfCancelled()` throws once it is set.
+- **Every step that starts work checks it first**, in the same synchronous run as the work it starts, so no signal handler can run between the check and the start: each ffmpeg spawn (`ffmpeg`), each scenario (the loop in `main`), the demo's start, Chromium's launch, and `install`. `ffmpeg` checks it again after its process exits, so a conversion ends there whatever the exit code. The hub wait and the demo's exit handler read the same flag.
+- **ffmpeg first.** `shutdown` kills the running ffmpeg before it awaits anything, and awaits its exit before Chromium, the stage, the clock reset and the demo, and before it removes the raw videos. A Chromium still launching is awaited and closed too.
+- **The guarantee**, also in `convert`'s comment: once shutdown begins, no new process starts and no media file changes.
+
+**Test first.** `e2e/demo/launcher.spec.ts`, "once a recorder is stopped, no ffmpeg starts and no media file changes". The stand-in ffmpeg appends its pid to a `starts` file, writes its output, and exits 0 as soon as the recorder's Chromium is gone (the test writes Chromium's pid to a file before the signal), or on SIGTERM, which it traps and answers with exit 0, as an ffmpeg that finished at that moment would. The test waits until the first conversion has begun, sends SIGTERM to the recorder alone, and asserts exit 143, Chromium gone, no stand-in running (`pgrep` on its path), no start after the signal, the media still `previous`, the raw-video directory gone and every port free. No timing assertion; the only waits are polls on observable conditions.
+
+- **The director's variant first.** In the first version the test created a release file once it saw Chromium gone. On the old recorder it passed, because the old `shutdown` finished before the test reacted. The stand-in now releases itself the moment Chromium dies, with no round trip through the test.
+- **Red** on the old recorder: after the signal it started two more stand-ins (`starts` held 41681, 41770, 41771), so it ran the whole conversion. The old code fails this test on every timing: either the conversion finishes and installs, or `shutdown`'s kill lets `convert` start the next ffmpeg in the same microtask turn (the trapped stand-in exits 0), which outlives the recorder.
+- **Green** after the redesign: the launcher spec, 8 passed; both conversion tests repeated 5 times each with one worker, 10 passed, at a load average of 42.
+
+**An earlier repeat.** A first `--repeat-each 5` of the two conversion tests had 9 passed and 1 failed. In that one run of "a recorder stopped while it converts …" the recorder never reached its conversion within 110 s, at a load average of 17. Its output was not captured, so the cause is not known; the likeliest is a scenario check that failed under load. Both conversion tests now fail at once with the recorder's exit code and stderr if it exits before converting (`untilConverting`), instead of timing out; the repeat after that change passed 10 of 10.
