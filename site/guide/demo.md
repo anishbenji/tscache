@@ -41,12 +41,9 @@ Recordings of four of these, multi-tab sharing, credential refresh, server rende
 reconnect, each on the vanilla reference client, are on the pages that explain them: sharing on
 [What tscache is](/), the refresh under [Refreshing once across tabs](/guides/auth#refreshing-once-across-tabs),
 server rendering on [Server rendering](/guides/ssr) and the reconnect under
-[Catching up after a gap](/guides/live-feeds#catching-up-after-a-gap). `bun scripts/demo/record.ts`
-makes them again: it starts the demo, records each scenario headless in Chromium, checks that the app
-shows what the caption says, and writes the GIFs the README shows (`docs/media/`) and the videos the
-site shows (`site/public/media/`). It needs `ffmpeg` on the `PATH`, and runs a demo of its own on the
-same ports: stop a running `bun run demo` first, or set `DEMO_PORT`; it stops at once, starting nothing,
-when a port is taken.
+[Catching up after a gap](/guides/live-feeds#catching-up-after-a-gap). They were recorded headless
+with Playwright and converted with ffmpeg into the GIFs the README shows (`docs/media/`) and the videos
+the site shows (`site/public/media/`); the script that records them again lands in a later step.
 
 The launcher is
 [`scripts/demo.ts`](https://github.com/anishbenji/tscache/blob/main/scripts/demo.ts), and the hub's

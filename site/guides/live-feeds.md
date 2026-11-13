@@ -55,7 +55,7 @@ gaps. Push one bar, or one unbroken run of bars, per batch.
     <source src="/media/live-feed-reconnect.webm" type="video/webm" />
     <source src="/media/live-feed-reconnect.mp4" type="video/mp4" />
   </video>
-  <figcaption id="demo-reconnect">The reference client following a live feed over Server-Sent Events, with one open stream. The backend drops every stream and moves its clock a minute on, as if the outage had lasted a minute. The open-stream count falls to zero and returns to one when the feed reconnects, and one fetch over the newest bars mends the bar the outage broke in, whose final values the new stream does not send again. Recorded from the demo hub's vanilla reference client by <code>scripts/demo/record.ts</code>; the counters above the page are its mock backend's.</figcaption>
+  <figcaption id="demo-reconnect">The reference client following a live feed over Server-Sent Events, with one open stream. The backend drops every stream and moves its clock a minute on, as if the outage had lasted a minute. The open-stream count falls to zero and returns to one when the feed reconnects, and one fetch over the newest bars mends the bar the outage broke in, whose final values the new stream does not send again. Recorded headless with Playwright from the demo hub's vanilla reference client; the counters above the page are its mock backend's.</figcaption>
 </figure>
 
 ## Redrawing when the cache changes

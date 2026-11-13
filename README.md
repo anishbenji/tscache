@@ -72,8 +72,8 @@ start, the entries and browser support.
 ## Demos
 
 Each recording is the vanilla reference client (`reference/vanilla`) in the
-demo hub, made by `bun scripts/demo/record.ts`; the counters above the page are
-its mock backend's. The two tabs are two frames of one page, which share the
+demo hub, recorded headless with Playwright; the counters above the page are
+its mock backend's. The recording script lands in a later step. The two tabs are two frames of one page, which share the
 origin's SharedWorker as two tabs do.
 
 **Credential refresh.** The backend expires the access token; tab 1 scrolls
