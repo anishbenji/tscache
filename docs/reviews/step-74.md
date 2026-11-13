@@ -10,7 +10,6 @@ The review of 2026-11-10 (`docs/reviews/2026-11-review.md`, Part 2, §2.4) found
 | ----------------------------------------------------------------------- | ------------------------------------------------- |
 | `test: seeded model and fault-injection property tests for the cache`   | The model, its checks and the two property tests. |
 | `docs(review): step 74, model-based property tests`                     | This file.                                        |
-| `test: draw only field values a put accepts (n68)`                      | The generator after the rebase onto N68.          |
 | `test: require a failed put to leave a prefix of its write steps (n70)` | The set-based expectation of round 3.             |
 
 | File                                                  | Role                                                                                                                                                                                        |
@@ -152,7 +151,7 @@ A scratch probe in the fault test (not committed) classified every one of the 9 
 
 2026-11-13, after the user answered Q1–Q3 (decision 42, option A), recorded on `main` as N70 (`docs/decisions/N70-failed-put-runs.md`; architecture §4.3 "Allocation failure", §4.5 "Order inside `put`"): runs are applied in ascending slot order; a write run is counted on the batch alone; a put with its own watermark is two passes, cut there.
 
-The branch was rebased onto `main` 2dc86e7. `main` had meanwhile taken N68, under which a put rejects a value its field cannot hold, and both property tests then failed on every batch: their generator drew NaN, fractions and values past the integer ranges for every field, so most puts threw `PutError`. `test: draw only field values a put accepts (n68)` makes the generator take the field's dtype (see Decisions taken). No check changed.
+The branch was rebased onto `main` 2dc86e7. `main` had meanwhile taken N68, under which a put rejects a value its field cannot hold, and both property tests then failed on every batch: their generator drew NaN, fractions and values past the integer ranges for every field, so most puts threw `PutError`. The generator now takes the field's dtype (see Decisions taken); no check changed. Because the branch was never pushed, the director folded that change into the first commit, `test: seeded model and fault-injection property tests for the cache`, so every commit stays green against `main`: both property tests pass at each of the four test commits (`bunx vitest run` on the two files at each commit).
 
 `test: require a failed put to leave a prefix of its write steps (n70)` builds the redesign R2-1 called for. The model (`cache-model.ts`) gains `writeSteps`, the ordered steps of a put's write under N70 computed from its state after the version step, and `failureStates`, the state after each prefix of them. After every failure past validation the fault test requires the observed points to equal one of those states, and when it carries on the model adopts that state rather than copying the cache's points inside the range. Every existing check stays as it was, the per-slot checks included. A new outcome requires each batch to reach a failure between two write runs; over the 640 seeds 3 944 do. All 640 seeds pass against the library: it conforms to N70.
 
