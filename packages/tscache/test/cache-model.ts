@@ -1,7 +1,7 @@
 import type { Dtype, Range } from "../src/types";
 
 // An independent, slot-by-slot model of one cache, written from architecture
-// §2.3–§2.4, §4.3–§4.5 and decisions N1, N3, N11, N13–N19. It uses no
+// §2.3–§2.4, §4.3–§4.5 and decisions N1, N3, N11, N13–N19 and N70. It uses no
 // production helper: snapping scans the grid, coverage is a set of slots,
 // stored points are a map from slot to values, and the segment layout is
 // recomputed from the present slots. Shared by the seeded property tests in
@@ -93,6 +93,14 @@ export interface Span {
   start: number;
   end: number;
 }
+
+/**
+ * One step of a put's write (§4.3, N70): the removal of a replace, inclusive
+ * slots, or one write run of points (stored values, in schema order).
+ */
+export type WriteStep =
+  | { kind: "remove"; start: number; end: number }
+  | { kind: "run"; points: { slot: number; values: number[] }[] };
 
 /** How far around [lo, hi] the scans for snapping reach. */
 const MARGIN = 64;
@@ -290,6 +298,101 @@ export class CacheModel {
       });
     }
     return warnings;
+  }
+
+  /**
+   * The steps the write of a put takes (§4.3 allocation failure, §4.5, N70),
+   * from the model's current state, which must be the state after the put's
+   * version step. A put that carries its own watermark is two passes, the
+   * points below `slotAtOrAfter(finalizedUntil)` first, with the authority
+   * clipped there (N19), then the rest, merely upserted; without one it is a
+   * single pass. Each pass is, for a replace, the removal of the stored
+   * points inside its authority, then its write runs in ascending slot order.
+   * A write run is a maximal stretch of consecutive batch points, each on the
+   * same page as the one before it with at most K slots between them, counted
+   * on the batch alone (N14, N15, N70).
+   */
+  writeSteps(
+    slots: readonly number[],
+    columns: readonly (readonly number[])[],
+    range: Range | undefined,
+    finalizedUntil: number | undefined,
+  ): WriteStep[] {
+    const authority = this.authority(range);
+    const own =
+      finalizedUntil === undefined
+        ? Number.POSITIVE_INFINITY
+        : this.slotAtOrAfter(finalizedUntil);
+    const points = slots.map((slot, i) => ({
+      slot,
+      values: this.names.map((name, c) =>
+        stored(
+          this.config.fields[name] as Dtype,
+          (columns[c] as readonly number[])[i] as number,
+        ),
+      ),
+    }));
+    const steps: WriteStep[] = [];
+    const pass = (
+      batch: readonly { slot: number; values: number[] }[],
+      removal: Span | undefined,
+    ): void => {
+      if (removal !== undefined && removal.start <= removal.end) {
+        steps.push({ kind: "remove", start: removal.start, end: removal.end });
+      }
+      let run: Extract<WriteStep, { kind: "run" }> | undefined;
+      let prev: number | undefined;
+      for (const point of batch) {
+        const joins =
+          run !== undefined &&
+          prev !== undefined &&
+          Math.floor(prev / this.config.cap) ===
+            Math.floor(point.slot / this.config.cap) &&
+          point.slot - prev - 1 <= this.config.k;
+        if (!joins) {
+          run = { kind: "run", points: [] };
+          steps.push(run);
+        }
+        run?.points.push(point);
+        prev = point.slot;
+      }
+    };
+    if (finalizedUntil === undefined) {
+      pass(points, authority);
+    } else {
+      pass(
+        points.filter((p) => p.slot < own),
+        authority === undefined
+          ? undefined
+          : { start: authority.start, end: Math.min(authority.end, own - 1) },
+      );
+      pass(
+        points.filter((p) => p.slot >= own),
+        undefined,
+      );
+    }
+    return steps;
+  }
+
+  /**
+   * The point states a put may legally leave when its write fails (N70): the
+   * state after each prefix of `writeSteps`, from none of them to all, so
+   * entry i is the state after the first i steps.
+   */
+  failureStates(steps: readonly WriteStep[]): Map<number, number[]>[] {
+    const state = new Map(this.rows);
+    const states = [new Map(state)];
+    for (const step of steps) {
+      if (step.kind === "remove") {
+        for (const slot of [...state.keys()]) {
+          if (step.start <= slot && slot <= step.end) state.delete(slot);
+        }
+      } else {
+        for (const point of step.points) state.set(point.slot, point.values);
+      }
+      states.push(new Map(state));
+    }
+    return states;
   }
 
   put(

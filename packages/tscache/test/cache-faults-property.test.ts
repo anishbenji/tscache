@@ -3,7 +3,13 @@ import { CacheState } from "../src/engine/cache";
 import { resolveCacheConfig } from "../src/engine/validate";
 import { FIELD_ARRAYS } from "../src/segment/dtype";
 import type { Dtype, Range } from "../src/types";
-import { CacheModel, type ModelMeta, rng, stored } from "./cache-model";
+import {
+  CacheModel,
+  type ModelMeta,
+  rng,
+  stored,
+  type WriteStep,
+} from "./cache-model";
 import {
   batchOf,
   compareState,
@@ -26,6 +32,10 @@ import {
 // - no point outside the put's range changed, and each point inside it is
 //   its old value, its new value, or removed by the put's own replace (only
 //   below the put's own watermark, N19);
+// - the points as a whole equal one of the legal states (N70): the state
+//   after a prefix of the write's steps (per pass, the replace's removal,
+//   then each write run in ascending slot order), computed from the model's
+//   state after the version step; carrying on, the model adopts that state;
 // - no coverage was added, coverage outside the put's range is unchanged,
 //   and none of the range is covered, whether or not any point changed;
 // - the watermark did not move;
@@ -121,10 +131,31 @@ const OUTCOMES = [
   "failed part-way, coverage withdrawn only",
   "failed after a version clear",
   "failed replace removed a point",
+  "failed between write runs",
   "fault in a field array",
   "fault in a slot array",
   "fault in a mask",
 ] as const;
+
+/** The same present points with the same values (NaN and −0 included). */
+function sameRows(
+  a: ReadonlyMap<number, number[]>,
+  b: ReadonlyMap<number, number[]>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [s, row] of a) {
+    const other = b.get(s);
+    if (other === undefined || !sameNumbers(row, other)) return false;
+  }
+  return true;
+}
+
+/** A write step for a failure message: the removal's span or a run's slots. */
+function stepName(step: WriteStep): string {
+  return step.kind === "remove"
+    ? `remove ${step.start}..${step.end}`
+    : `run ${step.points.map((p) => p.slot).join(",")}`;
+}
 
 function runCase(
   seed: number,
@@ -378,6 +409,24 @@ function runCase(
       }
     }
 
+    // The points as a whole are one of the legal states (N70): the state
+    // after some prefix of the write's steps, computed from the model's state
+    // after the version step. Prefixes that leave the same points are one
+    // member of the set.
+    const steps = model.writeSteps(slots, columns, range, meta?.finalizedUntil);
+    const legal = model.failureStates(steps);
+    const matched = legal.findIndex((state) => sameRows(state, after.rows));
+    if (matched === -1) {
+      return `a failed put left points ${show([...after.rows.keys()].sort((x, y) => x - y))}, which no prefix of its ${steps.length} write steps ${show(steps.map(stepName))} gives (N70)\n${where()}`;
+    }
+    const isRun = (step: WriteStep) => step.kind === "run";
+    if (
+      steps.slice(0, matched).some(isRun) &&
+      steps.slice(matched).some(isRun)
+    ) {
+      note("failed between write runs");
+    }
+
     const baseCovered = new Set(base.covered);
     for (const s of after.covered) {
       if (!baseCovered.has(s))
@@ -403,13 +452,10 @@ function runCase(
     else if (covChanged) note("failed part-way, coverage withdrawn only");
     else if (!cleared) note("failed in the write with nothing changed");
 
-    // The model takes over what the cache now holds inside the put's range.
-    if (touched !== undefined) {
-      for (let s = touched.start; s <= touched.end; s++) {
-        const now = after.rows.get(s);
-        if (now === undefined) model.rows.delete(s);
-        else model.rows.set(s, now);
-      }
+    // The model takes over the legal state the cache was found in.
+    model.rows.clear();
+    for (const [s, row] of legal[matched] as Map<number, number[]>) {
+      model.rows.set(s, row);
     }
     model.covered.clear();
     for (const s of after.covered) model.covered.add(s);
