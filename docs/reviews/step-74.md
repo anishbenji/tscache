@@ -204,6 +204,10 @@ The miss was reproduced before the redesign with a scratch wrapper that, after a
 
 "Times applied" is counted in a run that the wrapper does not stop (the rule before PR3-1 for the split and join wrappers, the PR3-1 rule for the join outside the range). Under the exact rule every seed in which a wrapper fired while the layout was still checked fails; the remainder are seeds in which the wrapper found no segment to act on, or fired only after a genuine exception had turned the layout check off. Without a wrapper the exception is reached in 16 seeds and all 640 pass.
 
+## Security lane (Claude), not the gate
+
+run 1, head 6a42d84: P0 0, P1 0, P2 0
+
 ## Contract-test changes
 
 None. No contract test was changed; round 3 changed only this step's own tests.
