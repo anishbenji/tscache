@@ -4,29 +4,7 @@ All notable changes to `@anishbenji/tscache`. The package follows semantic
 versioning within 0.x: a minor release may break the API, a patch release never
 does.
 
-## [Unreleased]
-
-### Breaking changes
-
-- **A put rejects field values its field cannot hold** (architecture N68).
-  A value that is not a number (`null`, `undefined`, a hole in an array, a
-  string, a boolean) in any field, and a fraction, `NaN`, `±Infinity` or a
-  value outside the dtype's range in an integer field, now reject the whole
-  batch with `PutError` `'field-mismatch'`; before, they were coerced (`null`
-  stored as `0`, `300` in a `u8` field as `44`, `1.5` in an `i32` field as
-  `1`). The same applies to fetcher responses, which then report
-  `'fetch-failed'`. Float fields still accept `NaN`: a JSON fetcher maps its
-  `null`s to `NaN`, and rounds values meant for an integer field.
-- **`hydrate` refuses a snapshot whose coverage reaches its own
-  `finalizedUntil`** (architecture N69), with `TscacheError`, before anything
-  changes. Snapshots the library takes are unaffected.
-
-### Added
-
-- `PutError.offenderField` names the field of a rejected value, and travels
-  across the worker boundary.
-
-## [0.1.0] - 2026-11-09
+## [0.1.0] - 2026-11-13
 
 The first release. A browser cache for timestamp-aligned time series, built
 for charts that scroll through history and follow a live tail in several tabs.
@@ -34,18 +12,22 @@ for charts that scroll through history and follow a live tail in several tabs.
 - **Hosting.** `createClient` runs the cache in a `SharedWorker` that every
   same-origin tab shares, and falls back to a dedicated `Worker`, then to the
   page itself. A lost SharedWorker is detected with a lifetime Web Lock and
-  reported as `workerLost`.
+  reported as `workerLost`. The handshake timeout bounds only the wait for the
+  worker's first message: a slow fetcher import does not step a tab down to a
+  fallback, and a SharedWorker that dies during the handshake makes
+  `createClient` fall back.
 - **Fetching in the worker.** A fetcher module, loaded by the worker, fetches
-  only the ranges the cache neither holds nor already has in flight, widened by one
-  interval where a miss meets cached data so the series joins up (that edge
-  point is fetched again). Under the
-  SharedWorker hosting, concurrent reads of a range from several tabs wait on
-  one fetch, and finalized history one tab fetched is not fetched again for
-  another; the dedicated and in-process fallbacks give each tab a cache of its
-  own. Points at or after the `finalizedUntil` watermark are provisional and
-  fetched again by every read that includes them. An `AuthInvalidError` from
-  the fetcher reaches every tab the worker serves as `authInvalid`, and
-  `updateAuth` retries with new credentials.
+  only the ranges the cache neither holds nor already has in flight, widened
+  by one interval where a miss meets cached data so the series joins up (that
+  edge point is fetched again). Under the SharedWorker hosting, concurrent
+  reads of a range from several tabs wait on one fetch, and finalized history
+  one tab fetched is not fetched again for another; the dedicated and
+  in-process fallbacks give each tab a cache of its own. Points at or after
+  the `finalizedUntil` watermark are provisional and fetched again by every
+  read that includes them. An `AuthInvalidError` from the fetcher reaches
+  every tab the worker serves as `authInvalid`. `updateAuth` supplies new
+  credentials and fetching resumes; the application reads again any range
+  that came back `'auth-pending'`.
 - **Coverage.** A read returns the present points as one typed array per
   field, the ranges the cache knows for certain, and each missing range with
   its reason. A confirmed gap (a weekend, a sensor dropout) is never fetched
@@ -53,14 +35,39 @@ for charts that scroll through history and follow a live tail in several tabs.
 - **Freshness.** A watermark keeps the provisional tail refetched, a dataset
   version change clears a cache, and `invalidate` and `clear` forget data on
   the application's clock.
-- **Writes and snapshots.** `put` adds points from a live feed;
-  `encodeSnapshot`, `decodeSnapshot` and `hydrate` carry a server's read into
-  the browser's cache.
-- **Persistence.** `persist: true` keeps a cache's history in IndexedDB when
-  the SharedWorker hosts it.
+- **Writes and validation.** `put` adds points from a live feed. A put, or a
+  fetcher response, whose field values the field cannot hold is rejected
+  whole rather than coerced (architecture N68): a value that is not a number
+  in any field, and a fraction, `NaN`, `±Infinity` or an out-of-range value
+  in an integer field. A put fails with `PutError` `'field-mismatch'`, whose
+  `offenderField` names the field; a fetcher response reports
+  `'fetch-failed'`. Float fields accept `NaN`. A put that validation rejects
+  changes nothing. One that fails part-way, on an allocation failure, has
+  applied an ascending prefix of its write runs, each run whole, and that
+  range is refetched before it is trusted (architecture N70).
+- **Snapshots.** `encodeSnapshot`, `decodeSnapshot` and `hydrate` carry a
+  server's read into the browser's cache. `hydrate` refuses a snapshot whose
+  coverage reaches its own `finalizedUntil` (architecture N69); snapshots the
+  library takes are unaffected.
+- **Persistence.** `persist: true` keeps a cache's finalized history in
+  IndexedDB when the SharedWorker hosts it, and a new worker restores it.
+- **Bundlers.** Exported error classes, and the `HostingError` that ends the
+  fallback chain, keep their documented `name` through minification. webpack
+  5, Rspack and Turbopack builds leave the in-process hosting's fetcher import
+  alone.
 - **Entries.** `@anishbenji/tscache` (the page), `/worker`, `/fetcher`,
   `/engine` (the engine without a worker, for Node and tests) and `/vite`
   (the `fetcherUrl()` plugin for Vite 8).
+- **Known limits.** Memory is neither bounded nor reported, a deploy can leave
+  tabs on two versions, and readers are not told when data changes. The
+  guides say how to design around each.
+- **Documentation.** The documentation site is published on GitHub Pages at
+  <https://anishbenji.github.io/tscache/>, built from `site/`, and is the
+  package's `homepage`. The repository README is rewritten around recordings
+  of the demos, which the site's guides also embed; the package README shows
+  the multi-tab recording and the demo benchmark's measured figure.
+- **Tooling.** Security updates to development dependencies in the lockfile;
+  nothing the package ships changed.
 
 The commits since the start of the project follow.
 
@@ -125,6 +132,12 @@ The commits since the start of the project follow.
 - _(vite)_ Warn at build time when workers build as iife
 - _(persist)_ Stop a cache at once when a write exceeds the quota
 - _(client)_ Create the SharedWorker with extendedLifetime
+- _(examples)_ Label each read cache or network, with time to chart
+- _(examples)_ Add a benchmark of tscache against three baselines
+- _(examples)_ Name the baselines by their keys and count views without a request
+- _(scripts)_ Record the machine and split the saving in the demo comparison
+- _(engine)_ [**breaking**] Reject field values a field cannot hold and snapshot coverage past its watermark
+- _(engine)_ [**breaking**] Reject a non-integer value for an integer field (decision 38)
 
 ### 🐛 Bug Fixes
 
@@ -256,6 +269,43 @@ The commits since the start of the project follow.
 - _(persist)_ One owner of the clear-only deadline, answer after the close
 - _(persist)_ A failed chunk import clears the clear-only import timer
 - _(vite)_ Warn about an iife worker once, for the browser build only
+- _(site)_ Load the diagrams' stylesheet from the theme
+- _(client)_ Stop the handshake timer at hello
+- _(client)_ Watch the lifetime lock from hello
+- Keep webpack-family bundlers off the fetcher import
+- Keep documented error names through minification
+- Keep the HostingError name through minification
+- _(examples)_ Correct a read's label when its fetch report arrives late
+- _(examples)_ Keep a read's label right through a held-back frame
+- _(examples)_ Dispose each benchmark tab's source before removing it
+- _(examples)_ Start a new SharedWorker for each benchmark run
+- _(examples)_ Print a dash for a p50 that no view gave in the results file
+- _(examples)_ Make the demo fetcher's requests skip the http cache
+- _(examples)_ Close every benchmark tab on a failed run and check only this click's workers
+- _(examples)_ Credit a read only with its own engine's fetches and bound the reports kept
+- _(examples)_ Fail a benchmark run on a read with misses or no bars
+- _(examples)_ Coalesce pending draws and cap the fetch reports a page keeps
+- _(examples)_ Clear the benchmark's last results when a run starts
+- _(examples)_ Validate the benchmark's inputs once and publish only a done run
+- _(examples)_ Start an autorun with the URL's validated configuration
+- _(docs)_ Step 61 pre-review fixes to the tour and the anchor check
+- _(docs)_ Step 61 round 1, regex after a condition and titled links
+- _(docs)_ Step 61, redesign the regex rule and the link forms
+- _(docs)_ Step 61, a balance check behind the scanner and links with more text
+- _(docs)_ Step 61 pre-review before round 3
+- _(docs)_ Step 61, HTML links page-wide and malformed anchors
+- _(docs)_ Step 61 round 3, read whole HTML tags
+- _(docs)_ Step 61, stop modelling HTML links
+- _(docs)_ Step 61, every anchor a Markdown link
+- _(engine)_ Read a typed array's type and length only through its getters
+- _(engine)_ Convert a batch with the timestamps it checked
+- _(demo)_ Stop the demo when the recorder is interrupted
+- _(demo)_ Replace the media only after a whole conversion
+- _(demo)_ Cancel the recorder as one step once shutdown begins
+- _(demo)_ Take the recorder's tests off the live demo's counts
+- _(demo)_ Refuse to record when the demo's ports are taken
+- _(demo)_ Undo only what the recorder acquired
+- _(demo)_ Release what is acquired after shutdown begins
 
 ### 💼 Other
 
@@ -263,6 +313,8 @@ The commits since the start of the project follow.
 - _(site)_ Run the code examples in ci, not only type-check them
 - _(site)_ Run every snippet in the docs check, behind page shims
 - Set the package version to 0.1.0 and its node engines
+- _(site)_ Add the vitepress mermaid plugin
+- _(site)_ Render mermaid with securityLevel strict
 
 ### 🚜 Refactor
 
@@ -284,6 +336,8 @@ The commits since the start of the project follow.
 - _(engine)_ Restore outside the cache module
 - _(scripts)_ Rename the demo error helper to describeError
 - Keep the library version beside the protocol version
+- _(engine)_ Share the typed-array getter lookup to fit the size budget
+- _(engine)_ Test integer values with Number.isInteger
 
 ### 📚 Documentation
 
@@ -379,6 +433,118 @@ The commits since the start of the project follow.
 - Add the npm readme and license, and the 0.x stability note
 - Draft the 0.1.0 release notes
 - Limit the fetch-sharing claims to the SharedWorker and finalized history
+- Note the one-interval overlap in the fetch-sharing claims
+- Shorten the fetch bullet in the npm readme
+- Add a measured-benefit placeholder to the npm readme
+- Add a browser support section to the npm readme
+- Limit the chrome on android note to versions before 148
+- Add the maintainer release steps
+- Describe the staged release flow in releasing.md
+- Record the live 0.0.1 and trusted-publisher validation in releasing.md
+- Reorder the release checklist and explain the forced dry run
+- Document the main-only stage and recovering a failed draft job
+- Add the contributor covenant 2.1 code of conduct
+- Add contributing and support guides
+- _(security)_ Add the 0.x supported-versions table
+- Let bug reports link a repository in the reproduction field
+- Point the issue forms at the rendered docs site
+- Add the supply-chain hardening checklist
+- Correct the supply-chain checklist checks
+- List file names only in the token audit
+- _(site)_ Generate the package map from the package's imports
+- _(site)_ Draw the data model of one cache
+- _(site)_ Add the how it works overview
+- _(site)_ Correct the auth-pending path in how it works
+- _(site)_ Describe persisted records in the segments page
+- _(site)_ Document the module graph and the theme in the readme
+- _(site)_ Tighten the overview's read and worker-loss steps
+- _(architecture)_ List the missing modules in the layout
+- _(site)_ Say shared-mode loss detection needs web locks
+- _(site)_ Note covered slots can be fetched at a miss's edge
+- The handshake timeout bounds only the wait for hello
+- Record the hello-time lock watch and the step 68 pre-review
+- Note the hello-time lock watch on n25 and n32
+- _(site)_ List the handshake lock-loss fallback reason
+- Record the user's decisions on the lock watch and the fetcher load
+- Say what the bundler probe verified without citing an absent file
+- Correct sharedworker support on android and add a browser support table
+- Say that updateauth pauses and retries nothing
+- Say what auth and persistence do in the fallback hostings
+- _(architecture)_ Bring stale rows and signatures in line with approved changes
+- _(site)_ Add recipes for data that does not fit a fixed grid
+- Document how put converts values that are not valid numbers
+- _(site)_ Make the script-element escaping of snapshots hard to miss
+- _(site)_ Map month ordinals before 1970 back correctly
+- _(site)_ Use late-only jitter in the flooring example
+- _(site)_ Name the browsers without sharedworker on the home page
+- Say the in-process hosting has an engine per client, not a worker
+- Revert the f64-default corrections pending user decision 37
+- _(architecture)_ Record how the step 38 redesign was accepted
+- Say which values the put conversion rejects
+- Say every field names its dtype, with f64 the usual choice
+- _(benchmarks)_ Add the demo comparison generated by demo-bench
+- _(demo)_ Say the benchmark table matches the results file
+- _(benchmarks)_ Regenerate the demo comparison on fresh workers
+- _(examples)_ Say in the benchmark's method that requests skip the http cache
+- _(benchmarks)_ Regenerate the demo comparison with requests that skip the http cache
+- _(benchmarks)_ Regenerate the demo comparison on the final benchmark code
+- Name the benchmark baselines by their keys in the guide and the fetcher notes
+- _(examples)_ Name the demo-bench checks and the fetch the baselines call
+- _(benchmarks)_ Regenerate the demo comparison after the rebase onto main
+- _(examples)_ Say the benchmark's first view starts after the connect
+- _(benchmarks)_ Regenerate the demo comparison after Codex round 1
+- _(benchmarks)_ Regenerate the demo comparison after Codex round 5
+- Add an index of documents with when to read each
+- _(agents)_ Point at the index and add the rules that bind every agent
+- _(claude)_ Route review rounds through the director's script when one runs
+- _(workflow)_ Describe the director setup and correct stale statements
+- _(conduct)_ Keep private vulnerability reporting as the only contact route
+- _(releasing)_ Link the supply-chain checklist where a release starts
+- _(workflow)_ Name opera mobile among the browsers without sharedworker
+- Refresh index sizes after this step's edits
+- _(agents)_ Guard the nvm path command and define the release and path rules
+- Name both required checks in the supply-chain checklist and contributing
+- _(workflow)_ Stop anchoring prompts a and b to the finished commit plan
+- _(index)_ Add the demo comparison and package readme, re-measure sizes
+- _(site)_ Show sequence diagrams at their natural size
+- _(site)_ The how-it-works flows
+- _(site)_ A new worker restores the persisted caches
+- _(site)_ Step 60 pre-review fixes
+- _(readme)_ Show the ?fetcher declaration and what finalizedUntil means
+- _(readme)_ The watermark persists, and where the declarations go
+- _(readme)_ Use the read's result, and the index sizes
+- _(site)_ Add the code tour to "How it works"
+- Specify field-value and snapshot-watermark validation (n68, n69)
+- Document field-value rejection and offenderField (n68, n69)
+- Bring step 71's value-conversion notes in line with n68
+- Record offenderField as decided and the step 75 pre-review
+- Integer fields reject non-integers (n68, decision 38)
+- _(site)_ Map null to NaN only in the fetcher's float fields
+- State decision 38 in the checklist and patterns guide; record pre-review round 2
+- _(decisions)_ One file per decision, architecture §7 and §8 as an index
+- Move the starter prompt to docs/history/
+- Say how a new or amended decision is recorded
+- _(checklist)_ Drop persistence from the roadmap-leak list
+- _(decisions)_ N70, what a failed put leaves behind
+- Step 80 pre-review fixes
+- State three known limits of 0.1.0 in the guides
+- _(troubleshooting)_ Persistence has shipped
+- Correct the deploy-skew limit after the pre-review
+- Scope the polling advice to a shared worker
+- N70, the split follows the pass's write runs
+- _(site)_ Embed the demo videos where each scenario is explained
+- Rewrite the landing readme
+- Correct the demo text after the pre-review
+- Name the four recordings on the demo hub page
+- The reviews folder size after the rebase
+- The reviews folder size after the second rebase
+- Say how the demo media were recorded
+- State how the demo media were made, without the plan
+- Regenerate the 0.1.0 changelog and summarize the release
+- Re-measure the 0.1.0 sizes and state its known limits
+- Pre-review fixes to the 0.1.0 changelog and notes
+- Scope the range rejection to integer fields
+- Re-measure the 0.1.0 pack after the rebase
 
 ### ⚡ Performance
 
@@ -446,6 +612,27 @@ The commits since the start of the project follow.
 - Check slice-into reads without typed-array deep equality
 - _(e2e)_ The SharedWorker outlives its last tab and its final flush lands
 - Alias the scoped specifiers to the source in vitest
+- Share the fake navigator.locks between test files
+- _(e2e)_ Count notices before the restate click, not after the clear
+- Keep a commented literal import out of the hint scan
+- Match comments in the hint scan without backtracking
+- _(site)_ Check the null mapping and the value-conversion table
+- _(demo)_ Count the launcher's apps from the app list
+- _(e2e)_ Give the benchmark spec the time its wait allows
+- _(examples)_ Check every offered benchmark latency parses
+- _(e2e)_ Wait for the read where the scroll-back drag ended
+- _(site)_ Check the n68 field-value table in docs:run
+- _(engine)_ Pass the documented waitFor options in fetch-field-values
+- Seeded model and fault-injection property tests for the cache
+- Require a put that fails in validation to change nothing
+- Derive a failed put's version step and require its coverage withdrawn
+- Require a failed put to leave a prefix of its write steps (n70)
+- Narrow the failed replace's layout exception (§4.3, n70)
+- Make the failed replace's layout exception exact (§4.3)
+- _(demo)_ Stop the recorder during the last conversion
+- _(demo)_ Hold the probe while the recorder is interrupted
+- Run the cache property tests in smaller batches
+- Assert the property tests' reach once per seed start
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -503,6 +690,22 @@ The commits since the start of the project follow.
 - Check the packed contents against an allowlist
 - Generate the 0.1.0 changelog with git-cliff
 - Keep a blank line before the next release in a prepended changelog
+- Skip review and dependency commits in the changelog
+- Accept workflow_call so the release workflow can run the gate
+- Add the release workflow with npm trusted publishing
+- Stage the release with npm stage publish and draft the github release
+- Key ci concurrency by workflow name as well as ref
+- Check the registry version in plan and force the stage dry run
+- Stage only a commit that is on main
+- Add issue forms and codeowners
+- Add the openssf scorecard workflow and badge
+- Trim the scorecard workflow to its required permissions
+- _(docs)_ Fail when a path#symbol anchor in site/ no longer resolves
+- _(docs)_ Rebuild the anchor check on real parsers
+- Say that the bench check is required
+- Deploy the documentation site to github pages
+- _(demo)_ Record the demo scenarios headless
+- _(demo)_ Move the demo recorder to its own step
 
 ### ◀️ Revert
 
