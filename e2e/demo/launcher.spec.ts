@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { demoPorts } from "../../scripts/demo/catalog";
 import { apps as APPS } from "../examples/apps";
 
 // The launcher (scripts/demo.ts) on its own. Every way out stops every
@@ -430,14 +431,14 @@ test("an interrupted recorder stops Chromium and the demo while it records", asy
   try {
     launched = launch(
       hub,
-      ["--reuse-builds", "--only", "multi-tab-sharing"],
-      { RECORD_FFMPEG: "true", TMPDIR: temp },
+      ["--reuse-builds", "--only", CONVERSION.name],
+      { ...CONVERSION.env, RECORD_FFMPEG: "true", TMPDIR: temp },
       recorderPath,
     );
     const recorder = launched;
     await expect
       .poll(() => recorder.stdout(), { timeout: 90_000 })
-      .toContain("recording multi-tab-sharing");
+      .toContain(`recording ${CONVERSION.name}`);
     children = childrenOf(recorder.child.pid ?? 0);
     // The launcher and Chromium.
     expect(children.length).toBeGreaterThanOrEqual(2);
@@ -487,6 +488,16 @@ async function untilConverting(
   }
 }
 
+/**
+ * The scenario the conversion tests record, and what selects it. They test
+ * the recorder's cancellation, so they must reach the conversion whatever
+ * the demo's data does (the last test below).
+ */
+const CONVERSION = {
+  name: "probe",
+  env: { RECORD_PROBE: "1" } as Record<string, string>,
+};
+
 /** What each scenario's three media files hold before the recorder runs. */
 const PREVIOUS = "previous";
 
@@ -507,7 +518,7 @@ test("a recorder stopped while it converts leaves the media as they were and sto
   const media = await mkdtemp(join(tmpdir(), "tscache-record-media-"));
   const ffmpeg = join(fake, "ffmpeg");
   await writeFile(ffmpeg, SLOW_FFMPEG, { mode: 0o755 });
-  const files = mediaFiles(media, "multi-tab-sharing");
+  const files = mediaFiles(media, CONVERSION.name);
   await mkdir(join(media, "docs/media"), { recursive: true });
   await mkdir(join(media, "site/public/media"), { recursive: true });
   for (const file of files) await writeFile(file, PREVIOUS);
@@ -516,8 +527,9 @@ test("a recorder stopped while it converts leaves the media as they were and sto
   try {
     launched = launch(
       hub,
-      ["--reuse-builds", "--only", "multi-tab-sharing"],
+      ["--reuse-builds", "--only", CONVERSION.name],
       {
+        ...CONVERSION.env,
         RECORD_FFMPEG: ffmpeg,
         RECORD_MEDIA_ROOT: media,
         FAKE_FFMPEG_DIR: fake,
@@ -540,11 +552,11 @@ test("a recorder stopped while it converts leaves the media as they were and sto
     }
     // Nothing else was written beside them.
     expect(await readdir(join(media, "docs/media"))).toEqual([
-      "multi-tab-sharing.gif",
+      `${CONVERSION.name}.gif`,
     ]);
     expect((await readdir(join(media, "site/public/media"))).sort()).toEqual([
-      "multi-tab-sharing.mp4",
-      "multi-tab-sharing.webm",
+      `${CONVERSION.name}.mp4`,
+      `${CONVERSION.name}.webm`,
     ]);
     expect(await allFree([hub, ...apps])).toBe(true);
     expect(await rawVideoDirs(temp)).toEqual([]);
@@ -668,7 +680,7 @@ for (const { title, hold, startsBefore } of STOPS) {
     const media = await mkdtemp(join(tmpdir(), "tscache-record-media-"));
     const ffmpeg = join(fake, "ffmpeg");
     await writeFile(ffmpeg, FINISHING_FFMPEG, { mode: 0o755 });
-    const files = mediaFiles(media, "multi-tab-sharing");
+    const files = mediaFiles(media, CONVERSION.name);
     await mkdir(join(media, "docs/media"), { recursive: true });
     await mkdir(join(media, "site/public/media"), { recursive: true });
     for (const file of files) await writeFile(file, PREVIOUS);
@@ -677,8 +689,9 @@ for (const { title, hold, startsBefore } of STOPS) {
     try {
       launched = launch(
         hub,
-        ["--reuse-builds", "--only", "multi-tab-sharing"],
+        ["--reuse-builds", "--only", CONVERSION.name],
         {
+          ...CONVERSION.env,
           RECORD_FFMPEG: ffmpeg,
           RECORD_MEDIA_ROOT: media,
           FAKE_FFMPEG_DIR: fake,
@@ -721,3 +734,63 @@ for (const { title, hold, startsBefore } of STOPS) {
     }
   });
 }
+
+test("the conversion tests reach the conversion whatever the demo's data does", async () => {
+  test.setTimeout(120_000);
+  const hub = await freePorts();
+  const apps = appPortsAfter(hub);
+  const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
+  const fake = await mkdtemp(join(tmpdir(), "tscache-record-ffmpeg-"));
+  const media = await mkdtemp(join(tmpdir(), "tscache-record-media-"));
+  const ffmpeg = join(fake, "ffmpeg");
+  await writeFile(ffmpeg, SLOW_FFMPEG, { mode: 0o755 });
+  let launched: Launch | undefined;
+  let converting: number | undefined;
+  try {
+    launched = launch(
+      hub,
+      ["--reuse-builds", "--only", CONVERSION.name],
+      {
+        ...CONVERSION.env,
+        RECORD_FFMPEG: ffmpeg,
+        RECORD_MEDIA_ROOT: media,
+        FAKE_FFMPEG_DIR: fake,
+        TMPDIR: temp,
+      },
+      recorderPath,
+    );
+    // Every series request of the recorded app fails from the moment its
+    // backend answers, so a scenario that waited for its data or checked a
+    // count of it would fail on every run.
+    const backend = `http://127.0.0.1:${demoPorts(hub)["reference-vanilla"]}/api/`;
+    await expect
+      .poll(
+        async () =>
+          (await fetch(`${backend}stats`).catch(() => undefined))?.ok ?? false,
+        { timeout: 110_000, intervals: [20] },
+      )
+      .toBe(true);
+    const failing = await fetch(`${backend}control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ failNext: 1_000_000 }),
+    });
+    expect(failing.ok).toBe(true);
+    const pidFile = join(fake, "ffmpeg.pid");
+    await untilConverting(launched, async () =>
+      Boolean(await readFile(pidFile, "utf8").catch(() => "")),
+    );
+    converting = Number(await readFile(pidFile, "utf8"));
+    launched.child.kill("SIGTERM");
+    expect(await launched.exit()).toBe(143);
+    expect(running(converting)).toBe(false);
+    expect(await allFree([hub, ...apps])).toBe(true);
+    expect(await rawVideoDirs(temp)).toEqual([]);
+  } finally {
+    if (converting !== undefined) kill(converting);
+    cleanUp(launched, apps);
+    for (const dir of [temp, fake, media]) {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});

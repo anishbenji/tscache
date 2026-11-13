@@ -245,12 +245,43 @@ interface Recording {
   start(): Promise<void>;
   /** What the scenario observed, printed at the end. */
   note(text: string): void;
+  /**
+   * A claim the captions, the README or the site make about what the app
+   * did: fails the recording unless `ok`, and fails it as well if a minute
+   * boundary passed since the scenario began, since every count it checks
+   * is stated for one minute.
+   */
+  claim(ok: boolean, failure: string): void;
 }
 
 interface Scenario {
   name: string;
   stage: StageOptions;
+  /**
+   * The scenario checks counts of the live demo (`claim`), so it starts in
+   * a quiet minute (`quietMinute`). Only the tests' probe does not.
+   */
+  live: boolean;
   run(recording: Recording): Promise<void>;
+}
+
+/** How much of its minute a scenario that makes claims starts with. */
+const QUIET_MS = 45_000;
+
+/**
+ * Starts a scenario on a clock no minute boundary crosses before its
+ * checks: resets the backend's clock to real time (the page, the server's
+ * render and the backend all read real time then), and, with less than
+ * QUIET_MS of the minute left, waits for the next. Returns the minute.
+ */
+async function quietMinute(): Promise<number> {
+  await control({ resetClock: true });
+  const left = MINUTE - (Date.now() % MINUTE);
+  if (left < QUIET_MS) {
+    console.log(`waiting ${Math.ceil(left / 1000)} s for a new minute`);
+    await Bun.sleep(left + 1000);
+  }
+  return Math.floor(Date.now() / MINUTE);
 }
 
 /** Waits until the page in `tab` is connected, live and has drawn bars. */
@@ -286,9 +317,45 @@ function count(n: number, one: string, many: string): string {
  */
 const NEWEST = 2;
 
+/**
+ * Holds every live-stream request of the stage's frames until `release`,
+ * so a feed opens only when the scenario lets it (as
+ * e2e/reference/clients.spec.ts does).
+ */
+async function holdStream(page: Page): Promise<{ release(): void }> {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/stream/**", async (route) => {
+    await held;
+    await route.continue();
+  });
+  return { release };
+}
+
+/**
+ * For the recorder's tests only (RECORD_PROBE=1): a clip of the stage and
+ * the app with no wait on the app's data and no claim, so the tests of the
+ * conversion and of its cancellation reach the conversion whatever the
+ * demo's data does (e2e/demo/launcher.spec.ts).
+ */
+const PROBE: Scenario = {
+  name: "probe",
+  live: false,
+  stage: { title: "probe", chips: ["fetches"], tabs: ["Tab 1"] },
+  async run(r) {
+    await r.start();
+    await r.caption("The recorder's test clip.");
+    await r.open(0, LIVE_PATH);
+    await r.hold(1000);
+  },
+};
+
 const scenarios: Scenario[] = [
   {
     name: "multi-tab-sharing",
+    live: true,
     stage: {
       title: "multi-tab sharing",
       chips: ["fetches", "bars"],
@@ -296,21 +363,31 @@ const scenarios: Scenario[] = [
     },
     async run(r) {
       const zero = await counters();
+      // Tab 1's live feed opens only once it has drawn the history, so the
+      // order is fixed: the history in one fetch, then, as the feed opens,
+      // one fetch of the newest bars (reference/shared/src/live.ts, header),
+      // both before tab 2 opens. (Without the hold the stream usually opens
+      // first, and the second fetch happens or not by a margin.)
+      const feed = await holdStream(r.page);
       await r.start();
       await r.caption(
         "Tab 1 opens. Its cache is empty, so the SharedWorker fetches the history.",
       );
       const a = await r.open(0, LIVE_PATH);
       const shown = await live(a);
-      // After the hold, so a fetch of tab 1's (its feed opening reads the
-      // newest bars) is counted before tab 2 opens.
-      await r.hold(1500);
+      feed.release();
+      await expect
+        .poll(async () => (await counters()).fetches, { timeout: 15_000 })
+        .toBe(zero.fetches + 2);
+      await r.hold(1000);
       const first = await counters();
       const opening = moved(zero, first);
-      // The README and the site say tab 1 fetches the history in one fetch.
-      if (opening.fetches !== 1) {
-        throw new Error(`tab 1 made ${opening.fetches} fetches, not one`);
-      }
+      // The README and the site say tab 1 fetches the history in one fetch;
+      // the second is its feed's catch-up of the newest bars.
+      r.claim(
+        opening.fetches === 2 && opening.bars <= shown + NEWEST,
+        `tab 1 made ${opening.fetches} fetches of ${opening.bars} bars, not the history and the newest`,
+      );
       await r.caption(
         "Tab 2 opens on the same SharedWorker and draws from the shared cache.",
       );
@@ -319,16 +396,15 @@ const scenarios: Scenario[] = [
       await expect(b.getByTestId("mode")).toHaveText("shared");
       // The README and the site say tab 2 draws the same bars. Both first
       // read twelve hours up to the bar forming now (readRange in
-      // reference/shared/src/market.ts), 721 bars; a bar that opens while
-      // tab 2 loads is pushed into the cache and redrawn, one bar more.
-      if (drawn < shown || drawn > shown + 1) {
-        throw new Error(`tab 2 drew ${drawn} bars, tab 1 ${shown}`);
-      }
+      // reference/shared/src/market.ts), in the same minute, so the same
+      // bars.
+      r.claim(drawn === shown, `tab 2 drew ${drawn} bars, tab 1 ${shown}`);
       await r.hold(600);
       const step = moved(first, await counters());
-      if (step.bars > NEWEST) {
-        throw new Error(`tab 2 fetched ${step.bars} bars, not the newest`);
-      }
+      r.claim(
+        step.bars <= NEWEST,
+        `tab 2 fetched ${step.bars} bars, not the newest`,
+      );
       await r.caption(
         `Tab 2 drew ${drawn} bars; the backend served it ${step.bars === 0 ? "nothing" : `${count(step.bars, "bar", "bars")}, the newest`}.`,
       );
@@ -340,6 +416,7 @@ const scenarios: Scenario[] = [
   },
   {
     name: "credential-refresh",
+    live: true,
     stage: {
       title: "credential refresh",
       chips: ["refused", "refreshes", "fetches"],
@@ -372,9 +449,10 @@ const scenarios: Scenario[] = [
       await expect(b.getByTestId("auth")).toHaveText("signed in");
       await r.hold(800);
       const step = moved(before, await counters());
-      if (step.refreshes !== 1 || step.refused < 1) {
-        throw new Error(`${step.refused} refused, ${step.refreshes} refreshes`);
-      }
+      r.claim(
+        step.refreshes === 1 && step.refused >= 1,
+        `${step.refused} refused, ${step.refreshes} refreshes`,
+      );
       await r.caption(
         "One refresh for both tabs: both stay signed in, and the history arrives.",
       );
@@ -386,6 +464,7 @@ const scenarios: Scenario[] = [
   },
   {
     name: "server-rendering",
+    live: true,
     stage: {
       title: "server rendering",
       chips: ["fetches", "bars"],
@@ -410,9 +489,7 @@ const scenarios: Scenario[] = [
       await r.hold(800);
       const step = moved(before, await counters());
       // The server's read and the browser's read each fetch the newest bars.
-      if (step.bars > 2 * NEWEST) {
-        throw new Error(`${step.bars} bars served for the page`);
-      }
+      r.claim(step.bars <= 2 * NEWEST, `${step.bars} bars served for the page`);
       await r.caption(
         `${drawn} bars drawn from the server's read; server and browser fetched only ${count(step.bars, "bar", "bars")}.`,
       );
@@ -424,6 +501,7 @@ const scenarios: Scenario[] = [
   },
   {
     name: "live-feed-reconnect",
+    live: true,
     stage: {
       title: "live-feed reconnect",
       chips: ["streams", "fetches", "bars"],
@@ -460,11 +538,10 @@ const scenarios: Scenario[] = [
       await r.hold(800);
       const step = moved(before, await counters());
       // The README and the site say one fetch mends the gap.
-      if (step.fetches !== 1 || step.bars > NEWEST + 1) {
-        throw new Error(
-          `the catch-up made ${step.fetches} fetches of ${step.bars} bars`,
-        );
-      }
+      r.claim(
+        step.fetches === 1 && step.bars <= NEWEST + 1,
+        `the catch-up made ${step.fetches} fetches of ${step.bars} bars`,
+      );
       await r.caption(
         `Caught up with ${count(step.fetches, "fetch", "fetches")} of ${count(step.bars, "bar", "bars")}, not the history.`,
       );
@@ -504,6 +581,9 @@ async function record(
   scenario: Scenario,
   rawDir: string,
 ): Promise<Clip> {
+  const minute = scenario.live ? await quietMinute() : undefined;
+  // The wait for a quiet minute is long enough for a shutdown to begin.
+  stopIfCancelled();
   console.log(`recording ${scenario.name}`);
   stage.show(scenario.stage);
   const context = await browser.newContext({
@@ -538,6 +618,14 @@ async function record(
       from = at();
     },
     note: (text) => notes.push(text),
+    claim(ok, failure) {
+      if (minute !== undefined && Math.floor(Date.now() / MINUTE) !== minute) {
+        throw new Error(
+          `${scenario.name} ran past the minute it started in, so its counts cannot be checked`,
+        );
+      }
+      if (!ok) throw new Error(failure);
+    },
   };
   try {
     await scenario.run(recording);
@@ -707,7 +795,8 @@ let exiting: Promise<never> | undefined;
 /**
  * The one way out, as in scripts/demo.ts. In order: marks the recorder
  * cancelled and signals a running ffmpeg, before anything is awaited; waits
- * for that ffmpeg to exit; closes Chromium (one still launching too), stops
+ * for that ffmpeg to exit; closes Chromium's contexts, which waits for
+ * Playwright's video encoder, then Chromium (one still launching too); stops
  * the stage, resets the backend's clock and stops the demo with everything
  * it started; removes the raw videos and any unfinished conversion; then
  * exits. The demo's processes run in groups of their own, so a Ctrl-C in
@@ -722,6 +811,11 @@ function shutdown(code: number, reason?: string): Promise<never> {
     if (reason !== undefined) console.error(reason);
     await running?.exited;
     const opened = browser ?? (await launching?.catch(() => undefined));
+    // A context first: closing one waits for Playwright's video encoder,
+    // an ffmpeg of its own that closing the browser alone leaves finishing.
+    for (const context of opened?.contexts() ?? []) {
+      await context.close().catch(() => {});
+    }
     await opened?.close().catch(() => {});
     stage?.stop();
     // Undo a scenario's clock move; the backend may be down already.
@@ -744,10 +838,12 @@ async function main(): Promise<void> {
     throw new Error(`${FFMPEG} is not on PATH (macOS: brew install ffmpeg)`);
   }
   const only = option("--only")?.split(",");
-  const chosen = scenarios.filter((s) => only?.includes(s.name) ?? true);
+  const known =
+    process.env.RECORD_PROBE === "1" ? [...scenarios, PROBE] : scenarios;
+  const chosen = known.filter((s) => only?.includes(s.name) ?? s !== PROBE);
   if (chosen.length === 0) {
     throw new Error(
-      `--only names none of ${scenarios.map((s) => s.name).join(", ")}`,
+      `--only names none of ${known.map((s) => s.name).join(", ")}`,
     );
   }
   await mkdir(GIF_DIR, { recursive: true });
