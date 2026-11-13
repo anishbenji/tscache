@@ -1,6 +1,6 @@
 # Step 90 — Release docs after 0.1.0
 
-Branch: `docs/90-releasing-current-state` · Reviewer: none yet (the director runs the review) · Rounds: 0 · Status: awaiting review
+Branch: `docs/90-releasing-current-state` · Reviewer: none yet (the director runs the review) · Rounds: 0 · Status: pre-reviewed, awaiting the gate
 
 ## Scope
 
@@ -10,6 +10,7 @@ Commits, by subject:
 
 - `docs: bring the release docs up to date after 0.1.0`. In `docs/releasing.md`: Current state rewritten for 13 November 2026, and the one anchor to the old heading fixed; the dry-run paragraph rewritten for `main` at 0.1.0; the `stage` row and "Cutting a release" gain the environment approval (new step 6, later steps renumbered); the environment section describes today's settings. In `docs/supply-chain.md`: the stale "placeholder bootstrap" mention removed, the chain names the required reviewer, and the checklist checks it with a read-only `gh api` call. In `docs/INDEX.md`: both rows re-measured.
 - `docs(review): step 90 scope and verification`. This file, and the review-file count and size in `docs/INDEX.md`.
+- `docs: fix the pre-review findings on the release docs`. The four pre-review findings below, with this file and the `docs/INDEX.md` sizes.
 
 **Facts and their sources.** The release facts come from the director's brief (from the user). These were checked read-only on 2026-11-13:
 
@@ -29,7 +30,20 @@ Not checked here: the SLSA provenance and `npm audit signatures` result, the 2FA
 | `bun run build`, then `bun run docs:check`                          | exit 0; `doc-anchors: 246 anchors in 42 pages resolve` |
 | `bunx biome check docs/releasing.md docs/supply-chain.md`           | no fixes                                               |
 | `grep -rn current-state-9-november .` (outside `.git`)              | no match after the change                              |
-| `~/code/tscache-reports/bin/heavy-run.sh "90 child: ci" bun run ci` | run on the final head; result in the step report       |
+| `~/code/tscache-reports/bin/heavy-run.sh "90 child: ci" bun run ci` | exit 0 on `8f8cebc`                                    |
+
+On the final head, after the pre-review fixes (wording only, so no full `bun run ci`, as the director asked): `bun run docs:check` and `bunx biome check docs/releasing.md docs/supply-chain.md docs/reviews/step-90.md docs/INDEX.md`, results in the director's report. The `can_admins_bypass` expected output was re-read with the same read-only `gh api` call on 2026-11-14.
+
+## Pre-review (Claude), not the gate
+
+The director's pre-review checked the release facts and found no P0 or P1. Its findings were fixed in `docs: fix the pre-review findings on the release docs`.
+
+| #    | Sev | Finding                                                                                      | Decision | Resolution                                                                                                                                                                                                                                         |
+| ---- | --- | -------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR-1 | P2  | "Cutting a release" said `bunx git-cliff --tag vX.Y.Z -o CHANGELOG.md`, which rebuilds 0.1.0 | accepted | Step 1 now uses `bun run changelog --tag vX.Y.Z` (`--unreleased --prepend`, `package.json` and `cliff.toml`), says the new summary is hand-written, and keeps the `*(scope)*` to `_(scope)_` rewrite: `cliff.toml` line 28 still emits `*(scope)*` |
+| PR-2 | P2  | "Retrying a failed stage" did not say a retried `stage` waits for the required reviewer      | accepted | One paragraph added: a new run on the tag or **Re-run failed jobs** waits again; approve under **Review deployments**, as in step 6                                                                                                                |
+| PR-3 | P2  | `npm-publish` has `can_admins_bypass: true`; the supply-chain doc did not say so             | accepted | Chain step 3 says an admin (the maintainer alone) can bypass both rules; the checklist's jq call includes `can_admins_bypass` and its expected output, copied from a live read                                                                     |
+| PR-4 | nit | The Verification table left the CI result open                                               | accepted | CI recorded as exit 0 on `8f8cebc`; the checks run on the final head stated above                                                                                                                                                                  |
 
 ## Contract-test changes
 

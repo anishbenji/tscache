@@ -8,7 +8,7 @@ The release flow itself (cutting a release, approving the `stage` job and the st
 
 1. A change reaches `main` only through a pull request that passes the required `ci` and `bench` checks (ruleset `protect-main`).
 2. The maintainer creates a `v*` tag. The ruleset `protect-release-tags` blocks creating, updating (moving, fast-forward or not) and deleting a `v*` tag for everyone except the repository admin role, which bypasses the ruleset always. On this repository that is the maintainer alone, so the maintainer can still create, move or delete a release tag; no one else can.
-3. The tag starts `release.yml`. Its `stage` job is the only job that uses the environment `npm-publish`, which accepts deployments from `v*` tags only and waits for the maintainer's approval as required reviewer, and it holds `id-token: write` so it can exchange the GitHub OIDC token with npm.
+3. The tag starts `release.yml`. Its `stage` job is the only job that uses the environment `npm-publish`, which accepts deployments from `v*` tags only and waits for the maintainer's approval as required reviewer, and it holds `id-token: write` so it can exchange the GitHub OIDC token with npm. The environment lets repository admins bypass its protection rules (`can_admins_bypass` is `true`), so an admin can deploy to it from another ref or without the approval. On this repository that is the maintainer alone, as for the tag ruleset in step 2; no one else can.
 4. npm's trusted publisher for `@anishbenji/tscache` accepts that token only from this repository, `release.yml` and the `npm-publish` environment, and allows only `npm stage publish`. The job stages the version with provenance; nothing is live yet.
 5. The maintainer approves the staged version on npmjs.com or with `npm stage approve`, which asks for the security key. Approval is the final human gate.
 
@@ -66,14 +66,14 @@ No step uses an npm token.
 
   Expected: `{"custom_branch_policies":true,"protected_branches":false}`, then one policy, `{"name":"v*","type":"tag"}`.
 
-- [ ] The environment requires the maintainer's approval before a job runs in it (required reviewer `anishbenji`, since 2026-11-13).
+- [ ] The environment requires the maintainer's approval before a job runs in it (required reviewer `anishbenji`, since 2026-11-13), and only repository admins can bypass its rules.
 
   ```sh
   gh api repos/anishbenji/tscache/environments/npm-publish \
-    --jq '[.protection_rules[] | {type, reviewers: [.reviewers[]?.reviewer.login]}]'
+    --jq '{can_admins_bypass, rules: [.protection_rules[] | {type, reviewers: [.reviewers[]?.reviewer.login]}]}'
   ```
 
-  Expected: two rules, `{"reviewers":[],"type":"branch_policy"}` and `{"reviewers":["anishbenji"],"type":"required_reviewers"}`.
+  Expected: `{"can_admins_bypass":true,"rules":[{"reviewers":[],"type":"branch_policy"},{"reviewers":["anishbenji"],"type":"required_reviewers"}]}`. `can_admins_bypass` is `true` today, so the admin role, held by the maintainer alone, can skip both rules; set it to `false` under **Settings → Environments → npm-publish** ("Allow administrators to bypass configured protection rules") if the maintainer wants the rules to bind the admin too.
 
 - [ ] The environment holds no secrets and no variables.
 - [ ] Only the `stage` job of `release.yml` uses the `npm-publish` environment. Outside it, two jobs hold `id-token: write`: the `analysis` job of `scorecard.yml`, which needs it to publish the Scorecard results, and the `deploy` job of `pages.yml`, which needs it to deploy the documentation site to GitHub Pages (in the `github-pages` environment). Neither names `npm-publish` or runs from `release.yml`, so npm's trusted publisher does not accept their tokens.

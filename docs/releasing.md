@@ -103,8 +103,13 @@ that each protection on the path from `main` to npm is still in place.
    - set `version` in `packages/tscache/package.json` to the new `X.Y.Z` (0.x semver: a minor release
      may break the API, a patch release never does). It must be above every version already on npm;
      the `plan` job checks this;
-   - regenerate the changelog with `bunx git-cliff --tag vX.Y.Z -o CHANGELOG.md` and edit the summary
-     at the top;
+   - add the new release to the changelog with `bun run changelog --tag vX.Y.Z`. It runs git-cliff
+     with `--unreleased --prepend`, so only the commits since the last tag become the `X.Y.Z` section,
+     above the older ones, which stay as they are with their hand-written summaries. Do not run
+     `git-cliff -o CHANGELOG.md`: it rebuilds every section and loses those summaries. Then write the
+     new section's summary by hand, above its generated list, and rewrite git-cliff's scope markers in
+     that section from `*(scope)*` to `_(scope)_`, the style the file uses (`cliff.toml` still emits
+     `*(scope)*`);
    - write the release notes in `docs/releases/X.Y.Z.md`; this file becomes the GitHub release text.
 2. Open a pull request, let CI pass and merge it.
 3. Run a dry run on `main` (see [Dry run](#dry-run)) and check that it passes with no warning: with the
@@ -187,6 +192,10 @@ gh workflow run release.yml --ref vX.Y.Z -f dry-run=false
 If the version is already staged, npm refuses to stage it again; reject the old stage first
 (`npm stage reject <stage-id>`, which asks for 2FA). The draft-release step skips a release that
 already exists.
+
+A retried `stage` job, whether from a new run on the tag or from **Re-run failed jobs**, waits for
+the required reviewer of the `npm-publish` environment again: approve it as in step 6 of
+[Cutting a release](#cutting-a-release), under **Review deployments** on the run.
 
 **If `stage` succeeded but `github-release-draft` failed**, the staged package is good: do not reject
 it, and do not start a new run, which would fail because the version is already staged. Either open
