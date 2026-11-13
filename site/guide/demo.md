@@ -37,7 +37,8 @@ What to watch for:
   numbers the documentation quotes come from `docs/benchmarks/demo-comparison.md`, which
   `bun scripts/demo-bench.ts` generates.
 
-Recordings of these four, on the vanilla reference client, are on the pages that explain them: sharing on
+Recordings of four of these, multi-tab sharing, credential refresh, server rendering and the live-feed
+reconnect, each on the vanilla reference client, are on the pages that explain them: sharing on
 [What tscache is](/), the refresh under [Refreshing once across tabs](/guides/auth#refreshing-once-across-tabs),
 server rendering on [Server rendering](/guides/ssr) and the reconnect under
 [Catching up after a gap](/guides/live-feeds#catching-up-after-a-gap). `bun scripts/demo/record.ts`
