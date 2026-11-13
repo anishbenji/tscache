@@ -11,6 +11,14 @@ The page then carries the server's answer twice:
 - **a snapshot**, which the browser applies to its own cache with `hydrate`, so its first live read
   fetches only what the server did not know, typically the provisional tail.
 
+<figure class="demo-video">
+  <video autoplay muted loop playsinline controls width="960" height="600" aria-describedby="demo-ssr" style="width: 100%; height: auto">
+    <source src="/media/server-rendering.webm" type="video/webm" />
+    <source src="/media/server-rendering.mp4" type="video/mp4" />
+  </video>
+  <figcaption id="demo-ssr">The reference client's server-rendered page (<code>/ssr</code>). The server reads the history through tscache and renders the page; the browser's cache starts from the server's snapshot, so the chart draws the history at once, and the backend serves only the newest bars, to the server's read and to the browser's. Recorded from the demo hub's vanilla reference client by <code>scripts/demo/record.ts</code>; the counters above the page are its mock backend's.</figcaption>
+</figure>
+
 ## The server
 
 <<< @/snippets/snapshots-server.ts#server{ts}
