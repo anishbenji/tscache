@@ -949,7 +949,12 @@ import { existsSync } from "node:fs";
 const [dir, name] = [process.env.FAKE_BUILD_DIR, process.argv[2]];
 if (name !== "tscache") process.exit(0);
 await Bun.write(\`\${dir}/building\`, "");
-while (!existsSync(\`\${dir}/taken\`)) await Bun.sleep(20);
+while (!existsSync(\`\${dir}/taken\`)) {
+  // The test's cleanup removed the directory: it ended without taking the
+  // port, so this build is not left running.
+  if (!existsSync(dir)) process.exit(1);
+  await Bun.sleep(20);
+}
 `;
 
 test("a launcher whose app port is taken during the build refuses that app, and the recorder sends it nothing", async () => {
