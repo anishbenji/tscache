@@ -1,6 +1,6 @@
 # Step 74 — Model-based property tests for the cache
 
-Branch: `chore/74-model-property-tests` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: built for round 3 · Verdict after triage: pending
+Branch: `chore/74-model-property-tests` · Reviewer: GPT-6.1 Sol (high) · Rounds: 3 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -203,6 +203,10 @@ The miss was reproduced before the redesign with a scratch wrapper that, after a
 | Join: two neighbouring segments on one page, after a fault inside the removal or a first-pass write run | 1 030         | 343 / 640        | 343 / 640        |
 
 "Times applied" is counted in a run that the wrapper does not stop (the rule before PR3-1 for the split and join wrappers, the PR3-1 rule for the join outside the range). Under the exact rule every seed in which a wrapper fired while the layout was still checked fails; the remainder are seeds in which the wrapper found no segment to act on, or fired only after a genuine exception had turned the layout check off. Without a wrapper the exception is reached in 16 seeds and all 640 pass.
+
+## Round 3 — reviewer verdict: merge
+
+No findings (2026-11-13). The reviewer confirmed every accepted finding of earlier rounds is fixed and none needs re-raising; `git diff --check` and `tsc -p packages/tscache` passed. Round 3 ran on the rebased head with decision 52 A applied.
 
 ## Security lane (Claude), not the gate
 
