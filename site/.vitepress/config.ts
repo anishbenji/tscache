@@ -22,6 +22,9 @@ function missingRepoFile(href: string): string | undefined {
 }
 
 const config = defineConfig({
+  // GitHub Pages serves the project site under the repository's name:
+  // https://anishbenji.github.io/tscache/ (.github/workflows/pages.yml).
+  base: "/tscache/",
   title: "tscache",
   description:
     "Browser time-series cache: SharedWorker multi-tab sharing, worker-side fetch orchestration, coverage tracking with real-gap awareness.",
