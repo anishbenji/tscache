@@ -35,6 +35,7 @@ import {
   type FrameLocator,
   type Page,
 } from "@playwright/test";
+import { Backend } from "./backend";
 import { demoPorts, hubPort } from "./catalog";
 import { Owner } from "./owned";
 import { Processes, type Started } from "./processes";
@@ -73,21 +74,15 @@ interface Counters {
 }
 
 /**
- * Set once `waitForHub` has accepted the hub of this run's own launcher:
- * from then on the backend on `appOrigin` is this run's. Before that the port
- * may be another demo's, so nothing is sent to it.
+ * The backend on `appOrigin`, the recorder's only from the moment
+ * `waitForHub` accepts the hub of this run's own launcher until that launcher
+ * exits (scripts/demo/backend.ts). Outside that window the port may be
+ * another process's, so nothing is sent to it, the clock's reset included.
  */
-let backendOwned = false;
-
-function ownedBackend(): void {
-  if (!backendOwned) {
-    throw new Error("the recorder sends requests only to its own demo");
-  }
-}
+const backend = new Backend(appOrigin);
 
 async function counters(): Promise<Counters> {
-  ownedBackend();
-  const response = await request(`${appOrigin}api/stats`);
+  const response = await backend.request("api/stats");
   if (!response.ok) throw new Error(`stats: ${response.status}`);
   const stats = (await response.json()) as Omit<
     Counters,
@@ -105,7 +100,7 @@ async function counters(): Promise<Counters> {
 let clockOwned = false;
 
 async function send(body: Record<string, unknown>): Promise<void> {
-  const response = await request(`${appOrigin}api/control`, {
+  const response = await backend.request("api/control", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -120,7 +115,11 @@ async function send(body: Record<string, unknown>): Promise<void> {
  * its clock alone.
  */
 async function control(body: Record<string, unknown>): Promise<void> {
-  ownedBackend();
+  // Checked before the clock's reset is registered: a control refused here
+  // registers none.
+  if (!backend.owned) {
+    throw new Error("the recorder sends requests only to its own demo");
+  }
   if (!clockOwned) {
     clockOwned = true;
     own(() => send({ resetClock: true }));
@@ -526,7 +525,7 @@ const scenarios: Scenario[] = [
       // The server's in-process cache outlives requests: one render first,
       // so the recorded render is one of a server that has served the page
       // before.
-      const warm = await request(`${appOrigin}ssr`);
+      const warm = await backend.request("ssr");
       if (!warm.ok) throw new Error(`/ssr: ${warm.status}`);
       await resetCounters(r.page);
       const before = await counters();
@@ -967,13 +966,15 @@ async function main(): Promise<void> {
   });
   own(() => processes.stop());
   void demo.exited.then((code) => {
+    // Its app servers are gone or going: their ports may be anyone's now.
+    backend.lose();
     if (!cancelled) {
       void shutdown(1, `the demo exited with ${code}:\n${demo.output()}`);
     }
   });
   await waitForHub(demo);
   // The hub is this run's launcher's, and so is its backend.
-  backendOwned = true;
+  backend.accept();
   stopIfCancelled();
   const stage = startStage();
   own(() => stage.stop());
