@@ -73,6 +73,16 @@ describe("request", () => {
     await outcome;
   });
 
+  it("passes on a fetch's own failure before the deadline, and leaves no timer behind", async () => {
+    const refused = new TypeError("connection refused");
+    const fetcher = ((_url: string | URL | Request) =>
+      Promise.reject(refused)) as typeof fetch;
+    await expect(
+      request("http://127.0.0.1:1/api/stats", {}, fetcher),
+    ).rejects.toBe(refused);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("returns an answer in time, body included, and leaves no timer behind", async () => {
     const seen: RequestInit[] = [];
     const fetcher = ((_url: string | URL | Request, init: RequestInit = {}) => {
