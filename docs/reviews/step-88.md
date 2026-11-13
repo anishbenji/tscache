@@ -1,6 +1,6 @@
 # Step 88 — The cache property tests in smaller batches
 
-Branch: `fix/88-property-test-batches` · Reviewer: none yet (the director runs the review) · Status: pre-reviewed, not gated
+Branch: `fix/88-property-test-batches` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -91,3 +91,7 @@ None.
 ## Security lane (Claude), not the gate
 
 run 1, head 48adc71: P0 0, P1 0, P2 0
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-13). The reviewer confirmed the pre-review fixes and, in a read-only comparison, identical 800 model seeds and 640 fault seeds, including order and retry flags; `tsc` and `git diff --check` passed.
