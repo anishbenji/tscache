@@ -61,6 +61,13 @@ for charts that scroll through history and follow a live tail in several tabs.
 - **Known limits.** Memory is neither bounded nor reported, a deploy can leave
   tabs on two versions, and readers are not told when data changes. The
   guides say how to design around each.
+- **Documentation.** The documentation site is published on GitHub Pages at
+  <https://anishbenji.github.io/tscache/>, built from `site/`, and is the
+  package's `homepage`. The repository README is rewritten around recordings
+  of the demos, which the site's guides also embed; the package README shows
+  the multi-tab recording and the demo benchmark's measured figure.
+- **Tooling.** Security updates to development dependencies in the lockfile;
+  nothing the package ships changed.
 
 The commits since the start of the project follow.
 
@@ -292,6 +299,13 @@ The commits since the start of the project follow.
 - _(docs)_ Step 61, every anchor a Markdown link
 - _(engine)_ Read a typed array's type and length only through its getters
 - _(engine)_ Convert a batch with the timestamps it checked
+- _(demo)_ Stop the demo when the recorder is interrupted
+- _(demo)_ Replace the media only after a whole conversion
+- _(demo)_ Cancel the recorder as one step once shutdown begins
+- _(demo)_ Take the recorder's tests off the live demo's counts
+- _(demo)_ Refuse to record when the demo's ports are taken
+- _(demo)_ Undo only what the recorder acquired
+- _(demo)_ Release what is acquired after shutdown begins
 
 ### 💼 Other
 
@@ -518,6 +532,19 @@ The commits since the start of the project follow.
 - Correct the deploy-skew limit after the pre-review
 - Scope the polling advice to a shared worker
 - N70, the split follows the pass's write runs
+- _(site)_ Embed the demo videos where each scenario is explained
+- Rewrite the landing readme
+- Correct the demo text after the pre-review
+- Name the four recordings on the demo hub page
+- The reviews folder size after the rebase
+- The reviews folder size after the second rebase
+- Say how the demo media were recorded
+- State how the demo media were made, without the plan
+- Regenerate the 0.1.0 changelog and summarize the release
+- Re-measure the 0.1.0 sizes and state its known limits
+- Pre-review fixes to the 0.1.0 changelog and notes
+- Scope the range rejection to integer fields
+- Re-measure the 0.1.0 pack after the rebase
 
 ### ⚡ Performance
 
@@ -602,6 +629,10 @@ The commits since the start of the project follow.
 - Require a failed put to leave a prefix of its write steps (n70)
 - Narrow the failed replace's layout exception (§4.3, n70)
 - Make the failed replace's layout exception exact (§4.3)
+- _(demo)_ Stop the recorder during the last conversion
+- _(demo)_ Hold the probe while the recorder is interrupted
+- Run the cache property tests in smaller batches
+- Assert the property tests' reach once per seed start
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -672,6 +703,9 @@ The commits since the start of the project follow.
 - _(docs)_ Fail when a path#symbol anchor in site/ no longer resolves
 - _(docs)_ Rebuild the anchor check on real parsers
 - Say that the bench check is required
+- Deploy the documentation site to github pages
+- _(demo)_ Record the demo scenarios headless
+- _(demo)_ Move the demo recorder to its own step
 
 ### ◀️ Revert
 
