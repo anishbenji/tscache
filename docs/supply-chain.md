@@ -67,13 +67,24 @@ No step uses an npm token.
   Expected: `{"custom_branch_policies":true,"protected_branches":false}`, then one policy, `{"name":"v*","type":"tag"}`.
 
 - [ ] The environment holds no secrets and no variables. A required reviewer is optional; the npm approval step is already a human gate.
-- [ ] Only the `stage` job of `release.yml` uses the `npm-publish` environment. Outside it, the only job that holds `id-token: write` is the `analysis` job of `scorecard.yml`, which needs it to publish the Scorecard results; that job never names the environment, so npm's trusted publisher does not accept its token.
+- [ ] Only the `stage` job of `release.yml` uses the `npm-publish` environment. Outside it, two jobs hold `id-token: write`: the `analysis` job of `scorecard.yml`, which needs it to publish the Scorecard results, and the `deploy` job of `pages.yml`, which needs it to deploy the documentation site to GitHub Pages (in the `github-pages` environment). Neither names `npm-publish` or runs from `release.yml`, so npm's trusted publisher does not accept their tokens.
 
   ```sh
   grep -n -e 'environment:' -e 'id-token:' .github/workflows/*.yml
   ```
 
-  Expected: `environment: npm-publish` and `id-token: write` in `release.yml` (the `stage` job, plus the comment above it), and `id-token: write` in `scorecard.yml`; nothing else.
+  Expected: `environment: npm-publish` and `id-token: write` in `release.yml` (the `stage` job, plus the comment above it), `id-token: write` in `scorecard.yml`, and `environment:` and `id-token: write` in `pages.yml` (the `deploy` job, whose environment is `github-pages`); nothing else.
+
+- [ ] The `github-pages` environment, which the `deploy` job of `pages.yml` uses, deploys from `main` only.
+
+  ```sh
+  gh api repos/anishbenji/tscache/environments/github-pages \
+    --jq '.deployment_branch_policy'
+  gh api repos/anishbenji/tscache/environments/github-pages/deployment-branch-policies \
+    --jq '.branch_policies[] | {name, type}'
+  ```
+
+  Expected: `{"custom_branch_policies":true,"protected_branches":false}`, then one policy, `{"name":"main","type":"branch"}`. Pages creates the environment when it is enabled with GitHub Actions as its source; if it allows other branches, restrict it to `main`.
 
 ### Workflows
 
@@ -81,6 +92,16 @@ No step uses an npm token.
 - [ ] Every third-party action is pinned to a full commit SHA, with its version in a comment. Dependabot proposes updates monthly; each one is reviewed by hand.
 - [ ] No workflow runs on `pull_request_target` or `workflow_run`, and none interpolates untrusted event fields (pull request titles, branch names, commit messages) into a `run:` script.
 - [ ] Checkouts set `persist-credentials: false` unless a later step must push.
+
+### GitHub Pages
+
+- [ ] Pages builds from GitHub Actions (the `build_type` is `workflow`), and `.github/workflows/pages.yml` ran on the latest push to `main` and succeeded. The site is <https://anishbenji.github.io/tscache/>.
+
+  ```sh
+  gh api repos/anishbenji/tscache/pages --jq '{build_type, html_url}'
+  ```
+
+  Expected: `{"build_type":"workflow","html_url":"https://anishbenji.github.io/tscache/"}`. A 404 means Pages is not enabled yet; `docs/reviews/step-65.md` gives the command that enables it.
 
 ### Branch protection for `main`
 

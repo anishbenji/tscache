@@ -1,0 +1,81 @@
+# Builds the documentation site (site/) and deploys it to GitHub Pages at
+# https://anishbenji.github.io/tscache/ on every push to main. The site's
+# VitePress `base` is /tscache/ (site/.vitepress/config.ts), the path GitHub
+# Pages serves a project site under. Pull requests do not run this: ci.yml
+# already builds the site (`bun run docs:build` in scripts/ci.sh), and only
+# main is deployed. Actions are pinned to commit SHAs; Dependabot keeps the
+# pins current.
+#
+# Pages must be set to deploy from GitHub Actions (Settings, Pages, Source:
+# GitHub Actions) for the deploy job to succeed; docs/supply-chain.md records
+# the setting.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# No permissions by default; each job asks for what it needs.
+permissions: {}
+
+# One deploy at a time. A push that lands while a deploy runs waits for it
+# rather than cancelling it, so a deploy is never left half done; a later
+# push replaces one still waiting.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      # Check out the repository.
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      # The site's pages include the package's sources and TypeDoc reads them;
+      # building the package first matches the order of scripts/ci.sh.
+      - name: Build the package
+        run: bun run build
+
+      - name: Build the site
+        run: bun run docs:build
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # Deploy to GitHub Pages.
+      pages: write
+      # Prove the deploy's origin to Pages with the GitHub OIDC token; no
+      # other job holds it.
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

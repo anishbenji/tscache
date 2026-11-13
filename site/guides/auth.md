@@ -54,6 +54,14 @@ token in place returns the refused string again, so each tab that heard the refu
 turn, always with the current refresh token: the session survives, at the cost of one redundant refresh
 per extra tab.
 
+<figure class="demo-video">
+  <video autoplay muted loop playsinline controls width="960" height="600" aria-describedby="demo-refresh" style="width: 100%; height: auto">
+    <source src="/media/credential-refresh.webm" type="video/webm" />
+    <source src="/media/credential-refresh.mp4" type="video/mp4" />
+  </video>
+  <figcaption id="demo-refresh">Two tabs of one origin share one access token. The backend expires it; tab 1 scrolls back, and the backend refuses its fetches. One tab refreshes the token under the lock and the other adopts it: the backend counts one refresh, both tabs stay signed in, and tab 1 receives the history it asked for. Recorded headless with Playwright from the demo hub's vanilla reference client; the counters above the page are its mock backend's. The two tabs are two frames of one page, which share the SharedWorker, the Web Lock and localStorage as two tabs do.</figcaption>
+</figure>
+
 The reference clients use the same scheme with a sign-in flow around it
 ([`reference/shared/src/auth.ts`](https://github.com/anishbenji/tscache/blob/main/reference/shared/src/auth.ts)).
 

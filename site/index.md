@@ -22,6 +22,14 @@ once.
   version clears the cache when the backend says history changed; `invalidate` forgets a range on your
   own clock. There is no TTL.
 
+<figure class="demo-video">
+  <video autoplay muted loop playsinline controls width="960" height="600" aria-describedby="demo-sharing" style="width: 100%; height: auto">
+    <source src="/media/multi-tab-sharing.webm" type="video/webm" />
+    <source src="/media/multi-tab-sharing.mp4" type="video/mp4" />
+  </video>
+  <figcaption id="demo-sharing">Two tabs of one origin. Tab 1 opens with an empty cache, and its SharedWorker fetches the history in one fetch; when its live feed opens, one more fetch reads the newest bars. Tab 2 opens on the same SharedWorker and draws the same chart at once from the shared cache; the backend serves it only the newest bars, the one forming now and the one that just closed. Recorded headless with Playwright from the demo hub's vanilla reference client; the counters above the page are its mock backend's. The two tabs are two frames of one page, which share the SharedWorker as two tabs do.</figcaption>
+</figure>
+
 ## A first look
 
 <<< @/snippets/getting-started.ts#cache{ts}
