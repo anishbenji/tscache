@@ -59,8 +59,8 @@ import {
 // while a put is armed.
 //
 // A failure prints the seed, the step, the case's configuration and the
-// operations before it. To replay one, narrow the it.each table to a row
-// such as { first: <seed>, count: 1, retry: <as printed> }.
+// operations before it. To replay one, replace the it.each table with
+// [{ first: <seed>, count: 1, retry: <as printed> }].
 
 const FAULT = new RangeError("injected: Array buffer allocation failed");
 let countdown = -1; // -1: disarmed
@@ -520,18 +520,25 @@ function runCase(
 }
 
 describe("CacheState.put failing part-way — architecture §4.3 allocation failure, §4.5 order inside put", () => {
-  it.each([
-    // Eight short batches rather than four long ones, so that no test runs
-    // near the default timeout on a loaded machine; the seeds are the same.
-    { first: 1, count: 80, retry: true },
-    { first: 81, count: 80, retry: true },
-    { first: 0xc0ffee, count: 80, retry: true },
-    { first: 0xc0ffee + 80, count: 80, retry: true },
-    { first: 10_001, count: 80, retry: false },
-    { first: 10_081, count: 80, retry: false },
-    { first: 0xdeadbeef, count: 80, retry: false },
-    { first: 0xdeadbeef + 80, count: 80, retry: false },
-  ])(
+  it.each(
+    // 160 seeds from each start, in batches of 10: many short tests rather
+    // than a few long ones, so that each stays far below the default timeout
+    // on a loaded machine (step 88). Each batch still reaches every outcome.
+    (
+      [
+        [1, true],
+        [0xc0ffee, true],
+        [10_001, false],
+        [0xdeadbeef, false],
+      ] as const
+    ).flatMap(([start, retry]) =>
+      Array.from({ length: 16 }, (_, i) => ({
+        first: start + 10 * i,
+        count: 10,
+        retry,
+      })),
+    ),
+  )(
     "every injected allocation failure leaves the documented state (seeds $first + $count, retry $retry)",
     ({ first, count, retry }) => {
       const seen = new Map<string, number>();

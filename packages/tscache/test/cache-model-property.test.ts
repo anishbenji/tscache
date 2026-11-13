@@ -22,8 +22,9 @@ import { batchOf, compareState, randomValue, show } from "./cache-model-checks";
 // version, a well-formed store and the segment layout (N14, N15).
 //
 // A failure prints the seed, the step and the operations before it. To
-// replay one, narrow the it.each table to { first: <seed>, count: 1 } (the
-// rule-reach assertion may then fail too, since one seed reaches fewer rules).
+// replay one, replace the it.each table with [{ first: <seed>, count: 1 }]
+// (the rule-reach assertion may then fail too, since one seed reaches fewer
+// rules).
 
 const STEPS = 120;
 const VERSIONS = ["v1", "v2", "v3"] as const;
@@ -240,18 +241,17 @@ function runCase(seed: number, seen: Map<string, number>): string | undefined {
 }
 
 describe("CacheState against a slot-by-slot model — architecture §4.3–§4.5, N1, N3, N11, N13–N19", () => {
-  it.each([
-    // Eight short batches rather than four long ones, so that no test runs
-    // near the default timeout on a loaded machine; the seeds are the same.
-    { first: 1, count: 100 },
-    { first: 101, count: 100 },
-    { first: 10_001, count: 100 },
-    { first: 10_101, count: 100 },
-    { first: 0xc0ffee, count: 100 },
-    { first: 0xc0ffee + 100, count: 100 },
-    { first: 0xdeadbeef, count: 100 },
-    { first: 0xdeadbeef + 100, count: 100 },
-  ])(
+  it.each(
+    // 200 seeds from each start, in batches of 25: many short tests rather
+    // than a few long ones, so that each stays far below the default timeout
+    // on a loaded machine (step 88). Each batch still reaches every rule.
+    [1, 10_001, 0xc0ffee, 0xdeadbeef].flatMap((start) =>
+      Array.from({ length: 8 }, (_, i) => ({
+        first: start + 25 * i,
+        count: 25,
+      })),
+    ),
+  )(
     "random K, cap, grid, meta and warnings agree after every step (seeds $first + $count)",
     ({ first, count }) => {
       const seen = new Map<string, number>();
