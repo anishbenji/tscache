@@ -1,6 +1,6 @@
 # Step 85 — A persistence section in the review checklist
 
-Branch: `docs/85-checklist-persistence` · Reviewer: pending · Rounds: 0 · Status: open · Verdict after triage: pending
+Branch: `docs/85-checklist-persistence` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge (one P2 fixed)
 
 ## Scope
 
@@ -61,3 +61,11 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 1 — reviewer verdict: merge after fixes
+
+One P2 (2026-11-13): item 11 stated a two-deadline bound for a removal without N61's exception for the persistence chunk's import. Valid (the finding check measured a held removal answering after about 2.9 deadlines, as N61 and A§4.10.8 allow); fixed in `docs(checklist): the chunk import before the removal deadlines`, which names both halves of N61's exception (a removal held for the chunk, and a `clearAll` before it loads).
+
+## Finding check (claude-fable-5-2), round 1
+
+V 1, P 0, I 0, D 0
