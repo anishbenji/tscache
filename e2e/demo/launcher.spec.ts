@@ -7,6 +7,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -833,6 +834,106 @@ test("a recorder whose hub port is taken stops at once and sends that port nothi
   } finally {
     cleanUp(launched, apps);
     await taken.close();
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+/** An HTTP server on `port` that answers every request and counts them. */
+function countingServer(port: number): Promise<{
+  requests(): string[];
+  close(): Promise<void>;
+}> {
+  const seen: string[] = [];
+  const server = createHttpServer((request, response) => {
+    seen.push(`${request.method} ${request.url}`);
+    response.end("ok");
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () =>
+      resolve({
+        requests: () => seen,
+        close: () =>
+          new Promise((done) => {
+            server.closeAllConnections();
+            server.close(() => done());
+          }),
+      }),
+    );
+  });
+}
+
+/** The recorded app's port in a demo whose hub is on `hub`. */
+function recordedAppPort(hub: number): number {
+  return demoPorts(hub)["reference-vanilla"];
+}
+
+for (const { title, args, message } of [
+  {
+    title: "a recorder that refuses a taken app port sends that port nothing",
+    args: ["--reuse-builds", "--only", CONVERSION.name],
+    message: (hub: number) => `port ${recordedAppPort(hub)} is already in use`,
+  },
+  {
+    title:
+      "a recorder that stops on a bad option sends the demo's ports nothing",
+    args: ["--reuse-builds", "--only", "no-such-scenario"],
+    message: () => "--only names none of",
+  },
+]) {
+  test(title, async () => {
+    test.setTimeout(60_000);
+    const hub = await freePorts();
+    const apps = appPortsAfter(hub);
+    const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
+    // Something answering on the recorded app's port: another demo's
+    // backend, as far as the recorder can tell.
+    const backend = await countingServer(recordedAppPort(hub));
+    let launched: Launch | undefined;
+    try {
+      launched = launch(
+        hub,
+        args,
+        { ...CONVERSION.env, RECORD_FFMPEG: "true", TMPDIR: temp },
+        recorderPath,
+      );
+      expect(await launched.exit()).toBe(1);
+      expect(launched.stderr()).toContain(message(hub));
+      // It undid nothing it had not done: no control, no read.
+      expect(backend.requests()).toEqual([]);
+      expect(await rawVideoDirs(temp)).toEqual([]);
+    } finally {
+      cleanUp(launched, apps);
+      await backend.close();
+      await rm(temp, { recursive: true, force: true });
+    }
+  });
+}
+
+test("a recorder that refuses a taken app port exits though that port never answers", async () => {
+  test.setTimeout(30_000);
+  const hub = await freePorts();
+  const apps = appPortsAfter(hub);
+  const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
+  // Accepts connections and never answers on them.
+  const silent = await listen(recordedAppPort(hub));
+  let launched: Launch | undefined;
+  try {
+    launched = launch(
+      hub,
+      ["--reuse-builds", "--only", CONVERSION.name],
+      { ...CONVERSION.env, RECORD_FFMPEG: "true", TMPDIR: temp },
+      recorderPath,
+    );
+    // No deadline of its own: a recorder that hangs fails at the test's
+    // timeout (docs/testing.md).
+    expect(await launched.exit()).toBe(1);
+    expect(launched.stderr()).toContain(
+      `port ${recordedAppPort(hub)} is already in use`,
+    );
+  } finally {
+    cleanUp(launched, apps);
+    await silent.close();
     await rm(temp, { recursive: true, force: true });
   }
 });

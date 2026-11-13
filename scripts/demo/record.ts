@@ -70,8 +70,27 @@ interface Counters {
   streams: number;
 }
 
+/** How long a request to the demo's backend may take, so no path hangs on one. */
+const BACKEND_MS = 5000;
+
+/**
+ * Set once `waitForHub` has accepted the hub of this run's own launcher:
+ * from then on the backend on `appOrigin` is this run's. Before that the port
+ * may be another demo's, so nothing is sent to it.
+ */
+let backendOwned = false;
+
+function ownedBackend(): void {
+  if (!backendOwned) {
+    throw new Error("the recorder sends requests only to its own demo");
+  }
+}
+
 async function counters(): Promise<Counters> {
-  const response = await fetch(`${appOrigin}api/stats`);
+  ownedBackend();
+  const response = await fetch(`${appOrigin}api/stats`, {
+    signal: AbortSignal.timeout(BACKEND_MS),
+  });
   if (!response.ok) throw new Error(`stats: ${response.status}`);
   const stats = (await response.json()) as Omit<
     Counters,
@@ -85,13 +104,32 @@ async function counters(): Promise<Counters> {
   return { fetches, bars, refused, refreshes, streams };
 }
 
-async function control(body: Record<string, unknown>): Promise<void> {
+/** Set once this run has registered the backend clock's reset (`control`). */
+let clockOwned = false;
+
+async function send(body: Record<string, unknown>): Promise<void> {
   const response = await fetch(`${appOrigin}api/control`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(BACKEND_MS),
   });
   if (!response.ok) throw new Error(`control: ${response.status}`);
+}
+
+/**
+ * Sends a control to this run's own backend. The first one registers the
+ * clock's reset with shutdown, since a scenario may move the clock (and the
+ * quiet minute resets it): a run that never controlled the backend leaves
+ * its clock alone.
+ */
+async function control(body: Record<string, unknown>): Promise<void> {
+  ownedBackend();
+  if (!clockOwned) {
+    clockOwned = true;
+    own(() => send({ resetClock: true }));
+  }
+  await send(body);
 }
 
 // --- The stage ------------------------------------------------------------
@@ -609,6 +647,10 @@ async function record(
     deviceScaleFactor: 1,
     recordVideo: { dir: rawDir, size: VIEW },
   });
+  // Closing a context waits for Playwright's video encoder, an ffmpeg of
+  // its own that closing the browser alone leaves finishing; contexts are
+  // owned after the browser, so shutdown closes them first.
+  const disown = own(() => context.close());
   const page = await context.newPage();
   const born = performance.now();
   const at = () => (performance.now() - born) / 1000;
@@ -649,6 +691,7 @@ async function record(
     await scenario.run(recording);
   } finally {
     await context.close();
+    disown();
   }
   const video = await page.video()?.path();
   if (video === undefined || from === undefined) {
@@ -677,9 +720,6 @@ function stopIfCancelled(): void {
   if (cancelled) throw new Error("the recorder is stopping");
 }
 
-/** The ffmpeg running now, which shutdown stops before anything else. */
-let converting: ReturnType<typeof Bun.spawn> | undefined;
-
 async function ffmpeg(args: string[]): Promise<void> {
   stopIfCancelled();
   const run = Bun.spawn(
@@ -689,9 +729,14 @@ async function ffmpeg(args: string[]): Promise<void> {
       stderr: "inherit",
     },
   );
-  converting = run;
+  // The last thing owned while it runs, so the first shutdown releases;
+  // signalled before shutdown awaits anything.
+  const disown = own(
+    () => run.exited,
+    () => run.kill(),
+  );
   const code = await run.exited;
-  converting = undefined;
+  disown();
   // An ffmpeg that shutdown stopped, or that finished after it began, ends
   // the conversion here, whatever its exit code.
   stopIfCancelled();
@@ -849,44 +894,62 @@ async function waitForHub(demo: Started): Promise<void> {
 }
 
 const processes = new Processes();
-let stage: ReturnType<typeof startStage> | undefined;
-let browser: Browser | undefined;
-/** Chromium while it launches, so shutdown closes one it did not see yet. */
-let launching: Promise<Browser> | undefined;
-let rawDir: string | undefined;
 let exiting: Promise<never> | undefined;
 
+/** A cleanup, registered when its resource was acquired. */
+interface Owned {
+  /** Undoes the resource; awaited, in reverse order of acquisition. */
+  release(): unknown;
+  /** Runs synchronously as shutdown begins, before anything is awaited. */
+  stop?(): void;
+}
+
 /**
- * The one way out, as in scripts/demo.ts. In order: marks the recorder
- * cancelled and signals a running ffmpeg, before anything is awaited; waits
- * for that ffmpeg to exit; closes Chromium's contexts, which waits for
- * Playwright's video encoder, then Chromium (one still launching too); stops
- * the stage, resets the backend's clock and stops the demo with everything
- * it started; removes the raw videos and any unfinished conversion; then
- * exits. The demo's processes run in groups of their own, so a Ctrl-C in
- * the terminal reaches only this process, and only this stops them.
+ * What this run has acquired and not yet released, in the order it was
+ * acquired. Shutdown undoes exactly this, so an exit before a resource was
+ * acquired undoes nothing for it.
+ */
+const owned: Owned[] = [];
+
+/**
+ * Registers the cleanup of a resource just acquired; returns the call that
+ * removes it once the resource is released the ordinary way.
+ */
+function own(release: () => unknown, stop?: () => void): () => void {
+  const entry: Owned = stop === undefined ? { release } : { release, stop };
+  owned.push(entry);
+  return () => {
+    const at = owned.indexOf(entry);
+    if (at !== -1) owned.splice(at, 1);
+  };
+}
+
+/**
+ * The one way out, as in scripts/demo.ts. It marks the recorder cancelled,
+ * so no step starts new work, and runs every registered `stop` (a running
+ * ffmpeg is signalled), all before anything is awaited. Then it releases
+ * what this run owns, in reverse order of acquisition, each release on its
+ * own so one that fails does not keep the rest: the running ffmpeg (its
+ * exit), the backend clock's reset, each browser context (which waits for
+ * Playwright's video encoder), Chromium, the stage, the demo with
+ * everything it started, and the raw videos with any unfinished conversion.
+ * Then it exits. The demo's processes run in groups of their own, so a
+ * Ctrl-C in the terminal reaches only this process, and only this stops
+ * them.
  */
 function shutdown(code: number, reason?: string): Promise<never> {
   if (exiting !== undefined) return exiting;
   cancelled = true;
-  const running = converting;
-  running?.kill();
+  const held = owned.splice(0).reverse();
+  for (const entry of held) entry.stop?.();
   exiting = (async () => {
     if (reason !== undefined) console.error(reason);
-    await running?.exited;
-    const opened = browser ?? (await launching?.catch(() => undefined));
-    // A context first: closing one waits for Playwright's video encoder,
-    // an ffmpeg of its own that closing the browser alone leaves finishing.
-    for (const context of opened?.contexts() ?? []) {
-      await context.close().catch(() => {});
-    }
-    await opened?.close().catch(() => {});
-    stage?.stop();
-    // Undo a scenario's clock move; the backend may be down already.
-    await control({ resetClock: true }).catch(() => {});
-    await processes.stop();
-    if (rawDir !== undefined) {
-      await rm(rawDir, { recursive: true, force: true });
+    for (const entry of held) {
+      try {
+        await entry.release();
+      } catch {
+        // The resource is gone already, or its owner is: the rest still go.
+      }
     }
     process.exit(code);
   })();
@@ -912,7 +975,8 @@ async function main(): Promise<void> {
   await demoPortsFree();
   await mkdir(GIF_DIR, { recursive: true });
   await mkdir(VIDEO_DIR, { recursive: true });
-  rawDir = await mkdtemp(join(tmpdir(), "tscache-record-"));
+  const rawDir = await mkdtemp(join(tmpdir(), "tscache-record-"));
+  own(() => rm(rawDir, { recursive: true, force: true }));
   const demoArgs = process.argv.includes("--reuse-builds")
     ? ["--reuse-builds"]
     : [];
@@ -922,22 +986,29 @@ async function main(): Promise<void> {
     cwd: ROOT,
     capture: true,
   });
+  own(() => processes.stop());
   void demo.exited.then((code) => {
     if (!cancelled) {
       void shutdown(1, `the demo exited with ${code}:\n${demo.output()}`);
     }
   });
-  stage = startStage();
   await waitForHub(demo);
+  // The hub is this run's launcher's, and so is its backend.
+  backendOwned = true;
+  stopIfCancelled();
+  const stage = startStage();
+  own(() => stage.stop());
   // The recorder handles the signals itself: Playwright's handlers would
   // close Chromium and exit without stopping the demo.
   stopIfCancelled();
-  launching = chromium.launch({
+  const launching = chromium.launch({
     handleSIGINT: false,
     handleSIGTERM: false,
     handleSIGHUP: false,
   });
-  browser = await launching;
+  // Owned from the launch on, so a Chromium still launching is closed too.
+  own(async () => (await launching.catch(() => undefined))?.close());
+  const browser = await launching;
   const results: { clip: Clip; files: string[] }[] = [];
   for (const scenario of chosen) {
     stopIfCancelled();
