@@ -28,7 +28,8 @@ import {
 // that fails part-way:
 // - the error that propagates is the allocation failure;
 // - the store is well formed, and in the layout of its present points unless
-//   the put was a replace (the one documented exception);
+//   a replace removed a point and the fault came after the whole first pass,
+//   when the layout may be coarser (the one documented exception, §4.3);
 // - no point outside the put's range changed, and each point inside it is
 //   its old value, its new value, or removed by the put's own replace (only
 //   below the put's own watermark, N19);
@@ -148,6 +149,25 @@ function sameRows(
     if (other === undefined || !sameNumbers(row, other)) return false;
   }
   return true;
+}
+
+/**
+ * Whether `observed` is `canonical` with some neighbouring segments joined:
+ * every canonical segment lies inside one observed segment.
+ */
+function coarser(
+  observed: readonly { start?: number; end?: number }[],
+  canonical: readonly { start: number; end: number }[],
+): boolean {
+  return canonical.every((want) =>
+    observed.some(
+      (got) =>
+        got.start !== undefined &&
+        got.end !== undefined &&
+        got.start <= want.start &&
+        want.end <= got.end,
+    ),
+  );
 }
 
 /** A write step for a failure message: the removal's span or a run's slots. */
@@ -459,7 +479,29 @@ function runCase(
     }
     model.covered.clear();
     for (const s of after.covered) model.covered.add(s);
-    if (authority !== undefined && show(layoutOf(c)) !== show(model.layout())) {
+    // The one layout exception (§4.3 allocation failure): a replace that
+    // cleared the middle of a segment and then could not allocate the split.
+    // A fault inside the removal or a write run changes nothing (N70), so it
+    // leaves the canonical layout. The exception is taken only from a store
+    // in the canonical layout, only when the replace's removal took a point
+    // out, with the points as the whole first pass leaves them, and only as a
+    // coarser layout: segments that should have been split stay joined, and
+    // none is split. §4.3 and N70 do not say when the split is attempted; the
+    // test reads it as following the pass's write runs (step 74, round 3).
+    if (strictLayout && show(layoutOf(c)) !== show(model.layout())) {
+      const firstPass = steps.filter((step) => step.pass === 1).length;
+      const removal = steps.findIndex((step) => step.kind === "remove");
+      const removedPoint =
+        removal !== -1 &&
+        (legal[removal + 1] as Map<number, number[]>).size <
+          (legal[removal] as Map<number, number[]>).size;
+      if (
+        !removedPoint ||
+        !sameRows(legal[firstPass] as Map<number, number[]>, after.rows) ||
+        !coarser(layoutOf(c), model.layout())
+      ) {
+        return `a failed put left the layout ${show(layoutOf(c))}, want ${show(model.layout())}; the exception needs a replace that removed a point, the points after its whole first pass (${firstPass} of ${steps.length} steps; found after ${matched}) and a coarser layout\n${where()}`;
+      }
       note("failed replace left the documented layout exception");
       strictLayout = false;
     }

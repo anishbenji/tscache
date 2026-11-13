@@ -96,11 +96,16 @@ export interface Span {
 
 /**
  * One step of a put's write (§4.3, N70): the removal of a replace, inclusive
- * slots, or one write run of points (stored values, in schema order).
+ * slots, or one write run of points (stored values, in schema order). `pass`
+ * is 1, or 2 for the points at or after the put's own watermark (N19).
  */
 export type WriteStep =
-  | { kind: "remove"; start: number; end: number }
-  | { kind: "run"; points: { slot: number; values: number[] }[] };
+  | { kind: "remove"; pass: 1 | 2; start: number; end: number }
+  | {
+      kind: "run";
+      pass: 1 | 2;
+      points: { slot: number; values: number[] }[];
+    };
 
 /** How far around [lo, hi] the scans for snapping reach. */
 const MARGIN = 64;
@@ -334,11 +339,17 @@ export class CacheModel {
     }));
     const steps: WriteStep[] = [];
     const pass = (
+      which: 1 | 2,
       batch: readonly { slot: number; values: number[] }[],
       removal: Span | undefined,
     ): void => {
       if (removal !== undefined && removal.start <= removal.end) {
-        steps.push({ kind: "remove", start: removal.start, end: removal.end });
+        steps.push({
+          kind: "remove",
+          pass: which,
+          start: removal.start,
+          end: removal.end,
+        });
       }
       let run: Extract<WriteStep, { kind: "run" }> | undefined;
       let prev: number | undefined;
@@ -350,7 +361,7 @@ export class CacheModel {
             Math.floor(point.slot / this.config.cap) &&
           point.slot - prev - 1 <= this.config.k;
         if (!joins) {
-          run = { kind: "run", points: [] };
+          run = { kind: "run", pass: which, points: [] };
           steps.push(run);
         }
         run?.points.push(point);
@@ -358,15 +369,17 @@ export class CacheModel {
       }
     };
     if (finalizedUntil === undefined) {
-      pass(points, authority);
+      pass(1, points, authority);
     } else {
       pass(
+        1,
         points.filter((p) => p.slot < own),
         authority === undefined
           ? undefined
           : { start: authority.start, end: Math.min(authority.end, own - 1) },
       );
       pass(
+        2,
         points.filter((p) => p.slot >= own),
         undefined,
       );
