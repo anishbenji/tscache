@@ -9,6 +9,8 @@
     "packages/*/bench/e2e.ts",
     // Read by tsdown, not imported.
     "packages/*/tsdown.config.ts",
+    // Read by Stryker (stryker.config.json), not imported.
+    "vitest.mutation.config.ts",
     "scripts/*.ts",
     "examples/*/*.html",
     "examples/*/src/entry-server.tsx",
