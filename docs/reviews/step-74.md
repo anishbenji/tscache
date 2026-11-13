@@ -1,28 +1,30 @@
 # Step 74 — Model-based property tests for the cache
 
-Branch: `chore/74-model-property-tests` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: escalated · Verdict after triage: pending
+Branch: `chore/74-model-property-tests` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: built for round 3 · Verdict after triage: pending
 
 ## Scope
 
 The review of 2026-11-10 (`docs/reviews/2026-11-review.md`, Part 2, §2.4) found the storage core correct against an independent model, but several rules had example tests only: the watermark moving forwards only (N17), version adoption and clear (N18), a response clipped to its own watermark (N19), the overlap warning, and the failed-write guarantees of §4.3 and §4.5. The existing `cache-property.test.ts` fixes K = 2 and cap = 8, never passes `meta` and never turns the warning on. This step ports the review's two probes (`probe-cache-model.ts`, `probe-faults.ts`) into the suite as seeded property tests. Tests only: nothing under `packages/tscache/src` changes, and no dependency is added.
 
-| Commit (by subject)                                                   | What                                              |
-| --------------------------------------------------------------------- | ------------------------------------------------- |
-| `test: seeded model and fault-injection property tests for the cache` | The model, its checks and the two property tests. |
-| `docs(review): step 74, model-based property tests`                   | This file.                                        |
+| Commit (by subject)                                                     | What                                              |
+| ----------------------------------------------------------------------- | ------------------------------------------------- |
+| `test: seeded model and fault-injection property tests for the cache`   | The model, its checks and the two property tests. |
+| `docs(review): step 74, model-based property tests`                     | This file.                                        |
+| `test: draw only field values a put accepts (n68)`                      | The generator after the rebase onto N68.          |
+| `test: require a failed put to leave a prefix of its write steps (n70)` | The set-based expectation of round 3.             |
 
-| File                                                  | Role                                                                                                                                                                              |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/tscache/test/cache-model.ts`                | An independent slot-by-slot model of one cache, written from architecture §2.3–§2.4, §4.3–§4.5, N1, N3, N11, N13–N19, and the seeded generator. It imports only types from `src`. |
-| `packages/tscache/test/cache-model-checks.ts`         | Comparison of a live `CacheState` with the model, shared by both tests: `get`, coverage index, watermark, version, well-formedness, layout.                                       |
-| `packages/tscache/test/cache-model-property.test.ts`  | The model test.                                                                                                                                                                   |
-| `packages/tscache/test/cache-faults-property.test.ts` | The fault-injection test.                                                                                                                                                         |
+| File                                                  | Role                                                                                                                                                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/tscache/test/cache-model.ts`                | An independent slot-by-slot model of one cache, written from architecture §2.3–§2.4, §4.3–§4.5, N1, N3, N11, N13–N19, N68, N70, and the seeded generator. It imports only types from `src`. |
+| `packages/tscache/test/cache-model-checks.ts`         | Comparison of a live `CacheState` with the model, shared by both tests: `get`, coverage index, watermark, version, well-formedness, layout.                                                 |
+| `packages/tscache/test/cache-model-property.test.ts`  | The model test.                                                                                                                                                                             |
+| `packages/tscache/test/cache-faults-property.test.ts` | The fault-injection test.                                                                                                                                                                   |
 
 ## What each test checks
 
 ### `cache-model-property.test.ts`
 
-Eight batches of 100 fixed seeds (1, 10 001, 0xc0ffee and 0xdeadbeef onwards, 200 from each), 120 random operations per seed, 96 000 operations in all. Each seed draws its own interval (1, 2, 10 or 60 000), `alignmentOffset`, `gapSplitK` (1–5), `segmentSlotCap` (1 to 32 768), schema (one, two or six fields across all eight dtypes), initial watermark (none, on the grid or between grid points), `config.version` (set or not) and `warnOnOverlapDiff`. Operations: puts without a range and with a range of six shapes (on the grid, inward, outward, one point, no grid point, random fractions), whose `meta` holds nothing, `finalizedUntil`, `version`, or both; `invalidate`; `setFinalizedUntil` (forwards and back); `clear`. Batches come as plain arrays or `Float64Array`s, with values that include NaN, −0, fractions, values past the integer dtypes' ranges and values below `f32` precision.
+Eight batches of 100 fixed seeds (1, 10 001, 0xc0ffee and 0xdeadbeef onwards, 200 from each), 120 random operations per seed, 96 000 operations in all. Each seed draws its own interval (1, 2, 10 or 60 000), `alignmentOffset`, `gapSplitK` (1–5), `segmentSlotCap` (1 to 32 768), schema (one, two or six fields across all eight dtypes), initial watermark (none, on the grid or between grid points), `config.version` (set or not) and `warnOnOverlapDiff`. Operations: puts without a range and with a range of six shapes (on the grid, inward, outward, one point, no grid point, random fractions), whose `meta` holds nothing, `finalizedUntil`, `version`, or both; `invalidate`; `setFinalizedUntil` (forwards and back); `clear`. Batches come as plain arrays or `Float64Array`s, with values each field can hold (N68): in a float field NaN, −0, fractions, values past 2^31 and values below `f32` precision; in an integer field −0 and the ends of its range.
 
 | Checked after every step                                                                                                                                       | Against                                           |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
@@ -35,24 +37,27 @@ Eight batches of 100 fixed seeds (1, 10 001, 0xc0ffee and 0xdeadbeef onwards, 20
 | The store well formed (ascending, disjoint, no empty segment, tight extents, inside one page, sizes right)                                                     | §4.3                                              |
 | The segment layout equals the layout of the present points                                                                                                     | N14, N15                                          |
 
-Each batch also asserts that its generator reached every rule it claims to check (a fixed list of 17, from "N17 lower watermark ignored" to "warning clipped at the volatile region"). Over the 800 seeds: 61 858 puts, 16 428 lower watermarks ignored and 8 275 advances (N17), 504 first versions adopted and 7 908 mismatch clears (N18), 8 199 provisional points kept by a replace (N19), 7 093 warnings reported, 336 clipped and 2 732 dropped at the volatile region.
+Each batch also asserts that its generator reached every rule it claims to check (a fixed list of 17, from "N17 lower watermark ignored" to "warning clipped at the volatile region"). Over the 800 seeds: 61 869 puts, 16 316 lower watermarks ignored and 8 233 advances (N17), 504 first versions adopted and 7 793 mismatch clears (N18), 7 997 provisional points kept by a replace (N19), 7 136 warnings reported, 349 clipped and 2 816 dropped at the volatile region.
 
 ### `cache-faults-property.test.ts`
 
-Eight batches of 80 fixed seeds (1, 0xc0ffee, 10 001 and 0xdeadbeef onwards, 160 from each), 60 operations per seed; four batches retry each failed put, four carry on from the state it left. Two out of three puts are armed: the n-th typed-array allocation of the put (n from 0 to 24) throws a `RangeError`. The allocations wrapped are the field-array constructors in `FIELD_ARRAYS` (segments, store and batch validation) and the global `Float64Array` and `Uint8Array` (slot and mask arrays). Each is wrapped in a `Proxy`, so `instanceof`, static members and species are unchanged; it counts only while a put is armed, and the originals are restored in `afterAll`. Over the 640 seeds 13 675 failures are injected: 10 025 in a field array, 2 112 in a mask, 1 538 in a slot array.
+Eight batches of 80 fixed seeds (1, 0xc0ffee, 10 001 and 0xdeadbeef onwards, 160 from each), 60 operations per seed; four batches retry each failed put, four carry on from the state it left. Two out of three puts are armed: the n-th typed-array allocation of the put (n from 0 to 24) throws a `RangeError`. The allocations wrapped are the field-array constructors in `FIELD_ARRAYS` (segments, store and batch validation) and the global `Float64Array` and `Uint8Array` (slot and mask arrays). Each is wrapped in a `Proxy`, so `instanceof`, static members and species are unchanged; it counts only while a put is armed, and the originals are restored in `afterAll`. Over the 640 seeds 13 830 failures are injected: 10 218 in a field array, 2 106 in a mask, 1 506 in a slot array; 3 804 of them in validation and 10 026 after it.
 
 | Checked after every failed put                                                                                                                                                                                                | Against                                             |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | The error that propagates is the injected one; an injected failure is never swallowed                                                                                                                                         | §4.5 order inside `put`                             |
 | The store is well formed; it is in the layout of its present points unless the put was a replace                                                                                                                              | §4.3 allocation failure (the one exception)         |
 | No point outside the put's range changed; each point inside it is its old value, its new value, or removed by the put's own replace below the put's own watermark                                                             | §4.3 allocation failure, N11, N19                   |
+| The points as a whole equal one of the legal states: the state after a prefix of the write's steps, computed from the model's state after the version step (round 3, R2-1); carrying on, the model adopts that state          | §4.3 allocation failure, N70                        |
 | No coverage was added; coverage outside the put's range is unchanged; after a fault past validation none of the range is covered, whether or not a point changed (round 1, R1-2)                                              | §4.3 allocation failure, §4.5 order inside `put`    |
 | The watermark did not move                                                                                                                                                                                                    | §4.5 order inside `put`                             |
 | A fault during validation (`validateBatch` on the stack when it fired) changed nothing: points, coverage, watermark, version, hook calls; `onMutate` is not called for it and is called once for a put that passed validation | §4.5 order inside `put`, errors; §4.10.4 `onMutate` |
 | The version step stays: the version the model derives from `meta.version` is adopted, a mismatch has cleared the cache, `onVersionClear` was called once for it (round 1, R1-1)                                               | §4.5 version, `CacheStateHooks`, order inside `put` |
 | The retried put lands exactly on the model, warnings included; carrying on, every later step matches it                                                                                                                       | §4.3, §4.5                                          |
 
-Each batch asserts that it reached every outcome: a successful put, a failure in validation, a write failure that changed nothing, one that changed points, one that only withdrew coverage, one after a version clear, a failed replace that removed a point, and a fault in each kind of array.
+The legal states are those of N70. The write of a put is a list of steps: per pass, for a replace, the removal of the stored points inside its authority, then its write runs in ascending slot order, a write run being a maximal stretch of consecutive batch points, each on the same page as the one before it with at most K slots between them, counted on the batch alone. A put that carries its own `finalizedUntil` is two passes, cut at `slotAtOrAfter(finalizedUntil)`: the points below it with the authority clipped there, then the rest, merely upserted. The legal states are the point states after each prefix of that list, from none of the steps to all of them; prefixes that leave the same points are one member.
+
+Each batch asserts that it reached every outcome: a successful put, a failure in validation, a write failure that changed nothing, one that changed points, one that only withdrew coverage, one after a version clear, a failed replace that removed a point, a failure between two write runs (some applied, some not), and a fault in each kind of array.
 
 A failure in either test prints the seed, the step, the case's configuration and the operations before it. To replay one, narrow the test's `it.each` table to that seed: `{ first: <seed>, count: 1 }` in the model test, `{ first: <seed>, count: 1, retry: <as printed> }` in the fault test. The rule-reach assertion may then fail as well, since one seed reaches fewer rules.
 
@@ -82,13 +87,15 @@ Each rule was broken in the model or in the fault test's expectations (never in 
 | Failure atomicity, watermark        | A failed put advances the watermark as a successful one would  | 505 / 640     |
 | Failure atomicity, layout exception | A failed replace must leave the canonical layout               | 20 / 640      |
 
-The six fault-test rows above were measured before the pre-review fix below, which changed that test's checks and the order in which it draws random numbers; the mutation added with the fix is recorded in the pre-review section.
+The six fault-test rows above were measured before the pre-review fix below, which changed that test's checks and the order in which it draws random numbers; the mutation added with the fix is recorded in the pre-review section. Every row was measured before round 3, whose generator change (N68) draws different values; the mutations of round 3 are recorded in its section.
 
 The N18 count equals the number of seeds in which an unversioned cache sees a version (504), and the layout-exception count shows the documented exception is reached (25 failed replaces left it, in 20 seeds) and is the only layout departure.
 
 ## Timings
 
 `bunx vitest run <file>` on the development machine, three runs each: `cache-model-property.test.ts` 2.48–2.57 s at normal load and 2.65–3.25 s with a load average of 5.7; `cache-faults-property.test.ts` 2.08–2.19 s. After round 1, with a load average of 13: model test 4.05 s (eight batches, 0.43–0.57 s each), fault test 4.29 s (0.40–0.70 s each); timings at normal load were not taken again. After the pre-review fix, with a load average of 6 to 10: model test 2.43–2.49 s, fault test 2.92 s. The whole package suite (`bunx vitest run packages/tscache/test`): 97 files, 1963 tests, 6.4 s.
+
+After round 3, with a load average of 2.2: model test batches 0.29–0.37 s, fault test batches 0.30–0.54 s, both files 3.15–3.27 s. Under twelve CPU-bound processes on the ten-core machine (load average 4.8 rising to 14.9): model test batches 0.91–2.55 s, fault test batches 0.93–3.20 s, all inside Vitest's 5 s default; no timeout was raised.
 
 ## Library defects found
 
@@ -101,6 +108,8 @@ None. Every seed of both tests passes against the library as it stands on `main`
 - Faults are injected through `Proxy` wrappers of the typed-array constructors, as the probe wrapped the field arrays, extended to the global `Float64Array` and `Uint8Array`. This reaches the mask and slot arrays the review did not inject (§2.4, "Not verified in this part"). The existing seams (`vi.spyOn` on `DenseSegment.prototype` and `SegmentStore.prototype`, `vi.stubGlobal`) were considered: a spy that throws on entry tests only the step boundaries, not an allocation inside a step, so `vi.stubGlobal` is reused for the globals and the spies are not.
 - A fault during batch validation and one during the write are told apart by whether `validateBatch`, the validation step §4.3 names, is on the stack when the fault fires (with `Error.stackTraceLimit` raised to 50 for the file and restored after). A validation fault must change nothing at all; a write fault is judged by the write-failure guarantees, against the state after a version clear when one ran. `onMutate` (§4.10.4) cross-checks the split: it must not fire for the first and must fire once for the second. It is not used alone, since a regression that calls a public mutating method would fire it too.
 - After a failed replace that left the documented non-canonical layout, the test checks only well-formedness for the rest of that seed. §4.3 states the layout after a successful put from a canonical store, not from the exception.
+- After the rebase onto N68, the generator draws only values each field can hold (round 3). Keeping the rejected values and expecting `PutError` would have turned most puts into rejections, since one bad value among up to six fields rejects the batch, and would have starved the write paths the tests exist for; rejection is pinned by `put-field-values.test.ts`, `hostile-values.test.ts` and `batch-rejections.test.ts`.
+- The legal states of round 3 are compared on the points alone; coverage, the watermark and the version keep their own checks, which already fix them exactly after a failure past validation.
 - The model test keeps 200 seeds per batch (about 2.5 s at normal load) rather than fewer, so that the mutation counts above stay those of the committed file.
 
 ## Pre-review (Claude), not the gate
@@ -139,9 +148,24 @@ While re-running the suite under a load average of 19, one 160-seed batch of the
 
 A scratch probe in the fault test (not committed) classified every one of the 9 898 failures past validation against each reading. Under (a) with the cut at the watermark, no run was left partial and the applied runs were always an ascending prefix. Without the cut (Q3, one run), 11 failures left a run half applied. Under (b), 76 more did. So the library conforms to reading Q1 ascending, Q2 (a), Q3 cut; under the other readings it has a defect. Recommended: adopt that reading in §4.3 (a documentation change, no code change), then build the set-based expectation on it.
 
+## Round 3 build
+
+2026-11-13, after the user answered Q1–Q3 (decision 42, option A), recorded on `main` as N70 (`docs/decisions/N70-failed-put-runs.md`; architecture §4.3 "Allocation failure", §4.5 "Order inside `put`"): runs are applied in ascending slot order; a write run is counted on the batch alone; a put with its own watermark is two passes, cut there.
+
+The branch was rebased onto `main` 2dc86e7. `main` had meanwhile taken N68, under which a put rejects a value its field cannot hold, and both property tests then failed on every batch: their generator drew NaN, fractions and values past the integer ranges for every field, so most puts threw `PutError`. `test: draw only field values a put accepts (n68)` makes the generator take the field's dtype (see Decisions taken). No check changed.
+
+`test: require a failed put to leave a prefix of its write steps (n70)` builds the redesign R2-1 called for. The model (`cache-model.ts`) gains `writeSteps`, the ordered steps of a put's write under N70 computed from its state after the version step, and `failureStates`, the state after each prefix of them. After every failure past validation the fault test requires the observed points to equal one of those states, and when it carries on the model adopts that state rather than copying the cache's points inside the range. Every existing check stays as it was, the per-slot checks included. A new outcome requires each batch to reach a failure between two write runs; over the 640 seeds 3 944 do. All 640 seeds pass against the library: it conforms to N70.
+
+Proof that the new check catches what the old ones miss, by scratch wrappers inside the test that alter the cache after an injected write failure and before any check (undone with the Edit tool; `git status` clean afterwards). Each wrapper finds the legal state the cache is in, then writes points with an ordinary upsert and subtracts the coverage that upsert added, so the coverage checks see the withdrawal they expect. "Old test" is the same file with the new check switched off (the model then adopts the cache's points, as before round 3).
+
+| Scratch wrapper                                                                                          | Times applied (old test) | Old test fails | New test fails |
+| -------------------------------------------------------------------------------------------------------- | ------------------------ | -------------- | -------------- |
+| Half of one run applied: the first half of the next unapplied run, when it has two or more points (R2-1) | 2 452                    | 0 / 640        | 608 / 640      |
+| Out of order: the last run applied while an earlier run is not                                           | 7 527                    | 0 / 640        | 640 / 640      |
+
 ## Contract-test changes
 
-None. No existing test was changed.
+None. No contract test was changed; round 3 changed only this step's own tests.
 
 ## Not verified
 
