@@ -335,7 +335,7 @@ async function holdStream(page: Page): Promise<{ release(): void }> {
 }
 
 /**
- * For the recorder's tests only (RECORD_PROBE=1): a clip of the stage and
+ * For the recorder's tests only (RECORD_PROBE): a clip of the stage and
  * the app with no wait on the app's data and no claim, so the tests of the
  * conversion and of its cancellation reach the conversion whatever the
  * demo's data does (e2e/demo/launcher.spec.ts).
@@ -348,9 +348,24 @@ const PROBE: Scenario = {
     await r.start();
     await r.caption("The recorder's test clip.");
     await r.open(0, LIVE_PATH);
-    await r.hold(1000);
+    if (PROBE_MODE !== "hold") {
+      await r.hold(1000);
+      return;
+    }
+    // Its page is open, so Playwright's video encoder runs: a test that
+    // interrupts the recorder now finds every process the recorder starts.
+    console.log("probe holding");
+    while (!cancelled) await r.hold(50);
   },
 };
+
+/**
+ * RECORD_PROBE: "1" adds the probe, which records for a second and then
+ * converts; "hold" adds it holding until shutdown begins, so a signal sent
+ * after "probe holding" always lands while it records.
+ */
+const PROBE_MODE = ((mode) =>
+  mode === "1" || mode === "hold" ? mode : undefined)(process.env.RECORD_PROBE);
 
 const scenarios: Scenario[] = [
   {
@@ -838,8 +853,7 @@ async function main(): Promise<void> {
     throw new Error(`${FFMPEG} is not on PATH (macOS: brew install ffmpeg)`);
   }
   const only = option("--only")?.split(",");
-  const known =
-    process.env.RECORD_PROBE === "1" ? [...scenarios, PROBE] : scenarios;
+  const known = PROBE_MODE === undefined ? scenarios : [...scenarios, PROBE];
   const chosen = known.filter((s) => only?.includes(s.name) ?? s !== PROBE);
   if (chosen.length === 0) {
     throw new Error(

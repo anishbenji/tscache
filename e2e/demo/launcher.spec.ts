@@ -432,16 +432,26 @@ test("an interrupted recorder stops Chromium and the demo while it records", asy
     launched = launch(
       hub,
       ["--reuse-builds", "--only", CONVERSION.name],
-      { ...CONVERSION.env, RECORD_FFMPEG: "true", TMPDIR: temp },
+      {
+        ...CONVERSION.env,
+        // The probe holds until the recorder is interrupted.
+        RECORD_PROBE: "hold",
+        RECORD_FFMPEG: "true",
+        TMPDIR: temp,
+      },
       recorderPath,
     );
     const recorder = launched;
     await expect
       .poll(() => recorder.stdout(), { timeout: 90_000 })
-      .toContain(`recording ${CONVERSION.name}`);
+      .toContain("probe holding");
     children = childrenOf(recorder.child.pid ?? 0);
-    // The launcher and Chromium.
-    expect(children.length).toBeGreaterThanOrEqual(2);
+    // Every process the recorder starts: the launcher, Chromium, and
+    // Playwright's video encoder, an ffmpeg of its own.
+    const commands = children.map(commandOf);
+    expect(commands.some((c) => c.includes("scripts/demo.ts"))).toBe(true);
+    expect(commands.some((c) => /chrom/i.test(c))).toBe(true);
+    expect(commands.some((c) => c.includes("ms-playwright/ffmpeg"))).toBe(true);
     interrupt(recorder);
     expect(await recorder.exit()).toBe(130);
     // Named, so a process left over says what it is.
