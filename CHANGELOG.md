@@ -13,9 +13,9 @@ for charts that scroll through history and follow a live tail in several tabs.
   same-origin tab shares, and falls back to a dedicated `Worker`, then to the
   page itself. A lost SharedWorker is detected with a lifetime Web Lock and
   reported as `workerLost`. The handshake timeout bounds only the wait for the
-  worker's first message, so a slow fetcher import no longer steps a tab down
-  to a fallback, and a SharedWorker that dies during the handshake makes
-  `createClient` fall back instead of waiting forever.
+  worker's first message: a slow fetcher import does not step a tab down to a
+  fallback, and a SharedWorker that dies during the handshake makes
+  `createClient` fall back.
 - **Fetching in the worker.** A fetcher module, loaded by the worker, fetches
   only the ranges the cache neither holds nor already has in flight, widened
   by one interval where a miss meets cached data so the series joins up (that
@@ -25,8 +25,9 @@ for charts that scroll through history and follow a live tail in several tabs.
   in-process fallbacks give each tab a cache of its own. Points at or after
   the `finalizedUntil` watermark are provisional and fetched again by every
   read that includes them. An `AuthInvalidError` from the fetcher reaches
-  every tab the worker serves as `authInvalid`, and `updateAuth` retries with
-  new credentials.
+  every tab the worker serves as `authInvalid`. `updateAuth` supplies new
+  credentials and fetching resumes; the application reads again any range
+  that came back `'auth-pending'`.
 - **Coverage.** A read returns the present points as one typed array per
   field, the ranges the cache knows for certain, and each missing range with
   its reason. A confirmed gap (a weekend, a sensor dropout) is never fetched
@@ -40,9 +41,10 @@ for charts that scroll through history and follow a live tail in several tabs.
   in any field, and a fraction, `NaN`, `±Infinity` or an out-of-range value
   in an integer field. A put fails with `PutError` `'field-mismatch'`, whose
   `offenderField` names the field; a fetcher response reports
-  `'fetch-failed'`. Float fields accept `NaN`. A put that fails part-way
-  has applied an ascending prefix of its write runs, each run whole
-  (architecture N70).
+  `'fetch-failed'`. Float fields accept `NaN`. A put that validation rejects
+  changes nothing. One that fails part-way, on an allocation failure, has
+  applied an ascending prefix of its write runs, each run whole, and that
+  range is refetched before it is trusted (architecture N70).
 - **Snapshots.** `encodeSnapshot`, `decodeSnapshot` and `hydrate` carry a
   server's read into the browser's cache. `hydrate` refuses a snapshot whose
   coverage reaches its own `finalizedUntil` (architecture N69); snapshots the
