@@ -79,3 +79,7 @@ Earlier scratch attempts added code instead: a new file under `packages/tscache/
 ## Pre-review (Fable), not the gate
 
 No P0 or P1. Four P2s: the workflow doc named plain `fallow health` (82 B with hotspots) as showing the gated score; the 95 plan tied advisory targets to the static coupling deduction; stale `docs/INDEX.md` sizes; and `AGENTS.md`'s hook-staging line does not name the new job. The first three are fixed in `docs: the health floor's score, after the pre-review`; `AGENTS.md` is user-owned, so the line is proposed to the user, not changed here. The pre-review's decision concern (which score the user meant) is settled by the user's own figures, which match the `--score` form.
+
+## Security lane (Claude), not the gate
+
+run 1, head 0592191: P0 0, P1 0, P2 0
