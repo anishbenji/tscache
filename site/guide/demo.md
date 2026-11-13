@@ -28,14 +28,6 @@ What to watch for:
   what is still forming. See [Server rendering](/guides/ssr).
 - **Live feeds.** Drop the streams from the panel: the feed reconnects and mends the bars it missed.
   See [Live feeds](/guides/live-feeds).
-
-Recordings of these four, on the vanilla reference client, are on the pages that explain them: sharing on
-[What tscache is](/), the refresh under [Refreshing once across tabs](/guides/auth#refreshing-once-across-tabs),
-server rendering on [Server rendering](/guides/ssr) and the reconnect under
-[Catching up after a gap](/guides/live-feeds#catching-up-after-a-gap). `bun scripts/demo/record.ts`
-makes them again: it starts the demo, records each scenario headless in Chromium, checks that the app
-shows what the caption says, and writes the GIFs the README shows (`docs/media/`) and the videos the
-site shows (`site/public/media/`). It needs `ffmpeg` on the `PATH`.
 - **Cache or network.** Every page labels the read on screen: how many of its bars came from the
   cache and how many from the network, and its time to chart (from `get()` to the frame after the
   chart library drew it), with the median and the 95th percentile of the page's reads.
@@ -44,6 +36,14 @@ site shows (`site/public/media/`). It needs `ffmpeg` on the `PATH`.
   requests, the views answered without a request, bars, bytes and time to chart of each. The
   numbers the documentation quotes come from `docs/benchmarks/demo-comparison.md`, which
   `bun scripts/demo-bench.ts` generates.
+
+Recordings of these four, on the vanilla reference client, are on the pages that explain them: sharing on
+[What tscache is](/), the refresh under [Refreshing once across tabs](/guides/auth#refreshing-once-across-tabs),
+server rendering on [Server rendering](/guides/ssr) and the reconnect under
+[Catching up after a gap](/guides/live-feeds#catching-up-after-a-gap). `bun scripts/demo/record.ts`
+makes them again: it starts the demo, records each scenario headless in Chromium, checks that the app
+shows what the caption says, and writes the GIFs the README shows (`docs/media/`) and the videos the
+site shows (`site/public/media/`). It needs `ffmpeg` on the `PATH`.
 
 The launcher is
 [`scripts/demo.ts`](https://github.com/anishbenji/tscache/blob/main/scripts/demo.ts), and the hub's

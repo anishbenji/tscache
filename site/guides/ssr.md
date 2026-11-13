@@ -16,7 +16,7 @@ The page then carries the server's answer twice:
     <source src="/media/server-rendering.webm" type="video/webm" />
     <source src="/media/server-rendering.mp4" type="video/mp4" />
   </video>
-  <figcaption id="demo-ssr">The reference client's server-rendered page (<code>/ssr</code>). The server reads the history through tscache and renders the page; the browser's cache starts from the server's snapshot, so the chart draws the history at once, and the backend serves only the newest bars, to the server's read and to the browser's. Recorded from the demo hub's vanilla reference client by <code>scripts/demo/record.ts</code>; the counters above the page are its mock backend's.</figcaption>
+  <figcaption id="demo-ssr">The reference client's server-rendered page (<code>/ssr</code>). The server has rendered the page before, so its in-process cache already holds the history; it renders the page from it, the browser's cache starts from the server's snapshot, and the chart draws the history at once. The backend serves only the newest bars, to the server's read and to the browser's. A server's first render after it starts fetches the history once. Recorded from the demo hub's vanilla reference client by <code>scripts/demo/record.ts</code>; the counters above the page are its mock backend's.</figcaption>
 </figure>
 
 ## The server

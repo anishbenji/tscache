@@ -75,6 +75,17 @@ No step uses an npm token.
 
   Expected: `environment: npm-publish` and `id-token: write` in `release.yml` (the `stage` job, plus the comment above it), `id-token: write` in `scorecard.yml`, and `environment:` and `id-token: write` in `pages.yml` (the `deploy` job, whose environment is `github-pages`); nothing else.
 
+- [ ] The `github-pages` environment, which the `deploy` job of `pages.yml` uses, deploys from `main` only.
+
+  ```sh
+  gh api repos/anishbenji/tscache/environments/github-pages \
+    --jq '.deployment_branch_policy'
+  gh api repos/anishbenji/tscache/environments/github-pages/deployment-branch-policies \
+    --jq '.branch_policies[] | {name, type}'
+  ```
+
+  Expected: `{"custom_branch_policies":true,"protected_branches":false}`, then one policy, `{"name":"main","type":"branch"}`. Pages creates the environment when it is enabled with GitHub Actions as its source; if it allows other branches, restrict it to `main`.
+
 ### Workflows
 
 - [ ] Every workflow sets top-level `permissions` to read-only or `{}`, and each job asks only for what it needs.

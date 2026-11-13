@@ -12,6 +12,9 @@ requests where no cache made 36 and a per-tab cache keyed by exact range made
 
 ![Two tabs share one cache: tab 2 draws the history at once and fetches only the newest bars](https://raw.githubusercontent.com/anishbenji/tscache/main/docs/media/multi-tab-sharing.gif)
 
+The two tabs in the recording are two frames of one page, which share the
+origin's SharedWorker as two tabs do.
+
 - **One cache for every tab.** The cache runs in a `SharedWorker`, so every
   same-origin tab reads the same data. Without `SharedWorker` it falls back to
   a dedicated `Worker`, then to the page itself; those give each tab a cache of

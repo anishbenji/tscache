@@ -82,9 +82,9 @@ both.
 
 ![Two tabs of the reference client: the backend expires the token, tab 1 scrolls back, its fetches are refused, and one refresh serves both tabs](docs/media/credential-refresh.gif)
 
-**Server rendering.** The server reads the history through tscache and renders
-the page; the browser's cache starts from that read and fetches only the
-newest bars.
+**Server rendering.** The server has rendered the page before, so its
+in-process cache already holds the history; it renders the page from it, and
+the browser's cache starts from that read and fetches only the newest bars.
 
 ![The server-rendered page of the reference client draws its history at once, and the browser fetches only the newest bars](docs/media/server-rendering.gif)
 
