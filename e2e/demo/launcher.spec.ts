@@ -114,6 +114,8 @@ interface Launch {
    * (docs/testing.md).
    */
   exit(): Promise<number | null>;
+  /** The exit code once it has exited (null after a signal), else undefined. */
+  code(): number | null | undefined;
   stdout(): string;
   stderr(): string;
 }
@@ -139,12 +141,17 @@ function launch(
   child.stderr?.on("data", (chunk) => {
     stderr += String(chunk);
   });
+  let code: number | null | undefined;
   const exited = new Promise<number | null>((resolve) =>
-    child.once("exit", resolve),
+    child.once("exit", (exit) => {
+      code = exit;
+      resolve(exit);
+    }),
   );
   return {
     child,
     exit: () => exited,
+    code: () => code,
     stdout: () => stdout,
     stderr: () => stderr,
   };
@@ -458,6 +465,27 @@ await Bun.write(\`\${process.env.FAKE_FFMPEG_DIR}/ffmpeg.pid\`, String(process.p
 await Bun.sleep(60_000);
 `;
 
+/**
+ * Waits until the recorder is converting (`converting` resolves true), and
+ * fails at once, with its output, if it exits before that: a scenario's own
+ * checks can fail it.
+ */
+async function untilConverting(
+  recorder: Launch,
+  converting: () => Promise<boolean>,
+): Promise<void> {
+  await expect
+    .poll(async () => (await converting()) || recorder.code() !== undefined, {
+      timeout: 110_000,
+    })
+    .toBe(true);
+  if (!(await converting())) {
+    throw new Error(
+      `the recorder exited with ${recorder.code()} before converting:\n${recorder.stderr()}`,
+    );
+  }
+}
+
 /** What each scenario's three media files hold before the recorder runs. */
 const PREVIOUS = "previous";
 
@@ -497,11 +525,9 @@ test("a recorder stopped while it converts leaves the media as they were and sto
       recorderPath,
     );
     const pidFile = join(fake, "ffmpeg.pid");
-    await expect
-      .poll(() => readFile(pidFile, "utf8").catch(() => ""), {
-        timeout: 110_000,
-      })
-      .not.toBe("");
+    await untilConverting(launched, async () =>
+      Boolean(await readFile(pidFile, "utf8").catch(() => "")),
+    );
     converting = Number(await readFile(pidFile, "utf8"));
     // SIGTERM to the recorder alone: ffmpeg, in its group, hears nothing,
     // so only the recorder can stop it.
@@ -523,6 +549,128 @@ test("a recorder stopped while it converts leaves the media as they were and sto
     expect(await rawVideoDirs(temp)).toEqual([]);
   } finally {
     if (converting !== undefined) kill(converting);
+    cleanUp(launched, apps);
+    for (const dir of [temp, fake, media]) {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+/**
+ * Stands in for ffmpeg as a conversion that ends on its own while the
+ * recorder cleans up: writes its output, appends its pid to `starts`, and
+ * exits 0 as soon as the recorder's Chromium (whose pid the test writes to
+ * `chromium`) is gone, or on SIGTERM, which it traps and answers with a
+ * clean exit, as an ffmpeg that finished at that moment would.
+ */
+const FINISHING_FFMPEG = `#!/usr/bin/env bun
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+const dir = process.env.FAKE_FFMPEG_DIR;
+const output = process.argv[process.argv.length - 1];
+appendFileSync(\`\${dir}/starts\`, \`\${process.pid}\\n\`);
+await Bun.write(output, "converted");
+process.on("SIGTERM", () => process.exit(0));
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+for (;;) {
+  const file = \`\${dir}/chromium\`;
+  if (existsSync(file) && !alive(Number(readFileSync(file, "utf8")))) break;
+  await Bun.sleep(5);
+}
+`;
+
+/** The command line of `pid`, or "" once it has exited. */
+function commandOf(pid: number): string {
+  try {
+    return execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
+      encoding: "utf8",
+    }).trim();
+  } catch (error) {
+    // ps exits 1 when no such process exists.
+    if ((error as { status?: unknown }).status !== 1) throw error;
+    return "";
+  }
+}
+
+/** The stand-in ffmpeg processes running now, by their script's path. */
+function standIns(script: string): number[] {
+  try {
+    return execFileSync("pgrep", ["-f", "--", script], { encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean)
+      .map(Number);
+  } catch (error) {
+    // pgrep exits 1 when nothing matches.
+    if ((error as { status?: unknown }).status !== 1) throw error;
+    return [];
+  }
+}
+
+async function starts(dir: string): Promise<number[]> {
+  const text = await readFile(join(dir, "starts"), "utf8").catch(() => "");
+  return text.split("\n").filter(Boolean).map(Number);
+}
+
+test("once a recorder is stopped, no ffmpeg starts and no media file changes", async () => {
+  test.setTimeout(120_000);
+  const hub = await freePorts();
+  const apps = appPortsAfter(hub);
+  const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
+  const fake = await mkdtemp(join(tmpdir(), "tscache-record-ffmpeg-"));
+  const media = await mkdtemp(join(tmpdir(), "tscache-record-media-"));
+  const ffmpeg = join(fake, "ffmpeg");
+  await writeFile(ffmpeg, FINISHING_FFMPEG, { mode: 0o755 });
+  const files = mediaFiles(media, "multi-tab-sharing");
+  await mkdir(join(media, "docs/media"), { recursive: true });
+  await mkdir(join(media, "site/public/media"), { recursive: true });
+  for (const file of files) await writeFile(file, PREVIOUS);
+  let launched: Launch | undefined;
+  let started: number[] = [];
+  try {
+    launched = launch(
+      hub,
+      ["--reuse-builds", "--only", "multi-tab-sharing"],
+      {
+        RECORD_FFMPEG: ffmpeg,
+        RECORD_MEDIA_ROOT: media,
+        FAKE_FFMPEG_DIR: fake,
+        TMPDIR: temp,
+      },
+      recorderPath,
+    );
+    const recorder = launched;
+    // The first conversion of the last scenario has begun.
+    await untilConverting(
+      recorder,
+      async () => (await starts(fake)).length === 1,
+    );
+    started = await starts(fake);
+    const chromium = childrenOf(recorder.child.pid ?? 0).find((pid) =>
+      /chrom/i.test(commandOf(pid)),
+    );
+    if (chromium === undefined) throw new Error("no Chromium child");
+    // The conversion ends on its own as soon as the recorder's cleanup is
+    // under way (its Chromium gone). Then SIGTERM to the recorder alone.
+    await writeFile(join(fake, "chromium"), String(chromium));
+    recorder.child.kill("SIGTERM");
+    expect(await recorder.exit()).toBe(143);
+    expect(running(chromium)).toBe(false);
+    // No ffmpeg outlives the recorder: none started after the signal.
+    expect(standIns(ffmpeg)).toEqual([]);
+    expect(await starts(fake)).toEqual(started);
+    for (const file of files) {
+      expect(await readFile(file, "utf8")).toBe(PREVIOUS);
+    }
+    expect(await rawVideoDirs(temp)).toEqual([]);
+    expect(await allFree([hub, ...apps])).toBe(true);
+  } finally {
+    for (const pid of [...started, ...standIns(ffmpeg)]) kill(pid);
     cleanUp(launched, apps);
     for (const dir of [temp, fake, media]) {
       await rm(dir, { recursive: true, force: true });

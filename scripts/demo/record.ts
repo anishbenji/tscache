@@ -557,10 +557,24 @@ async function record(
  */
 const FFMPEG = process.env.RECORD_FFMPEG || "ffmpeg";
 
-/** The ffmpeg running now, which shutdown stops. */
+/**
+ * Set, synchronously, the moment shutdown begins. Every step that starts
+ * work checks it first, in the same synchronous run as the work it starts:
+ * each ffmpeg, each scenario, and the install of a scenario's media. So once
+ * shutdown begins, no new process starts and no media file changes.
+ */
+let cancelled = false;
+
+/** Stops the step that calls it once shutdown has begun. */
+function stopIfCancelled(): void {
+  if (cancelled) throw new Error("the recorder is stopping");
+}
+
+/** The ffmpeg running now, which shutdown stops before anything else. */
 let converting: ReturnType<typeof Bun.spawn> | undefined;
 
 async function ffmpeg(args: string[]): Promise<void> {
+  stopIfCancelled();
   const run = Bun.spawn(
     [FFMPEG, "-hide_banner", "-loglevel", "error", "-y", ...args],
     {
@@ -571,15 +585,20 @@ async function ffmpeg(args: string[]): Promise<void> {
   converting = run;
   const code = await run.exited;
   converting = undefined;
+  // An ffmpeg that shutdown stopped, or that finished after it began, ends
+  // the conversion here, whatever its exit code.
+  stopIfCancelled();
   if (code !== 0) throw new Error(`ffmpeg ${args.join(" ")}: exit ${code}`);
 }
 
 /**
- * Moves each finished file over its committed one. Synchronous, so no
- * signal handler runs between two moves: a scenario's three files are
- * replaced together or not at all. A move across file systems copies.
+ * Moves each finished file over its committed one, unless shutdown has
+ * begun. Synchronous, so no signal handler runs between the check and the
+ * last move: a scenario's three files are replaced together or not at all.
+ * A move across file systems copies.
  */
 function install(moves: [from: string, to: string][]): void {
+  stopIfCancelled();
   for (const [from, to] of moves) {
     try {
       renameSync(from, to);
@@ -593,8 +612,10 @@ function install(moves: [from: string, to: string][]): void {
 
 /**
  * Writes the clip's GIF, MP4 and WebM into `work`, then, once all three
- * exist, moves them into place; a failed or interrupted conversion leaves
- * the committed media as they were.
+ * exist, moves them into place. A failed conversion leaves the committed
+ * media as they were. Once shutdown begins (`cancelled`), no further ffmpeg
+ * starts, the one running is stopped, and nothing is installed, even when
+ * that ffmpeg had just finished.
  */
 async function convert(clip: Clip, work: string): Promise<string[]> {
   const { name } = clip.scenario;
@@ -663,7 +684,7 @@ function option(name: string): string | undefined {
 async function waitForHub(): Promise<void> {
   // The demo builds every app first, which takes minutes.
   const deadline = Date.now() + 15 * MINUTE;
-  while (Date.now() < deadline && !processes.stopping) {
+  while (Date.now() < deadline && !cancelled) {
     try {
       if ((await fetch(`${hubOrigin}healthz`)).ok) return;
     } catch {
@@ -677,27 +698,34 @@ async function waitForHub(): Promise<void> {
 const processes = new Processes();
 let stage: ReturnType<typeof startStage> | undefined;
 let browser: Browser | undefined;
+/** Chromium while it launches, so shutdown closes one it did not see yet. */
+let launching: Promise<Browser> | undefined;
 let rawDir: string | undefined;
 let exiting: Promise<never> | undefined;
 
 /**
- * The one way out, as in scripts/demo.ts: closes Chromium, stops the stage
- * and the demo with everything it started and a running ffmpeg, removes the
- * raw videos and any unfinished conversion, then exits. The demo's processes run in groups of their own, so a Ctrl-C in
- * the terminal reaches only this process, and only this stops them.
+ * The one way out, as in scripts/demo.ts. In order: marks the recorder
+ * cancelled and stops a running ffmpeg, both before anything else is
+ * awaited; then closes Chromium, stops the stage and the demo with
+ * everything it started, and, once that ffmpeg has exited, removes the raw
+ * videos and any unfinished conversion; then exits. The demo's processes
+ * run in groups of their own, so a Ctrl-C in the terminal reaches only this
+ * process, and only this stops them.
  */
 function shutdown(code: number, reason?: string): Promise<never> {
-  exiting ??= (async () => {
+  if (exiting !== undefined) return exiting;
+  cancelled = true;
+  const running = converting;
+  running?.kill();
+  exiting = (async () => {
     if (reason !== undefined) console.error(reason);
-    await browser?.close().catch(() => {});
+    await running?.exited;
+    const opened = browser ?? (await launching?.catch(() => undefined));
+    await opened?.close().catch(() => {});
     stage?.stop();
     // Undo a scenario's clock move; the backend may be down already.
     await control({ resetClock: true }).catch(() => {});
     await processes.stop();
-    if (converting !== undefined) {
-      converting.kill();
-      await converting.exited;
-    }
     if (rawDir !== undefined) {
       await rm(rawDir, { recursive: true, force: true });
     }
@@ -727,23 +755,27 @@ async function main(): Promise<void> {
   const demoArgs = process.argv.includes("--reuse-builds")
     ? ["--reuse-builds"]
     : [];
+  stopIfCancelled();
   const demo = processes.start(["bun", "scripts/demo.ts", ...demoArgs], {
     cwd: ROOT,
   });
   void demo.exited.then((code) => {
-    if (!processes.stopping) void shutdown(1, `the demo exited with ${code}`);
+    if (!cancelled) void shutdown(1, `the demo exited with ${code}`);
   });
   stage = startStage();
   await waitForHub();
   // The recorder handles the signals itself: Playwright's handlers would
   // close Chromium and exit without stopping the demo.
-  browser = await chromium.launch({
+  stopIfCancelled();
+  launching = chromium.launch({
     handleSIGINT: false,
     handleSIGTERM: false,
     handleSIGHUP: false,
   });
+  browser = await launching;
   const results: { clip: Clip; files: string[] }[] = [];
   for (const scenario of chosen) {
+    stopIfCancelled();
     const clip = await record(browser, stage, scenario, rawDir);
     if (scenario.name === "live-feed-reconnect") {
       await control({ resetClock: true });
