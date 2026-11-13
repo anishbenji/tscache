@@ -33,7 +33,7 @@ N70 follows the shape of the decision files of step 73: a title line, one senten
 
 On failure the engine subtracts coverage over the put's whole range, provisional slots included (`cache.ts:491-517`, `touched` at `cache.ts:293`), so whichever prefix was applied is refetched before it is trusted. The code agrees with all four points; nothing was stopped.
 
-**The probe.** The brief reports a probe on step 74's branch that injected a failure at each of the 9,898 points after validation and always found the library in this state; under "one run across the put's own watermark" 11 failures leave a run half applied, and under runs counted with stored points 76 more. It was not rerun here, as the brief allows. Existing tests that pin parts of the reading: `packages/tscache/test/merge-failures.test.ts` (a failed join changes nothing) and `packages/tscache/test/cache-failures.test.ts`.
+**The probe.** The brief reports a probe on step 74's branch that injected 9,898 failures, each at a different point of the write after validation, and always found the library in this state; under "one run across the put's own watermark" 11 failures leave a run half applied, and under runs counted with stored points 76 more. It was not rerun here, as the brief allows. Existing tests that pin parts of the reading: `packages/tscache/test/merge-failures.test.ts` (a failed join changes nothing) and `packages/tscache/test/cache-failures.test.ts`.
 
 **Other documents.** Searched the tracked files outside `docs/reviews/` and `docs/history/` for "changes nothing", "run of points", "shares a segment", "half done" and allocation failures. Only §4.3 described the runs of a failed put. The site pages (`site/concepts/segments.md`, `site/how-it-works/data-model.md`, `site/how-it-works/code-tour.md`) describe the layout, which N70 does not change. §4.5 ("Order inside `put`") still says that the coverage the put would have recorded is subtracted; see below.
 
@@ -43,10 +43,20 @@ On failure the engine subtracts coverage over the put's whole range, provisional
 
 ## Contradictions found
 
-Left as they are; the brief changes no code, and neither is made untrue by N70.
+1. §4.5, "Order inside `put`", said that when `store.put` throws "the coverage the put would have recorded is subtracted". The engine subtracts more: the whole range the put touched, provisional slots included (`cache.ts:487-503`, whose comment says so). Fixed after the pre-review: §4.5 now says so.
+2. Left as they are, because this step changes no code (decision 42 A: documentation only), and queued for a later code step: the comment on `#insertChunks` (`merge.ts:123`) calls a chunk "a run that shares a segment", and the comment at `merge.ts:233-235` says every stored segment within K slots belongs to the same run. The code implements N70's write run; only the comments use the older wording.
 
-1. The comment on `#insertChunks` (`merge.ts:123`) still calls a chunk "a run that shares a segment". The code it documents implements N70's run; only the comment uses the older wording.
-2. §4.5, "Order inside `put`", says that when `store.put` throws "the coverage the put would have recorded is subtracted". The engine subtracts more: the whole range the put touched, provisional slots included (`cache.ts:487-503`, whose comment says so). §4.3's allocation-failure rule ("any coverage it already held for the put's range") matches the code.
+## Pre-review (Claude), not the gate
+
+Before Codex round 1, a fresh-context Opus pre-review checked N70 against `merge.ts`, `cache.ts` and `dense.ts` with three scratch tests (a failure in run 2 keeps run 1 and drops run 3; a stored point between two batch points does not join them; a page boundary splits a run), all passing, and found:
+
+1. (P1) N70 states behaviour no test in the repository checks (the order of write runs and where they split). Not fixed here, by the user's decision: decision 42 A makes this step documentation only, and step 74's round 3 builds its set-based fault check against N70. The probe's wording ("9,898 points") read as data points; it now says 9,898 injected failures.
+2. (P2) N70 cited §4.5, which described a narrower withdrawal than the code performs. Fixed (Contradictions found, item 1).
+3. (P2) Source comments in `merge.ts` still define a run the way N70 rejects. Recorded under Contradictions found, item 2; no code changes in this step.
+4. (P2) "Run" meant two things in §4.3 (the overlap warning's run of differing points and the write run). Fixed: §4.3 and N70 say "write run" and tell the two apart.
+5. (nit) §4.3 suggested `SegmentStore.put` takes a watermark. Fixed: the engine writes such a put as two `SegmentStore.put` calls.
+
+Fixed in `docs: step 80 pre-review fixes`.
 
 ## Decision concerns
 
