@@ -4,7 +4,7 @@ Branch: `chore/81-checklist-roadmap` · Reviewer: GPT-6.1 Sol · Rounds: — · 
 
 ## Scope
 
-User decision 45 A (2026-11-13; `docs/reviews/2026-11-review-update.md`, row 45) corrects two stale statements. Both files are protected paths, so the user merges this pull request. No library code changes.
+The user chose option A of decision 45 on 2026-11-13 (relayed to the director; `docs/reviews/2026-11-review-update.md`, row 45, holds the question and the recommendation): fix both stale statements, and check the rest of the roadmap-leak list against `docs/roadmap.md`. Both files are protected paths, so the user merges this pull request. No library code changes.
 
 | Commit (by subject)                                            | What                                                                                                                                                                        |
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -49,7 +49,22 @@ A search of the repository outside `docs/reviews/` and `docs/history/` (`git gre
 - `git grep -niE "not (yet )?required|becomes required|required is one line"` outside `docs/reviews/` and `docs/history/`, after the edits: no match.
 - The gate: `~/code/tscache-reports/bin/heavy-run.sh "81 child: ci" bun run ci` on the final head; the result is in the child's report to the director.
 
-Not verified: the ruleset itself (`gh api repos/anishbenji/tscache/rules/branches/main`) was not queried in this step; the claim rests on `docs/supply-chain.md` and the 2026-11 review update.
+The ruleset itself was not queried by the builder; the pre-review queried it (`gh api repos/anishbenji/tscache/rules/branches/main`) and it requires exactly `ci` and `bench`.
+
+## Pre-review (Claude), not the gate
+
+Before Codex round 1, a fresh-context Opus pre-review found no P0 or P1 and two P2 findings, both fixed in
+`docs(review): step 81 pre-review fixes`:
+
+1. (P2) `docs/INDEX.md` raised the `docs/reviews/` file count to 78 but kept its size, which left out this
+   file. Fixed: the folder's size and the index's own size are measured again with `wc -c`.
+2. (P2) Scope cited row 45 of `docs/reviews/2026-11-review-update.md` as the record of the user's answer,
+   but that row holds only the question and the recommendation. Fixed: Scope now says the user chose A on
+   2026-11-13 and what the row holds.
+
+Decision concern, passed to the user in the pull request: the checklist edit adds four roadmap items as new
+P0 triggers (another segment layout, subscriptions, per-field presence masks, an elected auth handler).
+Each is listed as future work in A§1 and S§10; the user approves them by merging.
 
 ## Decisions
 
