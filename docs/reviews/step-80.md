@@ -1,6 +1,6 @@
 # Step 80 — What a failed put may leave behind (N70)
 
-Branch: `docs/80-failed-write-row` · Reviewer: GPT-6.1 Sol (high) · Rounds: pending · Status: pending · Verdict after triage: pending
+Branch: `docs/80-failed-write-row` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -61,3 +61,7 @@ Fixed in `docs: step 80 pre-review fixes`.
 ## Decision concerns
 
 None.
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-13). The reviewer confirmed the pre-review fixes are present and that the recorded documentation-only scope (decision 42 A) supports leaving the tests to step 74 and the source comments to a later code step; `git diff --check` passed.
