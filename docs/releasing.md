@@ -9,21 +9,27 @@ Staging uses npm trusted publishing: GitHub mints a short-lived OIDC token for t
 exchanges it for a token that may only stage this package, and the same OIDC identity signs the
 provenance statement. No npm token is ever created or stored, and the workflow reads no secret.
 
-## Current state (9 November 2026)
+## Current state (13 November 2026)
 
 - The npm account `anishbenji` exists, with two-factor authentication through a security key.
-- `@anishbenji/tscache@0.0.1` is live on npm as `latest`. No placeholder or bootstrap step remains.
-- The trusted publisher exists (GitHub Actions, `anishbenji/tscache`, workflow `release.yml`,
-  environment `npm-publish`) and allows only `npm stage publish`. `npm publish` and `npm dist-tag` are
-  not allowed through it. Publishing access requires 2FA and disallows tokens, including bypass
-  tokens.
-- npm shows that trusted publisher as **pending validation** (publish once before 11 November 2026,
-  11:08 UTC). It is deliberately left to lapse: nothing is staged or published to validate it, and it
-  is re-created with the same fields just before the real release (see the checklist below).
+- `@anishbenji/tscache@0.1.0` is live on npm as `latest`, released on 13 November 2026 through the
+  flow below. It carries an SLSA v1 provenance statement; `npm audit signatures` in a project that
+  installs it verifies one registry signature and one attestation.
+- The annotated tag `v0.1.0` points at `b2e1f06`, the merge commit of the release preparation on
+  `main`. The release run it started (run 43470043079) succeeded, the maintainer approved the staged
+  version with 2FA, and the GitHub release `v0.1.0` was published on 13 November 2026 at
+  17:21:12 UTC.
+- The trusted publisher (GitHub Actions, `anishbenji/tscache`, workflow `release.yml`, environment
+  `npm-publish`) was re-created on 13 November 2026 and validated by the 0.1.0 stage. It allows only
+  `npm stage publish`; `npm publish` and `npm dist-tag` are not allowed through it. Publishing access
+  requires 2FA and disallows tokens, including bypass tokens.
+- Since 13 November 2026 the `npm-publish` environment has the maintainer as required reviewer, so
+  the `stage` job waits for an approval on GitHub before it runs. With the 2FA approval of the staged
+  version on npm, a release has two human approvals.
 
-Before the first release, check that nothing is left in the staging area for the version you are
-about to release: staged and published versions share one version index, so a pending stage of
-`0.1.0` blocks staging `0.1.0` again.
+Before every release, check that nothing is left in the staging area for the version you are about
+to release: staged and published versions share one version index, so a pending stage of a version
+blocks staging that version again.
 
 ```sh
 npm login                                  # browser sign-in with the security key
@@ -37,7 +43,7 @@ npm stage list @anishbenji/tscache         # pending staged versions and their s
 | `plan`                 | always                   | `contents: read`                    | Reads the version; on a tag, fails unless the tag is `v<version>`; decides whether the run stages for real; for a real stage, fails unless the commit is on `main` and the version is above every published one; checks the release notes exist |
 | `ci`                   | after `plan`             | `contents: read`                    | The full CI gate (`ci.yml` through `workflow_call`), without the bench job                                                                                                                                                                      |
 | `pack`                 | after `ci`               | `contents: read`                    | Builds the package and packs the tarball that is staged, as a workflow artifact                                                                                                                                                                 |
-| `stage`                | real stage only          | `contents: read`, `id-token: write` | In the `npm-publish` environment: `npm stage publish <tarball> --provenance --access public`; prints the stage id in the job summary                                                                                                            |
+| `stage`                | real stage only          | `contents: read`, `id-token: write` | In the `npm-publish` environment, after its required reviewer approves: `npm stage publish <tarball> --provenance --access public`; prints the stage id in the job summary                                                                      |
 | `stage-dry-run`        | every other run          | none                                | `npm stage publish <tarball> --dry-run --force --access public`                                                                                                                                                                                 |
 | `github-release-draft` | after a successful stage | `contents: write`                   | Creates a **draft** GitHub release for the tag from `docs/releases/<version>.md`                                                                                                                                                                |
 
@@ -83,8 +89,9 @@ Trusted publishing keeps working, because it uses no token.
 
 ### The `npm-publish` environment on GitHub
 
-GitHub creates the environment the first time a job names it. Creating it beforehand under
-**Settings → Environments** lets you limit it to `v*` tags and add a required reviewer. These are
+GitHub creates the environment the first time a job names it. Under **Settings → Environments** it
+is limited to `v*` tags and has the maintainer as required reviewer (see
+[`docs/supply-chain.md`](supply-chain.md) for the expected settings and how to check them). These are
 repository settings, which you change by hand.
 
 ## Cutting a release
@@ -114,9 +121,13 @@ that each protection on the path from `main` to npm is still in place.
    git push origin vX.Y.Z
    ```
 
-6. Follow the run with `gh run watch`. When it succeeds, the `stage` job summary shows
+6. Follow the run with `gh run watch`. After `plan`, `ci` and `pack` pass, the `stage` job waits for
+   the required reviewer of the `npm-publish` environment. Open the run on GitHub, choose
+   **Review deployments**, tick `npm-publish` and **Approve and deploy**. Approve only a run started by
+   the tag you pushed, on the commit you tagged.
+7. When the run succeeds, the `stage` job summary shows
    `+ @anishbenji/tscache@X.Y.Z (staged with id <stage-id>)`, and a draft GitHub release exists.
-7. Review the staged package. The stage commands need your own login (`npm login`); the workflow's
+8. Review the staged package. The stage commands need your own login (`npm login`); the workflow's
    OIDC token cannot run them.
 
    ```sh
@@ -126,7 +137,7 @@ that each protection on the path from `main` to npm is still in place.
    ```
 
    On npmjs.com the same is under the package's **Staged Packages** tab.
-8. Approve it, with your security key: **Approve** in the Staged Packages tab, or
+9. Approve it, with your security key: **Approve** in the Staged Packages tab, or
 
    ```sh
    npm stage approve <stage-id>
@@ -134,9 +145,9 @@ that each protection on the path from `main` to npm is still in place.
 
    This publishes the version under `latest`. The provenance statement, signed during the OIDC stage
    publish, is published with it.
-9. Publish the draft GitHub release: `gh release edit vX.Y.Z --draft=false`, or **Publish release** on
-   the draft.
-10. Check the result: `npm view @anishbenji/tscache@X.Y.Z`, the provenance badge on the npmjs.com
+10. Publish the draft GitHub release: `gh release edit vX.Y.Z --draft=false`, or **Publish release** on
+    the draft.
+11. Check the result: `npm view @anishbenji/tscache@X.Y.Z`, the provenance badge on the npmjs.com
     package page, and the GitHub release. In a project that installs the package,
     `npm audit signatures` verifies the signature and the provenance attestation.
 
@@ -156,11 +167,13 @@ gh run watch
 The `stage-dry-run` job runs `npm stage publish --dry-run --force`, which prints the tarball's file
 list and size and changes nothing on the registry. `--force` skips only npm's client-side version
 checks, which would otherwise fail every dry run whose version is not above the registry's, such as
-`main` between two releases (today `0.0.0` on `main` against `0.0.1` on npm). The `plan` job makes
-the same check against `npm view @anishbenji/tscache versions` instead: a dry run reports it as a
-warning, and a tag run fails on it before CI. A dry run also warns, but does not fail, when
-`docs/releases/<version>.md` is missing. Staged versions are not public, so neither check sees a
-pending stage; `npm stage list` does (see [Current state](#current-state-9-november-2026)).
+`main` between two releases (today `main` says `0.1.0`, the same version as `latest` on npm). The
+`plan` job makes the same check against `npm view @anishbenji/tscache versions` instead, ignoring
+prereleases: a dry run reports a version that is not above the highest published one as a warning,
+and a tag run fails on it before CI. So a dry run on `main` passes with that warning until the next
+release bumps the version. A dry run also warns, but does not fail, when `docs/releases/<version>.md`
+is missing, and when the commit is not on `main`. Staged versions are not public, so neither check
+sees a pending stage; `npm stage list` does (see [Current state](#current-state-13-november-2026)).
 
 ## Retrying a failed stage
 
