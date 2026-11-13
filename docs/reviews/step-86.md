@@ -1,6 +1,6 @@
 # Step 86 — Development-tooling security updates within the declared ranges
 
-Branch: `chore/86-audit-fix` · Status: in review
+Branch: `chore/86-audit-fix` · Reviewer: GPT-6.1 Sol (high) · Rounds: pending · Status: in review · Verdict after triage: pending
 
 ## Scope
 
@@ -42,7 +42,14 @@ Both are in the documentation site (`@tscache/site`), are blocked by a parent's 
 | `katex` 0.16.47    | `mermaid` 11.17.2 depends on `katex@^0.16.47`; `site/package.json` pins `mermaid` to 11.17.2    | Move `mermaid` in `site/package.json` to 12.2.0 or later (the first release that depends on `katex@^0.18.0`; 12.3.0 is the latest), a major upgrade; or override `katex` to 0.18.2 at the root, outside the range `mermaid` 11 declares.                   |
 | `minimatch` 10.2.6 | `typedoc` 0.28.20 depends on `minimatch@^10.2.5`; `site/package.json` pins `typedoc` to 0.28.20 | No stable `typedoc` release accepts `minimatch` 11 (0.28.20 is the latest stable; only 1.0.0 prereleases exist). The fix needs an override of `minimatch` to 11.0.1 at the root, outside the range `typedoc` declares, or waiting for a `typedoc` release. |
 
+Notes on the two tables, from the pre-review:
+
+- The three `js-yaml` advisories are fixed in 4.3.0, 4.3.1 and 4.3.2 respectively (`bun audit --json` on main); 4.3.2 clears all three.
+- The `mermaid` 12 route for `katex` also needs `vitepress-plugin-mermaid`: `site/package.json` pins it at 2.0.17, its latest release, whose peer range is `mermaid: "10 || 11"`. Moving `mermaid` to 12 would therefore violate that peer range until the plugin ships a release that accepts 12.
+
 ## Verification
+
+The first full `bun run ci` on 21f0303 exited 1: six tests timed out at 5 s in `cache-model-property.test.ts` and `cache-faults-property.test.ts` (step 74), with no assertion failure, at a load average of about 17. The two files passed alone (16 of 16), and the second full run on the same head exited 0. The packages this step moves are used only by commitlint. The timeouts are addressed separately in step 88.
 
 | Command                                                                               | Result                                                                                                              |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
