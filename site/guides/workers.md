@@ -145,33 +145,37 @@ What happens depends on how the worker is served:
 
 - **A hashed worker URL** (the default with Vite and most bundlers) gives each deploy a SharedWorker of
   its own. There is no protocol mismatch then, and nothing reports the skew. Tabs of the old deploy and
-  of the new one stop sharing the cache, fetches in flight, `clear` and `authInvalid` until the old tabs
-  close, which for a tab left open may be days. For persisted caches both workers write the one
-  IndexedDB database of the origin ([Persistence](/guides/persistence)). Every record is checked on its
-  own when it is loaded, but one worker can delete pages the other stored, which then read as uncached
-  and are fetched again, and it can write back a range the other removed with `invalidate` or `clear`
-  while it still holds that range. A dataset whose restatements change its `version` is not exposed to
-  the second case, since records of another version are never loaded.
+  of the new one stop sharing the cache's memory, fetches in flight, `clear`, `clearAll` and
+  `authInvalid` until the old tabs close, which for a tab left open may be days. For persisted caches
+  both workers write the one IndexedDB database of the origin ([Persistence](/guides/persistence)).
+  Every record is checked on its own when it is loaded, but one worker can delete pages the other
+  stored, which then read as uncached and are fetched again, and it can write back a range the other
+  removed with `invalidate` or `clear` while it still holds that range. A dataset whose restatements
+  change its `version` is not exposed to that, since records of another version are never loaded. A
+  logout's `clearAll` in a new tab empties the disk and its own worker, but the old worker writes back
+  the pages it still holds ([Sensitive data and logout](/guides/persistence#sensitive-data-and-logout)).
 - **A fixed worker URL** makes every tab of every deploy join one SharedWorker, so the origin keeps a
   single writer. New tabs then run against the old worker's code until the old tabs close: the worker
-  reports its package version on connect, but the client does not check it, so only a protocol change
-  is refused. The fetcher module's URL must be fixed as well. A worker runs one fetcher module, and a
-  tab that names another one is refused: `createClient` rejects with a `ConfigError`
+  reports its package version on connect, but the client does not check it, so a release that keeps the
+  protocol connects silently. A release that changes the protocol is refused with
+  `ProtocolMismatchError`. A new fetcher module URL is refused too: a worker runs one fetcher module,
+  and `createClient` in a tab that names another rejects with a `ConfigError`
   (`this worker already runs fetcher <old URL>; cannot also load <new URL>`) and does not fall back.
-  Vite's `?fetcher` import gives the module a hashed name, so a fixed URL needs a fetcher built on its
-  own ([A fetcher that needs `import()`](/guides/vite#a-fetcher-that-needs-import) shows the build).
-  Serve both files with revalidation.
+  Vite's `?fetcher` import gives the module a hashed name, so a fixed worker URL needs a fetcher built
+  on its own at a fixed name too
+  ([A fetcher that needs `import()`](/guides/vite#a-fetcher-that-needs-import) shows the build). Serve
+  both files with revalidation.
 
-A page that gets `ProtocolMismatchError` can still run: call `createClient` again with
-`mode: 'dedicated'`. That tab then has a cache of its own, shared with no other tab, and persists
-nothing, until it is reloaded after the old tabs have closed.
+What a page can do with a `ProtocolMismatchError` depends on which side is stale. A dedicated worker
+loads the script at the same URL, so `mode: 'dedicated'` helps only when the stale side is a running
+SharedWorker that old tabs keep alive: the page is then newer (the error's `clientProtocol` is larger
+than its `workerProtocol`), and creating the client again with `mode: 'dedicated'` gives that tab a
+cache of its own, shared with no other tab and persisting nothing, until it is reloaded after the old
+tabs have closed. When the page itself is stale (an old tab that creates its client again after
+`workerLost`, or HTML or script served from an old cache), or the worker script came from an old HTTP
+cache entry, the dedicated worker is refused the same way, and the chain does not step down on this
+error: the page has to reload.
 :::
-
-If your worker is served at a fixed URL (no content hash in the file name), the first upgrade to a release
-that creates the SharedWorker with `extendedLifetime` (persistence slice (c)) also changes the worker's
-creation options. A browser refuses to connect a tab to a running SharedWorker created with different
-options, so tabs opened after that upgrade fall back to a dedicated worker (`modeFallback`) until the tabs
-from before it are closed. Bundlers that hash worker file names give each release its own URL and avoid this.
 
 ## Losing the worker
 

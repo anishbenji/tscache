@@ -18,8 +18,11 @@ stopped running during the handshake"); `modeFallback` says which.
 
 The worker script is from another version of tscache: a cached script after a deploy, or a SharedWorker
 kept alive by a tab opened before the upgrade. Close the old tabs and reload. A page cannot close the
-user's other tabs; until they close, it can create its client again with `mode: 'dedicated'`, a cache
-of its own that persists nothing ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
+user's other tabs. When the stale side is an old SharedWorker those tabs keep alive (the
+page is newer: `error.clientProtocol` is larger than `error.workerProtocol`), the page can create its
+client again with `mode: 'dedicated'` until they close, a cache of its own that persists nothing. When
+the page or the worker script came from an old cache, a dedicated worker fails the same way: reload
+([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
 
 ## `createClient` rejects with `this worker already runs fetcher`
 
