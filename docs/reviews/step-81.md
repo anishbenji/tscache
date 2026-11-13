@@ -76,6 +76,10 @@ Each is listed as future work in A§1 and S§10; the user approves them by mergi
 
 - `docs/benchmarking.md` contradicted `docs/supply-chain.md` and `docs/workflow.md` on whether `bench` is required; fixed here.
 
+## Security lane (Claude), not the gate
+
+run 1, head 467d00d: P0 0, P1 0, P2 0
+
 ## Round 1 — reviewer verdict: merge
 
 No findings (2026-11-13). The reviewer confirmed both fixes from the pre-review are present; `git diff --check` passed.
