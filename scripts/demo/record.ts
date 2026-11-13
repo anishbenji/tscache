@@ -8,7 +8,8 @@
 // - site/public/media/<name>.mp4 (H.264) and .webm (VP9), for the site.
 //
 // It starts the demo itself (scripts/demo.ts; --reuse-builds passes through)
-// and stops it at the end. Every scenario runs on the vanilla reference
+// and stops it at the end; Ctrl-C, SIGTERM or SIGHUP stops it, Chromium and
+// everything the demo started too. Every scenario runs on the vanilla reference
 // client in a fresh browser context, so a fresh SharedWorker. The recorded
 // page is a stage this script serves: a caption, a strip of the app's
 // mock-backend counters since the scenario began, and the app itself in one
@@ -299,6 +300,10 @@ const scenarios: Scenario[] = [
       await r.hold(1500);
       const first = await counters();
       const opening = moved(zero, first);
+      // The README and the site say tab 1 fetches the history in one fetch.
+      if (opening.fetches !== 1) {
+        throw new Error(`tab 1 made ${opening.fetches} fetches, not one`);
+      }
       await r.caption(
         "Tab 2 opens on the same SharedWorker and draws from the shared cache.",
       );
@@ -382,7 +387,7 @@ const scenarios: Scenario[] = [
       const before = await counters();
       await r.start();
       await r.caption(
-        "The server reads the history through tscache and renders the page with it.",
+        "The server has rendered this page before, so its cache already holds the history.",
       );
       await r.hold(1200);
       const tab = await r.open(0, "/ssr");
@@ -395,7 +400,7 @@ const scenarios: Scenario[] = [
         throw new Error(`${step.bars} bars served for the page`);
       }
       await r.caption(
-        `The browser's cache starts from the server's read: ${drawn} bars drawn, ${count(step.bars, "bar", "bars")} fetched in all.`,
+        `${drawn} bars drawn from the server's read; server and browser fetched only ${count(step.bars, "bar", "bars")}.`,
       );
       await r.hold(3000);
       r.note(
@@ -440,8 +445,11 @@ const scenarios: Scenario[] = [
         .toBeGreaterThan(before.fetches);
       await r.hold(800);
       const step = moved(before, await counters());
-      if (step.bars > NEWEST + 1) {
-        throw new Error(`the catch-up fetched ${step.bars} bars`);
+      // The README and the site say one fetch mends the gap.
+      if (step.fetches !== 1 || step.bars > NEWEST + 1) {
+        throw new Error(
+          `the catch-up made ${step.fetches} fetches of ${step.bars} bars`,
+        );
       }
       await r.caption(
         `Caught up with ${count(step.fetches, "fetch", "fetches")} of ${count(step.bars, "bar", "bars")}, not the history.`,
@@ -482,6 +490,7 @@ async function record(
   scenario: Scenario,
   rawDir: string,
 ): Promise<Clip> {
+  console.log(`recording ${scenario.name}`);
   stage.show(scenario.stage);
   const context = await browser.newContext({
     viewport: VIEW,
@@ -528,9 +537,15 @@ async function record(
   return { scenario, video, from, to: at(), notes };
 }
 
+/**
+ * The ffmpeg binary: RECORD_FFMPEG for the recorder's tests only, which stop
+ * it before it converts anything (e2e/demo/launcher.spec.ts).
+ */
+const FFMPEG = process.env.RECORD_FFMPEG || "ffmpeg";
+
 async function ffmpeg(args: string[]): Promise<void> {
   const run = Bun.spawn(
-    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", ...args],
+    [FFMPEG, "-hide_banner", "-loglevel", "error", "-y", ...args],
     {
       stdout: "inherit",
       stderr: "inherit",
@@ -598,7 +613,7 @@ function option(name: string): string | undefined {
   return at === -1 ? undefined : process.argv[at + 1];
 }
 
-async function waitForHub(processes: Processes): Promise<void> {
+async function waitForHub(): Promise<void> {
   // The demo builds every app first, which takes minutes.
   const deadline = Date.now() + 15 * MINUTE;
   while (Date.now() < deadline && !processes.stopping) {
@@ -612,9 +627,41 @@ async function waitForHub(processes: Processes): Promise<void> {
   throw new Error(`the demo hub did not answer on ${hubOrigin}`);
 }
 
+const processes = new Processes();
+let stage: ReturnType<typeof startStage> | undefined;
+let browser: Browser | undefined;
+let rawDir: string | undefined;
+let exiting: Promise<never> | undefined;
+
+/**
+ * The one way out, as in scripts/demo.ts: closes Chromium, stops the stage
+ * and the demo with everything it started, removes the raw videos, then
+ * exits. The demo's processes run in groups of their own, so a Ctrl-C in
+ * the terminal reaches only this process, and only this stops them.
+ */
+function shutdown(code: number, reason?: string): Promise<never> {
+  exiting ??= (async () => {
+    if (reason !== undefined) console.error(reason);
+    await browser?.close().catch(() => {});
+    stage?.stop();
+    // Undo a scenario's clock move; the backend may be down already.
+    await control({ resetClock: true }).catch(() => {});
+    await processes.stop();
+    if (rawDir !== undefined) {
+      await rm(rawDir, { recursive: true, force: true });
+    }
+    process.exit(code);
+  })();
+  return exiting;
+}
+
+process.on("SIGINT", () => void shutdown(130));
+process.on("SIGTERM", () => void shutdown(143));
+process.on("SIGHUP", () => void shutdown(129));
+
 async function main(): Promise<void> {
-  if (Bun.which("ffmpeg") === null) {
-    throw new Error("ffmpeg is not on PATH (macOS: brew install ffmpeg)");
+  if (Bun.which(FFMPEG) === null) {
+    throw new Error(`${FFMPEG} is not on PATH (macOS: brew install ffmpeg)`);
   }
   const only = option("--only")?.split(",");
   const chosen = scenarios.filter((s) => only?.includes(s.name) ?? true);
@@ -625,8 +672,7 @@ async function main(): Promise<void> {
   }
   await mkdir(GIF_DIR, { recursive: true });
   await mkdir(VIDEO_DIR, { recursive: true });
-  const rawDir = await mkdtemp(join(tmpdir(), "tscache-record-"));
-  const processes = new Processes();
+  rawDir = await mkdtemp(join(tmpdir(), "tscache-record-"));
   const demoArgs = process.argv.includes("--reuse-builds")
     ? ["--reuse-builds"]
     : [];
@@ -634,43 +680,42 @@ async function main(): Promise<void> {
     cwd: ROOT,
   });
   void demo.exited.then((code) => {
-    if (!processes.stopping) {
-      console.error(`the demo exited with ${code}`);
-      process.exit(1);
-    }
+    if (!processes.stopping) void shutdown(1, `the demo exited with ${code}`);
   });
-  const stage = startStage();
-  let browser: Browser | undefined;
-  try {
-    await waitForHub(processes);
-    browser = await chromium.launch();
-    const results: { clip: Clip; files: string[] }[] = [];
-    for (const scenario of chosen) {
-      const clip = await record(browser, stage, scenario, rawDir);
-      if (scenario.name === "live-feed-reconnect") {
-        await control({ resetClock: true });
-      }
-      results.push({ clip, files: await convert(clip) });
+  stage = startStage();
+  await waitForHub();
+  // The recorder handles the signals itself: Playwright's handlers would
+  // close Chromium and exit without stopping the demo.
+  browser = await chromium.launch({
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false,
+  });
+  const results: { clip: Clip; files: string[] }[] = [];
+  for (const scenario of chosen) {
+    const clip = await record(browser, stage, scenario, rawDir);
+    if (scenario.name === "live-feed-reconnect") {
+      await control({ resetClock: true });
     }
-    for (const { clip, files } of results) {
+    results.push({ clip, files: await convert(clip) });
+  }
+  for (const { clip, files } of results) {
+    console.log(
+      `\n${clip.scenario.name}: ${(clip.to - clip.from).toFixed(1)} s`,
+    );
+    for (const note of clip.notes) console.log(`  observed: ${note}`);
+    for (const file of files) {
+      const { size } = await stat(file);
       console.log(
-        `\n${clip.scenario.name}: ${(clip.to - clip.from).toFixed(1)} s`,
+        `  ${file.slice(ROOT.length)}  ${(size / 1024).toFixed(0)} KiB`,
       );
-      for (const note of clip.notes) console.log(`  observed: ${note}`);
-      for (const file of files) {
-        const { size } = await stat(file);
-        console.log(
-          `  ${file.slice(ROOT.length)}  ${(size / 1024).toFixed(0)} KiB`,
-        );
-      }
     }
-  } finally {
-    await browser?.close();
-    stage.stop();
-    await control({ resetClock: true }).catch(() => {});
-    await processes.stop();
-    await rm(rawDir, { recursive: true, force: true });
   }
 }
 
-await main();
+try {
+  await main();
+  await shutdown(0);
+} catch (error) {
+  await shutdown(1, String(error instanceof Error ? error.stack : error));
+}

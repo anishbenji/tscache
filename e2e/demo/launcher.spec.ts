@@ -9,13 +9,17 @@ import { apps as APPS } from "../examples/apps";
 
 // The launcher (scripts/demo.ts) on its own. Every way out stops every
 // process it started, builds included, with what they started in turn, and
-// frees every port (step 30 R1-1, R2-2). Each test takes free ports the
-// system picks, one for the hub and one per app, and kills anything left
-// over however it ends.
+// frees every port (step 30 R1-1, R2-2). The demo recorder
+// (scripts/demo/record.ts), which starts the launcher, does the same when
+// it is interrupted. Each test takes free ports the system picks, one for
+// the hub and one per app, and kills anything left over however it ends.
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const launcherPath = fileURLToPath(
   new URL("../../scripts/demo.ts", import.meta.url),
+);
+const recorderPath = fileURLToPath(
+  new URL("../../scripts/demo/record.ts", import.meta.url),
 );
 /** Every app the launcher builds and serves. */
 const APP_COUNT = Object.keys(APPS).length;
@@ -103,18 +107,28 @@ interface Launch {
    * (docs/testing.md).
    */
   exit(): Promise<number | null>;
+  stdout(): string;
   stderr(): string;
 }
 
-function launch(hub: number, args: string[], env = {}): Launch {
-  const child = spawn("bun", [launcherPath, ...args], {
+function launch(
+  hub: number,
+  args: string[],
+  env = {},
+  script = launcherPath,
+): Launch {
+  const child = spawn("bun", [script, ...args], {
     cwd: root,
     env: { ...process.env, ...env, DEMO_PORT: String(hub) },
     // A group of its own, so cleanup can kill it whatever it started.
     detached: true,
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
+  let stdout = "";
   let stderr = "";
+  child.stdout?.on("data", (chunk) => {
+    stdout += String(chunk);
+  });
   child.stderr?.on("data", (chunk) => {
     stderr += String(chunk);
   });
@@ -124,6 +138,7 @@ function launch(hub: number, args: string[], env = {}): Launch {
   return {
     child,
     exit: () => exited,
+    stdout: () => stdout,
     stderr: () => stderr,
   };
 }
@@ -289,5 +304,137 @@ test("a failed build stops the other builds, with what they started", async () =
     for (const pid of pids) kill(pid);
     cleanUp(launched, apps);
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Stands in for every build while the recorder waits for the demo: the
+ * package's passes; each app's records its pid and a child's and runs for a
+ * minute.
+ */
+const SLOW_BUILD = `
+const [dir, name] = [process.env.FAKE_BUILD_DIR, process.argv[2]];
+if (name === "tscache") process.exit(0);
+const child = Bun.spawn(["sleep", "60"]);
+await Bun.write(\`\${dir}/\${name}.pids\`, \`\${process.pid} \${child.pid}\`);
+await Bun.sleep(60_000);
+`;
+
+/** The pids each fake build recorded in `dir`. */
+async function recordedPids(dir: string): Promise<number[]> {
+  const pids: number[] = [];
+  for (const file of await readdir(dir)) {
+    if (!file.endsWith(".pids")) continue;
+    const text = await readFile(join(dir, file), "utf8");
+    pids.push(...text.split(" ").map(Number));
+  }
+  return pids;
+}
+
+/**
+ * The recorder's directories for its raw videos under `temp`; the demo's
+ * servers keep caches of their own there (node-compile-cache).
+ */
+async function rawVideoDirs(temp: string): Promise<string[]> {
+  return (await readdir(temp)).filter((name) =>
+    name.startsWith("tscache-record-"),
+  );
+}
+
+/** The recorder's direct children: the launcher and, once up, Chromium. */
+function childrenOf(pid: number): number[] {
+  try {
+    return execFileSync("pgrep", ["-P", String(pid)], { encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean)
+      .map(Number);
+  } catch (error) {
+    // pgrep exits 1 when nothing matches.
+    if ((error as { status?: unknown }).status !== 1) throw error;
+    return [];
+  }
+}
+
+/**
+ * Ctrl-C in a terminal: SIGINT to the recorder's process group. The
+ * launcher and its servers run in groups of their own, so it does not reach
+ * them; only the recorder can stop them.
+ */
+function interrupt(launched: Launch): void {
+  const pid = launched.child.pid;
+  if (pid === undefined) throw new Error("the recorder did not start");
+  process.kill(-pid, "SIGINT");
+}
+
+test("an interrupted recorder stops the demo's builds while it waits for them", async () => {
+  test.setTimeout(90_000);
+  const hub = await freePorts();
+  const apps = appPortsAfter(hub);
+  const dir = await mkdtemp(join(tmpdir(), "tscache-record-build-"));
+  const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
+  const script = join(dir, "build.ts");
+  await writeFile(script, SLOW_BUILD);
+  let launched: Launch | undefined;
+  let pids: number[] = [];
+  try {
+    launched = launch(
+      hub,
+      [],
+      {
+        DEMO_BUILD_SCRIPT: script,
+        FAKE_BUILD_DIR: dir,
+        RECORD_FFMPEG: "true",
+        TMPDIR: temp,
+      },
+      recorderPath,
+    );
+    await expect
+      .poll(async () => (await recordedPids(dir)).length, { timeout: 60_000 })
+      .toBe(2 * APP_COUNT);
+    pids = await recordedPids(dir);
+    interrupt(launched);
+    expect(await launched.exit()).toBe(130);
+    expect(pids.filter(running)).toEqual([]);
+    expect(await allFree([hub, ...apps])).toBe(true);
+    // Its directory for the raw videos is gone too.
+    expect(await rawVideoDirs(temp)).toEqual([]);
+  } finally {
+    for (const pid of pids) kill(pid);
+    cleanUp(launched, apps);
+    await rm(dir, { recursive: true, force: true });
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("an interrupted recorder stops Chromium and the demo while it records", async () => {
+  test.setTimeout(120_000);
+  const hub = await freePorts();
+  const apps = appPortsAfter(hub);
+  const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
+  let launched: Launch | undefined;
+  let children: number[] = [];
+  try {
+    launched = launch(
+      hub,
+      ["--reuse-builds", "--only", "multi-tab-sharing"],
+      { RECORD_FFMPEG: "true", TMPDIR: temp },
+      recorderPath,
+    );
+    const recorder = launched;
+    await expect
+      .poll(() => recorder.stdout(), { timeout: 90_000 })
+      .toContain("recording multi-tab-sharing");
+    children = childrenOf(recorder.child.pid ?? 0);
+    // The launcher and Chromium.
+    expect(children.length).toBeGreaterThanOrEqual(2);
+    interrupt(recorder);
+    expect(await recorder.exit()).toBe(130);
+    expect(children.filter(running)).toEqual([]);
+    expect(await allFree([hub, ...apps])).toBe(true);
+    expect(await rawVideoDirs(temp)).toEqual([]);
+  } finally {
+    for (const pid of children) kill(pid);
+    cleanUp(launched, apps);
+    await rm(temp, { recursive: true, force: true });
   }
 });
