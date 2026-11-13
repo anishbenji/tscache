@@ -20,9 +20,10 @@
 // printed at the end. ffmpeg must be on PATH (a local tool, not a
 // dependency). A heavy job: run it through the machine's heavy-job lock.
 
+import { copyFileSync, renameSync, unlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type Browser,
@@ -35,8 +36,14 @@ import { demoPorts, hubPort } from "./catalog";
 import { Processes } from "./processes";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const GIF_DIR = join(ROOT, "docs/media");
-const VIDEO_DIR = join(ROOT, "site/public/media");
+/**
+ * Where docs/media/ and site/public/media/ are: the checkout, or
+ * RECORD_MEDIA_ROOT for the recorder's tests only, so they never touch the
+ * committed media (e2e/demo/launcher.spec.ts).
+ */
+const MEDIA_ROOT = process.env.RECORD_MEDIA_ROOT || ROOT;
+const GIF_DIR = join(MEDIA_ROOT, "docs/media");
+const VIDEO_DIR = join(MEDIA_ROOT, "site/public/media");
 const MINUTE = 60_000;
 /** The recorded viewport; the site's videos keep it. */
 const VIEW = { width: 960, height: 600 };
@@ -310,6 +317,13 @@ const scenarios: Scenario[] = [
       const b = await r.open(1, LIVE_PATH);
       const drawn = await live(b);
       await expect(b.getByTestId("mode")).toHaveText("shared");
+      // The README and the site say tab 2 draws the same bars. Both first
+      // read twelve hours up to the bar forming now (readRange in
+      // reference/shared/src/market.ts), 721 bars; a bar that opens while
+      // tab 2 loads is pushed into the cache and redrawn, one bar more.
+      if (drawn < shown || drawn > shown + 1) {
+        throw new Error(`tab 2 drew ${drawn} bars, tab 1 ${shown}`);
+      }
       await r.hold(600);
       const step = moved(first, await counters());
       if (step.bars > NEWEST) {
@@ -538,10 +552,13 @@ async function record(
 }
 
 /**
- * The ffmpeg binary: RECORD_FFMPEG for the recorder's tests only, which stop
- * it before it converts anything (e2e/demo/launcher.spec.ts).
+ * The ffmpeg binary: RECORD_FFMPEG for the recorder's tests only, which
+ * stand a script in for it (e2e/demo/launcher.spec.ts).
  */
 const FFMPEG = process.env.RECORD_FFMPEG || "ffmpeg";
+
+/** The ffmpeg running now, which shutdown stops. */
+let converting: ReturnType<typeof Bun.spawn> | undefined;
 
 async function ffmpeg(args: string[]): Promise<void> {
   const run = Bun.spawn(
@@ -551,11 +568,35 @@ async function ffmpeg(args: string[]): Promise<void> {
       stderr: "inherit",
     },
   );
+  converting = run;
   const code = await run.exited;
+  converting = undefined;
   if (code !== 0) throw new Error(`ffmpeg ${args.join(" ")}: exit ${code}`);
 }
 
-async function convert(clip: Clip): Promise<string[]> {
+/**
+ * Moves each finished file over its committed one. Synchronous, so no
+ * signal handler runs between two moves: a scenario's three files are
+ * replaced together or not at all. A move across file systems copies.
+ */
+function install(moves: [from: string, to: string][]): void {
+  for (const [from, to] of moves) {
+    try {
+      renameSync(from, to);
+    } catch (error) {
+      if ((error as { code?: unknown }).code !== "EXDEV") throw error;
+      copyFileSync(from, to);
+      unlinkSync(from);
+    }
+  }
+}
+
+/**
+ * Writes the clip's GIF, MP4 and WebM into `work`, then, once all three
+ * exist, moves them into place; a failed or interrupted conversion leaves
+ * the committed media as they were.
+ */
+async function convert(clip: Clip, work: string): Promise<string[]> {
   const { name } = clip.scenario;
   const trim = [
     "-ss",
@@ -565,9 +606,9 @@ async function convert(clip: Clip): Promise<string[]> {
     "-i",
     clip.video,
   ];
-  const mp4 = join(VIDEO_DIR, `${name}.mp4`);
-  const webm = join(VIDEO_DIR, `${name}.webm`);
-  const gif = join(GIF_DIR, `${name}.gif`);
+  const mp4 = join(work, `${name}.mp4`);
+  const webm = join(work, `${name}.webm`);
+  const gif = join(work, `${name}.gif`);
   await ffmpeg([
     ...trim,
     "-an",
@@ -605,7 +646,13 @@ async function convert(clip: Clip): Promise<string[]> {
     "0",
     gif,
   ]);
-  return [gif, mp4, webm];
+  const placed: [string, string][] = [
+    [gif, join(GIF_DIR, `${name}.gif`)],
+    [mp4, join(VIDEO_DIR, `${name}.mp4`)],
+    [webm, join(VIDEO_DIR, `${name}.webm`)],
+  ];
+  install(placed);
+  return placed.map(([, to]) => to);
 }
 
 function option(name: string): string | undefined {
@@ -635,8 +682,8 @@ let exiting: Promise<never> | undefined;
 
 /**
  * The one way out, as in scripts/demo.ts: closes Chromium, stops the stage
- * and the demo with everything it started, removes the raw videos, then
- * exits. The demo's processes run in groups of their own, so a Ctrl-C in
+ * and the demo with everything it started and a running ffmpeg, removes the
+ * raw videos and any unfinished conversion, then exits. The demo's processes run in groups of their own, so a Ctrl-C in
  * the terminal reaches only this process, and only this stops them.
  */
 function shutdown(code: number, reason?: string): Promise<never> {
@@ -647,6 +694,10 @@ function shutdown(code: number, reason?: string): Promise<never> {
     // Undo a scenario's clock move; the backend may be down already.
     await control({ resetClock: true }).catch(() => {});
     await processes.stop();
+    if (converting !== undefined) {
+      converting.kill();
+      await converting.exited;
+    }
     if (rawDir !== undefined) {
       await rm(rawDir, { recursive: true, force: true });
     }
@@ -697,7 +748,7 @@ async function main(): Promise<void> {
     if (scenario.name === "live-feed-reconnect") {
       await control({ resetClock: true });
     }
-    results.push({ clip, files: await convert(clip) });
+    results.push({ clip, files: await convert(clip, rawDir) });
   }
   for (const { clip, files } of results) {
     console.log(
@@ -707,7 +758,7 @@ async function main(): Promise<void> {
     for (const file of files) {
       const { size } = await stat(file);
       console.log(
-        `  ${file.slice(ROOT.length)}  ${(size / 1024).toFixed(0)} KiB`,
+        `  ${relative(MEDIA_ROOT, file)}  ${(size / 1024).toFixed(0)} KiB`,
       );
     }
   }

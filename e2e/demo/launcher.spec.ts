@@ -1,5 +1,12 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -436,5 +443,89 @@ test("an interrupted recorder stops Chromium and the demo while it records", asy
     for (const pid of children) kill(pid);
     cleanUp(launched, apps);
     await rm(temp, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Stands in for ffmpeg: writes a partial file at its output path (the last
+ * argument), records its pid, and runs for a minute, as a long conversion
+ * does.
+ */
+const SLOW_FFMPEG = `#!/usr/bin/env bun
+const output = process.argv[process.argv.length - 1];
+await Bun.write(output, "partial");
+await Bun.write(\`\${process.env.FAKE_FFMPEG_DIR}/ffmpeg.pid\`, String(process.pid));
+await Bun.sleep(60_000);
+`;
+
+/** What each scenario's three media files hold before the recorder runs. */
+const PREVIOUS = "previous";
+
+function mediaFiles(root: string, name: string): string[] {
+  return [
+    join(root, "docs/media", `${name}.gif`),
+    join(root, "site/public/media", `${name}.mp4`),
+    join(root, "site/public/media", `${name}.webm`),
+  ];
+}
+
+test("a recorder stopped while it converts leaves the media as they were and stops ffmpeg", async () => {
+  test.setTimeout(120_000);
+  const hub = await freePorts();
+  const apps = appPortsAfter(hub);
+  const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
+  const fake = await mkdtemp(join(tmpdir(), "tscache-record-ffmpeg-"));
+  const media = await mkdtemp(join(tmpdir(), "tscache-record-media-"));
+  const ffmpeg = join(fake, "ffmpeg");
+  await writeFile(ffmpeg, SLOW_FFMPEG, { mode: 0o755 });
+  const files = mediaFiles(media, "multi-tab-sharing");
+  await mkdir(join(media, "docs/media"), { recursive: true });
+  await mkdir(join(media, "site/public/media"), { recursive: true });
+  for (const file of files) await writeFile(file, PREVIOUS);
+  let launched: Launch | undefined;
+  let converting: number | undefined;
+  try {
+    launched = launch(
+      hub,
+      ["--reuse-builds", "--only", "multi-tab-sharing"],
+      {
+        RECORD_FFMPEG: ffmpeg,
+        RECORD_MEDIA_ROOT: media,
+        FAKE_FFMPEG_DIR: fake,
+        TMPDIR: temp,
+      },
+      recorderPath,
+    );
+    const pidFile = join(fake, "ffmpeg.pid");
+    await expect
+      .poll(() => readFile(pidFile, "utf8").catch(() => ""), {
+        timeout: 110_000,
+      })
+      .not.toBe("");
+    converting = Number(await readFile(pidFile, "utf8"));
+    // SIGTERM to the recorder alone: ffmpeg, in its group, hears nothing,
+    // so only the recorder can stop it.
+    launched.child.kill("SIGTERM");
+    expect(await launched.exit()).toBe(143);
+    expect(running(converting)).toBe(false);
+    for (const file of files) {
+      expect(await readFile(file, "utf8")).toBe(PREVIOUS);
+    }
+    // Nothing else was written beside them.
+    expect(await readdir(join(media, "docs/media"))).toEqual([
+      "multi-tab-sharing.gif",
+    ]);
+    expect((await readdir(join(media, "site/public/media"))).sort()).toEqual([
+      "multi-tab-sharing.mp4",
+      "multi-tab-sharing.webm",
+    ]);
+    expect(await allFree([hub, ...apps])).toBe(true);
+    expect(await rawVideoDirs(temp)).toEqual([]);
+  } finally {
+    if (converting !== undefined) kill(converting);
+    cleanUp(launched, apps);
+    for (const dir of [temp, fake, media]) {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
 });
