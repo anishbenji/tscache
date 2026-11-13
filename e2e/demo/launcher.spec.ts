@@ -1014,3 +1014,90 @@ test("a launcher whose app port is taken during the build refuses that app, and 
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+/** The app server that holds its answer, and the one that fails. */
+const HOLDING_APP = "solid-uplot";
+const FAILING_APP = "vanilla-uplot";
+
+/**
+ * Stands in for every app's `vite preview` (DEMO_SERVE_SCRIPT), so the test
+ * sets the order in which the launcher's checks meet a shutdown. Every app
+ * listens, says so on vite's "Local:" line and answers. FAILING_APP exits 1
+ * once it has answered and HOLDING_APP has been asked. HOLDING_APP says it
+ * listens only once FAILING_APP has answered, and holds its first answer
+ * until the launcher's shutdown signals it (SIGTERM): the launcher then reads
+ * an "ok" while it is stopping.
+ */
+const ORDERED_SERVE = `
+import { existsSync } from "node:fs";
+const [app, port] = [process.argv[2], Number(process.argv[3])];
+const dir = process.env.FAKE_SERVE_DIR;
+// The test's cleanup removed the directory: nothing is left listening.
+setInterval(() => existsSync(dir) || process.exit(1), 100);
+let release = () => {};
+const server = Bun.serve({
+  port,
+  hostname: "127.0.0.1",
+  fetch() {
+    if (app === "${FAILING_APP}") Bun.write(\`\${dir}/answered\`, "");
+    if (app !== "${HOLDING_APP}") return new Response("ok");
+    Bun.write(\`\${dir}/asked\`, "");
+    return new Promise((resolve) => {
+      release = () => resolve(new Response("ok"));
+    });
+  },
+});
+const until = async (name) => {
+  while (!existsSync(\`\${dir}/\${name}\`)) await Bun.sleep(10);
+};
+if (app === "${HOLDING_APP}") {
+  process.on("SIGTERM", async () => {
+    release();
+    await server.stop();
+    process.exit(0);
+  });
+  await until("answered");
+}
+console.log(\`  ➜  Local:   http://127.0.0.1:\${port}/\`);
+if (app === "${FAILING_APP}") {
+  await until("answered");
+  await until("asked");
+  process.exit(1);
+}
+`;
+
+/** Stands in for every build: each passes at once. */
+const PASSING_BUILD = "process.exit(0);\n";
+
+test("a launcher whose app server fails while another answers prints no hub line", async () => {
+  test.setTimeout(60_000);
+  const hub = await freePorts();
+  const apps = appPortsAfter(hub);
+  const dir = await mkdtemp(join(tmpdir(), "tscache-demo-serve-"));
+  const serve = join(dir, "serve.ts");
+  const build = join(dir, "build.ts");
+  await writeFile(serve, ORDERED_SERVE);
+  await writeFile(build, PASSING_BUILD);
+  let launched: Launch | undefined;
+  try {
+    launched = launch(hub, [], {
+      DEMO_BUILD_SCRIPT: build,
+      DEMO_SERVE_SCRIPT: serve,
+      FAKE_SERVE_DIR: dir,
+    });
+    expect(await launched.exit()).toBe(1);
+    expect(launched.stderr()).toContain(
+      `${FAILING_APP}: vite preview exited with 1`,
+    );
+    // The order the test sets up happened: the holding app was asked, and
+    // its answer came once the shutdown had begun.
+    expect(await readdir(dir)).toEqual(
+      expect.arrayContaining(["answered", "asked"]),
+    );
+    expect(launched.stdout()).not.toContain("tscache demo hub:");
+    expect(await allFree([hub, ...apps])).toBe(true);
+  } finally {
+    cleanUp(launched, apps);
+    await rm(dir, { recursive: true, force: true });
+  }
+});

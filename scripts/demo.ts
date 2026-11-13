@@ -35,6 +35,12 @@ const reuseBuilds = process.argv.includes("--reuse-builds");
  * build, so a test can fail one without touching any dist/.
  */
 const buildScript = process.env.DEMO_BUILD_SCRIPT;
+/**
+ * For the launcher's tests only: `bun <script> <app> <port>` runs in place of
+ * each app's `vite preview`, so a test can decide when an app server says it
+ * listens, answers or exits.
+ */
+const serveScript = process.env.DEMO_SERVE_SCRIPT;
 const port = hubPort(process.env);
 const ports = demoPorts(port);
 const names = Object.keys(apps) as App[];
@@ -85,18 +91,20 @@ async function build(label: string, cmd: string[]): Promise<void> {
  */
 function serve(app: App): Started {
   const run = processes.start(
-    [
-      "bun",
-      "run",
-      "--cwd",
-      appDir(app),
-      "preview",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(ports[app]),
-      "--strictPort",
-    ],
+    serveScript === undefined
+      ? [
+          "bun",
+          "run",
+          "--cwd",
+          appDir(app),
+          "preview",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          String(ports[app]),
+          "--strictPort",
+        ]
+      : ["bun", serveScript, app, String(ports[app])],
     { cwd: rootDir, capture: true, stderr: process.stderr },
   );
   void run.exited.then((code) => {
@@ -133,6 +141,8 @@ async function ready(app: App, run: Started): Promise<void> {
     if (listening(app, run)) {
       try {
         const response = await fetch(origins[app]);
+        // A shutdown that began while the answer was on its way: not up.
+        if (processes.stopping) break;
         if (response.ok) return;
       } catch {
         // Listening, not answering yet.
