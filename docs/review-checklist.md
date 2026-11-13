@@ -14,7 +14,7 @@ Every review of a step branch checks the diff against this list. Section referen
 ## 1. Locked decisions and scope
 
 - [ ] No silent deviation from S§3 or A§7–§8. Any deviation is P0 unless the diff or step review file records user approval.
-- [ ] Nothing from the roadmap leaks in: TTL, aggregation/resampling, SharedArrayBuffer, `ColumnarSegment`, IndexedDB persistence, LRU/eviction, `i64`/`u64`/`f16`, `worker_threads` hosting (S§10, A§8 N7).
+- [ ] Nothing from the roadmap leaks in: TTL, aggregation/resampling, SharedArrayBuffer, `ColumnarSegment` or another segment layout (irregular timestamps), subscriptions (dirty notifications), LRU/eviction, per-field presence masks, an elected auth handler, `i64`/`u64`/`f16`, `worker_threads` hosting (S§3.3, S§10, A§1, A§8 N7; `docs/roadmap.md`). IndexedDB persistence is no longer on this list: it is specified in A§4.10 (N45–N61, N66).
 
 ## 2. Data model and validation (S§3.1, A§2.4, N1)
 
