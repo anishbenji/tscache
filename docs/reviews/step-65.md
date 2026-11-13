@@ -192,6 +192,10 @@ run 2, head 8fdceae: P0 0, P1 0, P2 0
 
 run 3, head 2172058: P0 0, P1 0, P2 0
 
+run 4, head 1629c92: P0 0, P1 0, P2 1
+
+S4.1 P2: deferred to a later step (the fix belongs in the demo launcher, `scripts/demo.ts`)
+
 ## Round 1 — reviewer verdict: merge after fixes
 
 | #    | Sev | Finding                                                                                                                                                                                                                                                                                      | Decision | Resolution                                                                            |
