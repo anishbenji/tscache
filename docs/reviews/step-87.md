@@ -1,6 +1,6 @@
 # Step 87 — Release prep for 0.1.0
 
-Branch: `docs/87-release-prep` · Reviewer: GPT-6.1 Sol · Rounds: — · Status: open · Verdict after triage: —
+Branch: `docs/87-release-prep` · Reviewer: GPT-6.1 Sol · Rounds: 1 · Status: settled · Verdict after triage: merge (one P2 fixed)
 
 ## Scope
 
@@ -80,3 +80,14 @@ The director's pre-review of 86fa75e found no P0 or P1 and five P2s. Each was ch
 | PR-3 | P2  | `CHANGELOG.md` and the notes: "`updateAuth` retries with new credentials" contradicts `site/guides/auth.md` ("nothing is retried") | accepted | Both now say `updateAuth` supplies new credentials and fetching resumes, and the application reads again any range that came back `'auth-pending'` (`site/guides/auth.md`, steps 5 and 6).                                                                                |
 | PR-4 | P2  | The notes attribute the tarball figures to "the release build"; they come from a local `npm pack --dry-run`                        | accepted | The sentence names the local dry run, and says npm counts 1,000 bytes to the kB while the size table counts 1,024 (`scripts/size.ts:216`, `bytes / 1024`).                                                                                                                |
 | PR-5 | P2  | `docs/INDEX.md`: the `docs/reviews/` size predates the last edit of this file                                                      | accepted | Re-measured after this table was written.                                                                                                                                                                                                                                 |
+
+## Round 1 — reviewer verdict: merge after fixes
+
+One P2 (2026-11-13): the release notes listed "a value outside the dtype's range" among the values that reject a
+put, without limiting it to integer fields; N68 lets float fields take every number, and `batch.ts` range-checks
+only integer fields. Valid; fixed in `docs: scope the range rejection to integer fields`. The reviewer's aside on
+the `docs/reviews/` size is fixed in the same commit.
+
+## Finding check (claude-fable-5-2), round 1
+
+V 1, P 0, I 0, D 0
