@@ -13,8 +13,10 @@ Nothing in CI, the hooks or a workflow runs Stryker, and no test changes: the su
 | `chore: configure stryker mutation testing of the engine` | `stryker.config.json`, `vitest.mutation.config.ts` (the root Vitest configuration narrowed to `packages/tscache/test`), `.gitignore`, `.fallowrc.json` |
 | `docs: report the engine's mutation scores`               | `docs/benchmarks/mutation.md`, its `docs/INDEX.md` row, this file                                                                                      |
 | `docs: correct the mutation report after the pre-review`  | The pre-review's seven findings (below), re-running before and after the dependencies, the index sizes                                                 |
+| `docs: keep only the in-repo stryker recipe`              | Security lane S1.1: the throwaway-copy recipe removed                                                                                                  |
+| `docs(review): step 84 security lane`                     | This file                                                                                                                                              |
 
-**The two Stryker dev dependencies are not in this branch.** The brief pre-approved `@stryker-mutator/core` and `@stryker-mutator/vitest-runner` (10.1.1, the current stable release, pinned exactly), but the unattended session's dependency guard refused `bun add` with "Adding, removing or upgrading a dependency needs Anish's OK". The step did not work around it: `package.json` and `bun.lock` are unchanged. The measurement ran in a throwaway copy of the worktree in the session's scratch directory, where the guard allows installs, with the same configuration files. The director parked adding them for the user's decision. "How to re-run" in the mutation report covers both cases: in a throwaway copy until the dependencies are added, from the repository root after. Until then `stryker.config.json` is inert, and Knip and Fallow see no Stryker dependency to check.
+**The two Stryker dev dependencies are not in this branch.** The brief pre-approved `@stryker-mutator/core` and `@stryker-mutator/vitest-runner` (10.1.1, the current stable release, pinned exactly), but the unattended session's dependency guard refused `bun add` with "Adding, removing or upgrading a dependency needs Anish's OK". The step did not work around it: `package.json` and `bun.lock` are unchanged. The measurement ran in a throwaway copy of the worktree in the session's scratch directory, where the guard allows installs, with the same configuration files. The director parked adding them for the user's decision. "How to re-run" in the mutation report records that the numbers were measured in that copy, pending user decision 60, and gives the run from the repository root once the dependencies are added. Until then `stryker.config.json` is inert, and Knip and Fallow see no Stryker dependency to check.
 
 Toolchain notes (the first two are also in the configuration's comments):
 
@@ -52,10 +54,16 @@ A Fable pre-review checked every number and file:line in the mutation report aga
 | PR-6 | nit | Row 9: 8 mutants at `merge.ts:272–275`, not 9 at `:272–274`                                                          | accepted | Fixed; the ninth, at `:283`, is named with the two of `span`                                                                                                                  |
 | PR-7 | nit | This file's CI row had no result or head                                                                             | accepted | The CI row records exit 0 and the head it ran on                                                                                                                              |
 
+## Security lane (Claude), not the gate
+
+- run 1, head 40cd12d: P0 0, P1 0, P2 1
+- S1.1 P2: fixed in 4a18ee8
+
 ## Contract-test changes
 
 None.
 
 ## Decision concerns
 
-- Whether to add the two Stryker dev dependencies (and a `mutation` script) to the repository. The brief pre-approved them; the unattended guard needs the user's own OK, and the director parked it for the user.
+- Whether to add the two Stryker dev dependencies (and a `mutation` script) to the repository. The brief pre-approved them; the unattended guard needs the user's own OK. Parked as user decision 60.
+- Whether measuring in a throwaway copy, the route taken because the unattended guard refused the install in the worktree, is acceptable. Raised by the security lane; parked as user decision 60.
