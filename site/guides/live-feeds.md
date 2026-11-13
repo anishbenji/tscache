@@ -64,6 +64,10 @@ A view that must redraw reads again. After its own `put`, a tab knows what chang
 the range it shows. To learn of other tabs' changes, the application tells them, as the reference clients
 do with a `BroadcastChannel`. Where the tabs share a SharedWorker, each then reads its shown range with
 `get(range, { cacheOnly: true })`, which returns what the shared cache holds without fetching; with a
-dedicated worker per tab, the other tab's cache is not this one, and the message has to carry the data. Without such a signal, a fetching `get` on a timer
-([Polling](#polling)) also picks up what other tabs added. Listen for `cacheCleared` to redraw an
-emptied cache.
+dedicated worker per tab, the other tab's cache is not this one, and the message has to carry the data.
+Without such a signal, a fetching `get` on a timer ([Polling](#polling)) shows other tabs' changes only
+where the tabs share a SharedWorker. With a cache per tab (a dedicated worker or in-process), it fetches
+from the backend only what its own cache lacks, so it never sees another tab's `put` or a change to a
+range it already covers: there the data has to be sent, or the range invalidated and fetched again from
+an updated backend. Polling still brings each tab new and provisional bars from the backend. Listen for
+`cacheCleared` to redraw an emptied cache.

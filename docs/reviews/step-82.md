@@ -75,3 +75,16 @@ Before Codex round 1, a fresh-context pre-review raised five P2 findings. Each w
 3. **`clearAll` was missing from what two deploys' workers stop sharing.** A logout's `clearAll` in a new tab empties the disk and its own worker, but the old worker writes back the pages it still holds (architecture §4.10.7; `site/guides/persistence.md`, Sensitive data and logout). Fixed: the hashed-URL bullet lists `clearAll` and says this, with a link to that section.
 4. **Sizes and the commit table.** The `docs/INDEX.md` rows for `site/`, `docs/guides/patterns.md`, `packages/tscache/README.md` and `docs/reviews/` re-measured on the final head; the director's troubleshooting commit and the fix commit added to the table above.
 5. **The `extendedLifetime` upgrade paragraph** under "Stale scripts after a deploy" described tabs falling back on the first upgrade to a release that creates the SharedWorker with `extendedLifetime`. Every release passes that option (`packages/tscache/src/client/hosting.ts:122`), the repository has no tag and `CHANGELOG.md` lists only `[Unreleased]`, so no published release lacks it, and the paragraph contradicted the fixed-URL bullet. Dropped from the site guide. The history stays in architecture §4.10.7 and §4.10.8, which record design history rather than user guidance.
+
+## Round 1 — reviewer verdict: merge after fixes
+
+One P2 (2026-11-13): the live-feeds guide said a fetching `get` on a timer picks up what other tabs added,
+which holds only where the tabs share a SharedWorker; with a cache per tab, a timer `get` fetches only what
+its own cache lacks and never sees another tab's `put`. Valid; fixed in `docs: scope the polling advice to
+a shared worker`: the sentence is scoped to a shared SharedWorker, says what a cache per tab must do
+instead, and keeps that polling still brings new and provisional bars. The one-line pointer in
+`docs/guides/patterns.md` (Known limits) gains the same scope.
+
+## Finding check (claude-fable-5-2), round 1
+
+V 1, P 0, I 0, D 0

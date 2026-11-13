@@ -170,5 +170,5 @@ designs follow after the release.
   worker but needs a fixed fetcher URL too, since a worker refuses a second fetcher module
   (`site/guides/workers.md`, Stale scripts after a deploy).
 - **No change notifications.** Apart from the opt-in `mergeWarning`, readers hear only `cacheCleared`; a
-  view that must redraw calls `get` again, with `cacheOnly: true` after another tab's signal
-  (`site/guides/live-feeds.md`; roadmap: subscriptions).
+  view that must redraw calls `get` again, with `cacheOnly: true` after another tab's signal when the tabs
+  share a SharedWorker (`site/guides/live-feeds.md`; roadmap: subscriptions).
