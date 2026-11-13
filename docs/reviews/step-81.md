@@ -1,6 +1,6 @@
 # Step 81 — The checklist's roadmap list and the bench comment
 
-Branch: `chore/81-checklist-roadmap` · Reviewer: GPT-6.1 Sol · Rounds: — · Status: — · Verdict after triage: —
+Branch: `chore/81-checklist-roadmap` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -75,3 +75,7 @@ Each is listed as future work in A§1 and S§10; the user approves them by mergi
 ## Contradictions found
 
 - `docs/benchmarking.md` contradicted `docs/supply-chain.md` and `docs/workflow.md` on whether `bench` is required; fixed here.
+
+## Round 1 — reviewer verdict: merge
+
+No findings (2026-11-13). The reviewer confirmed both fixes from the pre-review are present; `git diff --check` passed.
