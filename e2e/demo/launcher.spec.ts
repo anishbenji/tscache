@@ -937,3 +937,75 @@ test("a recorder that refuses a taken app port exits though that port never answ
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+/**
+ * Stands in for every build: each app's passes at once; the package's,
+ * which runs first, marks that it runs and waits until the test has taken
+ * the recorded app's port, so the port is taken after the recorder's port
+ * check and before any app server starts.
+ */
+const PORT_TAKING_BUILD = `
+import { existsSync } from "node:fs";
+const [dir, name] = [process.env.FAKE_BUILD_DIR, process.argv[2]];
+if (name !== "tscache") process.exit(0);
+await Bun.write(\`\${dir}/building\`, "");
+while (!existsSync(\`\${dir}/taken\`)) await Bun.sleep(20);
+`;
+
+test("a launcher whose app port is taken during the build refuses that app, and the recorder sends it nothing", async () => {
+  test.setTimeout(90_000);
+  const hub = await freePorts();
+  const apps = appPortsAfter(hub);
+  const dir = await mkdtemp(join(tmpdir(), "tscache-record-build-"));
+  const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
+  const script = join(dir, "build.ts");
+  await writeFile(script, PORT_TAKING_BUILD);
+  let launched: Launch | undefined;
+  let backend: Awaited<ReturnType<typeof countingServer>> | undefined;
+  try {
+    launched = launch(
+      hub,
+      ["--only", CONVERSION.name],
+      {
+        ...CONVERSION.env,
+        DEMO_BUILD_SCRIPT: script,
+        FAKE_BUILD_DIR: dir,
+        RECORD_FFMPEG: "true",
+        TMPDIR: temp,
+      },
+      recorderPath,
+    );
+    const recorder = launched;
+    // The recorder has checked its ports and its launcher is building.
+    await expect
+      .poll(
+        async () =>
+          (await readdir(dir)).includes("building") ||
+          recorder.code() !== undefined,
+        { timeout: 60_000 },
+      )
+      .toBe(true);
+    expect(recorder.code(), recorder.stderr()).toBeUndefined();
+    // Something else answers on the recorded app's port from now on.
+    backend = await countingServer(recordedAppPort(hub));
+    await writeFile(join(dir, "taken"), "");
+    expect(await recorder.exit()).toBe(1);
+    const output = `${recorder.stdout()}${recorder.stderr()}`;
+    // The launcher refused the app whose own server could not listen, and
+    // never printed its hub line.
+    expect(output).toContain("reference-vanilla: vite preview exited");
+    expect(output).not.toContain("tscache demo hub:");
+    // Neither the launcher nor the recorder sent that port anything.
+    expect(backend.requests()).toEqual([]);
+    const recorded = recordedAppPort(hub);
+    expect(await allFree([hub, ...apps.filter((p) => p !== recorded)])).toBe(
+      true,
+    );
+    expect(await rawVideoDirs(temp)).toEqual([]);
+  } finally {
+    cleanUp(launched, apps);
+    await backend?.close();
+    await rm(dir, { recursive: true, force: true });
+    await rm(temp, { recursive: true, force: true });
+  }
+});

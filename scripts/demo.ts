@@ -10,13 +10,21 @@
 // Every way out goes through shutdown(): a failed build or server, the hub's
 // port in use, a signal. It stops every subprocess, builds included, with
 // whatever they started (scripts/demo/processes.ts), then exits.
+//
+// An app counts as up only once its own `vite preview` has printed that it
+// listens on the app's port, and the hub line is printed only by a launcher
+// that is not stopping: a process that takes an app's port during the build
+// is never taken for the app (step 89, S4.1), and the demo recorder
+// (scripts/demo/record.ts), which waits for the hub line, never sends it
+// anything.
 
 import { stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 import { type App, appDir, apps } from "../e2e/examples/apps";
 import { demoPorts, hubPort } from "./demo/catalog";
 import { hub } from "./demo/hub";
-import { Processes } from "./demo/processes";
+import { Processes, type Started } from "./demo/processes";
 
 const root = new URL("..", import.meta.url);
 /** The checkout as a path, decoded (a space stays a space), for subprocesses. */
@@ -71,7 +79,8 @@ async function build(label: string, cmd: string[]): Promise<void> {
   console.log(`built ${label}`);
 }
 
-function serve(app: App): void {
+/** Starts the app's `vite preview`, its output kept for `ready`. */
+function serve(app: App): Started {
   const run = processes.start(
     [
       "bun",
@@ -85,23 +94,46 @@ function serve(app: App): void {
       String(ports[app]),
       "--strictPort",
     ],
-    { cwd: rootDir },
+    { cwd: rootDir, capture: true },
   );
   void run.exited.then((code) => {
     if (processes.stopping) return;
-    void shutdown(1, `${app}: vite preview exited with ${code}`);
+    void shutdown(
+      1,
+      `${app}: vite preview exited with ${code}\n${run.output()}`,
+    );
   });
+  return run;
 }
 
-/** Resolves once the app's server answers its page. */
-async function ready(app: App): Promise<void> {
+/**
+ * Whether the app's own `vite preview` has said it listens on the app's
+ * origin: its "Local:" line (vite's printServerUrls), colours removed.
+ */
+function listening(app: App, run: Started): boolean {
+  return stripVTControlCharacters(run.output())
+    .split("\n")
+    .some(
+      (line) => line.includes("Local:") && line.trim().endsWith(origins[app]),
+    );
+}
+
+/**
+ * Resolves once the app's own server listens and answers its page. Nothing
+ * is sent to the port before its `vite preview` says it listens there: until
+ * then the port may be another process's, and with --strictPort vite fails
+ * rather than share it.
+ */
+async function ready(app: App, run: Started): Promise<void> {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline && !processes.stopping) {
-    try {
-      const response = await fetch(origins[app]);
-      if (response.ok) return;
-    } catch {
-      // Not listening yet.
+    if (listening(app, run)) {
+      try {
+        const response = await fetch(origins[app]);
+        if (response.ok) return;
+      } catch {
+        // Listening, not answering yet.
+      }
     }
     await Bun.sleep(250);
   }
@@ -119,8 +151,10 @@ async function start(): Promise<void> {
       }
     }),
   );
-  for (const app of names) serve(app);
-  await Promise.all(names.map(ready));
+  const runs = names.map((app) => [app, serve(app)] as const);
+  await Promise.all(runs.map(([app, run]) => ready(app, run)));
+  // An app server that failed while the others came up began the shutdown.
+  if (exiting !== undefined) return;
   server = Bun.serve({ port, hostname: "127.0.0.1", fetch: hub(origins) });
 }
 
@@ -138,5 +172,7 @@ try {
     `demo hub on port ${port} failed to start: ${describeError(error)}`,
   );
 }
+// A launcher that is stopping never says its hub is up.
+if (exiting !== undefined) await exiting;
 console.log(`\ntscache demo hub: http://127.0.0.1:${port}/`);
 for (const app of names) console.log(`  ${app.padEnd(18)} ${origins[app]}`);
