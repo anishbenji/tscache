@@ -498,6 +498,42 @@ export class CacheModel {
   layout(): Extent[] {
     return layoutOf(this.presentSlots(), this.config.k, this.config.cap);
   }
+
+  /**
+   * The one layout §4.3's exception allows ("a replace that cleared the
+   * middle of a segment and then could not allocate the split"), for the
+   * present points after a replace that removed `removal` from a store whose
+   * present slots were `before`. E is the segment of `before`'s layout that
+   * strictly contains the removal, so that the removal cleared its middle;
+   * the allowed layout is that of the present points with every segment
+   * inside E kept as one. Undefined when no segment strictly contains the
+   * removal: trimming a segment at an edge needs no split.
+   */
+  unsplitLayout(
+    before: readonly number[],
+    removal: Span,
+  ): Extent[] | undefined {
+    const e = layoutOf(before, this.config.k, this.config.cap).find(
+      (x) => x.start < removal.start && removal.end < x.end,
+    );
+    if (e === undefined) return undefined;
+    const out: Extent[] = [];
+    let merged: Extent | undefined;
+    for (const x of this.layout()) {
+      if (e.start <= x.start && x.end <= e.end) {
+        if (merged === undefined) {
+          merged = { ...x };
+          out.push(merged);
+        } else {
+          merged.end = x.end;
+          merged.size += x.size;
+        }
+      } else {
+        out.push(x);
+      }
+    }
+    return out;
+  }
 }
 
 /**
