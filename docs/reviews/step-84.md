@@ -1,6 +1,6 @@
 # Step 84 — Measure mutation testing of the engine
 
-Branch: `chore/84-mutation-measure` · Reviewer: not run by the implementer (the director runs the review loop) · Status: built, awaiting review
+Branch: `chore/84-mutation-measure` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge (one P2 fixed)
 
 ## Scope
 
@@ -67,3 +67,11 @@ None.
 
 - Whether to add the two Stryker dev dependencies (and a `mutation` script) to the repository. The brief pre-approved them; the unattended guard needs the user's own OK. Parked as user decision 60.
 - Whether measuring in a throwaway copy, the route taken because the unattended guard refused the install in the worktree, is acceptable. Raised by the security lane; parked as user decision 60.
+
+## Round 1 — reviewer verdict: merge after fixes
+
+One P2 (2026-11-14): row 20 of `docs/benchmarks/mutation.md` gave the wrong reason why the `clear-disk.ts:87` deadline-timer mutant survives (two tests do call `clearDisk` at a later clock, but settle through `run()` before the timer matters). Valid; the finding check reproduced both shapes against the real code. Fixed in `docs: the deadline-timer survivor's diagnosis`: the row names the missing case (a call after advancing the clock whose open or clear stays pending through the deadline).
+
+## Finding check (claude-fable-5-2), round 1
+
+V 1, P 0, I 0, D 0
