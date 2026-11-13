@@ -94,8 +94,10 @@ integrations' `connect` does it for you. Outside a secure context, loss is not d
 
 ## Does tscache cache across page loads?
 
-No. Version 1 keeps everything in memory; persistence to IndexedDB is on the roadmap. Server rendering
-can [seed](/guides/ssr) a new page's cache.
+Only when you ask for it: a cache created with `persist: true` keeps its covered history in IndexedDB,
+so a reload starts from what earlier sessions fetched ([persistence](/guides/persistence)). Only the
+SharedWorker hosting persists; otherwise everything stays in memory. Server rendering can
+[seed](/guides/ssr) a new page's cache.
 
 ## Does it work in Node?
 
