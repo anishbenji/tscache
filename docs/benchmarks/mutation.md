@@ -92,24 +92,17 @@ File and line are in `packages/tscache/src` on `b2e1f06`. "Survived" means at le
 
 ## How to re-run
 
-Stryker is not a dependency of the repository yet: adding a dependency needs the user's approval, and it is parked for the user's decision. A run is a heavy job either way: run it under the heavy-job lock, never next to `bun run ci`. Every area takes about 40 minutes; `--mutate` limits a run to one area.
+The step 84 numbers were measured on 2026-11-13 in a throwaway copy of the worktree with the two packages installed there, because Stryker is not yet a dependency of the repository; adding it is pending user decision 60.
 
-**Before the dependencies are added**, as step 84 measured: copy the tracked files to a throwaway directory, install the two packages there, and run Stryker in the copy. The repository's `package.json` and `bun.lock` stay unchanged, and the reports land in the copy.
+Once the dependencies are added (`@stryker-mutator/core` and `@stryker-mutator/vitest-runner`, 10.1.1, pinned exactly in the repository's `package.json` and `bun.lock`), run Stryker from the repository root. A run is a heavy job: run it under the heavy-job lock, never next to `bun run ci`. Every area takes about 40 minutes; `--mutate` limits a run to one area.
 
 ```sh
-copy=$(mktemp -d)
-git ls-files | rsync -a --files-from=- ./ "$copy/"
-cd "$copy"
-bun install --frozen-lockfile
-bun add -d --exact @stryker-mutator/core@10.1.1 @stryker-mutator/vitest-runner@10.1.1
 ~/code/tscache-reports/bin/heavy-run.sh "mutation" bunx stryker run          # every area
 ~/code/tscache-reports/bin/heavy-run.sh "mutation" bunx stryker run \
   --mutate "packages/tscache/src/engine/**/*.ts"                              # one area
 ```
 
-**After the dependencies are added** (`bun add -d --exact @stryker-mutator/core@10.1.1 @stryker-mutator/vitest-runner@10.1.1` in the repository, with the user's approval), run the same two Stryker commands from the repository root; no copy is needed.
-
-Either way, the configuration is `stryker.config.json` at the repository root. It runs Vitest with `vitest.mutation.config.ts`, which is the root configuration narrowed to `packages/tscache/test`, and writes `reports/mutation/mutation.html` and `mutation.json`, which `.gitignore` covers along with Stryker's sandboxes (`.stryker-tmp/`). Two settings work around the toolchain:
+The configuration is `stryker.config.json` at the repository root. It runs Vitest with `vitest.mutation.config.ts`, which is the root configuration narrowed to `packages/tscache/test`, and writes `reports/mutation/mutation.html` and `mutation.json`, which `.gitignore` covers along with Stryker's sandboxes (`.stryker-tmp/`). Two settings work around the toolchain:
 
 - `plugins` names `@stryker-mutator/vitest-runner`, because Bun installs each package in isolation and Stryker's default plugin search finds nothing next to its core.
 - `tsconfigFile` names a file that does not exist, which turns off Stryker's tsconfig rewrite. The rewrite calls the TypeScript JS API, which TypeScript 7 does not ship. It only fixes paths that would leave the sandbox, and the sandbox holds the whole repository, so none do.
