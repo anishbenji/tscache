@@ -443,7 +443,8 @@ test("an interrupted recorder stops Chromium and the demo while it records", asy
     expect(children.length).toBeGreaterThanOrEqual(2);
     interrupt(recorder);
     expect(await recorder.exit()).toBe(130);
-    expect(children.filter(running)).toEqual([]);
+    // Named, so a process left over says what it is.
+    expect(children.filter(running).map(described)).toEqual([]);
     expect(await allFree([hub, ...apps])).toBe(true);
     expect(await rawVideoDirs(temp)).toEqual([]);
   } finally {
@@ -558,10 +559,12 @@ test("a recorder stopped while it converts leaves the media as they were and sto
 
 /**
  * Stands in for ffmpeg as a conversion that ends on its own while the
- * recorder cleans up: writes its output, appends its pid to `starts`, and
- * exits 0 as soon as the recorder's Chromium (whose pid the test writes to
- * `chromium`) is gone, or on SIGTERM, which it traps and answers with a
- * clean exit, as an ffmpeg that finished at that moment would.
+ * recorder cleans up: writes its output and appends its pid to `starts`.
+ * An output that does not end in FAKE_FFMPEG_HOLD (every output when it is
+ * empty) is done at once. The one it holds on exits 0 as soon as the
+ * recorder's Chromium (whose pid the test writes to `chromium`) is gone, or
+ * on SIGTERM, which it traps and answers with a clean exit, as an ffmpeg
+ * that finished at that moment would.
  */
 const FINISHING_FFMPEG = `#!/usr/bin/env bun
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
@@ -569,6 +572,7 @@ const dir = process.env.FAKE_FFMPEG_DIR;
 const output = process.argv[process.argv.length - 1];
 appendFileSync(\`\${dir}/starts\`, \`\${process.pid}\\n\`);
 await Bun.write(output, "converted");
+if (!output.endsWith(process.env.FAKE_FFMPEG_HOLD ?? "")) process.exit(0);
 process.on("SIGTERM", () => process.exit(0));
 function alive(pid) {
   try {
@@ -584,6 +588,22 @@ for (;;) {
   await Bun.sleep(5);
 }
 `;
+
+/** `pid` with its state and command line, as `ps` shows them. */
+function described(pid: number): string {
+  try {
+    const shown = execFileSync(
+      "ps",
+      ["-o", "stat=,command=", "-p", String(pid)],
+      {
+        encoding: "utf8",
+      },
+    );
+    return `${pid} ${shown.trim()}`;
+  } catch {
+    return `${pid} (gone)`;
+  }
+}
 
 /** The command line of `pid`, or "" once it has exited. */
 function commandOf(pid: number): string {
@@ -617,63 +637,87 @@ async function starts(dir: string): Promise<number[]> {
   return text.split("\n").filter(Boolean).map(Number);
 }
 
-test("once a recorder is stopped, no ffmpeg starts and no media file changes", async () => {
-  test.setTimeout(120_000);
-  const hub = await freePorts();
-  const apps = appPortsAfter(hub);
-  const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
-  const fake = await mkdtemp(join(tmpdir(), "tscache-record-ffmpeg-"));
-  const media = await mkdtemp(join(tmpdir(), "tscache-record-media-"));
-  const ffmpeg = join(fake, "ffmpeg");
-  await writeFile(ffmpeg, FINISHING_FFMPEG, { mode: 0o755 });
-  const files = mediaFiles(media, "multi-tab-sharing");
-  await mkdir(join(media, "docs/media"), { recursive: true });
-  await mkdir(join(media, "site/public/media"), { recursive: true });
-  for (const file of files) await writeFile(file, PREVIOUS);
-  let launched: Launch | undefined;
-  let started: number[] = [];
-  try {
-    launched = launch(
-      hub,
-      ["--reuse-builds", "--only", "multi-tab-sharing"],
-      {
-        RECORD_FFMPEG: ffmpeg,
-        RECORD_MEDIA_ROOT: media,
-        FAKE_FFMPEG_DIR: fake,
-        TMPDIR: temp,
-      },
-      recorderPath,
-    );
-    const recorder = launched;
-    // The first conversion of the last scenario has begun.
-    await untilConverting(
-      recorder,
-      async () => (await starts(fake)).length === 1,
-    );
-    started = await starts(fake);
-    const chromium = childrenOf(recorder.child.pid ?? 0).find((pid) =>
-      /chrom/i.test(commandOf(pid)),
-    );
-    if (chromium === undefined) throw new Error("no Chromium child");
-    // The conversion ends on its own as soon as the recorder's cleanup is
-    // under way (its Chromium gone). Then SIGTERM to the recorder alone.
-    await writeFile(join(fake, "chromium"), String(chromium));
-    recorder.child.kill("SIGTERM");
-    expect(await recorder.exit()).toBe(143);
-    expect(running(chromium)).toBe(false);
-    // No ffmpeg outlives the recorder: none started after the signal.
-    expect(standIns(ffmpeg)).toEqual([]);
-    expect(await starts(fake)).toEqual(started);
-    for (const file of files) {
-      expect(await readFile(file, "utf8")).toBe(PREVIOUS);
+/**
+ * The stop lands during the first of a scenario's three conversions (the
+ * MP4), where the next one's start is what must not happen; or during the
+ * last (the GIF), where only the checks after ffmpeg exits and before the
+ * install stand between the signal and the committed media (Codex round 1).
+ */
+const STOPS = [
+  {
+    title:
+      "once a recorder is stopped, no ffmpeg starts and no media file changes",
+    hold: "",
+    startsBefore: 1,
+  },
+  {
+    title:
+      "once a recorder is stopped during the last conversion, no media file changes",
+    hold: ".gif",
+    startsBefore: 3,
+  },
+] as const;
+
+for (const { title, hold, startsBefore } of STOPS) {
+  test(title, async () => {
+    test.setTimeout(120_000);
+    const hub = await freePorts();
+    const apps = appPortsAfter(hub);
+    const temp = await mkdtemp(join(tmpdir(), "tscache-record-tmp-"));
+    const fake = await mkdtemp(join(tmpdir(), "tscache-record-ffmpeg-"));
+    const media = await mkdtemp(join(tmpdir(), "tscache-record-media-"));
+    const ffmpeg = join(fake, "ffmpeg");
+    await writeFile(ffmpeg, FINISHING_FFMPEG, { mode: 0o755 });
+    const files = mediaFiles(media, "multi-tab-sharing");
+    await mkdir(join(media, "docs/media"), { recursive: true });
+    await mkdir(join(media, "site/public/media"), { recursive: true });
+    for (const file of files) await writeFile(file, PREVIOUS);
+    let launched: Launch | undefined;
+    let started: number[] = [];
+    try {
+      launched = launch(
+        hub,
+        ["--reuse-builds", "--only", "multi-tab-sharing"],
+        {
+          RECORD_FFMPEG: ffmpeg,
+          RECORD_MEDIA_ROOT: media,
+          FAKE_FFMPEG_DIR: fake,
+          FAKE_FFMPEG_HOLD: hold,
+          TMPDIR: temp,
+        },
+        recorderPath,
+      );
+      const recorder = launched;
+      // The conversion the stop lands in has begun.
+      await untilConverting(
+        recorder,
+        async () => (await starts(fake)).length === startsBefore,
+      );
+      started = await starts(fake);
+      const chromium = childrenOf(recorder.child.pid ?? 0).find((pid) =>
+        /chrom/i.test(commandOf(pid)),
+      );
+      if (chromium === undefined) throw new Error("no Chromium child");
+      // The conversion ends on its own as soon as the recorder's cleanup is
+      // under way (its Chromium gone). Then SIGTERM to the recorder alone.
+      await writeFile(join(fake, "chromium"), String(chromium));
+      recorder.child.kill("SIGTERM");
+      expect(await recorder.exit()).toBe(143);
+      expect(running(chromium)).toBe(false);
+      // No ffmpeg outlives the recorder: none started after the signal.
+      expect(standIns(ffmpeg)).toEqual([]);
+      expect(await starts(fake)).toEqual(started);
+      for (const file of files) {
+        expect(await readFile(file, "utf8")).toBe(PREVIOUS);
+      }
+      expect(await rawVideoDirs(temp)).toEqual([]);
+      expect(await allFree([hub, ...apps])).toBe(true);
+    } finally {
+      for (const pid of [...started, ...standIns(ffmpeg)]) kill(pid);
+      cleanUp(launched, apps);
+      for (const dir of [temp, fake, media]) {
+        await rm(dir, { recursive: true, force: true });
+      }
     }
-    expect(await rawVideoDirs(temp)).toEqual([]);
-    expect(await allFree([hub, ...apps])).toBe(true);
-  } finally {
-    for (const pid of [...started, ...standIns(ffmpeg)]) kill(pid);
-    cleanUp(launched, apps);
-    for (const dir of [temp, fake, media]) {
-      await rm(dir, { recursive: true, force: true });
-    }
-  }
-});
+  });
+}

@@ -560,8 +560,9 @@ const FFMPEG = process.env.RECORD_FFMPEG || "ffmpeg";
 /**
  * Set, synchronously, the moment shutdown begins. Every step that starts
  * work checks it first, in the same synchronous run as the work it starts:
- * each ffmpeg, each scenario, and the install of a scenario's media. So once
- * shutdown begins, no new process starts and no media file changes.
+ * the demo's start, Chromium's launch, each scenario, each ffmpeg, and the
+ * install of a scenario's media; each ffmpeg checks it again once it exits.
+ * So once shutdown begins, no new process starts and no media file changes.
  */
 let cancelled = false;
 
@@ -705,12 +706,12 @@ let exiting: Promise<never> | undefined;
 
 /**
  * The one way out, as in scripts/demo.ts. In order: marks the recorder
- * cancelled and stops a running ffmpeg, both before anything else is
- * awaited; then closes Chromium, stops the stage and the demo with
- * everything it started, and, once that ffmpeg has exited, removes the raw
- * videos and any unfinished conversion; then exits. The demo's processes
- * run in groups of their own, so a Ctrl-C in the terminal reaches only this
- * process, and only this stops them.
+ * cancelled and signals a running ffmpeg, before anything is awaited; waits
+ * for that ffmpeg to exit; closes Chromium (one still launching too), stops
+ * the stage, resets the backend's clock and stops the demo with everything
+ * it started; removes the raw videos and any unfinished conversion; then
+ * exits. The demo's processes run in groups of their own, so a Ctrl-C in
+ * the terminal reaches only this process, and only this stops them.
  */
 function shutdown(code: number, reason?: string): Promise<never> {
   if (exiting !== undefined) return exiting;
