@@ -17,7 +17,18 @@ stopped running during the handshake"); `modeFallback` says which.
 ## `createClient` rejects with `ProtocolMismatchError`
 
 The worker script is from another version of tscache: a cached script after a deploy, or a SharedWorker
-kept alive by a tab opened before the upgrade. Close the old tabs and reload.
+kept alive by a tab opened before the upgrade. Close the old tabs and reload. A page cannot close the
+user's other tabs. When the stale side is an old SharedWorker those tabs keep alive (the
+page is newer: `error.clientProtocol` is larger than `error.workerProtocol`), the page can create its
+client again with `mode: 'dedicated'` until they close, a cache of its own that persists nothing. When
+the page or the worker script came from an old cache, a dedicated worker fails the same way: reload
+([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
+
+## `createClient` rejects with `this worker already runs fetcher`
+
+The running SharedWorker loaded another fetcher module URL, usually a tab from an earlier deploy when the
+worker URL is fixed and the fetcher's is hashed. A worker runs one fetcher module; serve the fetcher at a
+fixed URL too ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
 
 ## `createClient` rejects naming the fetcher module
 
@@ -86,8 +97,10 @@ integrations' `connect` does it for you. Outside a secure context, loss is not d
 
 ## Does tscache cache across page loads?
 
-No. Version 1 keeps everything in memory; persistence to IndexedDB is on the roadmap. Server rendering
-can [seed](/guides/ssr) a new page's cache.
+Only when you ask for it: a cache created with `persist: true` keeps its covered history in IndexedDB,
+so a reload starts from what earlier sessions fetched ([persistence](/guides/persistence)). Only the
+SharedWorker hosting persists; otherwise everything stays in memory. Server rendering can
+[seed](/guides/ssr) a new page's cache.
 
 ## Does it work in Node?
 

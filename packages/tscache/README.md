@@ -155,6 +155,8 @@ has the details.
 tscache follows semantic versioning within 0.x: a minor release (0.2.0) may
 break the API, a patch release (0.1.1) never does. Pin a minor range
 (`~0.1.0`) to take fixes without breaking changes.
+[Known limits](https://anishbenji.github.io/tscache/#known-limits) of 0.1.0:
+unbounded memory, deploy skew, and no change notifications.
 
 ## Documentation
 

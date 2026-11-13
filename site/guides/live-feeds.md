@@ -36,6 +36,9 @@ on a `BroadcastChannel`; with a SharedWorker they read the bar back from the sam
 opens again, a tab that follows the market reads its newest bars with a fetch, which mends what the feed
 missed while it was down.
 
+The `BroadcastChannel` is the application's, because tscache sends no notification of its own; see
+[Redrawing when the cache changes](#redrawing-when-the-cache-changes).
+
 [`reference/shared/src/live.ts`](https://github.com/anishbenji/tscache/blob/main/reference/shared/src/live.ts) implements the election and the three
 sources (`sse`, `ws`, `poll`); [`reference/README.md`](https://github.com/anishbenji/tscache/blob/main/reference/README.md) describes the
 behaviour and its limits.
@@ -46,3 +49,25 @@ A pushed batch covers only its own span. If a feed drops for a while, the bars i
 uncovered, and a fetching `get` over that stretch fills them. Note that a put without a range claims its own span, from
 its first to its last timestamp: a batch that skips bars between those two confirms the skipped slots as
 gaps. Push one bar, or one unbroken run of bars, per batch.
+
+## Redrawing when the cache changes
+
+::: warning Known limit: no change notifications
+A reader gets no event when the data it read changes. A `put` from another tab, a fetch another tab's
+`get` started, an `invalidate` and a moved watermark all change the cache silently. Apart from the opt-in `mergeWarning`, the
+only event about a cache's contents is `cacheCleared`, when it is emptied ([Events](/concepts/events)). A subscription
+event is sketched on the
+[roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md#design-sketch-subscriptions-dirty-notifications).
+:::
+
+A view that must redraw reads again. After its own `put`, a tab knows what changed and calls `get` over
+the range it shows. To learn of other tabs' changes, the application tells them, as the reference clients
+do with a `BroadcastChannel`. Where the tabs share a SharedWorker, each then reads its shown range with
+`get(range, { cacheOnly: true })`, which returns what the shared cache holds without fetching; with a
+dedicated worker per tab, the other tab's cache is not this one, and the message has to carry the data.
+Without such a signal, a fetching `get` on a timer ([Polling](#polling)) shows other tabs' changes only
+where the tabs share a SharedWorker. With a cache per tab (a dedicated worker or in-process), it fetches
+from the backend only what its own cache lacks, so it never sees another tab's `put` or a change to a
+range it already covers: there the data has to be sent, or the range invalidated and fetched again from
+an updated backend. Polling still brings each tab new and provisional bars from the backend. Listen for
+`cacheCleared` to redraw an emptied cache.
