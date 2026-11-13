@@ -87,3 +87,7 @@ None. Both files are implementer tests (their headers say so); no test or assert
 ## Decision concerns
 
 None.
+
+## Security lane (Claude), not the gate
+
+run 1, head 48adc71: P0 0, P1 0, P2 0
