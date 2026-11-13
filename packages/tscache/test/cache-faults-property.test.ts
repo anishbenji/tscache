@@ -60,7 +60,10 @@ import {
 //
 // A failure prints the seed, the step, the case's configuration and the
 // operations before it. To replay one, replace the it.each table with
-// [{ first: <seed>, count: 1, retry: <as printed> }].
+// [{ start: <seed>, first: <seed>, count: 1, retry: <as printed> }]. The
+// outcome-reach assertion runs after the last batch of a seed start, so it
+// does not run for such a row; one seed reaches fewer outcomes than a
+// start's 160.
 
 const FAULT = new RangeError("injected: Array buffer allocation failed");
 let countdown = -1; // -1: disarmed
@@ -124,7 +127,7 @@ const FIELD_SETS: Record<string, Dtype>[] = [
   { a: "f32", b: "u8", c: "i32", d: "u32", e: "i8", f: "u16" },
 ];
 
-/** Every outcome the generator must reach in each batch of seeds. */
+/** Every outcome the generator must reach from each seed start. */
 const OUTCOMES = [
   "put succeeded",
   "failed in validation, nothing changed",
@@ -519,34 +522,45 @@ function runCase(
   return undefined;
 }
 
+/** The first seed of each group of 160, and whether its failed puts retry. */
+const STARTS = [
+  [1, true],
+  [0xc0ffee, true],
+  [10_001, false],
+  [0xdeadbeef, false],
+] as const;
+/** Each group runs as 16 batches of 10. */
+const BATCHES = 16;
+const BATCH_SIZE = 10;
+
+/** Per seed start: the outcomes its batches have reached and how many ran. */
+const reach = new Map<number, { seen: Map<string, number>; batches: number }>();
+
 describe("CacheState.put failing part-way — architecture §4.3 allocation failure, §4.5 order inside put", () => {
   it.each(
-    // 160 seeds from each start, in batches of 10: many short tests rather
-    // than a few long ones, so that each stays far below the default timeout
-    // on a loaded machine (step 88). Each batch still reaches every outcome.
-    (
-      [
-        [1, true],
-        [0xc0ffee, true],
-        [10_001, false],
-        [0xdeadbeef, false],
-      ] as const
-    ).flatMap(([start, retry]) =>
-      Array.from({ length: 16 }, (_, i) => ({
-        first: start + 10 * i,
-        count: 10,
+    // Many short tests rather than a few long ones, so that each stays far
+    // below the default timeout on a loaded machine (step 88). The
+    // outcome-reach assertion covers a whole start, as one batch of 10
+    // reaches some outcomes only a few times; it runs in the start's last
+    // batch, after the others, since the tests of a file run in order.
+    STARTS.flatMap(([start, retry]) =>
+      Array.from({ length: BATCHES }, (_, i) => ({
+        start,
+        first: start + BATCH_SIZE * i,
+        count: BATCH_SIZE,
         retry,
       })),
     ),
   )(
     "every injected allocation failure leaves the documented state (seeds $first + $count, retry $retry)",
-    ({ first, count, retry }) => {
-      const seen = new Map<string, number>();
+    ({ start, first, count, retry }) => {
+      const group = reach.get(start) ?? { seen: new Map(), batches: 0 };
+      reach.set(start, group);
       const failures: string[] = [];
       for (let seed = first; seed < first + count; seed++) {
         let failure: string | undefined;
         try {
-          failure = runCase(seed, retry, seen);
+          failure = runCase(seed, retry, group.seen);
         } catch (error) {
           failure = `seed=${seed}: the harness threw ${String(error)}`;
         } finally {
@@ -554,13 +568,20 @@ describe("CacheState.put failing part-way — architecture §4.3 allocation fail
         }
         if (failure !== undefined) failures.push(failure);
       }
+      group.batches++;
       expect(
         failures.slice(0, 3),
         `${failures.length} of ${count} seeds failed`,
       ).toEqual([]);
-      expect(
-        OUTCOMES.filter((outcome) => (seen.get(outcome) ?? 0) === 0),
-      ).toEqual([]);
+      if (first + count === start + BATCHES * BATCH_SIZE) {
+        expect(group.batches, `batches of seed start ${start} run`).toBe(
+          BATCHES,
+        );
+        // The start's seeds reached every outcome this test claims to check.
+        expect(
+          OUTCOMES.filter((outcome) => (group.seen.get(outcome) ?? 0) === 0),
+        ).toEqual([]);
+      }
     },
   );
 });

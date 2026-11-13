@@ -22,9 +22,10 @@ import { batchOf, compareState, randomValue, show } from "./cache-model-checks";
 // version, a well-formed store and the segment layout (N14, N15).
 //
 // A failure prints the seed, the step and the operations before it. To
-// replay one, replace the it.each table with [{ first: <seed>, count: 1 }]
-// (the rule-reach assertion may then fail too, since one seed reaches fewer
-// rules).
+// replay one, replace the it.each table with
+// [{ start: <seed>, first: <seed>, count: 1 }]. The rule-reach assertion runs
+// after the last batch of a seed start, so it does not run for such a row;
+// one seed reaches fewer rules than a start's 200.
 
 const STEPS = 120;
 const VERSIONS = ["v1", "v2", "v3"] as const;
@@ -34,7 +35,7 @@ const FIELD_SETS: Record<string, Dtype>[] = [
   { a: "f32", b: "u8", c: "i32", d: "u32", e: "i8", f: "u16" },
 ];
 
-/** Every rule the generator must reach in each batch of seeds. */
+/** Every rule the generator must reach from each seed start. */
 const RULES = [
   "unranged put",
   "ranged put",
@@ -240,32 +241,52 @@ function runCase(seed: number, seen: Map<string, number>): string | undefined {
   return undefined;
 }
 
+/** The first seed of each group of 200; each group runs as 8 batches of 25. */
+const STARTS = [1, 10_001, 0xc0ffee, 0xdeadbeef];
+const BATCHES = 8;
+const BATCH_SIZE = 25;
+
+/** Per seed start: the rules its batches have reached and how many ran. */
+const reach = new Map<number, { seen: Map<string, number>; batches: number }>();
+
 describe("CacheState against a slot-by-slot model — architecture §4.3–§4.5, N1, N3, N11, N13–N19", () => {
   it.each(
-    // 200 seeds from each start, in batches of 25: many short tests rather
-    // than a few long ones, so that each stays far below the default timeout
-    // on a loaded machine (step 88). Each batch still reaches every rule.
-    [1, 10_001, 0xc0ffee, 0xdeadbeef].flatMap((start) =>
-      Array.from({ length: 8 }, (_, i) => ({
-        first: start + 25 * i,
-        count: 25,
+    // Many short tests rather than a few long ones, so that each stays far
+    // below the default timeout on a loaded machine (step 88). The rule-reach
+    // assertion covers a whole start, as one batch of 25 reaches some rules
+    // only a few times; it runs in the start's last batch, after the others,
+    // since the tests of a file run in order.
+    STARTS.flatMap((start) =>
+      Array.from({ length: BATCHES }, (_, i) => ({
+        start,
+        first: start + BATCH_SIZE * i,
+        count: BATCH_SIZE,
       })),
     ),
   )(
     "random K, cap, grid, meta and warnings agree after every step (seeds $first + $count)",
-    ({ first, count }) => {
-      const seen = new Map<string, number>();
+    ({ start, first, count }) => {
+      const group = reach.get(start) ?? { seen: new Map(), batches: 0 };
+      reach.set(start, group);
       const failures: string[] = [];
       for (let seed = first; seed < first + count; seed++) {
-        const failure = runCase(seed, seen);
+        const failure = runCase(seed, group.seen);
         if (failure !== undefined) failures.push(failure);
       }
+      group.batches++;
       expect(
         failures.slice(0, 3),
         `${failures.length} of ${count} seeds failed`,
       ).toEqual([]);
-      // The generator reached every rule this test claims to check.
-      expect(RULES.filter((rule) => (seen.get(rule) ?? 0) === 0)).toEqual([]);
+      if (first + count === start + BATCHES * BATCH_SIZE) {
+        expect(group.batches, `batches of seed start ${start} run`).toBe(
+          BATCHES,
+        );
+        // The start's seeds reached every rule this test claims to check.
+        expect(
+          RULES.filter((rule) => (group.seen.get(rule) ?? 0) === 0),
+        ).toEqual([]);
+      }
     },
   );
 });
