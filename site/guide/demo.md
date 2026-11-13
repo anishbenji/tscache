@@ -43,7 +43,7 @@ reconnect, each on the vanilla reference client, are on the pages that explain t
 server rendering on [Server rendering](/guides/ssr) and the reconnect under
 [Catching up after a gap](/guides/live-feeds#catching-up-after-a-gap). They were recorded headless
 with Playwright and converted with ffmpeg into the GIFs the README shows (`docs/media/`) and the videos
-the site shows (`site/public/media/`); the script that records them again lands in a later step.
+the site shows (`site/public/media/`).
 
 The launcher is
 [`scripts/demo.ts`](https://github.com/anishbenji/tscache/blob/main/scripts/demo.ts), and the hub's
