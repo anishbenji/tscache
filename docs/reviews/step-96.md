@@ -1,6 +1,6 @@
 # Step 96 — merge.ts comments in N70's terms
 
-Branch: `docs/96-merge-comments-n70` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: awaiting review · Verdict after triage: pending
+Branch: `docs/96-merge-comments-n70` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -62,3 +62,12 @@ None.
 ## Security lane (Claude), not the gate
 
 run 1, head f63888c: P0 0, P1 0, P2 0
+
+## Round 1 (GPT-6.1 Sol, high), head aac603f
+
+One P1, R1-1: the round's own `bun run ci` exited 1 on two recorder tests in `e2e/demo/launcher.spec.ts`
+(`:461`, a port still in use right after an interrupted recording; `:579`, `ENOTEMPTY` removing a temporary
+`node-compile-cache` folder). This step changes only comments in `merge.ts`, the code tour and docs, and CI on `main`
+passes, so the failures are a pre-existing race in those tests, not this change. Outcome: accepted as a CI fact.
+`bun run ci` was re-run on `aac603f` under the heavy-job lock and exited 0 (Playwright 187 passed); step 110 finds and
+fixes both races at their cause. No finding about this step's diff; settled.
