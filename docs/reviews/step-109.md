@@ -81,16 +81,18 @@ The `vite` entry grows by the six function headers (minified 2,593 to 2,781 byte
 
 ## Verification
 
-| Check                                                                                                                                     | Result                                  |
-| ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `bunx vitest run packages/tscache/test/vite-fetcher-url-hooks.test.ts` on the unchanged `fetcher-url.ts`                                  | 12 tests passed                         |
-| `bunx vitest run` on `vite-fetcher-url-hooks`, `vite-fetcher-url`, `vite-iife-warning`, `vite-worker` and `bundler-hints` after the split | 5 files, 51 tests passed                |
-| `bunx tsc -p packages/tscache --noEmit`, `bunx tsc -p . --noEmit`                                                                         | No errors                               |
-| `bunx vitest run scripts/demo`                                                                                                            | 5 files, 24 tests passed                |
-| `heavy-run.sh "109 child: launcher spec" bunx playwright test --project=demo e2e/demo/launcher.spec.ts` on 26bee18                        | 16 passed                               |
-| `bunx fallow health --score --format json`                                                                                                | 97.9 A (table above)                    |
-| `bun scripts/size.ts`                                                                                                                     | Every entry within budget (table above) |
-| `heavy-run.sh "109 child: ci" bun run ci` on the final head                                                                               | PENDING                                 |
+| Check                                                                                                                                     | Result                                                                                                                                           |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bunx vitest run packages/tscache/test/vite-fetcher-url-hooks.test.ts` on the unchanged `fetcher-url.ts`                                  | 12 tests passed                                                                                                                                  |
+| `bunx vitest run` on `vite-fetcher-url-hooks`, `vite-fetcher-url`, `vite-iife-warning`, `vite-worker` and `bundler-hints` after the split | 5 files, 51 tests passed                                                                                                                         |
+| `bunx tsc -p packages/tscache --noEmit`, `bunx tsc -p . --noEmit`                                                                         | No errors                                                                                                                                        |
+| `bunx vitest run scripts/demo`                                                                                                            | 5 files, 24 tests passed                                                                                                                         |
+| `heavy-run.sh "109 child: launcher spec" bunx playwright test --project=demo e2e/demo/launcher.spec.ts` on 26bee18                        | 16 passed                                                                                                                                        |
+| `bunx fallow health --score --format json`                                                                                                | 97.9 A (table above)                                                                                                                             |
+| `bun scripts/size.ts`                                                                                                                     | Every entry within budget (table above)                                                                                                          |
+| `heavy-run.sh "109 child: ci" bun run ci` on cbffb71                                                                                      | Exit 0; Vitest 137 files, 2,736 tests passed; Playwright 187 passed; health 98 A; every size entry within budget; every bench smoke case matched |
+
+After cbffb71 only this table row changed, so `bun run ci` was not run again.
 
 Not verified: the recorder was not run end to end against a real demo with ffmpeg (it records and re-encodes the committed media for many minutes); the launcher spec drives it with a stand-in ffmpeg, a probe scenario and fake builds.
 
