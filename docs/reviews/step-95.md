@@ -90,6 +90,8 @@ None.
 
 run 1, head 1be6356: P0 0, P1 0, P2 0
 
+run 2, head 8ee7b43: P0 0, P1 0, P2 0
+
 ## Round 1 — GPT-6.1 Sol (high)
 
 Head `c5c7a41`. Reviewer verdict: merge after fixes. Finding check: V 1, P 0, I 0, D 0.
