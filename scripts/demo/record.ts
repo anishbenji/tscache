@@ -11,7 +11,8 @@
 // on the demo's ports (DEMO_PORT moves them), and refuses to start when one is
 // taken, such as by a `bun run demo` already running. It stops the demo at
 // the end; Ctrl-C, SIGTERM or SIGHUP stops it, Chromium and everything the
-// demo started too. Every scenario runs on the vanilla reference
+// demo started too (best effort past a launcher that does not stop within
+// LAUNCHER_GRACE_MS: see `processes` below). Every scenario runs on the vanilla reference
 // client in a fresh browser context, so a fresh SharedWorker. The recorded
 // page is a stage this script serves: a caption, a strip of the app's
 // mock-backend counters since the scenario began, and the app itself in one
@@ -891,10 +892,12 @@ async function waitForHub(demo: Started): Promise<void> {
 }
 
 /**
- * Starts the demo's launcher, which stops its app servers on SIGTERM and
- * exits only once they are gone: the recorder waits for that whole stop
- * before it sends SIGKILL, which would reach the launcher alone and leave
- * the servers running past the recorder's exit (step 110).
+ * The registry the demo's launcher is started in, with LAUNCHER_GRACE_MS.
+ * The launcher stops its app servers on SIGTERM and exits only once they are
+ * gone, and the grace covers that whole stop (step 110). The SIGKILL after it
+ * is a best-effort backstop for a launcher that stalls: it reaches the
+ * launcher alone, so app servers may outlive the recorder, and Processes says
+ * so on stderr.
  */
 const processes = new Processes(undefined, { graceMs: LAUNCHER_GRACE_MS });
 let exiting: Promise<never> | undefined;

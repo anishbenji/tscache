@@ -236,7 +236,8 @@ console.log(server.group);
       const group = launcher.group;
       if (group === undefined) throw new Error("the launcher did not start");
       leftovers.push(group);
-      // Printed once its handlers are installed.
+      // Printed once its handlers are installed; echoedPid registers the
+      // server, which leads its own group, for afterEach to kill.
       const server = await echoedPid(launcher.output);
       vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "Date"] });
       const stopped = processes.stop();
@@ -253,6 +254,42 @@ console.log(server.group);
     } finally {
       vi.useRealTimers();
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sends SIGKILL once a custom grace has passed, says so, and resolves with every group retired (step 110)", async () => {
+    // Ignores SIGTERM, as a launcher stalled past its grace does; says
+    // "ready" once it does, so the SIGTERM below cannot come first.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { kill, calls } = recording();
+    const processes = new Processes(kill, { graceMs: LAUNCHER_GRACE_MS });
+    const started = processes.start(
+      ["sh", "-c", 'trap "" TERM; echo ready; exec sleep 60'],
+      { cwd, capture: true },
+    );
+    const group = started.group;
+    if (group === undefined) throw new Error("sh did not start");
+    leftovers.push(group);
+    try {
+      await expect.poll(() => started.output()).toBe("ready\n");
+      vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "Date"] });
+      const stopped = processes.stop();
+      await vi.advanceTimersByTimeAsync(LAUNCHER_GRACE_MS - 1);
+      expect(signalsTo(calls, group)).toEqual(["SIGTERM"]);
+      expect(errors).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(signalsTo(calls, group)).toEqual(["SIGTERM", "SIGKILL"]);
+      expect(errors).toHaveBeenCalledTimes(1);
+      expect(String(errors.mock.calls[0]?.[0])).toContain(String(group));
+      expect(await started.exited).toBe(null);
+      // The next probe finds the group empty.
+      await vi.runOnlyPendingTimersAsync();
+      await stopped;
+      expect(processes.groups.size).toBe(0);
+      expect(errors).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      errors.mockRestore();
     }
   });
 

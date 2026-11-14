@@ -175,16 +175,22 @@ export class Processes {
     this.#sweeper.unref?.();
   }
 
-  /** Sends `name` to every registered group that still has a member. */
-  #signal(name: NodeJS.Signals): void {
+  /**
+   * Sends `name` to every registered group that still has a member; returns
+   * the groups it signalled.
+   */
+  #signal(name: NodeJS.Signals): number[] {
+    const signalled: number[] = [];
     for (const group of [...this.#groups]) {
       if (!this.#live(group)) continue;
       try {
         this.#kill(-group, name);
+        signalled.push(group);
       } catch {
         this.#retire(group);
       }
     }
+    return signalled;
   }
 
   /** Resolves true once every group is retired, or false after `ms`. */
@@ -201,7 +207,14 @@ export class Processes {
   async #stopAll(): Promise<void> {
     this.#signal("SIGTERM");
     if (await this.#emptied(this.#graceMs)) return;
-    this.#signal("SIGKILL");
+    const killed = this.#signal("SIGKILL");
+    if (killed.length > 0) {
+      // A group leader that stops groups of its own (a launcher) may leave
+      // them running: the SIGKILL does not reach them.
+      console.error(
+        `demo: groups ${killed} did not exit within ${this.#graceMs} ms of SIGTERM; sent SIGKILL`,
+      );
+    }
     if (!(await this.#emptied(KILL_MS))) {
       console.error(
         `demo: processes still running in groups ${[...this.#groups]}`,
