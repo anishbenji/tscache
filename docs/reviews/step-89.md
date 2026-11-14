@@ -72,7 +72,7 @@ On `5ba6db4`, the last commit that changes code (the commits after it change onl
 - `bunx vitest run scripts/demo`: 5 files, 23 tests passed (`processes.test.ts` 7, `owned.test.ts` 5, `request.test.ts` 5, `backend.test.ts` 3, `lines.test.ts` 3).
 - `bunx tsc -p .` and `bunx tsc -p e2e`: no errors. `bunx biome check scripts e2e`: no fixes (one existing warning in `e2e/examples/react-lwcharts.spec.ts`, untouched). `bun scripts/test-clocks.ts`: "169 files clean". `bun run knip`: exit 0. `bun run fallow`: exit 0.
 - **The launcher spec, repeated.** `~/code/tscache-reports/bin/heavy-run.sh "89 child: launcher x5" bunx playwright test e2e/demo/launcher.spec.ts --project demo --repeat-each 5 --workers 1`: exit 0, 80 passed (the spec's 16 tests, 5 times each) in 2.5 min, at a load average of about 12 to 18.
-- **The gate.** `~/code/tscache-reports/bin/heavy-run.sh "89 child: ci" bun run ci`: recorded in the next commit, run on the commit that adds the second pre-review section.
+- **The gate.** `~/code/tscache-reports/bin/heavy-run.sh "89 child: ci" bun run ci`: on `05dfb64`, the commit that adds the second pre-review section (its code is `5ba6db4`'s): exit 0, 132 Vitest files (2691 tests) and 187 Playwright tests passed, no `not ok` line, at a load average of about 11 to 15.
 
 Earlier runs:
 
