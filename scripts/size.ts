@@ -10,7 +10,10 @@
 // the entry and the lazy chunks above it hold. Fails when an entry or its lazy part exceeds
 // its budget in packages/tscache/bench/budgets.json, or when a file of the
 // built package imports an entry file (a worker loaded under a URL with a
-// query would then evaluate its entry twice).
+// query would then evaluate its entry twice). The measurement itself is in
+// scripts/size-measure.ts: a chunk left out of a bundle is named there with
+// its content hash replaced by a constant, so that an edit to comments alone
+// moves no size.
 //
 //   bun scripts/size.ts            check against the budgets
 //   bun scripts/size.ts --update   rewrite the budgets from this build
@@ -20,15 +23,10 @@
 // Raising one is a reviewed edit of budgets.json in the pull request that
 // needs it (docs/benchmarking.md).
 
-import {
-  appendFileSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { budgetFor, checkRow, parseBudgets } from "./size-budget";
+import { checkEntryImports, measureEntry, type Size } from "./size-measure";
 
 const ROOT = new URL("../packages/tscache/", import.meta.url);
 const BUDGETS = fileURLToPath(new URL("bench/budgets.json", ROOT));
@@ -45,172 +43,12 @@ const ENTRIES = {
 
 type Entry = keyof typeof ENTRIES;
 
-interface Size {
-  minified: number;
-  gzip: number;
-  brotli: number;
-}
-
 interface Budgets {
   /**
    * Brotli bytes each entry may reach; `<entry>:lazy` for what it loads
    * with `import()`.
    */
   brotli: Record<string, number>;
-}
-
-/** A dist file's source, by the relative specifier that names it. */
-const source = (specifier: string) =>
-  readFileSync(`${DIST}${specifier.slice(2)}`, "utf8");
-
-/** The dist files a module imports, statically and with `import()`. */
-function importsOf(code: string): { static: string[]; dynamic: string[] } {
-  const relative = (re: RegExp) =>
-    [...code.matchAll(re)].map((m) => m[1] as string);
-  return {
-    static: relative(/(?:\bfrom|\bimport)\s*"(\.\/[\w-]+\.js)"/g),
-    dynamic: relative(/\bimport\s*\(\s*"(\.\/[\w-]+\.js)"\s*\)/g),
-  };
-}
-
-/** The dist files `roots` reach through static imports, the roots included. */
-function closure(roots: string[]): Set<string> {
-  const seen = new Set<string>();
-  const pending = [...roots];
-  for (let file = pending.pop(); file !== undefined; file = pending.pop()) {
-    if (seen.has(file)) continue;
-    seen.add(file);
-    pending.push(...importsOf(source(file)).static);
-  }
-  return seen;
-}
-
-/** Fails when a file of the built package imports one of its entry files. */
-function checkEntryImports(): void {
-  const entryFiles = new Set(Object.keys(ENTRIES).map((e) => `./${e}.js`));
-  for (const file of readdirSync(DIST).filter((f) => f.endsWith(".js"))) {
-    const { static: deps, dynamic } = importsOf(source(`./${file}`));
-    const bad = [...deps, ...dynamic].filter((dep) => entryFiles.has(dep));
-    if (bad.length > 0) {
-      throw new Error(
-        `dist/${file} imports the entry file ${bad.join(", ")}: an entry must only be loaded as an entry`,
-      );
-    }
-  }
-}
-
-/** Leaves the named dist files out of a bundle, as imports. */
-function leaveOut(files: ReadonlySet<string>): Bun.BunPlugin {
-  return {
-    name: "leave-out",
-    setup(build) {
-      build.onResolve({ filter: /^\.\// }, (args) =>
-        files.has(args.path) ? { path: args.path, external: true } : undefined,
-      );
-    },
-  };
-}
-
-/** A dist file bundled into one, minified, without `left`, and its sizes. */
-async function bundle(
-  file: string,
-  target: "browser" | "node",
-  left: ReadonlySet<string>,
-): Promise<Size> {
-  const result = await Bun.build({
-    entrypoints: [`${DIST}${file.slice(2)}`],
-    target,
-    format: "esm",
-    minify: true,
-    plugins: [leaveOut(left)],
-    // The `./vite` entry runs inside Vite: Vite and Node's modules are the
-    // application's, not the package's.
-    external: ["vite", "node:*"],
-  });
-  if (!result.success) {
-    throw new AggregateError(result.logs, `bundling ${file} failed`);
-  }
-  const output = result.outputs[0];
-  if (output === undefined) throw new Error(`bundling ${file} gave nothing`);
-  const code = Buffer.from(await output.arrayBuffer());
-  return {
-    minified: code.byteLength,
-    gzip: gzipSync(code, { level: 9 }).byteLength,
-    brotli: brotliCompressSync(code, {
-      params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
-    }).byteLength,
-  };
-}
-
-/** Sums sizes. */
-function total(sizes: Size[]): Size {
-  return sizes.reduce(
-    (sum, size) => ({
-      minified: sum.minified + size.minified,
-      gzip: sum.gzip + size.gzip,
-      brotli: sum.brotli + size.brotli,
-    }),
-    { minified: 0, gzip: 0, brotli: 0 },
-  );
-}
-
-/** The dist files that `files` load with `import()`, other than `except`. */
-function dynamicOf(
-  files: Iterable<string>,
-  except: ReadonlySet<string>,
-): Set<string> {
-  return new Set(
-    [...files]
-      .flatMap((file) => importsOf(source(file)).dynamic)
-      .filter((file) => !except.has(file)),
-  );
-}
-
-/**
- * An entry's initial load, bundled into one file as an application's
- * bundler would, and what it loads with `import()`: each lazy chunk bundled
- * without the files the initial load already holds, and each chunk a lazy
- * chunk loads with `import()` in turn (nested) without the files the
- * initial load and the lazy chunks hold. A chunk's own `import()` targets
- * are left out of it, never inlined.
- */
-async function measure(entry: Entry): Promise<{
-  initial: Size;
-  lazy: Size | undefined;
-  nested: Size | undefined;
-}> {
-  const reached = closure([`./${entry}.js`]);
-  const lazyRoots = dynamicOf(reached, reached);
-  const initial = await bundle(`./${entry}.js`, ENTRIES[entry], lazyRoots);
-  if (lazyRoots.size === 0) {
-    return { initial, lazy: undefined, nested: undefined };
-  }
-  const lazyFiles = closure([...lazyRoots]);
-  const held = new Set([...reached, ...lazyRoots]);
-  const nestedRoots = dynamicOf(lazyFiles, held);
-  const lazy = await Promise.all(
-    [...lazyRoots].map((root) =>
-      bundle(root, ENTRIES[entry], new Set([...reached, ...nestedRoots])),
-    ),
-  );
-  const above = new Set([...reached, ...lazyFiles]);
-  const deeper = dynamicOf(
-    closure([...nestedRoots]),
-    new Set([...above, ...nestedRoots]),
-  );
-  if (deeper.size > 0) {
-    throw new Error(
-      `${entry}: a nested lazy chunk loads ${[...deeper].join(", ")} with import(); measure that level too`,
-    );
-  }
-  const nested = await Promise.all(
-    [...nestedRoots].map((root) => bundle(root, ENTRIES[entry], above)),
-  );
-  return {
-    initial,
-    lazy: total(lazy),
-    nested: nested.length === 0 ? undefined : total(nested),
-  };
 }
 
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(2)} kB`;
@@ -248,9 +86,13 @@ function row(label: string, key: string, size: Size): void {
     `| \`${label}\` | ${kb(size.minified)} | ${kb(size.gzip)} | ${kb(size.brotli)} | ${budget} | ${verdict} |`,
   );
 }
-checkEntryImports();
+checkEntryImports(DIST, Object.keys(ENTRIES));
 for (const entry of Object.keys(ENTRIES) as Entry[]) {
-  const { initial, lazy, nested } = await measure(entry);
+  const { initial, lazy, nested } = await measureEntry(
+    DIST,
+    entry,
+    ENTRIES[entry],
+  );
   row(entry, entry, initial);
   if (lazy !== undefined) row(`${entry} (lazy)`, `${entry}:lazy`, lazy);
   if (nested !== undefined) {
