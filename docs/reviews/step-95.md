@@ -1,6 +1,6 @@
 # Step 95 — The flaky tests
 
-Branch: `fix/95-flakes` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: round 1 fixed · Verdict after triage: pending
+Branch: `fix/95-flakes` · Reviewer: GPT-6.1 Sol (high) · Rounds: 2 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -130,3 +130,8 @@ On the previous construction, with stops forced at steps 7, 10 and 16, round 1's
 The previous construction, run the same way before the connection limit was found, failed once in 60 and twice in 90 (the diagnostic run), each time at the wait after the drag.
 
 `bun scripts/test-clocks.ts`: "173 files clean"; `bunx tsc -p e2e`: no errors. `~/code/tscache-reports/bin/heavy-run.sh "95 child: ci" bun run ci`: exit 0 on `9ebd75d` (Vitest 2724 passed, Playwright 187 passed); the commit after it changes only this file and `docs/INDEX.md`.
+
+## Round 2 (GPT-6.1 Sol, high), head b750b0e
+
+No findings; verdict merge. R1-1 was checked as fixed by the rebuilt R1-3. `bun run ci` exit 0 on that head (run by
+the round). Settled.
