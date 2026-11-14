@@ -1,6 +1,6 @@
 # Step 104 — room in the index (lazy) size budget
 
-Branch: `chore/104-lazy-budget` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: awaiting review
+Branch: `chore/104-lazy-budget` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled
 
 ## Scope
 
@@ -40,3 +40,8 @@ None.
 ## Security lane (Claude), not the gate
 
 run 1, head 4e0a17f: P0 0, P1 0, P2 0
+
+## Round 1 (GPT-6.1 Sol, high), head ca7c05a
+
+No findings; verdict merge. The pre-review fixes were checked as fixed. `bun run ci` exit 0 on that head (run by the
+round). Settled.
