@@ -69,3 +69,7 @@ One P2 (2026-11-13): item 11 stated a two-deadline bound for a removal without N
 ## Finding check (claude-fable-5-2), round 1
 
 V 1, P 0, I 0, D 0
+
+## Merge with main after #115 (2026-11-14)
+
+After #117 and #115 merged, the branch conflicted with `main` only in `docs/INDEX.md`. Main was merged in twice (no force-push), keeping both steps' rows: the `docs/workflow.md` size from step 83 (18.4 KB), the `docs/review-checklist.md` size from this step (15.1 KB), and the `docs/reviews/` count and size re-measured with `wc -c`. The checklist text is unchanged by the merges, so no new gate round was run; the PR's required checks run on the merged head.
