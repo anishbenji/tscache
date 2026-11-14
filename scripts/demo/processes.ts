@@ -35,6 +35,11 @@ export interface StartOptions {
   cwd: string;
   /** Keep the output for `output()`; otherwise stderr goes to ours. */
   capture?: boolean;
+  /**
+   * With `capture`, also copy stderr here as it arrives (the launcher's own
+   * stderr), so a running server's warnings still reach the terminal.
+   */
+  stderr?: { write(chunk: Buffer): unknown };
   env?: Record<string, string | undefined>;
 }
 
@@ -84,6 +89,10 @@ export class Processes {
     };
     child.stdout?.on("data", keep);
     child.stderr?.on("data", keep);
+    const sink = options.stderr;
+    if (sink !== undefined) {
+      child.stderr?.on("data", (chunk: Buffer) => sink.write(chunk));
+    }
     const exited = new Promise<number | null>((resolve) => {
       child.once("exit", (code) => {
         if (group !== undefined) this.#leaderExited(group);
