@@ -53,7 +53,12 @@
     "tscache-bench:head"
   ],
   "health": {
-    // Test tables run long by design; size thresholds gate src only. The
+    // Test tables run long by design; size thresholds gate src only, and a
+    // test that imports a module would count against its coupling, which
+    // could then not move without editing tests. That holds for every test
+    // tree: the package tests, the Playwright specs with their support
+    // modules and pages (all of e2e/ is test-harness code), the integration
+    // tests and the script tests. The
     // example apps are demo code covered by their Playwright specs, which
     // the coverage-based CRAP estimate cannot see. The framework snippets
     // are type-checked, not run in CI (step ⑭), so the estimate takes them
@@ -66,6 +71,9 @@
     // not run, as the framework snippets are.
     "ignore": [
       "packages/*/test/**",
+      "e2e/**",
+      "integrations/test/**",
+      "scripts/**/*.test.ts",
       "packages/tscache/bench/run.ts",
       "packages/tscache/bench/e2e.ts",
       "scripts/bench.ts",

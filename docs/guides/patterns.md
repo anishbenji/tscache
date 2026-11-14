@@ -165,10 +165,15 @@ designs follow after the release.
   fields is 525,600 bars of 40 bytes and one presence bit, about 21 MB per series. `clear()` frees a
   cache's points (`site/guides/patterns.md`, Memory; roadmap: eviction and memory limits).
 - **Deploy skew has no recovery path.** A protocol mismatch rejects `createClient` with
-  `ProtocolMismatchError` and nothing more; with hashed worker URLs two deploys run two SharedWorkers
-  side by side, unreported, and both write the origin's IndexedDB database. A fixed worker URL keeps one
-  worker but needs a fixed fetcher URL too, since a worker refuses a second fetcher module
-  (`site/guides/workers.md`, Stale scripts after a deploy).
+  `ProtocolMismatchError` and nothing more. With hashed worker URLs, two deploys that change the worker
+  run two SharedWorkers side by side, unreported, and both write the origin's IndexedDB database. A
+  deploy that changes only the fetcher keeps the worker URL, since the worker bundle names no fetcher
+  (`fetcherUrl()` emits it as a chunk of the page's build, `packages/tscache/src/vite/fetcher-url.ts`,
+  and the client sends its URL at `init`); new tabs then join the old worker, which refuses a second
+  fetcher module (`Orchestrator.load`, `packages/tscache/src/orchestrator/orchestrator.ts`), so
+  `createClient` rejects with `ConfigError` until the old tabs close. A fixed worker URL keeps one
+  worker but needs a fixed fetcher URL too, for the same reason (`site/guides/workers.md`, Stale
+  scripts after a deploy). The deploy-skew proposal (finding M5) designs the recovery.
 - **No change notifications.** Apart from the opt-in `mergeWarning`, readers hear only `cacheCleared`; a
   view that must redraw calls `get` again, with `cacheOnly: true` after another tab's signal when the tabs
   share a SharedWorker (`site/guides/live-feeds.md`; roadmap: subscriptions).
