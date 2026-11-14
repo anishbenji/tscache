@@ -51,10 +51,11 @@ Three limits of 0.1.0 that an application has to design around:
 - **Memory is neither bounded nor reported.** A cache keeps everything it was asked for until its worker
   ends, and a SharedWorker runs while any tab of the origin uses it. A year of one-minute OHLCV bars is
   about 21 MB per series. [Memory](/guides/patterns#memory) says how to keep it in check.
-- **A deploy can leave tabs on two versions.** With a hashed worker URL, old and new tabs run separate
-  SharedWorkers that share no memory, silently, and both write the origin's IndexedDB database; with a
-  fixed URL, a protocol change or a new fetcher module URL makes `createClient` reject
-  (`ProtocolMismatchError` or `ConfigError`) until the old tabs close.
+- **A deploy can leave tabs on two versions.** With a hashed worker URL, a deploy that changes the
+  worker gives old and new tabs separate SharedWorkers that share no memory, silently, and both write
+  the origin's IndexedDB database. A deploy that changes only the fetcher keeps the worker URL, and
+  `createClient` in a new tab rejects with `ConfigError` until the old tabs close; so does a new fetcher
+  with a fixed worker URL, and a protocol change there rejects with `ProtocolMismatchError`.
   [Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy) has the details.
 - **Readers are not told when data changes.** A view that must redraw reads again.
   [Redrawing when the cache changes](/guides/live-feeds#redrawing-when-the-cache-changes) shows how.
