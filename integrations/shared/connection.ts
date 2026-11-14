@@ -50,6 +50,37 @@ export interface Connection {
 const CONNECTING: ConnectionState = { status: "connecting" };
 
 /**
+ * The applying of `seeds`: given a client and a cache id, the applying of
+ * that cache's seed to that client, started on the first ask and shared by
+ * every later one; undefined for a cache without a seed.
+ */
+function seeder(
+  seeds: readonly Seed[],
+): (client: TscacheClient, id: string) => Promise<void> | undefined {
+  const byId = new Map(seeds.map((seed) => [seed.config.id, seed]));
+  /** Per client, the applying of each cache's seed, started on the first ask. */
+  const seedings = new WeakMap<TscacheClient, Map<string, Promise<void>>>();
+  return (client, id) => {
+    const seed = byId.get(id);
+    if (seed === undefined) return undefined;
+    let ofClient = seedings.get(client);
+    if (ofClient === undefined) {
+      ofClient = new Map();
+      seedings.set(client, ofClient);
+    }
+    let applying = ofClient.get(id);
+    if (applying === undefined) {
+      applying = client
+        .cache(seed.config)
+        .then((cache) => hydrateRead(cache, seed.read))
+        .then(() => {});
+      ofClient.set(id, applying);
+    }
+    return applying;
+  };
+}
+
+/**
  * Connects with `open`, and again each time the worker behind the client
  * is lost, as when the tab hosting the SharedWorker crashes: the new client
  * starts a new worker with an empty cache (docs/guides/worker-setup.md).
@@ -70,9 +101,7 @@ export function connect(
 ): Connection {
   let state = CONNECTING;
   let disposed = false;
-  const byId = new Map(seeds.map((seed) => [seed.config.id, seed]));
-  /** Per client, the applying of each cache's seed, started on the first ask. */
-  const seedings = new WeakMap<TscacheClient, Map<string, Promise<void>>>();
+  const seeding = seeder(seeds);
   const listeners = new Set<() => void>();
 
   function set(next: ConnectionState): void {
@@ -95,29 +124,6 @@ export function connect(
         if (!disposed) set({ status: "failed", error });
       },
     );
-  }
-
-  /** The applying of cache `id`'s seed to `client`, started on the first ask. */
-  function seeding(
-    client: TscacheClient,
-    id: string,
-  ): Promise<void> | undefined {
-    const seed = byId.get(id);
-    if (seed === undefined) return undefined;
-    let ofClient = seedings.get(client);
-    if (ofClient === undefined) {
-      ofClient = new Map();
-      seedings.set(client, ofClient);
-    }
-    let applying = ofClient.get(id);
-    if (applying === undefined) {
-      applying = client
-        .cache(seed.config)
-        .then((cache) => hydrateRead(cache, seed.read))
-        .then(() => {});
-      ofClient.set(id, applying);
-    }
-    return applying;
   }
 
   start();
