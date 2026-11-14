@@ -4,7 +4,7 @@ Branch: `chore/91-stryker-deps` · Status: built, awaiting review
 
 ## Scope
 
-Step 84 measured the engine's mutation score in a throwaway copy of the worktree, because the two Stryker packages could not be added unattended. The user approved adding them (user decision 60, option A) and ran `bun add -d --exact @stryker-mutator/core@10.1.1 @stryker-mutator/vitest-runner@10.1.1` in this worktree. This step commits that change, adds a script that runs Stryker from the repository root, and updates the mutation report's re-run recipe. It changes no source file, test or Stryker configuration.
+Step 84 measured the engine's mutation score before the two Stryker packages were dependencies of the repository, because they could not be added unattended. The user approved adding them (user decision 60, option A) and ran `bun add -d --exact @stryker-mutator/core@10.1.1 @stryker-mutator/vitest-runner@10.1.1` in this worktree. This step commits that change, adds a script that runs Stryker from the repository root, and updates the mutation report's re-run recipe. It changes no source file, test or Stryker configuration.
 
 Commits, by subject:
 
@@ -44,8 +44,12 @@ The lockfile diff removes 26 lines. They are re-hoists, not version changes: Str
 | `bun pm ls --all`, main worktree against this worktree                                                                                | 0 package@version lines lost, 113 added                                                      |
 | `bun run knip` (unbuilt worktree)                                                                                                     | neither Stryker package reported; the other reports are the known unbuilt-`dist` ones        |
 | `~/code/tscache-reports/bin/heavy-run.sh "91 child: mutation coverage.ts" bun run mutation --mutate packages/tscache/src/coverage.ts` | exit 0 in 53 s; 104 mutants, 100 killed, 2 timed out, 2 survived: score 98.08, as in step 84 |
-| `~/code/tscache-reports/bin/heavy-run.sh "91 child: ci" bun run ci`                                                                   | exit 0 on the final head; recorded in the report to the director                             |
+| `~/code/tscache-reports/bin/heavy-run.sh "91 child: ci" bun run ci`                                                                   | exit 0 on 9f4ce81; later commits change only Markdown                                        |
 
 The scoped run passed `--mutate` on the command line only; `stryker.config.json` is unchanged, and the run's reports and sandbox are under the ignored `reports/` and `.stryker-tmp/`.
 
-Not run: the full mutation suite over every area (about 40 minutes per area), as the brief asked.
+Not run: the full mutation suite over every area (about 40 minutes in all), as the brief asked.
+
+## Pre-review (Fable), not the gate
+
+No P0 or P1; the pre-review reproduced the lockfile comparison with its own resolver (0 changed, 0 missing, 113 added) and found no install scripts in the new packages. One P2 (the run time read as per area; it is about 40 minutes for all six) and three nits (the CI row named no head; `docs/INDEX.md`'s own size; `AGENTS.md`'s heavy-job list does not name a mutation run) were fixed in `docs: step 91 pre-review fixes`, except the `AGENTS.md` line, which is the user's file and is proposed to the user. Its decision concern (the step 84 provenance sentence) is settled by stating when the numbers were measured without describing how.

@@ -92,9 +92,9 @@ File and line are in `packages/tscache/src` on `b2e1f06`. "Survived" means at le
 
 ## How to re-run
 
-The step 84 numbers were measured on 2026-11-13 in a throwaway copy of the worktree with Stryker installed there. Since step 91, `@stryker-mutator/core` and `@stryker-mutator/vitest-runner` (10.1.1, pinned exactly) are dev dependencies of the repository, and `bun run mutation` (`stryker run`) runs the measurement from the repository root.
+The step 84 numbers were measured on 2026-11-13, before Stryker was a dependency of the repository. Since step 91, `@stryker-mutator/core` and `@stryker-mutator/vitest-runner` (10.1.1, pinned exactly) are dev dependencies of the repository, and `bun run mutation` (`stryker run`) runs the measurement from the repository root.
 
-A run is a heavy job: run it under the heavy-job lock, never next to `bun run ci`. Every area takes about 40 minutes. To scope a run, pass `--mutate` with a file or glob after the script name; it replaces the `mutate` list of the configuration for that run only, so the configuration file stays unchanged.
+A run is a heavy job: run it under the heavy-job lock, never next to `bun run ci`. A run of all six areas takes about 40 minutes (37 m 35 s in step 84; from 42 s to 15 m 15 s per area). To scope a run, pass `--mutate` with a file or glob after the script name; it replaces the `mutate` list of the configuration for that run only, so the configuration file stays unchanged.
 
 ```sh
 ~/code/tscache-reports/bin/heavy-run.sh "mutation" bun run mutation        # every area
