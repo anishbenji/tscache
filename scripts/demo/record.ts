@@ -39,7 +39,7 @@ import { Backend } from "./backend";
 import { demoPorts, hubPort } from "./catalog";
 import { HUB_LINE, stopping } from "./lines";
 import { Owner } from "./owned";
-import { Processes, type Started } from "./processes";
+import { LAUNCHER_GRACE_MS, Processes, type Started } from "./processes";
 import { request } from "./request";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -890,7 +890,13 @@ async function waitForHub(demo: Started): Promise<void> {
   throw new Error(`the demo hub did not answer on ${hubOrigin}`);
 }
 
-const processes = new Processes();
+/**
+ * Starts the demo's launcher, which stops its app servers on SIGTERM and
+ * exits only once they are gone: the recorder waits for that whole stop
+ * before it sends SIGKILL, which would reach the launcher alone and leave
+ * the servers running past the recorder's exit (step 110).
+ */
+const processes = new Processes(undefined, { graceMs: LAUNCHER_GRACE_MS });
 let exiting: Promise<never> | undefined;
 
 /**

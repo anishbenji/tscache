@@ -9,18 +9,36 @@
 // event we hear: the group is checked then, and if its leader left children
 // behind, checked again every SWEEP_MS until they are gone. Stopping signals
 // only registered groups that still have members: SIGTERM, then SIGKILL to
-// what is left after GRACE_MS, retiring each group as soon as it is empty.
+// what is left after the grace (GRACE_MS unless set), retiring each group as
+// soon as it is empty.
+//
+// A group whose leader is itself a launcher, stopping its own groups this way
+// on SIGTERM (the recorder's demo), needs LAUNCHER_GRACE_MS: a SIGKILL sent
+// while it is still stopping them would leave them running, each in a group
+// the SIGKILL does not reach (step 110).
 
 import { spawn } from "node:child_process";
-import { setTimeout as sleep } from "node:timers/promises";
 
 /** How long the groups get to exit after SIGTERM before SIGKILL. */
 const GRACE_MS = 3000;
 /** How long SIGKILL may take to clear the groups. */
 const KILL_MS = 2000;
+/** The longest a default `stop()` takes: GRACE_MS, then KILL_MS. */
+export const STOP_MS: number = GRACE_MS + KILL_MS;
+/**
+ * The grace for a launcher that stops its own groups with a default
+ * `Processes` on SIGTERM: its whole stop (STOP_MS), and GRACE_MS again for
+ * the launcher to begin it and to exit.
+ */
+export const LAUNCHER_GRACE_MS: number = STOP_MS + GRACE_MS;
 const POLL_MS = 50;
 /** How often a group whose leader exited is checked for remaining members. */
 const SWEEP_MS = 250;
+
+/** Resolves after `ms`, on the global timer (which fake timers replace). */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export interface Started {
   /** The group's id: the leader's pid, or undefined if it never started. */
@@ -46,8 +64,14 @@ export interface StartOptions {
 /** `process.kill`, replaceable so tests can see every signal sent. */
 export type Kill = (pid: number, signal: NodeJS.Signals | 0) => void;
 
+export interface ProcessesOptions {
+  /** How long the groups get to exit after SIGTERM before SIGKILL. */
+  graceMs?: number;
+}
+
 export class Processes {
   readonly #kill: Kill;
+  readonly #graceMs: number;
   /** Groups that have, or may have, members: each leader's pid. */
   readonly #groups = new Set<number>();
   /** The registered groups whose leader has exited. */
@@ -55,8 +79,12 @@ export class Processes {
   #sweeper: ReturnType<typeof setInterval> | undefined;
   #stopping: Promise<void> | undefined;
 
-  constructor(kill: Kill = (pid, signal) => process.kill(pid, signal)) {
+  constructor(
+    kill: Kill = (pid, signal) => process.kill(pid, signal),
+    { graceMs = GRACE_MS }: ProcessesOptions = {},
+  ) {
     this.#kill = kill;
+    this.#graceMs = graceMs;
   }
 
   /** True once `stop()` has been called. */
@@ -172,7 +200,7 @@ export class Processes {
 
   async #stopAll(): Promise<void> {
     this.#signal("SIGTERM");
-    if (await this.#emptied(GRACE_MS)) return;
+    if (await this.#emptied(this.#graceMs)) return;
     this.#signal("SIGKILL");
     if (!(await this.#emptied(KILL_MS))) {
       console.error(
