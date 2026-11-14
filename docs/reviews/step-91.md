@@ -69,3 +69,6 @@ existing resolution changed, no package version lost) and `git diff --check`; `b
 
 `main` moved to a553b0c (steps 84 and 85) after the round. The merge conflicted only in the `docs/reviews/` row of
 `docs/INDEX.md`, resolved by re-measuring it (90 files); no reviewed file changed.
+
+After #120 merged (`main` d23ed46), a second merge kept both sides of `docs/INDEX.md`: this branch's mutation
+report row and `main`'s `docs/media/` row, with the reviews row re-measured; no reviewed file changed.
