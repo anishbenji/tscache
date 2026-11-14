@@ -268,9 +268,11 @@ What to notice:
   range arithmetic on integer slots. A read or an invalidation snaps outward (`snapOut`), a put's
   authority inward (`snapIn`).
 - `SegmentStore.put` first removes the stored points inside the put's authority
-  (`SegmentStore.#carve`), then writes the batch one run at a time. `SegmentStore.#together` is the
-  layout rule: two points share a segment when they lie on the same page and at most `gapSplitK` slots
-  between them hold no point.
+  (`SegmentStore.#carve`), then writes the batch one write run at a time, in ascending slot order.
+  `SegmentStore.#together` cuts the batch into write runs (N70): consecutive batch points on the same
+  page with at most `gapSplitK` slots between them, counted on the batch alone. The layout rule is the
+  file comment at the top of `merge.ts`: two present points share a segment when they lie on the same
+  page and at most `gapSplitK` slots between them hold no point.
 - A `DenseSegment` stores no timestamps: a slot's time follows from its position. It keeps one typed
   array per field and one presence bit per slot, so a point has all of its fields or none.
 - `DenseSegment.mergeFrom` with an authority leaves exactly the given points inside it; without one it
