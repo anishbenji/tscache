@@ -513,10 +513,11 @@ for (const app of [
       // as on a loaded machine, reads where it stopped and again where it
       // ends (SCROLL_PAUSE_MS in session.ts), each read fetching the forming
       // bar besides the history it lacks. This drag stops on every run.
-      await control(page, { failNext: 1000 });
       const before = (await notices(page)).length;
-      const history = async () =>
-        (await notices(page)).slice(before).filter(isHistory);
+      const { failed } = await stats(page);
+      await control(page, { failNext: 1000 });
+      const since = async () => (await notices(page)).slice(before);
+      const history = async () => (await since()).filter(isHistory);
       await drag(page, "back", () => waitHistory(page, before));
       await expect
         .poll(async () => (await history()).length)
@@ -526,6 +527,18 @@ for (const app of [
       );
       await expect(page.getByTestId("missing")).toContainText("fetch failed");
       await control(page, { failNext: 0 });
+      // Retry once every request the backend failed has come back as a
+      // failed fetch. A read awaits the fetches in flight that overlap it
+      // rather than fetching again (architecture §4.9.1), so a Retry while
+      // one bound to fail is still in flight would fail with it.
+      const failures = (await stats(page)).failed - failed;
+      await expect
+        .poll(
+          async () =>
+            (await since()).filter((notice) => notice.outcome === "failed")
+              .length,
+        )
+        .toBe(failures);
       await page.getByRole("button", { name: "Retry" }).click();
       await expect(page.getByTestId("missing")).toHaveText("nothing missing");
       await expect(page.getByRole("button", { name: "Retry" })).toBeHidden();
