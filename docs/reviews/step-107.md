@@ -1,6 +1,6 @@
 # Step 107 — the e2e bench keeps the passing timings when a scenario fails
 
-Branch: `chore/107-bench-partial-e2e` · Reviewer: GPT-6.1 Sol · Rounds: 0 · Status: awaiting review
+Branch: `chore/107-bench-partial-e2e` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled
 
 ## Scope
 
@@ -60,3 +60,8 @@ None.
 ## Security lane (Claude), not the gate
 
 run 1, head d8af08e: P0 0, P1 0, P2 0
+
+## Round 1 (GPT-6.1 Sol, high), head b616a60
+
+No findings; verdict merge. The pre-review fixes PR-1 and PR-2 were checked as fixed. `bun run ci` exit 0 on that
+head (run by the round). Settled.
