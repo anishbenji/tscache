@@ -1,6 +1,6 @@
 # Step 94 — Tests for the engine's real mutation survivors
 
-Branch: `chore/94-mutation-survivors` · Reviewer: not yet run · Rounds: 0 · Status: awaiting review · Verdict after triage: pending
+Branch: `chore/94-mutation-survivors` · Reviewer: not yet run · Rounds: 1 · Status: settled · Verdict after triage: pending
 
 ## Scope
 
@@ -104,3 +104,8 @@ None.
 ## Security lane (Claude), not the gate
 
 run 1, head 5ca5aa5: P0 0, P1 0, P2 0
+
+## Round 1 (GPT-6.1 Sol, high), head e8543f3
+
+No findings; verdict merge. The pre-review fixes PR-1 to PR-6 were checked as fixed. `bun run ci` exit 0 on
+that head (run by the round). Settled.
