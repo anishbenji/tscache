@@ -1,6 +1,6 @@
 # Step 103 — `docs/INDEX.md` stops counting the review files
 
-Branch: `docs/103-index-reviews-row` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: awaiting review
+Branch: `docs/103-index-reviews-row` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled
 
 ## Scope
 
@@ -34,3 +34,8 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 1 (GPT-6.1 Sol, high), head eddcde9
+
+No findings; verdict merge. The pre-review nit was checked as fixed. `bun run ci` exit 0 on that head (run by the
+round). Settled.
