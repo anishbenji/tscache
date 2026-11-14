@@ -105,26 +105,32 @@ function globals(): WorkerGlobals {
   return globalThis as unknown as WorkerGlobals;
 }
 
-export async function openShared(
+/** A new SharedWorker on `url`; HostingError when none can be created. */
+function createSharedWorker(
   url: string | URL,
-  fetcher: FetcherConfig | undefined,
-  timeoutMs: number,
-): Promise<Hosting> {
+): InstanceType<NonNullable<WorkerGlobals["SharedWorker"]>> {
   const Ctor = globals().SharedWorker;
   if (typeof Ctor !== "function") {
     throw new HostingError("SharedWorker is not available");
   }
-  let worker: InstanceType<NonNullable<WorkerGlobals["SharedWorker"]>>;
   try {
     // extendedLifetime keeps the worker about 30 s after its last tab, so the
     // final flush can land (§4.10.8, N50); a browser without the option
     // ignores it. Every tab passes the same options, so they reach one worker.
-    worker = new Ctor(url, { type: "module", extendedLifetime: true });
+    return new Ctor(url, { type: "module", extendedLifetime: true });
   } catch (error) {
     throw new HostingError(
       `SharedWorker could not be created: ${String(error)}`,
     );
   }
+}
+
+export async function openShared(
+  url: string | URL,
+  fetcher: FetcherConfig | undefined,
+  timeoutMs: number,
+): Promise<Hosting> {
+  const worker = createSharedWorker(url);
   // The worker can die with the tab hosting it and nothing else would tell
   // this one (N32): queue on its lifetime lock, granted only once it is gone.
   // The watch starts at hello, because the time to init-ok (the fetcher

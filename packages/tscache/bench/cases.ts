@@ -86,24 +86,56 @@ function expectRead(s: Series, range: Range): number {
   return bars + (bars === 0 ? 0 : lastClose(s, range));
 }
 
-/** The cases, built lazily: fixtures cost a second or two. */
-export function cases(): Case[] {
+/** The fixtures and the ranges the cases read and put, built once. */
+interface Scene {
+  allDay: Series;
+  sessions: Series;
+  /** A chart's read in the middle of the 24/7 year. */
+  viewport: Range;
+  /** A sessions read in the middle of the year, crossing a few nights. */
+  sessionsView: Range;
+  /** A 5,000-bar page ending in the middle of the year, and its batch. */
+  page: Range;
+  pageBatch: PutBatch;
+  /** The page's last bar. */
+  pageEnd: Range;
+  /** The year's newest bar, and its batch. */
+  tailBar: Range;
+  tailBatch: PutBatch;
+  /** The 30 days before the middle of the year, and its bar count. */
+  month: Range;
+  monthBars: number;
+}
+
+function scene(): Scene {
   const { allDay, sessions } = fixtures();
   const middle = allDay.range.start + 182 * DAY;
-  const viewport = around(middle);
-  // A sessions read in the middle of the year, crossing a few nights.
-  const sessionsView = around(
-    sessions.range.start + 182 * DAY + 16 * 60 * MINUTE,
-  );
   const page = { start: middle - 5000 * MINUTE + MINUTE, end: middle };
-  const pageBatch: PutBatch = batchOf(allDay, page);
-  const pageEnd = { start: page.end, end: page.end };
   const tail = allDay.range.end;
   const tailBar = { start: tail, end: tail };
-  const tailBatch: PutBatch = batchOf(allDay, tailBar);
   const month = { start: middle - 30 * DAY, end: middle - MINUTE };
-  const monthBars = barsIn(allDay, month);
+  return {
+    allDay,
+    sessions,
+    viewport: around(middle),
+    sessionsView: around(sessions.range.start + 182 * DAY + 16 * 60 * MINUTE),
+    page,
+    pageBatch: batchOf(allDay, page),
+    pageEnd: { start: page.end, end: page.end },
+    tailBar,
+    tailBatch: batchOf(allDay, tailBar),
+    month,
+    monthBars: barsIn(allDay, month),
+  };
+}
 
+/** Reads of a cache filled with a year of bars. */
+function readCases({
+  allDay,
+  sessions,
+  viewport,
+  sessionsView,
+}: Scene): Case[] {
   return [
     {
       name: "read-viewport",
@@ -132,6 +164,19 @@ export function cases(): Case[] {
         return () => fold(engine.get("a", allDay.range));
       },
     },
+  ];
+}
+
+/** Puts into a filled cache, read back. */
+function putCases({
+  allDay,
+  pageBatch,
+  page,
+  pageEnd,
+  tailBar,
+  tailBatch,
+}: Scene): Case[] {
+  return [
     {
       name: "put-page",
       what: "put a 5,000-bar authoritative page over cached history",
@@ -155,6 +200,12 @@ export function cases(): Case[] {
           fold(engine.get("a", tailBar));
       },
     },
+  ];
+}
+
+/** Filling an empty cache, bar by bar and page by page. */
+function fillCases({ allDay, month, monthBars }: Scene): Case[] {
+  return [
     {
       name: "append-bars",
       what: "append 32,768 bars one put at a time into an empty cache, as a live feed does",
@@ -192,6 +243,12 @@ export function cases(): Case[] {
         };
       },
     },
+  ];
+}
+
+/** Moving a cache's data elsewhere: a snapshot, a transfer. */
+function moveCases({ allDay, viewport, month, monthBars }: Scene): Case[] {
+  return [
     {
       name: "snapshot-roundtrip",
       what: "snapshot a month, encode, decode, hydrate a fresh cache",
@@ -228,4 +285,10 @@ export function cases(): Case[] {
       },
     },
   ];
+}
+
+/** The cases, built lazily: fixtures cost a second or two. */
+export function cases(): Case[] {
+  const s = scene();
+  return [...readCases(s), ...putCases(s), ...fillCases(s), ...moveCases(s)];
 }
