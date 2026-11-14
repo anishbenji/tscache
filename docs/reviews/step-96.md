@@ -22,10 +22,16 @@ The variable and parameter name `chunk` is unchanged, since this step changes no
 
 **Other comments.** `grep -rn "shares a segment\|same run\|share a segment" packages/tscache/src` before the change matched the three comments above and the file comment at `merge.ts:8`, which states the stored layout (N14, N15: two present points share a segment exactly when they are on the same page with at most K empty slots between them). That is the layout after a put, not the definition of a write run, so it stays. `engine/cache.ts:536` ("a run that reaches the split from both sides is one run of consecutive differing points") is about the overlap warning's run of differing points (§4.3), not the write run, so it stays. `segment/dense.ts:2` ("a run of consecutive slots") describes a segment's layout and stays.
 
-| Command                                                             | Result                                             |
-| ------------------------------------------------------------------- | -------------------------------------------------- |
-| `bunx tsc --noEmit -p packages/tscache`                             | exit 0                                             |
-| `~/code/tscache-reports/bin/heavy-run.sh "96 child: ci" bun run ci` | run on the final head; result in the step's report |
+| Command                                                             | Result                                                                                |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `bunx tsc --noEmit -p packages/tscache`                             | exit 0                                                                                |
+| `~/code/tscache-reports/bin/heavy-run.sh "96 child: ci" bun run ci` | exit 1 on `5b0ceab` (size budget, see below); rerun on the final head after the merge |
+
+## Blocked, then cleared
+
+The first `bun run ci` on `5b0ceab` failed one check: the size budget for `index (lazy)`, whose brotli size exceeded its budget of 12,464 B by at most 16 bytes. The comment changes did not change the code. They changed the content hashes in the names of the built chunks (`dist/` keeps comments), and the minified bundle carries those names in its `import()` paths, so the compressed size moved by a few bytes. `main` at `98b7bbf` measured within 16 bytes of the same budget. A comparison of the two builds found no other difference in `dist/` than the comments and the chunk names. The step did not raise the budget, since a child may not widen a bound, and did not reword the comments to get a smaller hash.
+
+User decision 64 A raised the `index (lazy)` budget to 12,976 B (step 104, merged to `main` as `7c2e35d`). This branch merged `origin/main` afterwards. The conflicts in `docs/INDEX.md` were in the `docs/reviews/` row and the index's own row, which since step 103 (decision 70 A) carry no count or size; `main`'s text was taken for both. No other row of the index covers a file this step changes. On the merge commit, `bun run build` then `bun scripts/size.ts` passes: `index (lazy)` is 12.16 kB brotli against a budget of 12.67 kB.
 
 ## Contract-test changes
 
