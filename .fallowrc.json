@@ -12,6 +12,9 @@
     // Read by Stryker (stryker.config.json), not imported.
     "vitest.mutation.config.ts",
     "scripts/*.ts",
+    // The demo recorder, which Bun runs to re-make the README's and the
+    // site's demo media.
+    "scripts/demo/record.ts",
     "examples/*/*.html",
     "examples/*/src/entry-server.tsx",
     // The reference clients' pages and their server entries, as above.
