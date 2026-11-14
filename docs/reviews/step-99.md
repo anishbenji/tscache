@@ -32,7 +32,9 @@ In the tests the window is usually missed because the group is found empty by a 
 
 ## The change
 
-Both assertions become `await expect.poll(() => running(child)).toBe(false)` with the default timeout. Each still asserts the same final state: the child is gone. No timeout was raised and no retry added.
+Both assertions become `await expect.poll(() => running(child), { timeout: 5000 }).toBe(false)`. Each still asserts the same final state: the child is gone. No retry was added.
+
+The polls first used Vitest's default timeout of 1 s; the pre-review (below) asked for 5 s, and that is what they use. This is a new wait for an effect, not a raised bound on an existing one. The effect is launchd's reap, whose latency the test does not control and which grows only under load, the one condition in which the flake appears. As `docs/testing.md` ("Waiting") says, the timeout only detects a hang, a child that never goes; a passing run returns as soon as the pid stops answering, so the longer limit costs nothing. 5 s matches the neighbouring `groups.has(group)` poll in the same test.
 
 The other one-shot `running(...)` and `groups` assertions in `scripts/demo/*.test.ts` were checked; only `processes.test.ts` has any:
 
@@ -48,7 +50,16 @@ The other one-shot `running(...)` and `groups` assertions in `scripts/demo/*.tes
 
 Step 95 (`fix/95-flakes`) also changes "retires a build whose child outlives it only once the child exits", for a different race: the `sleep 1` child could end on its own before the test checked that it was still running. That step makes the child `sleep 30`, waits for two group probes (a `probesOf` helper) before those checks, and then ends the child itself with `process.kill(child, "SIGTERM")`. It does not change the one-shot `running(child)` reads after the group is gone or after `stop()`, which are this step's.
 
-The two changes are kept apart so the branches merge cleanly: this step changes only the two assertion lines and the comment above each, and leaves the rest of that test as it is on `main`. After both merge, the child that step 95's test ends with SIGTERM is still an orphan reaped by launchd, so the same zombie gap applies and this step's poll still covers it. Whichever step merges second merges `main` into its branch and keeps both changes.
+The two changes are kept apart so that `scripts/demo/processes.test.ts` merges cleanly: this step changes only the two assertion lines and the comment above each, and leaves the rest of that test as it is on `main`. The `docs/reviews/` row in `docs/INDEX.md` does conflict between the two branches (both re-measure it); whichever branch merges second resolves that row and re-measures it with `wc -c`. After both merge, the child that step 95's test ends with SIGTERM is still an orphan reaped by launchd, so the same zombie gap applies and this step's poll still covers it. Whichever step merges second merges `main` into its branch and keeps both changes.
+
+## Pre-review (Fable), not the gate
+
+On head 224b7bc (the director's merge of `origin/main` at 03c7b20 into this branch). It reproduced the cause independently, 28 of 30 runs with a gap of at most 3.1 ms, and noted that Linux CI is unaffected, because there a zombie still answers the group probe. It checked that the change does not weaken the tests: a mutant `#stopAll` that returns early still fails 15 of 15. No P0 or P1; predicted verdict merge.
+
+| #    | Sev | Finding                                                                            | Decision | Resolution                                                                                                                                                               |
+| ---- | --- | ---------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PR-1 | P2  | The two new polls use the 1 s default, while the flake appears only under load     | accepted | Validated: Vitest's `expect.poll` default is 1 s, and the reap is launchd's work under load. Both polls pass `{ timeout: 5000 }`, as hang detection only ("The change"). |
+| PR-2 | nit | "Step 95 and this step" says the branches merge cleanly; `docs/INDEX.md` conflicts | accepted | Reproduced by the pre-review. The sentence now covers only the test file, and names who resolves the INDEX row.                                                          |
 
 ## Contract-test changes
 
