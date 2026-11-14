@@ -37,6 +37,7 @@ import {
 } from "@playwright/test";
 import { Backend } from "./backend";
 import { demoPorts, hubPort } from "./catalog";
+import { HUB_LINE, stopping } from "./lines";
 import { Owner } from "./owned";
 import { Processes, type Started } from "./processes";
 import { request } from "./request";
@@ -864,9 +865,6 @@ async function demoPortsFree(): Promise<void> {
   );
 }
 
-/** Marks the launcher's line once its hub is up (scripts/demo.ts). */
-const HUB_LINE = "tscache demo hub:";
-
 /**
  * Waits for the hub of the recorder's own launcher: only once `demo` has
  * printed its hub line, so a hub something else started on the port in the
@@ -959,14 +957,22 @@ async function main(): Promise<void> {
     ? ["--reuse-builds"]
     : [];
   stopIfCancelled();
-  // Its output is kept, for the hub line, and printed if it fails.
+  // Its output is kept, for the hub line, and printed if it fails. Its
+  // stderr is also read as it arrives: once the launcher says it is stopping
+  // (an app server failed, say), its ports may be anyone's, so nothing more
+  // is sent to the backend, though the launcher takes seconds to exit.
   const demo = processes.start(["bun", "scripts/demo.ts", ...demoArgs], {
     cwd: ROOT,
     capture: true,
+    stderr: {
+      write: () => {
+        if (stopping(demo.output())) backend.lose();
+      },
+    },
   });
   own(() => processes.stop());
   void demo.exited.then((code) => {
-    // Its app servers are gone or going: their ports may be anyone's now.
+    // Its app servers are gone: their ports may be anyone's now.
     backend.lose();
     if (!cancelled) {
       void shutdown(1, `the demo exited with ${code}:\n${demo.output()}`);

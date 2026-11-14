@@ -24,6 +24,7 @@ import { stripVTControlCharacters } from "node:util";
 import { type App, appDir, apps } from "../e2e/examples/apps";
 import { demoPorts, hubPort } from "./demo/catalog";
 import { hub } from "./demo/hub";
+import { HUB_LINE, STOPPING_LINE } from "./demo/lines";
 import { Processes, type Started } from "./demo/processes";
 
 const root = new URL("..", import.meta.url);
@@ -52,9 +53,14 @@ const processes = new Processes();
 let server: ReturnType<typeof Bun.serve> | undefined;
 let exiting: Promise<never> | undefined;
 
-/** The one way out: stops the hub and every subprocess, then exits. */
+/**
+ * The one way out: says it is stopping (STOPPING_LINE, which the demo
+ * recorder reads), stops the hub and every subprocess, then exits.
+ */
 function shutdown(code: number, reason?: string): Promise<never> {
   exiting ??= (async () => {
+    // First, before any app server is signalled or its port let go.
+    console.error(STOPPING_LINE);
     if (reason !== undefined) console.error(reason);
     void server?.stop(true);
     await processes.stop();
@@ -187,5 +193,5 @@ try {
 }
 // A launcher that is stopping never says its hub is up.
 if (exiting !== undefined) await exiting;
-console.log(`\ntscache demo hub: http://127.0.0.1:${port}/`);
+console.log(`\n${HUB_LINE} http://127.0.0.1:${port}/`);
 for (const app of names) console.log(`  ${app.padEnd(18)} ${origins[app]}`);

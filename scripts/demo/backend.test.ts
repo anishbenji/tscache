@@ -3,8 +3,9 @@ import { Backend } from "./backend";
 
 // The demo recorder's gate on its demo's backend (scripts/demo/record.ts):
 // nothing is sent to the recorded app's port until the recorder has accepted
-// its own launcher's hub, and nothing once that launcher has exited, since
-// the port may be anyone's then (step 65 R3-1; step 89 pre-review, finding 2).
+// its own launcher's hub, and nothing once that launcher is stopping or has
+// exited, since the port may be anyone's then (step 65 R3-1; step 89
+// pre-reviews).
 
 /** A fetch that records each URL it is asked for and answers 200. */
 function recording(): { fetcher: typeof fetch; urls: string[] } {
@@ -35,7 +36,7 @@ describe("Backend", () => {
     expect(urls).toEqual([`${ORIGIN}api/control`]);
   });
 
-  it("sends nothing once its demo has exited, even if accepted again", async () => {
+  it("sends nothing once its demo is lost, even if accepted again", async () => {
     const { fetcher, urls } = recording();
     const backend = new Backend(ORIGIN, fetcher);
     backend.accept();

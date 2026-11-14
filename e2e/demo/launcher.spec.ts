@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { demoPorts } from "../../scripts/demo/catalog";
+import { STOPPING_LINE } from "../../scripts/demo/lines";
 import { apps as APPS } from "../examples/apps";
 
 // The launcher (scripts/demo.ts) on its own. Every way out stops every
@@ -1088,6 +1089,13 @@ test("a launcher whose app server fails while another answers prints no hub line
     expect(await launched.exit()).toBe(1);
     expect(launched.stderr()).toContain(
       `${FAILING_APP}: vite preview exited with 1`,
+    );
+    // The line the recorder stops sending on, first thing in the shutdown,
+    // before its reason and before any app server is signalled.
+    const stderr = launched.stderr();
+    expect(stderr).toContain(STOPPING_LINE);
+    expect(stderr.indexOf(STOPPING_LINE)).toBeLessThan(
+      stderr.indexOf(`${FAILING_APP}: vite preview exited`),
     );
     // The order the test sets up happened: the holding app was asked, and
     // its answer came once the shutdown had begun.
