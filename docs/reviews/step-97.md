@@ -77,3 +77,9 @@ None.
 ## Decision concerns
 
 None.
+
+## Security lane (Claude), not the gate
+
+run 1, head fe5c753: P0 0, P1 0, P2 0
+
+`bun run ci` exit 0 on `fe5c753` (175 Playwright; bench and e2e smoke ok).
