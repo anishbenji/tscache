@@ -92,14 +92,16 @@ File and line are in `packages/tscache/src` on `b2e1f06`. "Survived" means at le
 
 ## How to re-run
 
-The step 84 numbers were measured on 2026-11-13 in a throwaway copy of the worktree with the two packages installed there, because Stryker is not yet a dependency of the repository; adding it is pending user decision 60.
+The step 84 numbers were measured on 2026-11-13, before Stryker was a dependency of the repository. Since step 91, `@stryker-mutator/core` and `@stryker-mutator/vitest-runner` (10.1.1, pinned exactly) are dev dependencies of the repository, and `bun run mutation` (`stryker run`) runs the measurement from the repository root.
 
-Once the dependencies are added (`@stryker-mutator/core` and `@stryker-mutator/vitest-runner`, 10.1.1, pinned exactly in the repository's `package.json` and `bun.lock`), run Stryker from the repository root. A run is a heavy job: run it under the heavy-job lock, never next to `bun run ci`. Every area takes about 40 minutes; `--mutate` limits a run to one area.
+A run is a heavy job: run it under the heavy-job lock, never next to `bun run ci`. A run of all six areas takes about 40 minutes (37 m 35 s in step 84; from 42 s to 15 m 15 s per area). To scope a run, pass `--mutate` with a file or glob after the script name; it replaces the `mutate` list of the configuration for that run only, so the configuration file stays unchanged.
 
 ```sh
-~/code/tscache-reports/bin/heavy-run.sh "mutation" bunx stryker run          # every area
-~/code/tscache-reports/bin/heavy-run.sh "mutation" bunx stryker run \
-  --mutate "packages/tscache/src/engine/**/*.ts"                              # one area
+~/code/tscache-reports/bin/heavy-run.sh "mutation" bun run mutation        # every area
+~/code/tscache-reports/bin/heavy-run.sh "mutation" bun run mutation \
+  --mutate "packages/tscache/src/engine/**/*.ts"                            # one area
+~/code/tscache-reports/bin/heavy-run.sh "mutation" bun run mutation \
+  --mutate packages/tscache/src/coverage.ts                                 # one file
 ```
 
 The configuration is `stryker.config.json` at the repository root. It runs Vitest with `vitest.mutation.config.ts`, which is the root configuration narrowed to `packages/tscache/test`, and writes `reports/mutation/mutation.html` and `mutation.json`, which `.gitignore` covers along with Stryker's sandboxes (`.stryker-tmp/`). Two settings work around the toolchain:
