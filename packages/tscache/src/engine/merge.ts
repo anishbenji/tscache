@@ -120,7 +120,12 @@ export class SegmentStore {
     return warnings;
   }
 
-  /** Writes the batch one chunk at a time; a chunk is a run that shares a segment. */
+  /**
+   * Writes the batch one write run at a time, in ascending slot order (N70).
+   * A write run is a maximal stretch of consecutive batch points, each on the
+   * same page as the one before it with at most K slots between them; it is
+   * cut from the batch alone, so stored points never decide where it ends.
+   */
   #insertChunks(incoming: Incoming): void {
     const { slots, columns } = incoming;
     let from = 0;
@@ -187,9 +192,9 @@ export class SegmentStore {
   }
 
   /**
-   * Whether two ascending batch points certainly share a segment: same page
-   * and at most K slots between them. Stored points between them can only
-   * narrow the gap.
+   * Whether two consecutive batch points belong to the same write run (N70):
+   * same page and at most K slots between them. Stored points between them
+   * are not counted, so the answer depends on the batch alone.
    */
   #together(a: number, b: number): boolean {
     return b - a - 1 <= this.#k && this.#page(a) === this.#page(b);
@@ -230,10 +235,11 @@ export class SegmentStore {
   }
 
   /**
-   * Adds a chunk of points that share a segment. Every stored segment on the
-   * chunk's page that overlaps it, or lies within K slots of it, belongs to
-   * the same run, so they all end up in one segment with the chunk. Either
-   * the whole chunk goes in or, if an allocation fails, nothing changes.
+   * Adds one write run (N70) as `chunk`. Every stored segment on the run's
+   * page that overlaps it, or lies within K slots of it, is merged with the
+   * run into one segment; such segments join the run's segment but never
+   * decide where the run ends. Either the whole run goes in or, if an
+   * allocation fails, nothing changes.
    */
   #insert(chunk: Columns): void {
     const first = chunk.slots[0] as number;
