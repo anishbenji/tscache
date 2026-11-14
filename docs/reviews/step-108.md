@@ -73,3 +73,7 @@ None.
 ## Decision concerns
 
 None.
+
+## Security lane (Claude), not the gate
+
+run 1, head 84275da: P0 0, P1 0, P2 0
