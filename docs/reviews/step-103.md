@@ -1,6 +1,6 @@
 # Step 103 — `docs/INDEX.md` stops counting the review files
 
-Branch: `docs/103-index-reviews-row` · Reviewer: GPT-6.1 Sol (<effort>) · Rounds: 0 · Status: awaiting review
+Branch: `docs/103-index-reviews-row` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: awaiting review
 
 ## Scope
 
@@ -18,6 +18,14 @@ No document tells authors to re-measure the two rows: `docs/workflow.md`, `docs/
 | ---------------------------------------------------------- | -------------------------- |
 | `docs(index): stop counting and sizing the reviews row`    | The `docs/INDEX.md` change |
 | `docs(review): step 103, the index stops counting reviews` | This file                  |
+
+## Pre-review (Claude Opus), not the gate
+
+On head 50258c5 (the director's merge of `origin/main` into this branch, keeping this step's two rows). No P0, P1 or P2.
+
+| #    | Sev | Finding                                                        | Decision | Resolution                                     |
+| ---- | --- | -------------------------------------------------------------- | -------- | ---------------------------------------------- |
+| PR-1 | nit | The Reviewer field still holds the template placeholder effort | accepted | Replaced with `high`, the round's effort level |
 
 ## Contract-test changes
 
