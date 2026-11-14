@@ -1,6 +1,6 @@
 # Step 100 — Design spec for deploy skew (M5)
 
-Branch: `docs/100-m5-deploy-skew-spec` · Reviewer: GPT-6.1 Sol (high), after a Claude Opus pre-review · Rounds: 2 · Status: round 3 pending (round 2's P1 disclosed and escalated to the user in F11) · Verdict after triage: —
+Branch: `docs/100-m5-deploy-skew-spec` · Reviewer: GPT-6.1 Sol (high), after a Claude Opus pre-review · Rounds: 3 · Status: round 4 pending (round 3's P1 answered by recommending the relay, F11 (b)) · Verdict after triage: —
 
 ## Scope
 
@@ -8,13 +8,14 @@ The third of the three design steps of user decision 46 A (2026-11-13: after 0.1
 
 Documentation only: no code, no tests, nothing under `packages/` changes.
 
-| Commit (by subject)                                   | What                                                                                                                                                                                                              |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs: propose the deploy-skew design for finding m5` | `docs/design/m5-deploy-skew.md`; a deploy-skew sketch in the roadmap linking to it, next to M7's and M3's; the `docs/design/` row and sizes in `docs/INDEX.md`                                                    |
-| `docs(review): step 100 scope and verification`       | This file; the `docs/reviews/` row of `docs/INDEX.md`                                                                                                                                                             |
-| `docs: answer the step 100 pre-review`                | The proposal after the pre-review (below): the worker URL in the announcement, the same-generation rule, F16, the rollback cons, the test grouping and the stop reason; this file's pre-review section; the sizes |
-| `docs: answer the step 100 round 1`                   | The proposal after round 1 (below): the second `clearAll` post at settle, the subscription before `init-ok`, the residual limit, F11, tests 8, 9 and 15; this file's round 1 section and header; the sizes        |
-| `docs: answer the step 100 round 2`                   | The proposal after round 2 (below): the limit (a) leaves after a successful clear, stated in §4.6 and F11; the relay as F11 (b); test 8 and new test 10; this file's round 2 section and header; the sizes        |
+| Commit (by subject)                                   | What                                                                                                                                                                                                                       |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs: propose the deploy-skew design for finding m5` | `docs/design/m5-deploy-skew.md`; a deploy-skew sketch in the roadmap linking to it, next to M7's and M3's; the `docs/design/` row and sizes in `docs/INDEX.md`                                                             |
+| `docs(review): step 100 scope and verification`       | This file; the `docs/reviews/` row of `docs/INDEX.md`                                                                                                                                                                      |
+| `docs: answer the step 100 pre-review`                | The proposal after the pre-review (below): the worker URL in the announcement, the same-generation rule, F16, the rollback cons, the test grouping and the stop reason; this file's pre-review section; the sizes          |
+| `docs: answer the step 100 round 1`                   | The proposal after round 1 (below): the second `clearAll` post at settle, the subscription before `init-ok`, the residual limit, F11, tests 8, 9 and 15; this file's round 1 section and header; the sizes                 |
+| `docs: answer the step 100 round 2`                   | The proposal after round 2 (below): the limit (a) leaves after a successful clear, stated in §4.6 and F11; the relay as F11 (b); test 8 and new test 10; this file's round 2 section and header; the sizes                 |
+| `docs: answer the step 100 round 3`                   | The proposal after round 3 (below): the relay is the recommended protocol (§4.6, F11 (b)), with two posts as the alternative (a); the cost in §4.11; tests 8, 10 and 16; this file's round 3 section and header; the sizes |
 
 **Where the design lives.** A proposal file beside M7's and M3's, for the reason they give: the architecture document records approved contracts, and this design has sixteen open rows, four of which would amend approved text (§4.8 and §4.10.8 by F1; §4.10.7 with N52 by F5; §4.10.7 with N54 and N66 by F11; the checklist's §12 item). The contract-test step moves the approved text into architecture §2.1, §2.7, §3.2, §4.8 and §4.10.6–§4.10.8.
 
@@ -31,10 +32,9 @@ Documentation only: no code, no tests, nothing under `packages/` changes.
 All sixteen rows, F1–F16, are open and listed with options, pros, cons and a recommendation in §5 of the proposal. None is decided here; the proposal's §4 assumes each recommendation. Rows whose recommended option needs the user's explicit approval because it amends a locked decision or approved text:
 
 - **F5 (a)** (a superseded worker stops persisting for its life) narrows the two-writer overlap that N52 accepts and changes what N52 and architecture §4.10.7 describe. It adds no lock, no disk read and no persistence in another hosting, so N52's single-writer design stands.
-- **F11 (a)** (`clearAll` reaches every SharedWorker over the channel, not awaited) extends what N54 and N66 say `clearAll` reaches, and §4.10.7's last paragraph.
-- **F11 (b)** (round 2; new option, the relay): each worker that runs a clear for another's clear id posts once when its disk clear settles. It closes the case (a) leaves after a successful clear (R2-1), at the cost of about k + 1 clears per worker per logout with k workers. The round 2 finding check and the director lean to it, since that case is a logout privacy gap; the proposal still recommends (a) with the limit stated, and the user chooses. Like (a), it extends N54 and N66.
+- **F11 (b)** (the relay, recommended since round 3): `clearAll` reaches every SharedWorker over the channel, not awaited; each worker that runs a clear for another's clear id posts once when its own disk clear settles. It extends what N54 and N66 say `clearAll` reaches, and §4.10.7's last paragraph. Option (a), two posts without the relay, needs the same approval and leaves the logout gap of R2-1 after a successful clear; choosing it means accepting that gap.
 - **F1 (a)** (the SharedWorker is named) amends the approved sentence of §4.8 and §4.10.8 that every tab of a deploy passes the same options; no locked decision.
-- The review checklist's §12 item on two engines writing one database (a protected path the user owns) changes with F5 (a) and F11 (a).
+- The review checklist's §12 item on two engines writing one database (a protected path the user owns) changes with F5 (a) and F11 (b).
 
 Options that would change a locked decision and are not recommended: F2 (d) with a build id in `init` and M7's D9 (a) used for it (§3.1, the handshake); F3 (b) (renames N32's lock); F6 (b) (N59: a stopped cache would restart); F13 (b) (N25 and N30).
 
@@ -82,6 +82,17 @@ Escalation: the same area (`clearAll` across workers, §4.6) drew a P1 in two co
 Test numbers: round 2 inserted a test 10, so the tests numbered 10 to 22 in the round 1 table are 11 to 23 now.
 
 Decision rows changed: F11 (option (b) added; the old (b) and (c) are now (c) and (d); pros, cons and the recommendation's note). The recommendation is unchanged: (a).
+
+
+## Round 3 (GPT-6.1 Sol, high) — reviewer verdict: merge after fixes
+
+Run on head `bd901df` (the director's merge of `origin/main` into the branch). No finding check ran for this round. Raw output: `.reviews/step-100/round-3.md`.
+
+| #    | Sev | Finding                                                                                                                                                                                                                           | Decision                        | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R3-1 | P1  | R2-1 remains unresolved in the recommended `clearAll` protocol: the disclosure is accurate, but F11 still recommends (a), which leaves the logout gap; adopt the relay or record the user's acceptance of the gap. No new finding | decision (director's triage: D) | Acted on by recommending (b), since the user was already asked to choose F11 and accepting the gap is the user's call, not made. §4.6 now describes the relay as the recommended protocol (§4.6.1), why it closes the lagging-writer case and on which three premises (§4.6.2), its remaining limits (a failed or timed-out clear, 0.1.0 workers, a realm without `BroadcastChannel`) and its cost; two posts without a relay is the alternative (a), with "narrows but does not close" and the R2-1 sequence in its description (§4.6.3). F11 recommends (b), notes the change in round 3 and why, and keeps the user's decision and the approval of N54, N66 and §4.10.7. §4.11's cost is the relay's; test 8 expects the relay by default (a channel clear posts once per clear id at settle); test 10's expectation under (b) is the default and the one the two-post design fails; test 16 relays once per id |
+
+Decision rows changed: F11 (recommendation (a) to (b); pros and cons rearranged with the gap as (a)'s con).
 
 ## Verification
 
