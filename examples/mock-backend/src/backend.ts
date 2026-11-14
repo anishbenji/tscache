@@ -55,6 +55,8 @@ export interface BackendStats {
    * counted on arrival, so the count is final once nothing is left to fail.
    */
   failed: number;
+  /** The ranges of the series requests waiting on BackendControl.holdSeries. */
+  holding: { start: number; end: number }[];
   /** Successful rotations. */
   refreshes: number;
   /** Refresh attempts with a refresh token that is not the current one. */
@@ -89,6 +91,11 @@ export interface BackendControl {
   expireAccess?: true;
   /** Answer the next this many series requests with a server error. */
   failNext?: number;
+  /**
+   * Hold the answers to series requests until set false. A request is still
+   * decided on arrival (failNext); only its answer waits.
+   */
+  holdSeries?: boolean;
   /**
    * End every live stream and socket, as a network outage would; clients
    * reconnect.
@@ -226,6 +233,11 @@ export function createBackend(options: BackendOptions = {}): Backend {
   let version = 1;
   /** Series requests still to fail (BackendControl.failNext). */
   let failing = 0;
+  /** Resolves when the hold is released (BackendControl.holdSeries). */
+  let hold: Promise<void> | undefined;
+  let release = () => {};
+  /** The series requests waiting on the hold. */
+  const holding = new Set<{ start: number; end: number }>();
   /** Ends each open live stream (BackendControl.dropStreams). */
   const streams = new Set<() => void>();
   let tokens: Tokens = { access: newToken("at"), refresh: newToken("rt") };
@@ -277,6 +289,12 @@ export function createBackend(options: BackendOptions = {}): Backend {
     if (fail) {
       failing--;
       stats.failed++;
+    }
+    if (hold !== undefined) {
+      const waiting = { start: query.start, end: query.end };
+      holding.add(waiting);
+      await hold;
+      holding.delete(waiting);
     }
     await sleep(latencyMs);
     if (fail) return text(500, "failing on request");
@@ -545,6 +563,15 @@ export function createBackend(options: BackendOptions = {}): Backend {
     if (body.resetClock === true) advanced = 0;
     const failNext = body.failNext ?? Number.NaN;
     if (Number.isSafeInteger(failNext) && failNext >= 0) failing = failNext;
+    if (body.holdSeries === true && hold === undefined) {
+      hold = new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+    if (body.holdSeries === false) {
+      release();
+      hold = undefined;
+    }
     if (body.expireAccess === true) {
       tokens = { ...tokens, access: newToken("at") };
     }
@@ -559,6 +586,7 @@ export function createBackend(options: BackendOptions = {}): Backend {
       latencyMs,
       pages: { ...stats.pages },
       formats: { ...stats.formats },
+      holding: [...holding].map((range) => ({ ...range })),
     };
   }
 
