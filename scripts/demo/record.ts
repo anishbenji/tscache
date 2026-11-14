@@ -1,0 +1,1029 @@
+// `bun scripts/demo/record.ts [--reuse-builds] [--only <name>[,<name>]]`:
+// records the four demo scenarios of the README and the site (multi-tab
+// sharing, credential refresh, server rendering, live-feed reconnect)
+// headless in Chromium against the demo (`bun run demo`), one Playwright
+// video per scenario, and converts each with ffmpeg into
+//
+// - docs/media/<name>.gif, for the README (GitHub, npm and editors show it);
+// - site/public/media/<name>.mp4 (H.264) and .webm (VP9), for the site.
+//
+// It starts the demo itself (scripts/demo.ts; --reuse-builds passes through),
+// on the demo's ports (DEMO_PORT moves them), and refuses to start when one is
+// taken, such as by a `bun run demo` already running. It stops the demo at
+// the end; Ctrl-C, SIGTERM or SIGHUP stops it, Chromium and everything the
+// demo started too. Every scenario runs on the vanilla reference
+// client in a fresh browser context, so a fresh SharedWorker. The recorded
+// page is a stage this script serves: a caption, a strip of the app's
+// mock-backend counters since the scenario began, and the app itself in one
+// or two same-site iframes. Two iframes of one origin share its SharedWorker,
+// Web Locks and localStorage exactly as two tabs do, and both fit in one
+// recording. Each scenario checks what its caption claims as it runs, and
+// fails the recording when the app does not show it; what it observed is
+// printed at the end. ffmpeg must be on PATH (a local tool, not a
+// dependency). A heavy job: run it through the machine's heavy-job lock.
+
+import { copyFileSync, renameSync, unlinkSync } from "node:fs";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  type Browser,
+  chromium,
+  expect,
+  type FrameLocator,
+  type Page,
+} from "@playwright/test";
+import { Backend } from "./backend";
+import { demoPorts, hubPort } from "./catalog";
+import { HUB_LINE, stopping } from "./lines";
+import { Owner } from "./owned";
+import { Processes, type Started } from "./processes";
+import { request } from "./request";
+
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
+/**
+ * Where docs/media/ and site/public/media/ are: the checkout, or
+ * RECORD_MEDIA_ROOT for the recorder's tests only, so they never touch the
+ * committed media (e2e/demo/launcher.spec.ts).
+ */
+const MEDIA_ROOT = process.env.RECORD_MEDIA_ROOT || ROOT;
+const GIF_DIR = join(MEDIA_ROOT, "docs/media");
+const VIDEO_DIR = join(MEDIA_ROOT, "site/public/media");
+const MINUTE = 60_000;
+/** The recorded viewport; the site's videos keep it. */
+const VIEW = { width: 960, height: 600 };
+/** The README's GIFs: narrower, fewer frames, a small palette. */
+const GIF = { width: 720, fps: 8, colors: 96 };
+const APP = "reference-vanilla";
+const LIVE_PATH = "/?chart=lightweight&feed=sse";
+
+const port = hubPort(process.env);
+const appOrigin = `http://127.0.0.1:${demoPorts(port)[APP]}/`;
+const hubOrigin = `http://127.0.0.1:${port}/`;
+
+/** The mock backend's counters the stage shows (GET /api/stats). */
+interface Counters {
+  /** Series pages served. */
+  fetches: number;
+  /** Bars in the series pages served. */
+  bars: number;
+  refused: number;
+  refreshes: number;
+  streams: number;
+}
+
+/**
+ * The backend on `appOrigin`, the recorder's only from the moment
+ * `waitForHub` accepts the hub of this run's own launcher until that launcher
+ * exits (scripts/demo/backend.ts). Outside that window the port may be
+ * another process's, so nothing is sent to it, the clock's reset included.
+ */
+const backend = new Backend(appOrigin);
+
+async function counters(): Promise<Counters> {
+  const response = await backend.request("api/stats");
+  if (!response.ok) throw new Error(`stats: ${response.status}`);
+  const stats = (await response.json()) as Omit<
+    Counters,
+    "fetches" | "bars"
+  > & {
+    pages: Record<string, number>;
+    points: number;
+  };
+  const fetches = Object.values(stats.pages).reduce((a, b) => a + b, 0);
+  const { points: bars, refused, refreshes, streams } = stats;
+  return { fetches, bars, refused, refreshes, streams };
+}
+
+/** Set once this run has registered the backend clock's reset (`control`). */
+let clockOwned = false;
+
+async function send(body: Record<string, unknown>): Promise<void> {
+  const response = await backend.request("api/control", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`control: ${response.status}`);
+}
+
+/**
+ * Sends a control to this run's own backend. The first one registers the
+ * clock's reset with shutdown, since a scenario may move the clock (and the
+ * quiet minute resets it): a run that never controlled the backend leaves
+ * its clock alone.
+ */
+async function control(body: Record<string, unknown>): Promise<void> {
+  // Checked before the clock's reset is registered: a control refused here
+  // registers none.
+  if (!backend.owned) {
+    throw new Error("the recorder sends requests only to its own demo");
+  }
+  if (!clockOwned) {
+    clockOwned = true;
+    own(() => send({ resetClock: true }));
+  }
+  await send(body);
+}
+
+// --- The stage ------------------------------------------------------------
+
+type Chip = keyof Counters;
+
+const CHIP_LABELS: Record<Chip, string> = {
+  fetches: "backend fetches",
+  bars: "bars served",
+  refused: "requests refused",
+  refreshes: "token refreshes",
+  streams: "open live streams",
+};
+
+const STAGE_STYLE = `
+* { box-sizing: border-box; }
+body { margin: 0; width: ${VIEW.width}px; height: ${VIEW.height}px; overflow: hidden;
+  font: 15px/1.4 system-ui, sans-serif; color: #1d2330; background: #eef1f6; }
+header { height: 92px; padding: 10px 16px 0; }
+.title { font-size: 13px; color: #5b6475; letter-spacing: 0.02em; }
+.caption { font-size: 21px; font-weight: 600; margin-top: 4px; min-height: 58px; }
+.chips { display: flex; gap: 10px; padding: 0 16px; height: 40px; }
+.chip { background: #fff; border: 1px solid #d5d9e2; border-radius: 6px; padding: 4px 10px;
+  display: flex; align-items: baseline; gap: 8px; transition: background 1.2s; }
+.chip b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.chip span { color: #5b6475; font-size: 13px; }
+.chip.changed { background: #ffe58a; transition: background 0s; }
+.tabs { display: flex; gap: 16px; padding: 8px 16px 0; }
+.tab { flex: 1; }
+.tab .label { font-size: 13px; font-weight: 600; color: #5b6475; height: 20px; }
+.frame { overflow: hidden; border: 1px solid #c4cad6; border-radius: 6px; background: #fbfbf9; }
+.frame iframe { border: 0; transform-origin: 0 0; display: block; }
+`;
+
+/** The stage's script: the caption, and the counters since the baseline. */
+const STAGE_SCRIPT = `
+let baseline = null;
+const absolute = new Set(["streams"]);
+async function read() {
+  const response = await fetch("/counters", { cache: "no-store" });
+  return response.json();
+}
+window.stageCaption = (text) => { document.getElementById("caption").textContent = text; };
+window.stageReset = async () => { baseline = await read(); paint(baseline); };
+function paint(now) {
+  for (const chip of document.querySelectorAll(".chip")) {
+    const key = chip.dataset.key;
+    const value = absolute.has(key) ? now[key] : now[key] - baseline[key];
+    const cell = chip.querySelector("b");
+    if (cell.textContent !== String(value)) {
+      cell.textContent = String(value);
+      chip.classList.add("changed");
+      requestAnimationFrame(() => requestAnimationFrame(() => chip.classList.remove("changed")));
+    }
+  }
+}
+setInterval(async () => { if (baseline !== null) paint(await read()); }, 200);
+`;
+
+/** What the stage's script puts on its window. */
+interface StageWindow {
+  stageCaption(text: string): void;
+  stageReset(): Promise<void>;
+}
+
+/** Counts the counters from now on (all but open streams). */
+async function resetCounters(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    (globalThis as unknown as StageWindow).stageReset(),
+  );
+}
+
+interface StageOptions {
+  title: string;
+  chips: Chip[];
+  /** One label per iframe: "Tab 1", "Tab 2". */
+  tabs: string[];
+}
+
+/** The iframe's scale: a page laid out wider than the column it shows in. */
+function frameLayout(tabs: number): {
+  width: number;
+  height: number;
+  scale: number;
+} {
+  const column = (VIEW.width - 32 - 16 * (tabs - 1)) / tabs;
+  const height = VIEW.height - 92 - 40 - 8 - 20 - 12;
+  const scale = tabs === 1 ? 0.85 : 0.78;
+  return { width: column, height, scale };
+}
+
+function stageHtml({ title, chips, tabs }: StageOptions): string {
+  const layout = frameLayout(tabs.length);
+  const inner = `width:${layout.width / layout.scale}px;height:${layout.height / layout.scale}px;transform:scale(${layout.scale})`;
+  const chipHtml = chips
+    .map(
+      (key) =>
+        `<div class="chip" data-key="${key}"><span>${CHIP_LABELS[key]}</span><b>–</b></div>`,
+    )
+    .join("");
+  const tabHtml = tabs
+    .map(
+      (label, i) =>
+        `<div class="tab"><div class="label">${label}</div><div class="frame" style="width:${layout.width}px;height:${layout.height}px"><iframe id="tab-${i}" title="${label}" style="${inner}"></iframe></div></div>`,
+    )
+    .join("");
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title>
+<style>${STAGE_STYLE}</style></head><body>
+<header><div class="title">tscache · ${title}</div><div class="caption" id="caption"></div></header>
+<div class="chips">${chipHtml}</div>
+<div class="tabs">${tabHtml}</div>
+<script>${STAGE_SCRIPT}</script></body></html>`;
+}
+
+/** Serves the stage page of the scenario running, and the counters. */
+function startStage(): {
+  origin: string;
+  show(options: StageOptions): void;
+  stop(): void;
+} {
+  let html = "";
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: async (request) => {
+      const { pathname } = new URL(request.url);
+      if (pathname === "/counters") return Response.json(await counters());
+      return new Response(html, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    },
+  });
+  return {
+    origin: `http://127.0.0.1:${server.port}/`,
+    show(options) {
+      html = stageHtml(options);
+    },
+    stop() {
+      void server.stop(true);
+    },
+  };
+}
+
+// --- Scenarios --------------------------------------------------------------
+
+interface Recording {
+  page: Page;
+  caption(text: string): Promise<void>;
+  /** Shows the app's page in tab `i`. */
+  open(i: number, path: string): Promise<FrameLocator>;
+  /** Waits in real time, so the video holds a moment. */
+  hold(ms: number): Promise<void>;
+  /** Marks where the published clip starts. */
+  start(): Promise<void>;
+  /** What the scenario observed, printed at the end. */
+  note(text: string): void;
+  /**
+   * A claim the captions, the README or the site make about what the app
+   * did: fails the recording unless `ok`, and fails it as well if a minute
+   * boundary passed since the scenario began, since every count it checks
+   * is stated for one minute.
+   */
+  claim(ok: boolean, failure: string): void;
+}
+
+interface Scenario {
+  name: string;
+  stage: StageOptions;
+  /**
+   * The scenario checks counts of the live demo (`claim`), so it starts in
+   * a quiet minute (`quietMinute`). Only the tests' probe does not.
+   */
+  live: boolean;
+  run(recording: Recording): Promise<void>;
+}
+
+/** How much of its minute a scenario that makes claims starts with. */
+const QUIET_MS = 45_000;
+
+/**
+ * Starts a scenario on a clock no minute boundary crosses before its
+ * checks: resets the backend's clock to real time (the page, the server's
+ * render and the backend all read real time then), and, with less than
+ * QUIET_MS of the minute left, waits for the next. Returns the minute.
+ */
+async function quietMinute(): Promise<number> {
+  await control({ resetClock: true });
+  const left = MINUTE - (Date.now() % MINUTE);
+  if (left < QUIET_MS) {
+    console.log(`waiting ${Math.ceil(left / 1000)} s for a new minute`);
+    await Bun.sleep(left + 1000);
+  }
+  return Math.floor(Date.now() / MINUTE);
+}
+
+/** Waits until the page in `tab` is connected, live and has drawn bars. */
+async function live(tab: FrameLocator): Promise<number> {
+  await expect(tab.getByTestId("connection")).toHaveText("live", {
+    timeout: 30_000,
+  });
+  const summary = tab.getByTestId("summary");
+  await expect(summary).toHaveText(/^[1-9][\d,]* bars/);
+  const text = (await summary.textContent()) ?? "";
+  return Number(/^([\d,]+)/.exec(text)?.[1]?.replace(/,/g, ""));
+}
+
+/** What the counters moved by between two reads. */
+function moved(before: Counters, after: Counters) {
+  return {
+    fetches: after.fetches - before.fetches,
+    bars: after.bars - before.bars,
+    refused: after.refused - before.refused,
+    refreshes: after.refreshes - before.refreshes,
+  };
+}
+
+/** "1 fetch", "2 fetches"; "1 bar", "3 bars". */
+function count(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * The most bars a read of the newest bars fetches: the bar forming now and
+ * the one that closed since the last read. The reads that catch up after
+ * a gap add the bars the gap held.
+ */
+const NEWEST = 2;
+
+/**
+ * Holds every live-stream request of the stage's frames until `release`,
+ * so a feed opens only when the scenario lets it (as
+ * e2e/reference/clients.spec.ts does).
+ */
+async function holdStream(page: Page): Promise<{ release(): void }> {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/stream/**", async (route) => {
+    await held;
+    await route.continue();
+  });
+  return { release };
+}
+
+/**
+ * For the recorder's tests only (RECORD_PROBE): a clip of the stage and
+ * the app with no wait on the app's data and no claim, so the tests of the
+ * conversion and of its cancellation reach the conversion whatever the
+ * demo's data does (e2e/demo/launcher.spec.ts).
+ */
+const PROBE: Scenario = {
+  name: "probe",
+  live: false,
+  stage: { title: "probe", chips: ["fetches"], tabs: ["Tab 1"] },
+  async run(r) {
+    await r.start();
+    await r.caption("The recorder's test clip.");
+    await r.open(0, LIVE_PATH);
+    if (PROBE_MODE !== "hold") {
+      await r.hold(1000);
+      return;
+    }
+    // Its page is open, so Playwright's video encoder runs: a test that
+    // interrupts the recorder now finds every process the recorder starts.
+    console.log("probe holding");
+    while (!cancelled) await r.hold(50);
+  },
+};
+
+/**
+ * RECORD_PROBE: "1" adds the probe, which records for a second and then
+ * converts; "hold" adds it holding until shutdown begins, so a signal sent
+ * after "probe holding" always lands while it records.
+ */
+const PROBE_MODE = ((mode) =>
+  mode === "1" || mode === "hold" ? mode : undefined)(process.env.RECORD_PROBE);
+
+const scenarios: Scenario[] = [
+  {
+    name: "multi-tab-sharing",
+    live: true,
+    stage: {
+      title: "multi-tab sharing",
+      chips: ["fetches", "bars"],
+      tabs: ["Tab 1", "Tab 2"],
+    },
+    async run(r) {
+      const zero = await counters();
+      // Tab 1's live feed opens only once it has drawn the history, so the
+      // order is fixed: the history in one fetch, then, as the feed opens,
+      // one fetch of the newest bars (reference/shared/src/live.ts, header),
+      // both before tab 2 opens. (Without the hold the stream usually opens
+      // first, and the second fetch happens or not by a margin.)
+      const feed = await holdStream(r.page);
+      await r.start();
+      await r.caption(
+        "Tab 1 opens. Its cache is empty, so the SharedWorker fetches the history.",
+      );
+      const a = await r.open(0, LIVE_PATH);
+      const shown = await live(a);
+      feed.release();
+      await expect
+        .poll(async () => (await counters()).fetches, { timeout: 15_000 })
+        .toBe(zero.fetches + 2);
+      await r.hold(1000);
+      const first = await counters();
+      const opening = moved(zero, first);
+      // The README and the site say tab 1 fetches the history in one fetch;
+      // the second is its feed's catch-up of the newest bars.
+      r.claim(
+        opening.fetches === 2 && opening.bars <= shown + NEWEST,
+        `tab 1 made ${opening.fetches} fetches of ${opening.bars} bars, not the history and the newest`,
+      );
+      await r.caption(
+        "Tab 2 opens on the same SharedWorker and draws from the shared cache.",
+      );
+      const b = await r.open(1, LIVE_PATH);
+      const drawn = await live(b);
+      await expect(b.getByTestId("mode")).toHaveText("shared");
+      // The README and the site say tab 2 draws the same bars. Both first
+      // read twelve hours up to the bar forming now (readRange in
+      // reference/shared/src/market.ts), in the same minute, so the same
+      // bars.
+      r.claim(drawn === shown, `tab 2 drew ${drawn} bars, tab 1 ${shown}`);
+      await r.hold(600);
+      const step = moved(first, await counters());
+      r.claim(
+        step.bars <= NEWEST,
+        `tab 2 fetched ${step.bars} bars, not the newest`,
+      );
+      await r.caption(
+        `Tab 2 drew ${drawn} bars; the backend served it ${step.bars === 0 ? "nothing" : `${count(step.bars, "bar", "bars")}, the newest`}.`,
+      );
+      await r.hold(2500);
+      r.note(
+        `tab 1: ${shown} bars drawn, ${count(opening.fetches, "fetch", "fetches")} of ${opening.bars} bars; tab 2: ${drawn} bars drawn, mode shared, ${count(step.fetches, "fetch", "fetches")} of ${count(step.bars, "bar", "bars")}`,
+      );
+    },
+  },
+  {
+    name: "credential-refresh",
+    live: true,
+    stage: {
+      title: "credential refresh",
+      chips: ["refused", "refreshes", "fetches"],
+      tabs: ["Tab 1", "Tab 2"],
+    },
+    async run(r) {
+      const a = await r.open(0, LIVE_PATH);
+      const b = await r.open(1, LIVE_PATH);
+      await live(a);
+      await live(b);
+      await resetCounters(r.page);
+      const before = await counters();
+      await r.start();
+      await r.caption("Two tabs, one SharedWorker, one access token.");
+      await r.hold(1200);
+      await r.caption("The backend expires the access token.");
+      await control({ expireAccess: true });
+      await r.hold(1200);
+      await r.caption(
+        "Tab 1 scrolls back. The backend refuses the expired token; one tab refreshes it for both.",
+      );
+      await drag(r.page, 0);
+      await expect
+        .poll(async () => (await counters()).refreshes, { timeout: 20_000 })
+        .toBe(before.refreshes + 1);
+      await expect(a.getByTestId("missing")).toHaveText("nothing missing", {
+        timeout: 20_000,
+      });
+      await expect(a.getByTestId("auth")).toHaveText("signed in");
+      await expect(b.getByTestId("auth")).toHaveText("signed in");
+      await r.hold(800);
+      const step = moved(before, await counters());
+      r.claim(
+        step.refreshes === 1 && step.refused >= 1,
+        `${step.refused} refused, ${step.refreshes} refreshes`,
+      );
+      await r.caption(
+        "One refresh for both tabs: both stay signed in, and the history arrives.",
+      );
+      await r.hold(2500);
+      r.note(
+        `${step.refused} refused, ${step.refreshes} refresh, ${count(step.fetches, "fetch", "fetches")} of ${step.bars} bars; both tabs "signed in", tab 1 "nothing missing"`,
+      );
+    },
+  },
+  {
+    name: "server-rendering",
+    live: true,
+    stage: {
+      title: "server rendering",
+      chips: ["fetches", "bars"],
+      tabs: ["The server-rendered page (/ssr)"],
+    },
+    async run(r) {
+      // The server's in-process cache outlives requests: one render first,
+      // so the recorded render is one of a server that has served the page
+      // before.
+      const warm = await backend.request("ssr");
+      if (!warm.ok) throw new Error(`/ssr: ${warm.status}`);
+      await resetCounters(r.page);
+      const before = await counters();
+      await r.start();
+      await r.caption(
+        "The server has rendered this page before, so its cache already holds the history.",
+      );
+      await r.hold(1200);
+      const tab = await r.open(0, "/ssr");
+      const drawn = await live(tab);
+      await expect(tab.locator("#chart canvas").first()).toBeVisible();
+      await r.hold(800);
+      const step = moved(before, await counters());
+      // The server's read and the browser's read each fetch the newest bars.
+      r.claim(step.bars <= 2 * NEWEST, `${step.bars} bars served for the page`);
+      await r.caption(
+        `${drawn} bars drawn from the server's read; server and browser fetched only ${count(step.bars, "bar", "bars")}.`,
+      );
+      await r.hold(3000);
+      r.note(
+        `${drawn} bars drawn; server and browser together: ${count(step.fetches, "fetch", "fetches")} of ${count(step.bars, "bar", "bars")}`,
+      );
+    },
+  },
+  {
+    name: "live-feed-reconnect",
+    live: true,
+    stage: {
+      title: "live-feed reconnect",
+      chips: ["streams", "fetches", "bars"],
+      tabs: ["The live page (Server-Sent Events)"],
+    },
+    async run(r) {
+      const tab = await r.open(0, LIVE_PATH);
+      await live(tab);
+      await expect
+        .poll(async () => (await counters()).streams, { timeout: 10_000 })
+        .toBe(1);
+      await resetCounters(r.page);
+      await r.start();
+      await r.caption("The live feed streams new bars into the cache.");
+      await r.hold(1500);
+      const before = await counters();
+      await r.caption(
+        "The backend drops every stream, and its clock moves a minute on while the feed is down.",
+      );
+      await control({ dropStreams: true, advanceMs: MINUTE });
+      // The client reconnects after the stream's retry delay (500 ms).
+      await expect
+        .poll(async () => (await counters()).streams, { intervals: [50] })
+        .toBe(0);
+      await expect
+        .poll(async () => (await counters()).streams, { timeout: 15_000 })
+        .toBe(1);
+      await r.caption(
+        "The feed reconnects and reads over the bars the outage broke into.",
+      );
+      await expect
+        .poll(async () => (await counters()).fetches, { timeout: 15_000 })
+        .toBeGreaterThan(before.fetches);
+      await r.hold(800);
+      const step = moved(before, await counters());
+      // The README and the site say one fetch mends the gap.
+      r.claim(
+        step.fetches === 1 && step.bars <= NEWEST + 1,
+        `the catch-up made ${step.fetches} fetches of ${step.bars} bars`,
+      );
+      await r.caption(
+        `Caught up with ${count(step.fetches, "fetch", "fetches")} of ${count(step.bars, "bar", "bars")}, not the history.`,
+      );
+      await r.hold(2500);
+      r.note(
+        `streams 1, then 0, then 1; ${count(step.fetches, "fetch", "fetches")} of ${count(step.bars, "bar", "bars")} after the drop`,
+      );
+    },
+  },
+];
+
+/** Drags tab `i`'s chart by most of its width, back in time. */
+async function drag(page: Page, i: number): Promise<void> {
+  const box = await page.locator(`#tab-${i}`).boundingBox();
+  if (box === null) throw new Error("no tab");
+  const y = box.y + box.height * 0.7;
+  await page.mouse.move(box.x + box.width * 0.15, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.9, y, { steps: 20 });
+  await page.mouse.up();
+}
+
+// --- Recording and conversion ---------------------------------------------
+
+interface Clip {
+  scenario: Scenario;
+  video: string;
+  /** Seconds into the video. */
+  from: number;
+  to: number;
+  notes: string[];
+}
+
+async function record(
+  browser: Browser,
+  stage: ReturnType<typeof startStage>,
+  scenario: Scenario,
+  rawDir: string,
+): Promise<Clip> {
+  const minute = scenario.live ? await quietMinute() : undefined;
+  // The wait for a quiet minute is long enough for a shutdown to begin.
+  stopIfCancelled();
+  console.log(`recording ${scenario.name}`);
+  stage.show(scenario.stage);
+  const context = await browser.newContext({
+    viewport: VIEW,
+    deviceScaleFactor: 1,
+    recordVideo: { dir: rawDir, size: VIEW },
+  });
+  // Closing a context waits for Playwright's video encoder, an ffmpeg of
+  // its own that closing the browser alone leaves finishing; contexts are
+  // owned after the browser, so shutdown closes them first.
+  const disown = own(() => context.close());
+  const page = await context.newPage();
+  const born = performance.now();
+  const at = () => (performance.now() - born) / 1000;
+  const notes: string[] = [];
+  let from: number | undefined;
+  await page.goto(stage.origin);
+  await resetCounters(page);
+  const recording: Recording = {
+    page,
+    async caption(text) {
+      await page.evaluate(
+        (t) => (globalThis as unknown as StageWindow).stageCaption(t),
+        text,
+      );
+    },
+    async open(i, path) {
+      const url = new URL(path, appOrigin).href;
+      await page.locator(`#tab-${i}`).evaluate((frame, src) => {
+        (frame as unknown as { src: string }).src = src;
+      }, url);
+      return page.frameLocator(`#tab-${i}`);
+    },
+    hold: (ms) => Bun.sleep(ms),
+    async start() {
+      from = at();
+    },
+    note: (text) => notes.push(text),
+    claim(ok, failure) {
+      if (minute !== undefined && Math.floor(Date.now() / MINUTE) !== minute) {
+        throw new Error(
+          `${scenario.name} ran past the minute it started in, so its counts cannot be checked`,
+        );
+      }
+      if (!ok) throw new Error(failure);
+    },
+  };
+  try {
+    await scenario.run(recording);
+  } finally {
+    await context.close();
+    disown();
+  }
+  const video = await page.video()?.path();
+  if (video === undefined || from === undefined) {
+    throw new Error(`${scenario.name}: no video, or no start mark`);
+  }
+  return { scenario, video, from, to: at(), notes };
+}
+
+/**
+ * The ffmpeg binary: RECORD_FFMPEG for the recorder's tests only, which
+ * stand a script in for it (e2e/demo/launcher.spec.ts).
+ */
+const FFMPEG = process.env.RECORD_FFMPEG || "ffmpeg";
+
+/**
+ * Set, synchronously, the moment shutdown begins. Every step that starts
+ * work checks it first, in the same synchronous run as the work it starts:
+ * the demo's start, Chromium's launch, each scenario, each ffmpeg, and the
+ * install of a scenario's media; each ffmpeg checks it again once it exits.
+ * So once shutdown begins, no new process starts and no media file changes.
+ */
+let cancelled = false;
+
+/** Stops the step that calls it once shutdown has begun. */
+function stopIfCancelled(): void {
+  if (cancelled) throw new Error("the recorder is stopping");
+}
+
+async function ffmpeg(args: string[]): Promise<void> {
+  stopIfCancelled();
+  const run = Bun.spawn(
+    [FFMPEG, "-hide_banner", "-loglevel", "error", "-y", ...args],
+    {
+      stdout: "inherit",
+      stderr: "inherit",
+    },
+  );
+  // The last thing owned while it runs, so the first shutdown releases;
+  // signalled before shutdown awaits anything.
+  const disown = own(
+    () => run.exited,
+    () => run.kill(),
+  );
+  const code = await run.exited;
+  disown();
+  // An ffmpeg that shutdown stopped, or that finished after it began, ends
+  // the conversion here, whatever its exit code.
+  stopIfCancelled();
+  if (code !== 0) throw new Error(`ffmpeg ${args.join(" ")}: exit ${code}`);
+}
+
+/**
+ * Moves each finished file over its committed one, unless shutdown has
+ * begun. Synchronous, so no signal handler runs between the check and the
+ * last move: a signal never leaves a scenario's three files half replaced.
+ * A file system error during the moves (a read-only or full directory) can:
+ * the error propagates and the recorder exits 1, and `git restore` recovers
+ * the committed media. No rollback could make the moves atomic across the two
+ * media directories. A move across file systems copies.
+ */
+function install(moves: [from: string, to: string][]): void {
+  stopIfCancelled();
+  for (const [from, to] of moves) {
+    try {
+      renameSync(from, to);
+    } catch (error) {
+      if ((error as { code?: unknown }).code !== "EXDEV") throw error;
+      copyFileSync(from, to);
+      unlinkSync(from);
+    }
+  }
+}
+
+/**
+ * Writes the clip's GIF, MP4 and WebM into `work`, then, once all three
+ * exist, moves them into place. A failed conversion leaves the committed
+ * media as they were. Once shutdown begins (`cancelled`), no further ffmpeg
+ * starts, the one running is stopped, and nothing is installed, even when
+ * that ffmpeg had just finished.
+ */
+async function convert(clip: Clip, work: string): Promise<string[]> {
+  const { name } = clip.scenario;
+  const trim = [
+    "-ss",
+    clip.from.toFixed(2),
+    "-to",
+    clip.to.toFixed(2),
+    "-i",
+    clip.video,
+  ];
+  const mp4 = join(work, `${name}.mp4`);
+  const webm = join(work, `${name}.webm`);
+  const gif = join(work, `${name}.gif`);
+  await ffmpeg([
+    ...trim,
+    "-an",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "slow",
+    "-crf",
+    "26",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    mp4,
+  ]);
+  await ffmpeg([
+    ...trim,
+    "-an",
+    "-c:v",
+    "libvpx-vp9",
+    "-b:v",
+    "0",
+    "-crf",
+    "38",
+    "-row-mt",
+    "1",
+    webm,
+  ]);
+  const scale = `fps=${GIF.fps},scale=${GIF.width}:-1:flags=lanczos`;
+  await ffmpeg([
+    ...trim,
+    "-filter_complex",
+    `[0:v]${scale},split[a][b];[a]palettegen=max_colors=${GIF.colors}:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle`,
+    "-loop",
+    "0",
+    gif,
+  ]);
+  const placed: [string, string][] = [
+    [gif, join(GIF_DIR, `${name}.gif`)],
+    [mp4, join(VIDEO_DIR, `${name}.mp4`)],
+    [webm, join(VIDEO_DIR, `${name}.webm`)],
+  ];
+  install(placed);
+  return placed.map(([, to]) => to);
+}
+
+function option(name: string): string | undefined {
+  const at = process.argv.indexOf(name);
+  return at === -1 ? undefined : process.argv[at + 1];
+}
+
+/**
+ * Whether 127.0.0.1:`at` is free: binds it and lets it go, so whatever holds
+ * it receives nothing, not even a connection.
+ */
+function bindable(at: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once("error", () => resolve(false));
+    server.listen({ port: at, host: "127.0.0.1", exclusive: true }, () =>
+      server.close(() => resolve(true)),
+    );
+  });
+}
+
+/**
+ * Fails at once, before anything is built or started, when a port the demo
+ * needs (the hub's and every app's) is taken, such as by a `bun run demo`
+ * already running: the recorder would otherwise record that demo, send its
+ * controls to its backends and rebuild the dist/ it serves.
+ */
+async function demoPortsFree(): Promise<void> {
+  const needed = [port, ...Object.values(demoPorts(port))];
+  const taken: number[] = [];
+  for (const at of needed) if (!(await bindable(at))) taken.push(at);
+  if (taken.length === 0) return;
+  const which =
+    taken.length === 1
+      ? `port ${taken[0]} is`
+      : `ports ${taken.join(", ")} are`;
+  throw new Error(
+    `${which} already in use, and the recorder needs ports ${port} to ${port + needed.length - 1} ` +
+      "for a demo of its own. Stop the demo or whatever holds them (is `bun run demo` running?), " +
+      "or set DEMO_PORT to move the recorder's demo. Nothing was started.",
+  );
+}
+
+/**
+ * Waits for the hub of the recorder's own launcher: only once `demo` has
+ * printed its hub line, so a hub something else started on the port in the
+ * meantime is never taken for it.
+ */
+async function waitForHub(demo: Started): Promise<void> {
+  // The demo builds every app first, which takes minutes.
+  const deadline = Date.now() + 15 * MINUTE;
+  while (Date.now() < deadline && !cancelled) {
+    if (demo.output().includes(HUB_LINE)) {
+      try {
+        const health = await request(`${hubOrigin}healthz`);
+        if (health.ok) return;
+      } catch {
+        // Not answering yet.
+      }
+    }
+    await Bun.sleep(500);
+  }
+  throw new Error(`the demo hub did not answer on ${hubOrigin}`);
+}
+
+const processes = new Processes();
+let exiting: Promise<never> | undefined;
+
+/**
+ * What this run has acquired and not yet released (scripts/demo/owned.ts).
+ * Shutdown undoes exactly this, so an exit before a resource was acquired
+ * undoes nothing for it, and one acquired after shutdown began (an await
+ * that finished late) is stopped at once and released too.
+ */
+const owner = new Owner();
+
+/**
+ * Registers the cleanup of a resource just acquired; returns the call that
+ * removes it once the resource is released the ordinary way.
+ */
+function own(release: () => unknown, stop?: () => void): () => void {
+  return owner.own(release, stop);
+}
+
+/**
+ * The one way out, as in scripts/demo.ts. It marks the recorder cancelled,
+ * so no step starts new work, and runs every registered `stop` (a running
+ * ffmpeg is signalled), all before anything is awaited. Then it releases
+ * what this run owns, newest first, until nothing is left, anything owned
+ * meanwhile included. In the order things are acquired, that is: the
+ * running ffmpeg (its exit), the browser context of the scenario recording
+ * (closing it waits for Playwright's video encoder), the backend clock's
+ * reset (registered by the first scenario's quiet minute, before its
+ * context), Chromium, the stage, the demo with everything it started, and
+ * the raw videos with any unfinished conversion. Then it exits. The demo's
+ * processes run in groups of their own, so a Ctrl-C in the terminal reaches
+ * only this process, and only this stops them.
+ */
+function shutdown(code: number, reason?: string): Promise<never> {
+  if (exiting !== undefined) return exiting;
+  cancelled = true;
+  const released = owner.releaseAll();
+  exiting = (async () => {
+    if (reason !== undefined) console.error(reason);
+    await released;
+    process.exit(code);
+  })();
+  return exiting;
+}
+
+process.on("SIGINT", () => void shutdown(130));
+process.on("SIGTERM", () => void shutdown(143));
+process.on("SIGHUP", () => void shutdown(129));
+
+async function main(): Promise<void> {
+  if (Bun.which(FFMPEG) === null) {
+    throw new Error(`${FFMPEG} is not on PATH (macOS: brew install ffmpeg)`);
+  }
+  const only = option("--only")?.split(",");
+  const known = PROBE_MODE === undefined ? scenarios : [...scenarios, PROBE];
+  const chosen = known.filter((s) => only?.includes(s.name) ?? s !== PROBE);
+  if (chosen.length === 0) {
+    throw new Error(
+      `--only names none of ${known.map((s) => s.name).join(", ")}`,
+    );
+  }
+  await demoPortsFree();
+  await mkdir(GIF_DIR, { recursive: true });
+  await mkdir(VIDEO_DIR, { recursive: true });
+  const rawDir = await mkdtemp(join(tmpdir(), "tscache-record-"));
+  own(() => rm(rawDir, { recursive: true, force: true }));
+  const demoArgs = process.argv.includes("--reuse-builds")
+    ? ["--reuse-builds"]
+    : [];
+  stopIfCancelled();
+  // Its output is kept, for the hub line, and printed if it fails. Its
+  // stderr is also read as it arrives: once the launcher says it is stopping
+  // (an app server failed, say), its ports may be anyone's, so nothing more
+  // is sent to the backend, though the launcher takes seconds to exit.
+  const demo = processes.start(["bun", "scripts/demo.ts", ...demoArgs], {
+    cwd: ROOT,
+    capture: true,
+    stderr: {
+      write: () => {
+        if (stopping(demo.output())) backend.lose();
+      },
+    },
+  });
+  own(() => processes.stop());
+  void demo.exited.then((code) => {
+    // Its app servers are gone: their ports may be anyone's now.
+    backend.lose();
+    if (!cancelled) {
+      void shutdown(1, `the demo exited with ${code}:\n${demo.output()}`);
+    }
+  });
+  await waitForHub(demo);
+  // The hub is this run's launcher's, and so is its backend.
+  backend.accept();
+  stopIfCancelled();
+  const stage = startStage();
+  own(() => stage.stop());
+  // The recorder handles the signals itself: Playwright's handlers would
+  // close Chromium and exit without stopping the demo.
+  stopIfCancelled();
+  const launching = chromium.launch({
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false,
+  });
+  // Owned from the launch on, so a Chromium still launching is closed too.
+  own(async () => (await launching.catch(() => undefined))?.close());
+  const browser = await launching;
+  const results: { clip: Clip; files: string[] }[] = [];
+  for (const scenario of chosen) {
+    stopIfCancelled();
+    const clip = await record(browser, stage, scenario, rawDir);
+    if (scenario.name === "live-feed-reconnect") {
+      await control({ resetClock: true });
+    }
+    results.push({ clip, files: await convert(clip, rawDir) });
+  }
+  for (const { clip, files } of results) {
+    console.log(
+      `\n${clip.scenario.name}: ${(clip.to - clip.from).toFixed(1)} s`,
+    );
+    for (const note of clip.notes) console.log(`  observed: ${note}`);
+    for (const file of files) {
+      const { size } = await stat(file);
+      console.log(
+        `  ${relative(MEDIA_ROOT, file)}  ${(size / 1024).toFixed(0)} KiB`,
+      );
+    }
+  }
+}
+
+try {
+  await main();
+  await shutdown(0);
+} catch (error) {
+  await shutdown(1, String(error instanceof Error ? error.stack : error));
+}

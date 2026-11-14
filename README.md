@@ -74,7 +74,9 @@ start, the entries and browser support.
 Each recording is the vanilla reference client (`reference/vanilla`) in the
 demo hub, recorded headless with Playwright; the counters above the page are
 its mock backend's. The two tabs are two frames of one page, which share the
-origin's SharedWorker as two tabs do.
+origin's SharedWorker as two tabs do. `bun scripts/demo/record.ts` records them
+again (`--only <name>` for one; it needs `ffmpeg`), as the
+[Demo hub](https://anishbenji.github.io/tscache/guide/demo) page describes.
 
 **Credential refresh.** The backend expires the access token; tab 1 scrolls
 back, the backend refuses its fetches, and one tab refreshes the token for
