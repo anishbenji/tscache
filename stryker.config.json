@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Mutation testing of the engine (docs/benchmarks/mutation.md). A measurement, not a gate: no CI job, hook or workflow runs it.",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+  "plugins_comment": "Named explicitly: Bun installs each package in isolation, so Stryker's default @stryker-mutator/* glob finds no plugins next to its core.",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.mutation.config.ts"
+  },
+  "mutate": [
+    "packages/tscache/src/grid.ts",
+    "packages/tscache/src/coverage.ts",
+    "packages/tscache/src/segment/**/*.ts",
+    "packages/tscache/src/engine/**/*.ts",
+    "packages/tscache/src/orchestrator/**/*.ts",
+    "packages/tscache/src/persist/**/*.ts"
+  ],
+  "coverageAnalysis": "perTest",
+  "tsconfigFile": "stryker-tsconfig-rewrite-disabled.json",
+  "tsconfigFile_comment": "A file that does not exist, which turns off Stryker's tsconfig rewrite. The rewrite needs the TypeScript JS API, which TypeScript 7 does not ship, and only fixes paths that leave the sandbox; the sandbox holds the whole repository, so none do.",
+  "reporters": ["clear-text", "progress", "html", "json"],
+  "htmlReporter": { "fileName": "reports/mutation/mutation.html" },
+  "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
+  "tempDirName": ".stryker-tmp",
+  "concurrency": 6,
+  "thresholds": { "high": 80, "low": 60, "break": null }
+}
