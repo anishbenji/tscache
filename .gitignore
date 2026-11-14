@@ -9,3 +9,6 @@ test-results/
 playwright-report/
 .reviews/
 .bench-results/
+# Stryker's reports and sandboxes (docs/benchmarks/mutation.md)
+reports/mutation/
+.stryker-tmp/
