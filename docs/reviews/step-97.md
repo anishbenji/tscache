@@ -1,6 +1,6 @@
 # Step 97 — The end-to-end bench runs again
 
-Branch: `fix/97-bench-e2e-reload` · Reviewer: none yet (the director runs the review) · Rounds: 0 · Status: built; pre-review (Fable) triaged, awaiting the gate · Verdict after triage: —
+Branch: `fix/97-bench-e2e-reload` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -83,3 +83,8 @@ None.
 run 1, head fe5c753: P0 0, P1 0, P2 0
 
 `bun run ci` exit 0 on `fe5c753` (175 Playwright; bench and e2e smoke ok).
+
+## Round 1 (GPT-6.1 Sol, high), head 55af7be
+
+No findings; verdict merge. The pre-review fixes were checked as fixed. `bun run ci` exit 0 on that head (run
+by the round). Settled.
