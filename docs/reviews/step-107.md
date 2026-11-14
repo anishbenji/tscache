@@ -10,10 +10,11 @@ This step makes `runE2e` return `{ results, failures }` instead of throwing. A p
 
 `scripts/bench.ts` is a protected path: the user merges this pull request. `scripts/bench-e2e.ts` is on the Notify list.
 
-| Commit (by subject)                                           | What                                                                                                    |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `chore(bench): keep the passing e2e timings when one fails`   | `runEach`/`runE2e` return the outcome; `bench.ts` writes it and exits 1; tests; `docs/benchmarking.md`. |
-| `docs(review): step 107, the e2e bench keeps passing timings` | This file and its `docs/INDEX.md` row.                                                                  |
+| Commit (by subject)                                                 | What                                                                                                    |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `chore(bench): keep the passing e2e timings when one fails`         | `runEach`/`runE2e` return the outcome; `bench.ts` writes it and exits 1; tests; `docs/benchmarking.md`. |
+| `docs(review): step 107, the e2e bench keeps passing timings`       | This file and its `docs/INDEX.md` row.                                                                  |
+| `fix(bench): test the one-line failure item and correct the header` | The pre-review's two findings (below).                                                                  |
 
 ## The change
 
@@ -38,6 +39,15 @@ Each behaviour was shown on the real scenarios with a temporary edit to `runScen
 | `bun scripts/bench.ts e2e --base HEAD --rounds 10 --only handshake-first-read,reload-first-read` | 1    | `.bench-results/e2e.json` held the `handshake-first-read` result and `failed: [{ scenario: "reload-first-read", message: "TEMPORARY forced failure" }]`; the summary its row and a `#### Failed` section. |
 
 Without the edit, `bunx vitest run scripts/bench.test.ts scripts/bench-e2e.test.ts` passes 8 of 8 and `bunx tsc --noEmit -p tsconfig.json` is clean. `bun run ci` runs on the branch head before it is handed to the director.
+
+## Pre-review (Fable), not the gate
+
+On head `3ce6237`. No P0 or P1. The pre-review confirmed that no rewritten assertion is weaker, that `bench.test.ts` covers "a failure fails the run", and that no caller can lose a failure on the smoke or the paired path. Prediction: merge after fixes.
+
+| #    | Sev | Finding                                                                                               | Decision | Resolution                                                                                                                                                                                                                                                                                                  |
+| ---- | --- | ----------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR-1 | P2  | The header of `scripts/bench-e2e.ts` still said the run throws with every failure                     | accepted | Validated: lines 12–13 described the step-97 behaviour. Now: the run returns the passing results with every failure, and the caller fails the run (`checkE2e`, `writeE2e`). Fixed in `108d411`.                                                                                                             |
+| PR-2 | P2  | The whitespace collapse in the summary's failure item had no test; every fixture message was one line | accepted | Validated: Playwright errors carry a multi-line call log. The fixture's message now has three lines; the test asserts the summary's one list item and the verbatim message in `e2e.json`. With `.replace` removed by a temporary edit, the test failed (1 of 4); restored, 4 of 4 pass. Fixed in `108d411`. |
 
 ## Contract-test changes
 
