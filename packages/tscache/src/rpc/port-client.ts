@@ -38,6 +38,62 @@ function rebuild(wire: unknown): TscacheError {
   }
 }
 
+/** The refusal of a hello whose protocol is not this client's. */
+function protocolMismatch(protocol: unknown): ProtocolMismatchError {
+  return new ProtocolMismatchError(
+    `worker speaks protocol ${show(protocol)}, client speaks ${PROTOCOL_VERSION}`,
+    {
+      clientProtocol: PROTOCOL_VERSION,
+      workerProtocol: typeof protocol === "number" ? protocol : Number.NaN,
+    },
+  );
+}
+
+/** The init answering an accepted hello, with the fetcher config if any. */
+function initReply(init: { fetcher?: FetcherConfig }): Init {
+  const reply: Init = { t: "init", protocol: PROTOCOL_VERSION };
+  if (init.fetcher !== undefined) reply.fetcher = init.fetcher;
+  return reply;
+}
+
+/** What the handshake does with each message `handshakeStep` accepts. */
+interface HandshakeSteps {
+  hello: (message: Hello) => void;
+  ok: () => void;
+  fail: (error: unknown) => void;
+}
+
+/**
+ * Takes one handshake message in `stage`: hello first, then the init
+ * result. A bye fails the handshake at any stage, and so does anything out
+ * of order; a message that is not an object is ignored.
+ */
+function handshakeStep(
+  data: unknown,
+  stage: "hello" | "init",
+  steps: HandshakeSteps,
+): void {
+  const message = data as ToClient;
+  if (!isObject(message)) return;
+  if (message.t === "bye") {
+    steps.fail(new TscacheError("port closed during handshake"));
+    return;
+  }
+  const expected =
+    stage === "hello" ? message.t === "hello" : message.t !== "hello";
+  if (!expected) {
+    steps.fail(
+      new TscacheError(`handshake out of order: got ${show(message.t)}`),
+    );
+  } else if (message.t === "hello") {
+    steps.hello(message);
+  } else if (message.t === "init-ok") {
+    steps.ok();
+  } else if (message.t === "init-err") {
+    steps.fail(fromWireError(message.error));
+  }
+}
+
 export class PortClient {
   readonly clientId: string;
   /** hello.lock: the worker's lifetime lock, when it holds one (N32). */
@@ -105,18 +161,7 @@ export class PortClient {
       signal?.addEventListener("abort", onAbort, { once: true });
       const onHello = (message: Hello) => {
         if (message.protocol !== PROTOCOL_VERSION) {
-          finish(
-            new ProtocolMismatchError(
-              `worker speaks protocol ${show(message.protocol)}, client speaks ${PROTOCOL_VERSION}`,
-              {
-                clientProtocol: PROTOCOL_VERSION,
-                workerProtocol:
-                  typeof message.protocol === "number"
-                    ? message.protocol
-                    : Number.NaN,
-              },
-            ),
-          );
+          finish(protocolMismatch(message.protocol));
           return;
         }
         clientId = message.clientId;
@@ -124,40 +169,24 @@ export class PortClient {
         lock = typeof message.lock === "string" ? message.lock : undefined;
         stage = "init";
         afterHello?.(lock);
-        const reply: Init = { t: "init", protocol: PROTOCOL_VERSION };
-        if (init.fetcher !== undefined) reply.fetcher = init.fetcher;
         try {
-          port.postMessage(reply);
+          port.postMessage(initReply(init));
         } catch (error) {
           // An uncloneable fetcher context cannot cross the port.
           finish(error);
         }
       };
-      const onMessage = (data: unknown) => {
-        const message = data as ToClient;
-        if (!isObject(message)) return;
-        if (message.t === "bye") {
-          finish(new TscacheError("port closed during handshake"));
-          return;
-        }
-        const expected =
-          stage === "hello" ? message.t === "hello" : message.t !== "hello";
-        if (!expected) {
-          finish(
-            new TscacheError(`handshake out of order: got ${show(message.t)}`),
-          );
-        } else if (message.t === "hello") {
-          onHello(message);
-        } else if (message.t === "init-ok") {
+      const steps: HandshakeSteps = {
+        hello: onHello,
+        ok: () => {
           signal?.removeEventListener("abort", onAbort);
           unlisten();
           resolve(new PortClient(port, clientId, lock));
-        } else if (message.t === "init-err") {
-          finish(fromWireError(message.error));
-        }
+        },
+        fail: finish,
       };
       unlisten = listen(port, {
-        onMessage,
+        onMessage: (data) => handshakeStep(data, stage, steps),
         onClose: () => finish(new TscacheError("port closed during handshake")),
       });
     });
