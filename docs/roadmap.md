@@ -114,6 +114,12 @@ with this sketch: its envelope is the cache record above and its segments the pa
 
 ## Design sketch: subscriptions (dirty notifications)
 
+**Proposed in detail in [`docs/design/m7-change-events.md`](design/m7-change-events.md) (step 92,
+finding M7), with its open choices as decision rows for the user.** It keeps this sketch's notify-only,
+cache-scoped event and changes three things: one event per mutating call rather than per macrotask; the
+payload separates written ranges from withdrawn coverage; and a reader re-reads a written range with
+`cacheOnly`, because a fetching re-read on every event loops wherever a cache has a volatile region.
+
 A cache-scoped event, `cacheChanged { cacheId, range }`, emitted after any merge, invalidation or clear
 with the range it touched. It carries no data: every tab would otherwise receive a copy of every merge.
 A consumer whose shown range overlaps calls `get` again, and the in-flight dedup keeps the fan-out to one

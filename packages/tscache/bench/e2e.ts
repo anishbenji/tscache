@@ -39,8 +39,8 @@ function config(id: string): CacheConfig {
 }
 
 /**
- * reload-first-read's cache: kept in IndexedDB (§4.10). The base, from
- * before persistence, ignores the flag and fetches again.
+ * reload-first-read's cache: kept in IndexedDB (§4.10). A revision from
+ * before persistence ignores the flag and fetches again.
  */
 function persistedConfig(id: string): CacheConfig {
   return { ...config(id), persist: true };
