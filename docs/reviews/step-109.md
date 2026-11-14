@@ -6,12 +6,15 @@ Branch: `chore/109-long-functions` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 
 
 User decision 66 B (2026-11-15): after step 106 the Fallow health score was 96.4 with three functions over 60 lines, `fetcherUrl` (`packages/tscache/src/vite/fetcher-url.ts`, 103 lines), and `main` (81 lines) and `record` (68 lines) of the demo recorder (`scripts/demo/record.ts`). This step splits all three into named helpers without changing behaviour, as step 93 did for seven others (`docs/reviews/step-93.md`). `vite/fetcher-url.ts` is a protected path, so the user merges this pull request.
 
-| Commit (by subject)                                              | What                                                                                                       |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `test(vite): pin each hook of fetcherUrl before it is split`     | `vite-fetcher-url-hooks.test.ts`: each hook called directly, the guards no real build reaches included.    |
-| `refactor(vite): split fetcherUrl's hooks into module functions` | `fileNumber`, `buildsIifeWorker`, `chunkModule`, `devModule`, `fetcherChunks` and `rejectPreloadHelper`.   |
-| `refactor(scripts): split the demo recorder's record and main`   | `recordingOn` out of `record`; `chosenScenarios`, `startDemo`, `launchBrowser` and `report` out of `main`. |
-| `docs(review): step 109, the last long functions`                | This file.                                                                                                 |
+| Commit (by subject)                                                      | What                                                                                                       |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `test(vite): pin each hook of fetcherUrl before it is split`             | `vite-fetcher-url-hooks.test.ts`: each hook called directly, the guards no real build reaches included.    |
+| `refactor(vite): split fetcherUrl's hooks into module functions`         | `fileNumber`, `buildsIifeWorker`, `chunkModule`, `devModule`, `fetcherChunks` and `rejectPreloadHelper`.   |
+| `refactor(scripts): split the demo recorder's record and main`           | `recordingOn` out of `record`; `chosenScenarios`, `startDemo`, `launchBrowser` and `report` out of `main`. |
+| `docs(review): step 109, the last long functions`                        | This file.                                                                                                 |
+| `docs(review): step 109, the ci result`                                  | The CI row of the verification table.                                                                      |
+| `test(vite): pin fetcherUrl's messages, name, resolve call and fetchers` | The pre-review's four test gaps (below).                                                                   |
+| `docs(review): step 109, the fable pre-review`                           | The pre-review section and its verification.                                                               |
 
 ### `fetcherUrl`
 
@@ -95,6 +98,19 @@ The `vite` entry grows by the six function headers (minified 2,593 to 2,781 byte
 After cbffb71 only this table row changed, so `bun run ci` was not run again.
 
 Not verified: the recorder was not run end to end against a real demo with ffmpeg (it records and re-encodes the committed media for many minutes); the launcher spec drives it with a stand-in ffmpeg, a probe scenario and fake builds.
+
+## Pre-review (Fable), not the gate
+
+Head 0d4c512 (the director's merge of `origin/main` into this branch). No P0 or P1. The reviewer confirmed that the split preserves behaviour: the signature, the hook order, every guard and its order, `IIFE_WARNING`, the 343-byte preload error (compared with `cmp`) and the emitted strings match `main`, and every `stopIfCancelled()` and `own(...)` of the recorder runs in the same order and in the same synchronous run as before. It found test gaps on the protected `fetcherUrl` path that predate the split; the director asked for them to be closed while the file is open.
+
+Each new test was written first and then shown to fail against a temporary mutation of `fetcher-url.ts`, made and undone with the Edit tool (`git diff --quiet HEAD -- packages/tscache/src` afterwards). The mutated runs covered `vite-fetcher-url-hooks.test.ts` and `vite-fetcher-url.test.ts` (and `vite-iife-warning.test.ts` for PR-4); in each, only the new test named failed.
+
+| #    | Sev | Finding                                                                                                                                                                           | Decision | Resolution                                                                                                                                                                                                                                                                                                 |
+| ---- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR-1 | P2  | The preload-helper error text is pinned only at its ends: rewording "that needs document and window" passes every test                                                            | accepted | Fixed in a380871: "fails with the whole message, naming the fetcher and the chunk" asserts it with `toBe`. Mutation "that needs the DOM": 1 failed, 34 passed.                                                                                                                                             |
+| PR-2 | P2  | The bundle check is tested with one fetcher only: `fetcherChunks(...).slice(0, 1)` passes                                                                                         | accepted | Fixed in a380871: a bundle with two fetcher chunks, only the second reaching the helper through a dynamic import; the error must name the second. Mutation `.slice(0, 1)`: 1 failed, 34 passed.                                                                                                            |
+| PR-3 | P2  | `resolveId`'s call to `this.resolve` is not pinned (the fake ignored the importer and options): `{ skipSelf: false }` passes, and so does `includes(QUERY)` for `endsWith(QUERY)` | accepted | Fixed in a380871: the fake records each `resolve` call; one test asserts `["./fetcher", "/repo/main.ts", { skipSelf: true }]`, another that `./x?fetcher&y` gives `undefined` without calling `resolve`. Mutation `skipSelf: false`: 1 failed, 34 passed. Mutation `includes(QUERY)`: 1 failed, 34 passed. |
+| PR-4 | nit | Assert the plugin's `name` and the whole IIFE warning                                                                                                                             | accepted | Fixed in a380871: `name` is `"tscache:fetcher-url"` (`toBe`), and a browser IIFE build logs exactly the full warning (`toEqual` on the one message). Mutations `name: "tscache:fetcher"` and the warning without "persisting or not", run together: 2 failed (these two tests), 48 passed.                 |
 
 ## Contract-test changes
 
