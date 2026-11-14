@@ -232,6 +232,36 @@ describe("failNext", () => {
     expect((await call(backend, path)).status).toBe(500);
     expect((await call(backend, path)).status).toBe(500);
     expect((await call(backend, path)).status).toBe(200);
+    expect((await stats(backend)).failed).toBe(2);
+  });
+});
+
+describe("holdSeries", () => {
+  it("holds series answers until released, failing them on arrival", async () => {
+    const backend = createBackend({ latencyMs: 0, now: () => NOW });
+    const path = `/api/series/metrics/web?${query}`;
+    await call(
+      backend,
+      "/api/control",
+      post({ holdSeries: true, failNext: 1 }),
+    );
+    let status = 0;
+    const answer = call(backend, path).then((response) => {
+      status = response.status;
+    });
+    // Waiting on the hold: decided already, not answered.
+    await vi.waitFor(
+      async () => expect((await stats(backend)).holding).toHaveLength(1),
+      { timeout: 4000, interval: 1 },
+    );
+    expect(status).toBe(0);
+    expect((await stats(backend)).failed).toBe(1);
+    await call(backend, "/api/control", post({ holdSeries: false }));
+    await answer;
+    expect(status).toBe(500);
+    expect((await stats(backend)).holding).toEqual([]);
+    // Released: later requests are answered at once.
+    expect((await call(backend, path)).status).toBe(200);
   });
 });
 

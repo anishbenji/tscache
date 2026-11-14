@@ -3,6 +3,9 @@
 #
 #   scripts/review-watch.sh <NN> [codex-review.sh args...]
 #
+# NN is the step number: two digits (07, 42), or three or more without a
+# leading zero (102).
+#
 # Headless Codex sessions sometimes stall without output. When nothing
 # under .reviews/step-NN/ grows for REVIEW_SILENCE_SECONDS (default 600),
 # the review's process group (the review script and its `codex exec`, and
@@ -12,7 +15,7 @@
 # REVIEW_POLL_SECONDS (default 30) sets how often output is checked.
 set -u
 
-[[ $# -ge 1 && $1 =~ ^[0-9]{2}$ ]] || {
+[[ $# -ge 1 && $1 =~ ^([0-9]{2}|[1-9][0-9]{2,})$ ]] || {
   echo "usage: $0 <NN> [codex-review.sh args...]" >&2
   exit 2
 }

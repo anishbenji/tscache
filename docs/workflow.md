@@ -57,7 +57,7 @@ Actions in the workflow are pinned to commit SHAs. The GitHub CLI (`gh`, `brew i
 
 ## Review loop
 
-The reviewer reads only committed history (`git diff main...feat/NN-slug`), so commit before each round.
+The reviewer reads only committed history (`git diff main...feat/NN-slug`), so commit before each round. `NN` is the step number: two digits (`07`), or three or more without a leading zero (`102`); both review scripts reject anything else.
 
 1. **Review.** `scripts/review-watch.sh NN` (in the background), which runs `scripts/codex-review.sh NN` with stdin closed under a silence watchdog: no output for ten minutes (`REVIEW_SILENCE_SECONDS`) kills the session and exits 124, and the round is retried. The script runs `bun run ci` on the host (Codex's read-only sandbox cannot install or build), then runs `codex exec` read-only in a fresh session with prompt C and the CI result. The model comes from `.codex/config.toml`; the script sets effort high. Output: `.reviews/step-NN/round-K.md`.
 2. **Adversarial review**, for steps in the schedule below: `scripts/codex-review.sh NN --adversarial "<focus>"` (effort xhigh). Output: `.reviews/step-NN/adversarial-K.md`.
