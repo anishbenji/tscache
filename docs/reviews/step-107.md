@@ -56,3 +56,7 @@ None: the changed tests are scripts tests, not Codex-authored contract tests.
 ## Decision concerns
 
 None.
+
+## Security lane (Claude), not the gate
+
+run 1, head d8af08e: P0 0, P1 0, P2 0
