@@ -234,7 +234,7 @@ interface Driver {
  * the directory persists a `persist: true` cache and one without it
  * ignores the flag.
  */
-function persists(src: string): boolean {
+export function persists(src: string): boolean {
   return existsSync(join(src, "persist"));
 }
 
@@ -331,10 +331,16 @@ async function firstReads(d: Driver): Promise<E2eResult> {
  * again; a revision from before persistence, which ignores `persist`,
  * must fetch the bars a second time. Each side is judged by what its
  * revision does, so a base that persists is held to one fetch as the head
- * is. Paired like handshake-first-read: one run a batch.
+ * is. Each side has a BrowserContext, and so an IndexedDB, of its own: a
+ * head that upgrades the database's version would otherwise leave the
+ * base unable to open it. Paired like handshake-first-read: one run a
+ * batch.
  */
 async function reloadReads(d: Driver): Promise<E2eResult> {
-  const context = await d.browser.newContext();
+  const contexts = new Map<Side, BrowserContext>();
+  for (const side of d.sides) {
+    contexts.set(side, await d.browser.newContext());
+  }
   const api = (page: Page) => ({
     setup: (side: Side, ns: string, id: string) =>
       page.evaluate(
@@ -364,6 +370,7 @@ async function reloadReads(d: Driver): Promise<E2eResult> {
   const once = async (side: Side): Promise<Once> => {
     const ns = randomUUID();
     const id = randomUUID();
+    const context = contexts.get(side) as BrowserContext;
     const setup = await open(context, d.pageUrl);
     try {
       await api(setup).setup(side, ns, id);
@@ -409,7 +416,7 @@ async function reloadReads(d: Driver): Promise<E2eResult> {
     }
     return result("reload-first-read", { sample: summarise(base, head, 1) });
   } finally {
-    await context.close();
+    for (const context of contexts.values()) await context.close();
   }
 }
 
@@ -633,6 +640,10 @@ function runScenario(d: Driver, scenario: Scenario): Promise<E2eResult> {
   }
 }
 
+/** A time in milliseconds, as the bench's summaries print one. */
+const duration = (value: number) =>
+  value >= 1 ? `${value.toFixed(2)} ms` : `${(value * 1000).toFixed(1)} µs`;
+
 /**
  * One line for a scenario that finished, logged as it does, so the
  * scenarios that passed are in the log even when a later one fails.
@@ -640,17 +651,57 @@ function runScenario(d: Driver, scenario: Scenario): Promise<E2eResult> {
 function line({ name, sample, value, expected, ms }: E2eResult): string {
   if (sample !== undefined) {
     const { baseMs, headMs, ratio, low, high } = sample;
-    return `${name}: base ${baseMs.toPrecision(3)} ms, head ${headMs.toPrecision(3)} ms, head/base ${ratio.toFixed(3)} (${low.toFixed(3)}–${high.toFixed(3)})`;
+    return `${name}: base ${duration(baseMs)}, head ${duration(headMs)}, head/base ${ratio.toFixed(3)} (${low.toFixed(3)}–${high.toFixed(3)})`;
   }
-  const took = ms === undefined ? "" : `, ${ms.toPrecision(3)} ms`;
+  const took = ms === undefined ? "" : `, ${duration(ms)}`;
   return `${name}: ${value} (expected ${expected})${took}`;
+}
+
+/** What runEach tells its caller as each scenario ends. */
+interface Progress<T> {
+  done(result: T): void;
+  failed(name: string, error: unknown): void;
+}
+
+/**
+ * Runs each named scenario in turn. A scenario that fails does not stop
+ * the others; once all have run, the failures are thrown together, so a
+ * wrong result or a fetch too many still fails the run.
+ */
+export async function runEach<N extends string, T>(
+  names: readonly N[],
+  run: (name: N) => Promise<T>,
+  progress: Progress<T>,
+): Promise<T[]> {
+  const results: T[] = [];
+  const failures: { name: N; error: Error }[] = [];
+  for (const name of names) {
+    try {
+      const done = await run(name);
+      progress.done(done);
+      results.push(done);
+    } catch (error) {
+      progress.failed(name, error);
+      failures.push({
+        name,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures.map((f) => f.error),
+      `${failures.length} of ${names.length} e2e scenarios failed: ${failures
+        .map((f) => `${f.name}: ${f.error.message}`)
+        .join("; ")}`,
+    );
+  }
+  return results;
 }
 
 /**
  * Runs the scenarios in Chromium: paired with a base, or the smoke. A
- * scenario that fails does not stop the others; once all have run, the
- * failures are thrown together, so a wrong result or a fetch too many
- * still fails the run.
+ * scenario that fails does not stop the others (runEach).
  */
 export async function runE2e(run: E2eRun): Promise<E2eResult[]> {
   const out = join(run.work, "e2e");
@@ -685,29 +736,11 @@ export async function runE2e(run: E2eRun): Promise<E2eResult[]> {
     const selected = (Object.keys(SCENARIOS) as Scenario[]).filter(
       (s) => run.only === undefined || run.only.includes(s),
     );
-    const results: E2eResult[] = [];
-    const failures: Error[] = [];
-    for (const scenario of selected) {
-      try {
-        const done = await runScenario(d, scenario);
-        console.log(`e2e ${line(done)}`);
-        results.push(done);
-      } catch (error) {
-        console.error(`e2e ${scenario} failed:`, error);
-        failures.push(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    }
-    if (failures.length > 0) {
-      throw new AggregateError(
-        failures,
-        `${failures.length} of ${selected.length} e2e scenarios failed: ${failures
-          .map((e) => e.message)
-          .join("; ")}`,
-      );
-    }
-    return results;
+    return await runEach(selected, (scenario) => runScenario(d, scenario), {
+      done: (done) => console.log(`e2e ${line(done)}`),
+      failed: (scenario, error) =>
+        console.error(`e2e ${scenario} failed:`, error),
+    });
   } finally {
     await browser.close();
     await server.stop(true);
