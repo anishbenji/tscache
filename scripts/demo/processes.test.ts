@@ -149,6 +149,30 @@ describe("Processes", () => {
     expect(processes.groups.size).toBe(0);
   });
 
+  it("copies a captured process's stderr to its sink as it arrives, and keeps it", async () => {
+    const processes = new Processes();
+    let copied = "";
+    const started = processes.start(
+      ["sh", "-c", "echo out; echo warn >&2; exec sleep 60"],
+      {
+        cwd,
+        capture: true,
+        stderr: {
+          write: (chunk) => {
+            copied += String(chunk);
+          },
+        },
+      },
+    );
+    if (started.group !== undefined) leftovers.push(started.group);
+    // While it still runs: copied as it arrives, not when it exits.
+    await expect.poll(() => copied).toBe("warn\n");
+    // stdout is its own pipe: wait for it too rather than rely on its order.
+    await expect.poll(() => started.output()).toContain("out\n");
+    expect(started.output()).toContain("warn\n");
+    await processes.stop();
+  });
+
   it("refuses to start once stopping", async () => {
     const processes = new Processes();
     await processes.stop();
