@@ -74,7 +74,7 @@ Each test below fails with its mutant applied and passes on the code as it is. T
 | `cmp` of each edited source file against its saved copy, and `git diff -- packages/tscache/src` | identical; empty                                                                                             |
 | `bun run typecheck`                                                                             | exit 0                                                                                                       |
 | `bun scripts/test-clocks.ts`                                                                    | `test-clocks: 169 files clean`                                                                               |
-| `~/code/tscache-reports/bin/heavy-run.sh "94 child: ci" bun run ci`                             | exit 0 on `419968f` (before the pre-review); final head: see the director's report                           |
+| `~/code/tscache-reports/bin/heavy-run.sh "94 child: ci" bun run ci`                             | exit 0 on `419968f` (before the pre-review) and on `5ca5aa5` (131 Vitest files, 2,701 tests; 175 Playwright) |
 
 The new tests follow `docs/testing.md`: the persistence tests run on Vitest's fake clock (`fakeTime()`, `vi.useFakeTimers`), the orchestrator tests order every interleaving with gated fetches and port round trips, and none sleeps or retries.
 
@@ -90,7 +90,7 @@ The director's pre-review on `419968f` predicted "merge after fixes". Each findi
 | PR-2 | P2  | `da < db` → `true` (`persister.ts:835`) survived: the order test pinned one orientation                                                               | accepted | Reproduced: the package suite passes under it. The test is now an `it.each` over both orientations; `→ true` fails "queued first". `<=` listed as equivalent                                                                                                                        |
 | PR-3 | P2  | `Math.min` → `Math.max` on the deadline (`persister.ts:985`) survived with no reason given                                                            | accepted | §4.10.6 bounds the joined job by the earlier deadline. New test holds the retry past the failed job's deadline; the cache stops at 5000 ms, and at 6000 ms under the mutant                                                                                                         |
 | PR-4 | P2  | `docs/INDEX.md` conflicts with `main` (`a553b0c`, step 85)                                                                                            | accepted | `origin/main` merged (no rebase); the `docs/reviews/` row set to 90 files and re-measured after the last edit of this file                                                                                                                                                          |
-| PR-5 | P2  | Verification table stale: test-clocks reports 169 files, and the CI row had no result                                                                 | accepted | Re-run on this branch; table updated. The final head's CI result is in the director's report                                                                                                                                                                                        |
+| PR-5 | P2  | Verification table stale: test-clocks reports 169 files, and the CI row had no result                                                                 | accepted | Re-run on this branch; table updated, with the CI result on `5ca5aa5`.                                                                                                                                                                                                              |
 | PR-6 | nit | Branch prefix `test/` is not one AGENTS.md allows                                                                                                     | accepted | Branch renamed to `chore/94-mutation-survivors` (`git branch -m`); header updated                                                                                                                                                                                                   |
 
 ## Contract-test changes
@@ -100,3 +100,7 @@ No contract test was changed or removed. Cases were added to two tables in Codex
 ## Decision concerns
 
 None.
+
+## Security lane (Claude), not the gate
+
+run 1, head 5ca5aa5: P0 0, P1 0, P2 0
