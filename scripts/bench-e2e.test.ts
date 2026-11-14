@@ -2,10 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { persists, runEach } from "./bench-e2e";
+import { failureSummary, persists, runEach } from "./bench-e2e";
 
 describe("runEach", () => {
-  it("runs every scenario after one fails, then rejects with every failure", async () => {
+  it("runs every scenario after one fails, then returns each result and failure", async () => {
     const ran: string[] = [];
     const done: number[] = [];
     const failed: string[] = [];
@@ -14,40 +14,46 @@ describe("runEach", () => {
       if (name === "b" || name === "d") throw new Error(`${name} broke`);
       return name.charCodeAt(0);
     };
-    const outcome = runEach(["a", "b", "c", "d", "e"], run, {
+    const outcome = await runEach(["a", "b", "c", "d", "e"], run, {
       done: (result) => done.push(result),
       failed: (name) => failed.push(name),
     });
-    const error = await outcome.then(
-      () => undefined,
-      (reason: unknown) => reason,
-    );
     expect(ran).toEqual(["a", "b", "c", "d", "e"]);
     expect(done).toEqual([97, 99, 101]);
     expect(failed).toEqual(["b", "d"]);
-    expect(error).toBeInstanceOf(AggregateError);
-    const { errors, message } = error as AggregateError;
-    expect(errors.map((e: Error) => e.message)).toEqual(["b broke", "d broke"]);
-    expect(message).toBe("2 of 5 e2e scenarios failed: b: b broke; d: d broke");
+    expect(outcome).toEqual({
+      results: [97, 99, 101],
+      failures: [
+        { scenario: "b", message: "b broke" },
+        { scenario: "d", message: "d broke" },
+      ],
+    });
+    expect(failureSummary(outcome)).toBe(
+      "2 of 5 e2e scenarios failed: b: b broke; d: d broke",
+    );
   });
 
-  it("resolves with every result, in order, when none fails", async () => {
-    const results = await runEach(["a", "b"], async (name) => `${name}!`, {
+  it("returns every result, in order, and no failure when none fails", async () => {
+    const outcome = await runEach(["a", "b"], async (name) => `${name}!`, {
       done: () => {},
       failed: () => {},
     });
-    expect(results).toEqual(["a!", "b!"]);
+    expect(outcome).toEqual({ results: ["a!", "b!"], failures: [] });
+    expect(failureSummary(outcome)).toBeUndefined();
   });
 
   it("keeps a thrown non-Error as the failure's message", async () => {
-    const outcome = runEach(
+    const outcome = await runEach(
       ["a"],
       async () => {
         throw "not an error";
       },
       { done: () => {}, failed: () => {} },
     );
-    await expect(outcome).rejects.toThrow(
+    expect(outcome.failures).toEqual([
+      { scenario: "a", message: "not an error" },
+    ]);
+    expect(failureSummary(outcome)).toBe(
       "1 of 1 e2e scenarios failed: a: not an error",
     );
   });
