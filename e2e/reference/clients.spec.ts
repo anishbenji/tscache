@@ -49,7 +49,10 @@ async function nextDraw(page: Page): Promise<void> {
 /**
  * Drags the chart by most of its width: right goes back in time, left
  * forward. With `pause`, the drag stops half-way, the button still held,
- * until `pause` resolves, as a drag on a loaded machine may stop.
+ * until `pause` resolves, as a drag on a loaded machine may stop. Each
+ * half then takes seven steps of a twentieth of the chart, about 18 min of
+ * its six hours: more than REACH_SLACK, so a read where a step stopped is
+ * never taken for the read where the half ended (readReach).
  */
 async function drag(
   page: Page,
@@ -62,12 +65,13 @@ async function drag(
   const [from, to] = toward === "back" ? [0.2, 0.9] : [0.9, 0.2];
   await page.mouse.move(box.x + box.width * from, y);
   await page.mouse.down();
+  const steps = pause === undefined ? 20 : 7;
   if (pause !== undefined) {
     const half = (from + to) / 2;
-    await page.mouse.move(box.x + box.width * half, y, { steps: 10 });
+    await page.mouse.move(box.x + box.width * half, y, { steps });
     await pause();
   }
-  await page.mouse.move(box.x + box.width * to, y, { steps: 20 });
+  await page.mouse.move(box.x + box.width * to, y, { steps });
   await page.mouse.up();
 }
 
@@ -183,6 +187,16 @@ async function showingStart(page: Page): Promise<number> {
   return (await showingRange(page)).start;
 }
 
+/**
+ * How far back the read of what is on screen reaches, give or take
+ * REACH_SLACK: it starts a screen before it (readRange in market.ts). A
+ * history fetch starting at or before this is that read's.
+ */
+async function readReach(page: Page): Promise<number> {
+  const shown = await showingRange(page);
+  return shown.start - (shown.end - shown.start) + REACH_SLACK;
+}
+
 test("a time shown without a year reads in the year nearest the clock", () => {
   const newYear = Date.UTC(2027, 0, 1, 1);
   expect(shownTime("12-31 20:00", newYear)).toBe(Date.UTC(2026, 11, 31, 20));
@@ -219,9 +233,13 @@ for (const app of [
   test.describe(app, () => {
     test.use({ baseURL: appUrl(app) });
     test.describe.configure({ mode: "serial" });
-    // Some tests move the backend's clock on; every test starts on the real one.
+    // Some tests move the backend's clock on, fail its series requests or
+    // hold its answers; every test starts on a backend that does none of
+    // these, even after a test that failed part-way.
     test.afterEach(async ({ request }) => {
-      await request.post("/api/control", { data: { resetClock: true } });
+      await request.post("/api/control", {
+        data: { resetClock: true, failNext: 0, holdSeries: false },
+      });
     });
 
     test("one tab holds the live feed, and every tab draws its bars without a fetch", async ({
@@ -513,24 +531,45 @@ for (const app of [
       // as on a loaded machine, reads where it stopped and again where it
       // ends (SCROLL_PAUSE_MS in session.ts), each read fetching the forming
       // bar besides the history it lacks. This drag stops on every run.
+      // The afterEach undoes the failures and the hold below.
+      await expect
+        .poll(async () => (await draws(page)).full)
+        .toBeGreaterThan(0);
       const before = (await notices(page)).length;
       const { failed } = await stats(page);
       await control(page, { failNext: 1000 });
       const since = async () => (await notices(page)).slice(before);
       const history = async () => (await since()).filter(isHistory);
-      await drag(page, "back", () => waitHistory(page, before));
+      await drag(page, "back", async () => {
+        // The read where the drag stopped has failed, so no read of the
+        // first half comes later; the answers to the reads from here on
+        // wait for the test.
+        await expect
+          .poll(async () => {
+            const reach = await readReach(page);
+            return (await history()).some(({ range }) => range.start <= reach);
+          })
+          .toBe(true);
+        await control(page, { holdSeries: true });
+      });
+      // The read where the drag ended has asked for its history, which the
+      // backend failed on arrival and holds; only then are fetches let
+      // through, so no read of this drag comes after them and succeeds.
       await expect
-        .poll(async () => (await history()).length)
-        .toBeGreaterThan(1);
-      expect((await history()).map((notice) => notice.outcome)).not.toContain(
-        "ok",
-      );
-      await expect(page.getByTestId("missing")).toContainText("fetch failed");
+        .poll(async () => {
+          const reach = await readReach(page);
+          return (await stats(page)).holding.some(
+            (range) => range.end - range.start > HOUR && range.start <= reach,
+          );
+        })
+        .toBe(true);
       await control(page, { failNext: 0 });
       // Retry once every request the backend failed has come back as a
-      // failed fetch. A read awaits the fetches in flight that overlap it
-      // rather than fetching again (architecture §4.9.1), so a Retry while
-      // one bound to fail is still in flight would fail with it.
+      // failed fetch: release the held answers and wait for them. A read
+      // awaits the fetches in flight that overlap it rather than fetching
+      // again (architecture §4.9.1), so a Retry before this would join a
+      // held fetch bound to fail, and fail with it on every run.
+      await control(page, { holdSeries: false });
       const failures = (await stats(page)).failed - failed;
       await expect
         .poll(
@@ -539,6 +578,12 @@ for (const app of [
               .length,
         )
         .toBe(failures);
+      // Both reads' history fetches failed.
+      expect((await history()).length).toBeGreaterThan(1);
+      expect((await history()).map((notice) => notice.outcome)).not.toContain(
+        "ok",
+      );
+      await expect(page.getByTestId("missing")).toContainText("fetch failed");
       await page.getByRole("button", { name: "Retry" }).click();
       await expect(page.getByTestId("missing")).toHaveText("nothing missing");
       await expect(page.getByRole("button", { name: "Retry" })).toBeHidden();
