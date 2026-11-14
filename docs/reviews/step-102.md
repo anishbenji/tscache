@@ -58,3 +58,7 @@ None. The changed test is a tooling test of the review scripts, not a contract t
 ## Decision concerns
 
 None.
+
+## Security lane (Claude), not the gate
+
+run 1, head 47826e1: P0 0, P1 0, P2 0
