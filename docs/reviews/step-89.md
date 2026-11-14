@@ -108,3 +108,9 @@ The guards, the request helper and the restore were found clean; one P2 and one 
 - **The helper takes the fetch as a parameter and uses `setTimeout`,** both, as the finding check allowed either: the parameter lets a test hold a request open without a server, and `setTimeout` lets fake timers drive the deadline.
 - **The helper buffers the body.** The recorder's responses are small (counters, a control's answer, one server-rendered page, a health check), and buffering keeps the body under the same deadline as the headers.
 - **The launcher's fix, not the recorder's.** The security lane offered either; the launcher's covers every consumer of its hub line (the recorder, Playwright's `demo` web server, a person reading the terminal), and the recorder already requires that line from its own launcher.
+
+## Security lane (Claude), not the gate
+
+run 1, head 3071559: P0 0, P1 0, P2 1
+
+S1.1 P2: fixed in fe6625c
