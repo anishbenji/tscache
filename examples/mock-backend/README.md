@@ -50,15 +50,17 @@ All routes live under `/api/`; the `mockBackend()` Vite plugin mounts them on
 - `POST /api/auth/refresh` with `{ refresh }` rotates both tokens; a refresh
   token works once.
 - `POST /api/control` with any of `{ latencyMs, bumpVersion: true,
-  expireAccess: true, failNext, dropStreams: true, advanceMs, resetClock:
-  true }` changes the latency (default 300 ms), restates every series under
-  a new version, replaces the access token, fails the next series requests,
-  ends every live stream and socket, or moves the backend's clock on and
-  back.
+  expireAccess: true, failNext, holdSeries, dropStreams: true, advanceMs,
+  resetClock: true }` changes the latency (default 300 ms), restates every
+  series under a new version, replaces the access token, fails the next
+  series requests, holds the answers to series requests until `holdSeries`
+  is set false (a request is still failed or not on arrival), ends every
+  live stream and socket, or moves the backend's clock on and back.
 - `GET /api/stats` counts series pages per dataset and per format, the
   points and body bytes they carried, refused requests and subscriptions,
-  rotations, reused refresh tokens and open live streams, and reports the
-  backend's clock.
+  series requests failed on request (`failNext`), rotations, reused refresh
+  tokens and open live streams, lists the ranges of the series requests
+  waiting on `holdSeries`, and reports the backend's clock.
 
 Series requests and socket subscriptions need a token only when the plugin
 is created with `mockBackend({ auth: true })`. The socket upgrade is served
