@@ -179,6 +179,35 @@ describe("clearDisk (§4.10.7, N66)", () => {
     expect(clearCalls(store)).toBe(2);
   });
 
+  it.each([
+    { startedAt: 0, deadline: 5000 },
+    { startedAt: undefined, deadline: 8000 },
+  ])(
+    "a call made at 3000 ms (startedAt $startedAt) whose clear stays pending is abandoned at $deadline ms",
+    async ({ startedAt, deadline }) => {
+      vi.useFakeTimers({ now: 0 });
+      await vi.advanceTimersByTimeAsync(3000);
+      const { store, close } = seeded();
+      const gate = store.gate("clearAll");
+      const cleared = tracked(
+        clearDisk(
+          async () => store,
+          startedAt === undefined ? {} : { startedAt },
+        ),
+      );
+      await gate.entered;
+      await vi.advanceTimersByTimeAsync(deadline - 3000 - 1);
+      expect(cleared.done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(cleared.done).toBe(true);
+      expect(close).toHaveBeenCalledTimes(1);
+      gate.release();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(clearCalls(store)).toBe(1);
+      expect(close).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("debounceMs and timeoutMs are options", async () => {
     vi.useFakeTimers({ now: 0 });
     const { store } = seeded();

@@ -29,6 +29,12 @@ function signalsTo(calls: Call[], group: number): (NodeJS.Signals | 0)[] {
     .map((call) => call.signal);
 }
 
+/** How many times `group` was probed for members (the 0 signal). */
+function probesOf(calls: Call[], group: number): number {
+  return calls.filter((call) => call.pid === -group && call.signal === 0)
+    .length;
+}
+
 function running(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -88,15 +94,27 @@ describe("Processes", () => {
   it("retires a build whose child outlives it only once the child exits", async () => {
     const { kill, calls } = recording();
     const processes = new Processes(kill);
-    const { group, started } = await startShell(processes, "sleep 1 & echo $!");
+    // The child lives until the test ends it: a child that ended on its own
+    // after a while could end before the checks below on a loaded machine.
+    const { group, started } = await startShell(
+      processes,
+      "sleep 30 & echo $!",
+    );
     const child = await echoedPid(started.output);
-    // The leader is gone; its child keeps the group, so it stays registered.
+    // The leader is gone; its child keeps the group, so it stays registered,
+    // through the check at the leader's exit and a sweep after it.
+    await expect
+      .poll(() => probesOf(calls, group), { timeout: 5000 })
+      .toBeGreaterThanOrEqual(2);
     expect(running(child)).toBe(true);
     expect(processes.groups.has(group)).toBe(true);
+    process.kill(child, "SIGTERM");
     await expect
       .poll(() => processes.groups.has(group), { timeout: 5000 })
       .toBe(false);
-    expect(running(child)).toBe(false);
+    // The group probe fails once the child has exited, but its pid answers
+    // until launchd reaps the zombie: wait for that, as for any effect.
+    await expect.poll(() => running(child), { timeout: 5000 }).toBe(false);
     await processes.stop();
     expect(signalsTo(calls, group)).toEqual([]);
   });
@@ -112,7 +130,8 @@ describe("Processes", () => {
     expect(processes.groups.has(group)).toBe(true);
     await processes.stop();
     expect(signalsTo(calls, group)).toEqual(["SIGTERM"]);
-    expect(running(child)).toBe(false);
+    // Stopped, but its pid answers until launchd reaps the zombie.
+    await expect.poll(() => running(child), { timeout: 5000 }).toBe(false);
     expect(processes.groups.size).toBe(0);
   });
 
@@ -147,6 +166,30 @@ describe("Processes", () => {
     await processes.stop();
     expect(signalsTo(calls, group)).toEqual([]);
     expect(processes.groups.size).toBe(0);
+  });
+
+  it("copies a captured process's stderr to its sink as it arrives, and keeps it", async () => {
+    const processes = new Processes();
+    let copied = "";
+    const started = processes.start(
+      ["sh", "-c", "echo out; echo warn >&2; exec sleep 60"],
+      {
+        cwd,
+        capture: true,
+        stderr: {
+          write: (chunk) => {
+            copied += String(chunk);
+          },
+        },
+      },
+    );
+    if (started.group !== undefined) leftovers.push(started.group);
+    // While it still runs: copied as it arrives, not when it exits.
+    await expect.poll(() => copied).toBe("warn\n");
+    // stdout is its own pipe: wait for it too rather than rely on its order.
+    await expect.poll(() => started.output()).toContain("out\n");
+    expect(started.output()).toContain("warn\n");
+    await processes.stop();
   });
 
   it("refuses to start once stopping", async () => {

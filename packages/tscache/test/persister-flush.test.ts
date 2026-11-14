@@ -74,6 +74,25 @@ describe("write-behind scheduling and plans (§4.10.6)", () => {
     ).toEqual([0, 1, 3]);
     expectRecords(h.store.records("persist"), h.engine);
   });
+  it("a dirty page range inserted ahead of later ones keeps the later ones", async () => {
+    const h = await opened();
+    h.engine.put("persist", batch([-8, 0, 4, 8, 12, 20]));
+    await finish(h.persister.flush());
+    h.store.log.length = 0;
+    h.engine.put("persist", batch([12]));
+    h.engine.put("persist", batch([20]));
+    h.engine.put("persist", batch([0]));
+    await finish(h.persister.flush());
+    expect(writes(h.store)[0]?.plan.deletePages).toEqual([
+      { start: 0, end: 0 },
+      { start: 3, end: 3 },
+      { start: 5, end: 5 },
+    ]);
+    expect(
+      writes(h.store)[0]?.plan.putPages.map((p: PageRecord) => p.page),
+    ).toEqual([0, 3, 5]);
+    expectRecords(h.store.records("persist"), h.engine);
+  });
   it.each(["clear", "version-mismatch", "first-version"])(
     "%s causes a full rewrite",
     async (kind) => {
