@@ -232,6 +232,7 @@ describe("failNext", () => {
     expect((await call(backend, path)).status).toBe(500);
     expect((await call(backend, path)).status).toBe(500);
     expect((await call(backend, path)).status).toBe(200);
+    expect((await stats(backend)).failed).toBe(2);
   });
 });
 

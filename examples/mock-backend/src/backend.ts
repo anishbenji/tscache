@@ -50,6 +50,11 @@ export interface BackendStats {
    * stale access token.
    */
   refused: number;
+  /**
+   * Series requests answered with a server error (BackendControl.failNext),
+   * counted on arrival, so the count is final once nothing is left to fail.
+   */
+  failed: number;
   /** Successful rotations. */
   refreshes: number;
   /** Refresh attempts with a refresh token that is not the current one. */
@@ -230,6 +235,7 @@ export function createBackend(options: BackendOptions = {}): Backend {
     points: 0,
     bytes: 0,
     refused: 0,
+    failed: 0,
     refreshes: 0,
     reused: 0,
     streams: 0,
@@ -268,7 +274,10 @@ export function createBackend(options: BackendOptions = {}): Backend {
       ? seriesPage(datasets[dataset], seed, query, now())
       : undefined;
     const fail = authorized && failing > 0;
-    if (fail) failing--;
+    if (fail) {
+      failing--;
+      stats.failed++;
+    }
     await sleep(latencyMs);
     if (fail) return text(500, "failing on request");
     if (page === undefined) {
