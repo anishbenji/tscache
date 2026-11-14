@@ -18,11 +18,20 @@ Documentation only: no code, no tests, no configuration changes.
 | Commit (by subject)                                       | What                                                        |
 | --------------------------------------------------------- | ----------------------------------------------------------- |
 | `docs: name the health floor and mutation runs in agents` | The two `AGENTS.md` lines; this file; `docs/INDEX.md` sizes |
+| `docs(review): step 105 pre-review`                       | This file's pre-review section; the `docs/INDEX.md` sizes   |
 
 ## Verification
 
 - `bun run docs:check`: passes.
 - `~/code/tscache-reports/bin/heavy-run.sh "105 child: ci" bun run ci`: exits 0 on the final head.
+
+## Pre-review (Claude Opus), not the gate
+
+Run on head `62a7ab4` (the director's merge of `origin/main` into this branch, with the `docs/INDEX.md` rows re-measured). No P0, P1 or P2 findings; every claim in this file was checked, including the health-floor line against `lefthook.yml` and `package.json` (`fallow:health`) and the size figures.
+
+| #    | Sev | Finding                                                                        | Decision | Resolution                                              |
+| ---- | --- | ------------------------------------------------------------------------------ | -------- | ------------------------------------------------------- |
+| PR-1 | nit | `AGENTS.md` names `bun run mutation` before pull request #119 adds that script | accepted | No change; the pull request says to merge it after #119 |
 
 ## Contract-test changes
 
