@@ -553,7 +553,7 @@ describe("N31 in-flight subtraction", () => {
     ]);
   });
 
-  it.each([r(53, 63), r(54, 62)])(
+  it.each([r(53, 63), r(54, 62), r(103, 113), r(-7, 3)])(
     "T28: invalidate fences the whole intersecting entry, retains unrelated joins and still applies old responses (%j)",
     async (invalidated) => {
       const h = harness();
