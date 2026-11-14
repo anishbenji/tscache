@@ -1,6 +1,6 @@
 # Step 101 — a fetcher-only deploy keeps the worker URL (docs correction)
 
-Branch: `docs/101-fetcher-only-deploy` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: awaiting review
+Branch: `docs/101-fetcher-only-deploy` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled
 
 ## Scope
 
@@ -74,3 +74,8 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 1 (GPT-6.1 Sol, high), head f4a0f1a
+
+No findings; verdict merge. The three pre-review fixes were checked as fixed. `bun run ci` exit 0 on that head
+(run by the round). Settled.
