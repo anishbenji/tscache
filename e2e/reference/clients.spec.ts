@@ -48,30 +48,16 @@ async function nextDraw(page: Page): Promise<void> {
 
 /**
  * Drags the chart by most of its width: right goes back in time, left
- * forward. With `pause`, the drag stops half-way, the button still held,
- * until `pause` resolves, as a drag on a loaded machine may stop. Each
- * half then takes seven steps of a twentieth of the chart, about 18 min of
- * its six hours: more than REACH_SLACK, so a read where a step stopped is
- * never taken for the read where the half ended (readReach).
+ * forward.
  */
-async function drag(
-  page: Page,
-  toward: "back" | "forward",
-  pause?: () => Promise<unknown>,
-): Promise<void> {
+async function drag(page: Page, toward: "back" | "forward"): Promise<void> {
   const box = await page.locator("#chart").boundingBox();
   if (box === null) throw new Error("no chart");
   const y = box.y + box.height / 3;
   const [from, to] = toward === "back" ? [0.2, 0.9] : [0.9, 0.2];
   await page.mouse.move(box.x + box.width * from, y);
   await page.mouse.down();
-  const steps = pause === undefined ? 20 : 7;
-  if (pause !== undefined) {
-    const half = (from + to) / 2;
-    await page.mouse.move(box.x + box.width * half, y, { steps });
-    await pause();
-  }
-  await page.mouse.move(box.x + box.width * to, y, { steps });
+  await page.mouse.move(box.x + box.width * to, y, { steps: 20 });
   await page.mouse.up();
 }
 
@@ -117,12 +103,12 @@ function isHistory(notice: FetchNotice): boolean {
  * bar after it.
  */
 function fetchedThrough(
-  fetched: readonly FetchNotice[],
+  fetched: readonly Range[],
   from: number,
   until: number,
 ): boolean {
   let reached = from - MINUTE;
-  const ranges = fetched.map((n) => n.range).sort((a, b) => a.start - b.start);
+  const ranges = [...fetched].sort((a, b) => a.start - b.start);
   for (const range of ranges) {
     if (range.start > reached + MINUTE) break;
     reached = Math.max(reached, range.end);
@@ -349,7 +335,7 @@ for (const app of [
         await expect
           .poll(async () =>
             fetchedThrough(
-              (await notices(page)).slice(before),
+              (await notices(page)).slice(before).map((n) => n.range),
               reach,
               opening.range.start - MINUTE,
             ),
@@ -526,63 +512,96 @@ for (const app of [
       const page = await openTab(context);
       await waitNotices(page, 1);
       await expect(page.getByTestId("missing")).toHaveText("nothing missing");
-      // Every fetch fails until the test lets them through: how many fetches
-      // a drag makes is not the test's to count. A drag that stops mid-way,
-      // as on a loaded machine, reads where it stopped and again where it
-      // ends (SCROLL_PAUSE_MS in session.ts), each read fetching the forming
-      // bar besides the history it lacks. This drag stops on every run.
-      // The afterEach undoes the failures and the hold below.
       await expect
         .poll(async () => (await draws(page)).full)
         .toBeGreaterThan(0);
+      const [opening] = await notices(page);
+      if (opening === undefined) throw new Error("no opening fetch");
+      // The bar before the opening fetch: what a read back from the screen
+      // fetches reaches through it (fetchedThrough).
+      const until = opening.range.start - MINUTE;
       const before = (await notices(page)).length;
       const { failed } = await stats(page);
-      await control(page, { failNext: 1000 });
       const since = async () => (await notices(page)).slice(before);
-      const history = async () => (await since()).filter(isHistory);
-      await drag(page, "back", async () => {
-        // The read where the drag stopped has failed, so no read of the
-        // first half comes later; the answers to the reads from here on
-        // wait for the test.
-        await expect
-          .poll(async () => {
-            const reach = await readReach(page);
-            return (await history()).some(({ range }) => range.start <= reach);
-          })
+      const failedFetches = async () =>
+        (await since()).filter((notice) => notice.outcome === "failed");
+      // How many reads a drag makes is not the test's to count: the page
+      // reads each time it stops (SCROLL_PAUSE_MS in session.ts), which on a
+      // loaded machine may be between any two mouse moves. So every request
+      // fails, and the test waits for each read it needs by where the read
+      // starts: the failed fetches, and the requests the backend holds,
+      // together reach from the read of what is on screen through the
+      // opening fetch. A read awaits the fetches in flight that overlap it
+      // and asks only for what lies outside them (architecture §4.9.1), so
+      // no one request need reach that far. The afterEach undoes the
+      // failures and the hold.
+      const readBack = () =>
+        expect
+          .poll(async () =>
+            fetchedThrough(
+              [
+                ...(await failedFetches()).map((notice) => notice.range),
+                ...(await stats(page)).holding,
+              ],
+              await readReach(page),
+              until,
+            ),
+          )
           .toBe(true);
-        await control(page, { holdSeries: true });
-      });
-      // The read where the drag ended has asked for its history, which the
-      // backend failed on arrival and holds; only then are fetches let
-      // through, so no read of this drag comes after them and succeeds.
-      await expect
-        .poll(async () => {
-          const reach = await readReach(page);
-          return (await stats(page)).holding.some(
-            (range) => range.end - range.start > HOUR && range.start <= reach,
-          );
-        })
-        .toBe(true);
+      await control(page, { failNext: 1000 });
+      // The drag, in twentieths of the chart (about 13 minutes of its six
+      // hours each; Lightweight Charts pans from the third move). The first
+      // half stops at steps 7 and 10, and may stop anywhere else.
+      const box = await page.locator("#chart").boundingBox();
+      if (box === null) throw new Error("no chart");
+      const y = box.y + box.height / 3;
+      const step = (n: number) => box.x + box.width * (0.2 + (0.7 * n) / 20);
+      await page.mouse.move(step(0), y);
+      await page.mouse.down();
+      for (let n = 1; n <= 10; n++) {
+        await page.mouse.move(step(n), y);
+        if (n === 7 || n === 10) await readBack();
+      }
+      // From here the backend holds the answers, so the end read's failed
+      // fetch is still in flight when fetches are allowed again. The rest
+      // of the drag is two single moves, which no stop can split: at most
+      // two reads are held, each a history request and a forming bar,
+      // within the browser's six connections to the backend, one of them
+      // the event stream. The read at step 17 holds the fetch the end read
+      // then awaits, so the end read asks for three steps, less than an
+      // hour: a wait for one request an hour long would never end.
+      await control(page, { holdSeries: true });
+      await page.mouse.move(step(17), y);
+      await readBack();
+      await page.mouse.move(step(20), y);
+      await page.mouse.up();
+      await readBack();
+      // Every read of the drag has failed on arrival; only now are fetches
+      // let through.
       await control(page, { failNext: 0 });
       // Retry once every request the backend failed has come back as a
-      // failed fetch: release the held answers and wait for them. A read
-      // awaits the fetches in flight that overlap it rather than fetching
-      // again (architecture §4.9.1), so a Retry before this would join a
-      // held fetch bound to fail, and fail with it on every run.
+      // failed fetch: release the held answers and wait for them. A Retry
+      // before this would join a held fetch bound to fail, and fail with it
+      // on every run.
       await control(page, { holdSeries: false });
       const failures = (await stats(page)).failed - failed;
       await expect
-        .poll(
-          async () =>
-            (await since()).filter((notice) => notice.outcome === "failed")
-              .length,
-        )
+        .poll(async () => (await failedFetches()).length)
         .toBe(failures);
-      // Both reads' history fetches failed.
-      expect((await history()).length).toBeGreaterThan(1);
-      expect((await history()).map((notice) => notice.outcome)).not.toContain(
-        "ok",
-      );
+      // The drag's fetches have come back as far as it read, and none of
+      // its history fetches succeeded.
+      await expect
+        .poll(async () =>
+          fetchedThrough(
+            (await since()).map((notice) => notice.range),
+            await readReach(page),
+            until,
+          ),
+        )
+        .toBe(true);
+      expect(
+        (await since()).filter(isHistory).map((notice) => notice.outcome),
+      ).not.toContain("ok");
       await expect(page.getByTestId("missing")).toContainText("fetch failed");
       await page.getByRole("button", { name: "Retry" }).click();
       await expect(page.getByTestId("missing")).toHaveText("nothing missing");
