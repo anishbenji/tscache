@@ -103,12 +103,12 @@ function isHistory(notice: FetchNotice): boolean {
  * bar after it.
  */
 function fetchedThrough(
-  fetched: readonly FetchNotice[],
+  fetched: readonly Range[],
   from: number,
   until: number,
 ): boolean {
   let reached = from - MINUTE;
-  const ranges = fetched.map((n) => n.range).sort((a, b) => a.start - b.start);
+  const ranges = [...fetched].sort((a, b) => a.start - b.start);
   for (const range of ranges) {
     if (range.start > reached + MINUTE) break;
     reached = Math.max(reached, range.end);
@@ -173,6 +173,16 @@ async function showingStart(page: Page): Promise<number> {
   return (await showingRange(page)).start;
 }
 
+/**
+ * How far back the read of what is on screen reaches, give or take
+ * REACH_SLACK: it starts a screen before it (readRange in market.ts). A
+ * history fetch starting at or before this is that read's.
+ */
+async function readReach(page: Page): Promise<number> {
+  const shown = await showingRange(page);
+  return shown.start - (shown.end - shown.start) + REACH_SLACK;
+}
+
 test("a time shown without a year reads in the year nearest the clock", () => {
   const newYear = Date.UTC(2027, 0, 1, 1);
   expect(shownTime("12-31 20:00", newYear)).toBe(Date.UTC(2026, 11, 31, 20));
@@ -209,9 +219,13 @@ for (const app of [
   test.describe(app, () => {
     test.use({ baseURL: appUrl(app) });
     test.describe.configure({ mode: "serial" });
-    // Some tests move the backend's clock on; every test starts on the real one.
+    // Some tests move the backend's clock on, fail its series requests or
+    // hold its answers; every test starts on a backend that does none of
+    // these, even after a test that failed part-way.
     test.afterEach(async ({ request }) => {
-      await request.post("/api/control", { data: { resetClock: true } });
+      await request.post("/api/control", {
+        data: { resetClock: true, failNext: 0, holdSeries: false },
+      });
     });
 
     test("one tab holds the live feed, and every tab draws its bars without a fetch", async ({
@@ -321,7 +335,7 @@ for (const app of [
         await expect
           .poll(async () =>
             fetchedThrough(
-              (await notices(page)).slice(before),
+              (await notices(page)).slice(before).map((n) => n.range),
               reach,
               opening.range.start - MINUTE,
             ),
@@ -498,10 +512,97 @@ for (const app of [
       const page = await openTab(context);
       await waitNotices(page, 1);
       await expect(page.getByTestId("missing")).toHaveText("nothing missing");
-      await control(page, { failNext: 2 });
-      await drag(page, "back");
-      await expect(page.getByTestId("missing")).toContainText("fetch failed");
+      await expect
+        .poll(async () => (await draws(page)).full)
+        .toBeGreaterThan(0);
+      const [opening] = await notices(page);
+      if (opening === undefined) throw new Error("no opening fetch");
+      // The bar before the opening fetch: what a read back from the screen
+      // fetches reaches through it (fetchedThrough).
+      const until = opening.range.start - MINUTE;
+      const before = (await notices(page)).length;
+      const { failed } = await stats(page);
+      const since = async () => (await notices(page)).slice(before);
+      const failedFetches = async () =>
+        (await since()).filter((notice) => notice.outcome === "failed");
+      // How many reads a drag makes is not the test's to count: the page
+      // reads each time it stops (SCROLL_PAUSE_MS in session.ts), which on a
+      // loaded machine may be between any two mouse moves. So every request
+      // fails, and the test waits for each read it needs by where the read
+      // starts: the failed fetches, and the requests the backend holds,
+      // together reach from the read of what is on screen through the
+      // opening fetch. A read awaits the fetches in flight that overlap it
+      // and asks only for what lies outside them (architecture §4.9.1), so
+      // no one request need reach that far. The afterEach undoes the
+      // failures and the hold.
+      const readBack = () =>
+        expect
+          .poll(async () =>
+            fetchedThrough(
+              [
+                ...(await failedFetches()).map((notice) => notice.range),
+                ...(await stats(page)).holding,
+              ],
+              await readReach(page),
+              until,
+            ),
+          )
+          .toBe(true);
+      await control(page, { failNext: 1000 });
+      // The drag, in twentieths of the chart (about 13 minutes of its six
+      // hours each; Lightweight Charts pans from the third move). The first
+      // half stops at steps 7 and 10, and may stop anywhere else.
+      const box = await page.locator("#chart").boundingBox();
+      if (box === null) throw new Error("no chart");
+      const y = box.y + box.height / 3;
+      const step = (n: number) => box.x + box.width * (0.2 + (0.7 * n) / 20);
+      await page.mouse.move(step(0), y);
+      await page.mouse.down();
+      for (let n = 1; n <= 10; n++) {
+        await page.mouse.move(step(n), y);
+        if (n === 7 || n === 10) await readBack();
+      }
+      // From here the backend holds the answers, so the end read's failed
+      // fetch is still in flight when fetches are allowed again. The rest
+      // of the drag is two single moves, which no stop can split: at most
+      // two reads are held, each a history request and a forming bar,
+      // within the browser's six connections to the backend, one of them
+      // the event stream. The read at step 17 holds the fetch the end read
+      // then awaits, so the end read asks for three steps, less than an
+      // hour: a wait for one request an hour long would never end.
+      await control(page, { holdSeries: true });
+      await page.mouse.move(step(17), y);
+      await readBack();
+      await page.mouse.move(step(20), y);
+      await page.mouse.up();
+      await readBack();
+      // Every read of the drag has failed on arrival; only now are fetches
+      // let through.
       await control(page, { failNext: 0 });
+      // Retry once every request the backend failed has come back as a
+      // failed fetch: release the held answers and wait for them. A Retry
+      // before this would join a held fetch bound to fail, and fail with it
+      // on every run.
+      await control(page, { holdSeries: false });
+      const failures = (await stats(page)).failed - failed;
+      await expect
+        .poll(async () => (await failedFetches()).length)
+        .toBe(failures);
+      // The drag's fetches have come back as far as it read, and none of
+      // its history fetches succeeded.
+      await expect
+        .poll(async () =>
+          fetchedThrough(
+            (await since()).map((notice) => notice.range),
+            await readReach(page),
+            until,
+          ),
+        )
+        .toBe(true);
+      expect(
+        (await since()).filter(isHistory).map((notice) => notice.outcome),
+      ).not.toContain("ok");
+      await expect(page.getByTestId("missing")).toContainText("fetch failed");
       await page.getByRole("button", { name: "Retry" }).click();
       await expect(page.getByTestId("missing")).toHaveText("nothing missing");
       await expect(page.getByRole("button", { name: "Retry" })).toBeHidden();
@@ -564,11 +665,16 @@ for (const app of [
       // ends three bars before the first pushed bar, as after a stream outage.
       await page.clock.setSystemTime((await stats(page)).now - 3 * MINUTE);
       await recordNotices(page);
+      // The stream held until the first read is counted: on a loaded machine
+      // it could otherwise open, and the gap be read through, before the
+      // counts below, which would then already hold the bars it adds.
+      const opening = await holdStream(page);
       await page.goto("/");
       await expect(page.getByTestId("connection")).toHaveText("live");
       await expect(page.getByTestId("summary")).toContainText("bars");
       const fetched = (await notices(page)).length;
       const opened = await barCount(page);
+      opening.release();
       // The fetch flank reaches one bar past the read, so two remain to fill.
       await expect
         .poll(() => barCount(page))
