@@ -1,6 +1,6 @@
 # Step 89 — The demo recorder, with a tested timeout and a launcher fix
 
-Branch: `chore/89-demo-recorder-v2` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: built, not yet reviewed · Verdict after triage: pending
+Branch: `chore/89-demo-recorder-v2` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -114,3 +114,18 @@ The guards, the request helper and the restore were found clean; one P2 and one 
 run 1, head 3071559: P0 0, P1 0, P2 1
 
 S1.1 P2: fixed in fe6625c
+
+## Round 1 (GPT-6.1 Sol, high), head 8e6ca51
+
+Verdict: merge after fixes; two P1. `bun run ci` exit 0 on that head.
+
+| ID   | Gate | Finding                                                                  | Outcome                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---- | ---- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1-1 | P1   | `install` (`scripts/demo/record.ts`) can leave a new GIF with old videos | Partly valid, P3. Reproduced with a read-only video directory; it needs a file system error between two moves in a hand-run tool that then exits 1, and the media are tracked, so `git restore` recovers them. No rollback makes moves across two directories atomic, so the TSDoc now promises only what holds: a signal never half-replaces a scenario; a file system error can, and is reported. |
+| R1-2 | P1   | `processes.test.ts` asserts stdout after polling only stderr             | Partly valid, P3. Not reproducible (400 spawns under Node, stderr never first at the next timer), but `docs/testing.md` says to wait for the effect itself: the test now polls stdout too.                                                                                                                                                                                                          |
+
+## Finding check (claude-fable-5-2), round 1
+
+V 0, P 2, I 0, D 0
+
+After the fixes: Biome, `tsc --noEmit -p .`, `bunx vitest run scripts/demo/processes.test.ts` (7 passed) and `bun scripts/test-clocks.ts` (170 files clean). The push's pre-push hook runs the full Vitest suite. No P0 or P1 remains; settled.
