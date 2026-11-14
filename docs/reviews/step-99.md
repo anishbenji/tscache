@@ -68,3 +68,7 @@ None. The changed tests are tooling tests of the demo launcher, not contract tes
 ## Decision concerns
 
 None.
+
+## Security lane (Claude), not the gate
+
+run 1, head 1393dfb: P0 0, P1 0, P2 0
