@@ -1,6 +1,6 @@
 # Step 99 — the demo process tests wait for a reaped child
 
-Branch: `fix/99-demo-process-reap` · Reviewer: GPT-6.1 Sol · Rounds: 0 · Status: awaiting review
+Branch: `fix/99-demo-process-reap` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled
 
 ## Scope
 
@@ -72,3 +72,8 @@ None.
 ## Security lane (Claude), not the gate
 
 run 1, head 1393dfb: P0 0, P1 0, P2 0
+
+## Round 1 (GPT-6.1 Sol, high), head efe2042
+
+No findings; verdict merge. The pre-review fixes PR-1 and PR-2 were checked as fixed. `bun run ci` exit 0 on
+that head (run by the round). Settled.
