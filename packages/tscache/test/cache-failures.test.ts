@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CacheState } from "../src/engine/cache";
 import { SegmentStore } from "../src/engine/merge";
+import { resolveCacheConfig } from "../src/engine/validate";
 import { batch, cache, result } from "./cache-test-helpers";
 
 // Implementer tests (not contract tests): what a put leaves behind when the
@@ -173,5 +175,46 @@ describe("CacheState with very many warnings", () => {
       range: { start: n - 1, end: n - 1 },
       fields: ["price"],
     });
+  });
+});
+
+describe("CacheState when a hydrate's store write fails", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("rethrows, reports the failed part as removed and leaves it uncovered", () => {
+    const source = cache();
+    source.put(batch([3, 13, 23, 33, 43, 53]));
+    const changes: { kind: string }[] = [];
+    const target = new CacheState(
+      resolveCacheConfig({
+        id: "contract-07",
+        interval: 10,
+        alignmentOffset: 3,
+        fields: { price: "f64", volume: "i16" },
+      }),
+      { onChange: (change) => changes.push(change) },
+    );
+    target.put(batch([23]));
+    changes.length = 0;
+    // The target already covers 23, so the snapshot applies in two parts,
+    // [3, 13] and [33, 53]; the second part's write fails.
+    const put = SegmentStore.prototype.put;
+    let calls = 0;
+    vi.spyOn(SegmentStore.prototype, "put").mockImplementation(function (
+      this: SegmentStore,
+      points,
+      authority,
+    ) {
+      if (++calls === 2) throw new RangeError("Array buffer allocation failed");
+      return put.call(this, points, authority);
+    });
+    expect(() =>
+      target.hydrate(source.snapshot({ start: 3, end: 53 })),
+    ).toThrow(RangeError);
+    vi.restoreAllMocks();
+    expect(changes.map((c) => c.kind)).toEqual(["write", "remove"]);
+    expect(target.coverage({ start: 3, end: 53 })).toEqual([
+      { start: 3, end: 23 },
+    ]);
   });
 });

@@ -114,6 +114,12 @@ with this sketch: its envelope is the cache record above and its segments the pa
 
 ## Design sketch: subscriptions (dirty notifications)
 
+**Proposed in detail in [`docs/design/m7-change-events.md`](design/m7-change-events.md) (step 92,
+finding M7), with its open choices as decision rows for the user.** It keeps this sketch's notify-only,
+cache-scoped event and changes three things: one event per mutating call rather than per macrotask; the
+payload separates written ranges from withdrawn coverage; and a reader re-reads a written range with
+`cacheOnly`, because a fetching re-read on every event loops wherever a cache has a volatile region.
+
 A cache-scoped event, `cacheChanged { cacheId, range }`, emitted after any merge, invalidation or clear
 with the range it touched. It carries no data: every tab would otherwise receive a copy of every merge.
 A consumer whose shown range overlaps calls `get` again, and the in-flight dedup keeps the fan-out to one
@@ -121,6 +127,13 @@ fetch. Changes are coalesced per cache and macrotask. The event fits the cache s
 and an integration's series would subscribe for live charts across tabs without polling.
 
 ## Design sketch: eviction and memory limits
+
+**Proposed in detail in [`docs/design/m3-memory.md`](design/m3-memory.md) (step 98, finding M3),
+with its open choices as decision rows for the user.** It keeps this sketch's engine-wide byte budget,
+page granularity, least-recently-used order and coverage subtraction, and adds three things: pages a
+pending `get` or the volatile region needs are never evicted; until lazy loading and a disk budget
+exist, an evicted page leaves the disk too, so the disk and the next load stay bounded by the budget
+in segment bytes; and an eviction is reported apart from a removal, so readers do not refetch what they already show.
 
 A byte budget per worker, enforced by evicting least-recently-read pages. The invariant that makes it
 safe: evicting a page subtracts the page's extent from coverage. Otherwise its points would read as a
