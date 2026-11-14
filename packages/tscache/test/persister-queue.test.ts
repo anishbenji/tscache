@@ -24,23 +24,30 @@ async function three() {
 }
 
 describe("job order (§4.10.6)", () => {
-  it("of two due jobs the one due earlier runs first, though it was queued later", async () => {
-    const h = await three();
-    const gate = h.store.gate("write");
-    h.engine.put("a", batch([0]));
-    await tick(100);
-    h.engine.put("b", batch([0])); // b's job is created first...
-    await tick(100);
-    h.engine.put("c", batch([0])); // ...c's second, due at 1200 ms
-    await tick(100);
-    h.engine.put("b", batch([1])); // and b's quiet spell now ends at 1300 ms
-    await tick(700);
-    await gate.entered; // a's write, at 1000 ms, holds the store
-    await tick(1000);
-    gate.release();
-    await finish(h.persister.flush());
-    expect(writes(h.store).map((w) => w.cacheId)).toEqual(["a", "c", "b"]);
-  });
+  it.each([
+    { name: "queued later", bChangesAgain: true, order: ["a", "c", "b"] },
+    { name: "queued first", bChangesAgain: false, order: ["a", "b", "c"] },
+  ])(
+    "of two due jobs the one due earlier runs first, when it was $name",
+    async ({ bChangesAgain, order }) => {
+      const h = await three();
+      const gate = h.store.gate("write");
+      h.engine.put("a", batch([0]));
+      await tick(100);
+      h.engine.put("b", batch([0])); // b's job is created first, due at 1100 ms...
+      await tick(100);
+      h.engine.put("c", batch([0])); // ...c's second, due at 1200 ms
+      await tick(100);
+      // A second change moves b's quiet spell to 1300 ms, after c's.
+      if (bChangesAgain) h.engine.put("b", batch([1]));
+      await tick(700);
+      await gate.entered; // a's write, at 1000 ms, holds the store
+      await tick(1000);
+      gate.release();
+      await finish(h.persister.flush());
+      expect(writes(h.store).map((w) => w.cacheId)).toEqual(order);
+    },
+  );
 });
 
 describe("a failed flush while its cache has a queued job (§4.10.6)", () => {
@@ -62,6 +69,34 @@ describe("a failed flush while its cache has a queued job (§4.10.6)", () => {
       h.engine.put("persist", batch([2 + i]));
     }
     expect(writes(h.store)).toHaveLength(2);
+    expect(flushed.done).toBe(true);
+  });
+
+  it("keeps the failed job's deadline: the joined job stops the cache at 5000 ms", async () => {
+    const h = await opened();
+    const first = h.store.gate("write");
+    const retry = h.store.gate("write");
+    h.engine.put("persist", batch([0]));
+    const flushed = tracked(h.persister.flush()); // due at 0, deadline 5000 ms
+    await tick();
+    await first.entered;
+    // A change while the write is out queues a second job, whose own
+    // deadline would be 5000 ms after its due time.
+    h.engine.put("persist", batch([1]));
+    first.reject(Object.assign(new Error("planted"), { name: "UnknownError" }));
+    await tick(1000);
+    await retry.entered; // the retry, at 1000 ms, is held past the deadline
+    await tick(3999); // 4999 ms
+    expect(h.stopped).toEqual([]);
+    expect(flushed.done).toBe(false);
+    await tick(1);
+    expect(h.stopped).toEqual([
+      {
+        cacheId: "persist",
+        reason: "error",
+        error: { name: "UnknownError", message: "planted" },
+      },
+    ]);
     expect(flushed.done).toBe(true);
   });
 });

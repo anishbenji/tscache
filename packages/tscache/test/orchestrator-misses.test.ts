@@ -77,20 +77,27 @@ describe("miss labels (§4.9.1 rule 4)", () => {
 });
 
 describe("decided fetches (§4.9.1 rule 1)", () => {
-  it("a failed fetch leaves the in-flight list: the next get fetches afresh", async () => {
+  it("a failed fetch listed second leaves the in-flight list: the next get fetches afresh", async () => {
     const h = harness();
     const a = await h.connect();
     const b = await h.connect();
+    const c = await h.connect();
     const x = h.get(a, r(3, 43));
     await h.turn(a);
-    h.call(0).fail(new Error("E"));
-    expect((await x.promise).misses).toEqual([
-      miss(3, 43, "fetch-failed", "E"),
-    ]);
-    const y = h.get(b, r(3, 43));
+    const y = h.get(b, r(103, 143));
     await h.turn(b);
-    expect(h.ranges()).toEqual([r(3, 43), r(3, 43)]);
-    h.call(1).answer();
-    expect((await y.promise).misses).toEqual([]);
+    // Both in flight; [103, 143] is the second entry of the list.
+    expect(h.ranges()).toEqual([r(3, 43), r(103, 143)]);
+    h.call(1).fail(new Error("E"));
+    expect((await y.promise).misses).toEqual([
+      miss(103, 143, "fetch-failed", "E"),
+    ]);
+    const z = h.get(c, r(103, 143));
+    await h.turn(c);
+    expect(h.ranges()).toEqual([r(3, 43), r(103, 143), r(103, 143)]);
+    h.call(2).answer();
+    expect((await z.promise).misses).toEqual([]);
+    h.call(0).answer();
+    expect((await x.promise).misses).toEqual([]);
   });
 });
