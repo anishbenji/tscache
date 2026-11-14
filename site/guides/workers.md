@@ -188,13 +188,18 @@ tabs have closed. When the page itself is stale (an old tab that creates its cli
 cache entry, the dedicated worker is refused the same way, and the chain does not step down on this
 error: the page has to reload.
 
-The `ConfigError` for a second fetcher module allows the same step: the page names the newer fetcher,
-and a dedicated worker is a new worker that loads it, so creating the client again with
-`mode: 'dedicated'` works until the tab is reloaded after the old tabs have closed. The other
-`ConfigError`s of `createClient` report invalid options and are thrown before any worker starts. Nothing
-else separates the deploys' workers today: tscache gives the SharedWorker no name a deploy id could go
-into, and a query added to a Vite worker URL loads the worker twice ([Vite](#vite)). The deploy-skew
-proposal (finding M5) designs the recovery.
+The `ConfigError` for a second fetcher module allows the same step, again only when the page is the
+newer side. Recognise it by its message, which starts with `this worker already runs fetcher`, not by
+its class: the other `ConfigError`s of `createClient` report invalid options, and a retry on every
+`ConfigError` would hide an invalid `mode` behind `'dedicated'`. A dedicated worker is a new worker that
+loads the fetcher the page names, so for a page of the current deploy, creating the client again with
+`mode: 'dedicated'` works until the tab is reloaded after the old tabs have closed. A stale page (an old
+tab that creates its client again after `workerLost`, or HTML or script served from an old cache) meets
+a worker that already runs the newer fetcher, and its retry loads the old one: it fails with the
+fetcher-load `TscacheError` when the deploy removed that file, and otherwise runs the old fetcher without
+any error. A page that may itself be stale has to reload. Nothing else separates the deploys' workers
+today: tscache gives the SharedWorker no name a deploy id could go into, and a query added to a Vite
+worker URL loads the worker twice ([Vite](#vite)). A recovery path is planned.
 :::
 
 ## Losing the worker

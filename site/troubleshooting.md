@@ -30,8 +30,9 @@ The running SharedWorker loaded another fetcher module URL, usually for a tab of
 worker runs one fetcher module. With Vite's hashed names, any deploy that changes the fetcher but not
 the worker does this: the worker file keeps its name, so new tabs join the old worker until the old tabs
 close. A fixed worker URL with a hashed fetcher does it on every fetcher change. Until the old tabs
-close, the page can create its client again with `mode: 'dedicated'`, a cache of its own that persists
-nothing ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
+close, a page of the current deploy can create its client again with `mode: 'dedicated'`, a cache of its
+own that persists nothing; a page that may itself be stale, served from an old cache, has to reload
+([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
 
 ## `createClient` rejects naming the fetcher module
 
