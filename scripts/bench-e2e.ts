@@ -663,18 +663,31 @@ interface Progress<T> {
   failed(name: string, error: unknown): void;
 }
 
+/** A scenario that failed, and its error's message. */
+export interface E2eFailure<N extends string = string> {
+  scenario: N;
+  message: string;
+}
+
+/** What a run of the scenarios returns: those that passed, those that failed. */
+export interface E2eOutcome<T = E2eResult, N extends string = string> {
+  results: T[];
+  failures: E2eFailure<N>[];
+}
+
 /**
  * Runs each named scenario in turn. A scenario that fails does not stop
- * the others; once all have run, the failures are thrown together, so a
- * wrong result or a fetch too many still fails the run.
+ * the others; the results of those that passed come back with every
+ * failure, and the caller fails the run when there is any, after keeping
+ * the passing scenarios' timings.
  */
 export async function runEach<N extends string, T>(
   names: readonly N[],
   run: (name: N) => Promise<T>,
   progress: Progress<T>,
-): Promise<T[]> {
+): Promise<E2eOutcome<T, N>> {
   const results: T[] = [];
-  const failures: { name: N; error: Error }[] = [];
+  const failures: E2eFailure<N>[] = [];
   for (const name of names) {
     try {
       const done = await run(name);
@@ -683,27 +696,32 @@ export async function runEach<N extends string, T>(
     } catch (error) {
       progress.failed(name, error);
       failures.push({
-        name,
-        error: error instanceof Error ? error : new Error(String(error)),
+        scenario: name,
+        message: error instanceof Error ? error.message : String(error),
       });
     }
   }
-  if (failures.length > 0) {
-    throw new AggregateError(
-      failures.map((f) => f.error),
-      `${failures.length} of ${names.length} e2e scenarios failed: ${failures
-        .map((f) => `${f.name}: ${f.error.message}`)
-        .join("; ")}`,
-    );
-  }
-  return results;
+  return { results, failures };
+}
+
+/** One line naming every failure, or undefined when none failed. */
+export function failureSummary({
+  results,
+  failures,
+}: E2eOutcome<unknown>): string | undefined {
+  if (failures.length === 0) return undefined;
+  const total = results.length + failures.length;
+  return `${failures.length} of ${total} e2e scenarios failed: ${failures
+    .map((f) => `${f.scenario}: ${f.message}`)
+    .join("; ")}`;
 }
 
 /**
  * Runs the scenarios in Chromium: paired with a base, or the smoke. A
- * scenario that fails does not stop the others (runEach).
+ * scenario that fails does not stop the others, and comes back among the
+ * failures (runEach); a build or a browser that fails to start throws.
  */
-export async function runE2e(run: E2eRun): Promise<E2eResult[]> {
+export async function runE2e(run: E2eRun): Promise<E2eOutcome> {
   const out = join(run.work, "e2e");
   const sides: Side[] = run.baseSrc === undefined ? ["head"] : ["base", "head"];
   await buildRevision(run.headSrc, join(out, "head"));
