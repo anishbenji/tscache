@@ -186,6 +186,7 @@ const payloads: Corruption[] = [
       ...snapshotPayload().fields,
       { name: "extra", dtype: "u8", data: new ArrayBuffer(5) },
     ],
+    [null, snapshotPayload().fields[1]],
   ].map((fields, index) => ({
     name: `payload fields ${index}`,
     change: (s: Snapshot) => ({
@@ -258,6 +259,13 @@ const segments: Corruption[] = [
   {
     name: "duplicate extents",
     change: (s) => ({ ...s, segments: [snapshotPayload(), snapshotPayload()] }),
+  },
+  {
+    name: "segment with no present point",
+    change: (s) => ({
+      ...s,
+      segments: [{ ...snapshotPayload(), mask: new Uint8Array([0]) }],
+    }),
   },
 ];
 
