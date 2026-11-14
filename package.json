@@ -25,6 +25,7 @@
     "build": "bun run --filter @anishbenji/tscache build",
     "knip": "knip",
     "fallow": "fallow audit",
+    "fallow:health": "fallow health --min-score 90",
     "changelog": "git-cliff --unreleased --prepend CHANGELOG.md",
     "ci": "bash scripts/ci.sh",
     "demo": "bun scripts/demo.ts",

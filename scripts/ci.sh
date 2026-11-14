@@ -57,6 +57,9 @@ bun run --filter @anishbenji/tscache build   # includes publint + attw (esm-only
 bun run --cwd site api
 bunx knip
 bun run fallow
+# The health floor: the project's Fallow health score (0-100) may not drop
+# below 90 (step 83). Raising it to 95 is a later refactoring step.
+bun run fallow:health
 bunx vitest run --passWithNoTests
 # What npm would publish: exactly the manifest, README, license and the
 # built code with its declarations, every entry among it; no test, fixture
