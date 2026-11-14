@@ -148,3 +148,70 @@ describe("restore into memory that knows nothing (§4.10.5)", () => {
     expect(requireCache(records).config.segmentSlotCap).toBe(4);
   });
 });
+
+describe("restore's schema match and rewrite decision (§4.10.5)", () => {
+  it("rejects a stored schema of several fields when one dtype differs", () => {
+    const fields = { value: "f64", other: "i16" } as const;
+    const source = new Engine();
+    source.cache(config({ fields }));
+    source.put("persist", {
+      timestamps: [0, 4],
+      fields: { value: [0, 4], other: [1, 2] },
+    });
+    const records = recordsOf(source);
+    Object.assign(requireCache(records).config, {
+      fields: { value: "f64", other: "u16" },
+    });
+    const target = state({ fields });
+    expect(target.restore(records)).toEqual({ applied: [], rewrite: true });
+    expect(target.coverage(all)).toEqual([]);
+  });
+  it.each([
+    { name: "starts before", range: { start: 0, end: 2 } },
+    { name: "ends after", range: { start: 1, end: 3 } },
+  ])(
+    "a page whose range $name its coverage applies and asks for a rewrite",
+    ({ range }) => {
+      const records = fixture({}, [1, 2]);
+      const page = records.pages[0];
+      if (page === undefined) throw new Error("fixture needs page");
+      expect(page.snapshot.range).toEqual({ start: 1, end: 2 });
+      page.snapshot.range = range;
+      const target = state();
+      expect(target.restore(records)).toEqual({
+        applied: [{ start: 1, end: 2 }],
+        rewrite: true,
+      });
+    },
+  );
+  it("a page holding a point outside its coverage applies and asks for a rewrite", () => {
+    const source = new Engine();
+    source.cache(config());
+    source.put("persist", batch([0, 1, 2]));
+    source.invalidate("persist", { start: 1, end: 1 });
+    const records = recordsOf(source);
+    const page = records.pages[0];
+    if (page === undefined) throw new Error("fixture needs page");
+    // The whole page's snapshot carries the uncovered point 1; the range is
+    // still the hull of the coverage.
+    const { finalizedUntil: _ignored, ...whole } = source.snapshot("persist", {
+      start: 0,
+      end: 2,
+    });
+    expect(whole.range).toEqual({ start: 0, end: 2 });
+    expect(whole.coverage).toEqual([
+      { start: 0, end: 0 },
+      { start: 2, end: 2 },
+    ]);
+    page.snapshot = whole;
+    const target = state();
+    expect(target.restore(records)).toEqual({
+      applied: [
+        { start: 0, end: 0 },
+        { start: 2, end: 2 },
+      ],
+      rewrite: true,
+    });
+    expect(target.get(all).timestamps).toEqual(new Float64Array([0, 2]));
+  });
+});

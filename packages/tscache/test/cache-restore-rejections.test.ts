@@ -219,3 +219,18 @@ describe("untrusted restore records (§4.10.5 d)", () => {
     expect(target.get(all).timestamps).toEqual(new Float64Array());
   });
 });
+
+describe("restore page order (§4.10.5 step 5)", () => {
+  it.each([
+    { name: "descending", order: [1, 0], applied: [{ start: 4, end: 4 }] },
+    { name: "repeated", order: [0, 0, 1], applied: [{ start: 0, end: 4 }] },
+  ])("a $name page is skipped and asks for a rewrite", ({ order, applied }) => {
+    const records = fixture({}, [0, 3, 4]);
+    const pages = order.map((i) => requirePage(records, i));
+    const target = state();
+    expect(target.restore({ cache: records.cache, pages })).toEqual({
+      applied,
+      rewrite: true,
+    });
+  });
+});
