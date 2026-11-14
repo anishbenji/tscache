@@ -10,7 +10,8 @@
 // against itself with the two formats. Each scenario
 // gets a BrowserContext of its own, whose pages share its SharedWorkers.
 // A scenario that fails is reported and the rest still run; the run then
-// throws with every failure.
+// returns the passing results with every failure, and the caller fails the
+// run (`checkE2e`, `writeE2e` in scripts/bench.ts).
 
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";

@@ -19,9 +19,12 @@ const passed: E2eResult = {
   },
 };
 
+/** A failure's message as Playwright gives it: several lines, a call log. */
+const multiline = "served 7502 bars\nCall log:\n  - waiting for locator";
+
 const failed: E2eOutcome = {
   results: [passed],
-  failures: [{ scenario: "fast-scroll", message: "served 7502 bars" }],
+  failures: [{ scenario: "fast-scroll", message: multiline }],
 };
 
 const run = {
@@ -49,12 +52,17 @@ describe("writeE2e", () => {
       head: run.head,
       fetchers: run.fetchers,
       results: [passed],
-      failed: [{ scenario: "fast-scroll", message: "served 7502 bars" }],
+      failed: [{ scenario: "fast-scroll", message: multiline }],
     });
     const written = readFileSync(join(dir, "e2e-summary.md"), "utf8");
     expect(written).toBe(`${summary}\n`);
     expect(summary).toContain("| `handshake-first-read` | 2.00 ms | 2.10 ms |");
-    expect(summary).toContain("`fast-scroll`: served 7502 bars");
+    // The summary keeps each failure to one list item; e2e.json, above,
+    // keeps its message verbatim.
+    const items = summary.split("\n").filter((l) => l.startsWith("- "));
+    expect(items).toEqual([
+      "- `fast-scroll`: served 7502 bars Call log: - waiting for locator",
+    ]);
   });
 
   it("succeeds with an empty failed list when every scenario passes", () => {
