@@ -62,7 +62,7 @@ import {
 import type { CaseResult, RunOptions } from "../packages/tscache/bench/run";
 import type { Sample } from "../packages/tscache/bench/sample";
 import { type BenchSetup, setupOf } from "../packages/tscache/bench/setups";
-import { type E2eResult, runE2e } from "./bench-e2e";
+import { type E2eOutcome, failureSummary, runE2e } from "./bench-e2e";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PACKAGE = join(ROOT, "packages/tscache");
@@ -432,11 +432,16 @@ function render(report: RuntimeReport): string[] {
   ];
 }
 
-function publish(summary: string, file = "summary.md"): void {
+/** Prints a summary and appends it to the job summary on GitHub. */
+function announce(summary: string): void {
   console.log(summary);
-  writeFileSync(join(RESULTS, file), `${summary}\n`);
   const step = process.env.GITHUB_STEP_SUMMARY;
   if (step) appendFileSync(step, `${summary}\n`);
+}
+
+function publish(summary: string, file = "summary.md"): void {
+  announce(summary);
+  writeFileSync(join(RESULTS, file), `${summary}\n`);
 }
 
 async function compare(args: Args): Promise<number> {
@@ -491,6 +496,19 @@ async function smoke(): Promise<number> {
   return checks(runProcess("bun", bundlePath, { mode: "smoke" }));
 }
 
+/**
+ * Checks the e2e smoke: every scenario's result, and that none failed. A
+ * failed scenario fails the smoke even when every result that came back
+ * checks.
+ */
+export function checkE2e(outcome: E2eOutcome): number {
+  const checked = checks(outcome.results);
+  const failed = failureSummary(outcome);
+  if (failed === undefined) return checked;
+  console.error(failed);
+  return 1;
+}
+
 function checks(results: (CaseResult & { ms?: number })[]): number {
   for (const { name, value, expected, ms: time } of results) {
     const note = value === expected ? "ok  " : "FAIL";
@@ -500,10 +518,73 @@ function checks(results: (CaseResult & { ms?: number })[]): number {
   return results.every((r) => r.value === r.expected) ? 0 : 1;
 }
 
+/** A paired e2e run: the revisions, the fetchers, and what it returned. */
+interface E2eRecord {
+  base: string;
+  /** The ref the base was resolved from, as given. */
+  baseRef: string;
+  head: string;
+  fetchers: Args["fetchers"];
+  outcome: E2eOutcome;
+}
+
+/**
+ * Writes `e2e.json` and `e2e-summary.md` into `dir`: the timings of the
+ * scenarios that passed and, under `failed`, each scenario that failed
+ * with its error's message. Returns the summary and the exit code, 1 when
+ * any scenario failed, so the artifact keeps the passing timings and the
+ * run still fails.
+ */
+export function writeE2e(
+  dir: string,
+  { base, baseRef, head, fetchers, outcome }: E2eRecord,
+): { summary: string; code: number } {
+  const { results, failures } = outcome;
+  const record = {
+    schema: 1,
+    base,
+    head,
+    fetchers,
+    results,
+    failed: failures,
+  };
+  writeFileSync(join(dir, "e2e.json"), `${JSON.stringify(record, null, 2)}\n`);
+  const rows = results.flatMap(({ name, sample }) =>
+    sample === undefined ? [] : [row(name, sample, undefined)],
+  );
+  const failed =
+    failures.length === 0
+      ? []
+      : [
+          "#### Failed",
+          "",
+          ...failures.map(
+            (f) => `- \`${f.scenario}\`: ${f.message.replace(/\s+/g, " ")}`,
+          ),
+          "",
+        ];
+  const summary = [
+    `### End-to-end scenarios, Chromium: \`${head.slice(0, 9)}\` against \`${base.slice(0, 9)}\` (${baseRef})`,
+    "",
+    `Fixture fetcher: ${fetchers.head} on the head, ${fetchers.base} on the base.`,
+    "",
+    "Report-only: no timing here fails a pull request (docs/benchmarking.md).",
+    "",
+    "| Scenario | Base | Head | Head/base | 95 % CI | |",
+    "|---|---:|---:|---:|---:|---|",
+    ...rows,
+    "",
+    ...failed,
+  ].join("\n");
+  writeFileSync(join(dir, "e2e-summary.md"), `${summary}\n`);
+  return { summary, code: failures.length === 0 ? 0 : 1 };
+}
+
 /**
  * The end-to-end scenarios in Chromium, paired against the base and
  * reported, or with --smoke each once, checked. Never fails on a timing;
- * a wrong result or a fetch too many throws.
+ * a wrong result or a fetch too many fails the run, after the paired run
+ * has written the passing scenarios' timings.
  */
 async function e2e(args: Args): Promise<number> {
   const work = mkdtempSync(join(tmpdir(), "tscache-bench-"));
@@ -515,35 +596,29 @@ async function e2e(args: Args): Promise<number> {
     only: args.only,
     fetchers: args.fetchers,
   };
-  if (args.smoke) return checks(await runE2e({ ...run, baseSrc: undefined }));
+  if (args.smoke) return checkE2e(await runE2e({ ...run, baseSrc: undefined }));
   const baseSha = extractBase(args.base, work);
   const headSha = git("rev-parse", "HEAD");
   const baseSrc = join(work, "packages/tscache/src");
-  const results: E2eResult[] = await runE2e({ ...run, baseSrc });
+  const outcome = await runE2e({ ...run, baseSrc });
   mkdirSync(RESULTS, { recursive: true });
   const { fetchers } = args;
-  const record = { schema: 1, base: baseSha, head: headSha, fetchers, results };
-  const file = join(RESULTS, "e2e.json");
-  writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
-  const rows = results.flatMap(({ name, sample }) =>
-    sample === undefined ? [] : [row(name, sample, undefined)],
-  );
-  const lines = [
-    `### End-to-end scenarios, Chromium: \`${headSha.slice(0, 9)}\` against \`${baseSha.slice(0, 9)}\` (${args.base})`,
-    "",
-    `Fixture fetcher: ${fetchers.head} on the head, ${fetchers.base} on the base.`,
-    "",
-    "Report-only: no timing here fails a pull request (docs/benchmarking.md).",
-    "",
-    "| Scenario | Base | Head | Head/base | 95 % CI | |",
-    "|---|---:|---:|---:|---:|---|",
-    ...rows,
-    "",
-  ];
-  publish(lines.join("\n"), "e2e-summary.md");
-  return 0;
+  const record = {
+    base: baseSha,
+    baseRef: args.base,
+    head: headSha,
+    fetchers,
+    outcome,
+  };
+  const { summary, code } = writeE2e(RESULTS, record);
+  announce(summary);
+  const failed = failureSummary(outcome);
+  if (failed !== undefined) console.error(failed);
+  return code;
 }
 
-const args = parseArgs(process.argv.slice(2));
-const commands = { smoke, compare, e2e } as const;
-process.exit(await commands[args.command](args));
+if (import.meta.main) {
+  const args = parseArgs(process.argv.slice(2));
+  const commands = { smoke, compare, e2e } as const;
+  process.exit(await commands[args.command](args));
+}
