@@ -9,8 +9,11 @@
 // for columns bodies or JSON, named per side, so one revision can be timed
 // against itself with the two formats. Each scenario
 // gets a BrowserContext of its own, whose pages share its SharedWorkers.
+// A scenario that fails is reported and the rest still run; the run then
+// throws with every failure.
 
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -63,7 +66,7 @@ const SCENARIOS: Readonly<Record<Scenario, string>> = {
   "handshake-first-read":
     "a new tab creates a client, connects to a new SharedWorker and reads 1,500 bars it fetches",
   "reload-first-read":
-    "a reload: a new tab and a new SharedWorker read 1,500 bars an earlier worker persisted; the head loads them from IndexedDB without a fetch, the base fetches",
+    "a reload: a new tab and a new SharedWorker read 1,500 bars an earlier worker persisted; a revision that persists loads them from IndexedDB without a fetch, one from before persistence fetches them again",
   "read-viewport-shared":
     "get 1,500 cached bars through a SharedWorker: the port round trip and the transfer",
   "two-tabs-one-fetch":
@@ -218,7 +221,21 @@ interface Driver {
   /** The scenario page's URL, naming each side's fetcher format. */
   pageUrl: string;
   sides: Side[];
+  /** Whether each side's revision persists (see `persists`). */
+  persists: Readonly<Record<Side, boolean>>;
   rounds: number;
+}
+
+/**
+ * Whether the revision whose package `src` this is persists from its
+ * SharedWorker (§4.10.8): whether it has `src/persist`. Persistence
+ * merged to main with that directory and its worker wiring together
+ * (302cd65), and a base is always a commit of main, so a revision with
+ * the directory persists a `persist: true` cache and one without it
+ * ignores the flag.
+ */
+function persists(src: string): boolean {
+  return existsSync(join(src, "persist"));
 }
 
 /** A new page of the context with the scenario page loaded. */
@@ -307,12 +324,14 @@ async function firstReads(d: Driver): Promise<E2eResult> {
 /**
  * reload-first-read: per run, a setup page reads the bars into a persisted
  * cache of its own (one fetch) and disposes its client, so its worker
- * writes them at once; the driver waits until IndexedDB holds them (the
- * head; the base persists nothing). Then a new page, with a worker URL no
- * earlier run used, creates a client, opens the cache and reads the same
- * bars, timed in the page from createClient. The head must not fetch; the
- * base, which ignores `persist`, fetches the bars again. Paired like
- * handshake-first-read: one run a batch.
+ * writes them at once; on a side that persists, the driver waits until
+ * IndexedDB holds them. Then a new page, with a worker URL no earlier run
+ * used, creates a client, opens the cache and reads the same bars, timed
+ * in the page from createClient. A side that persists must not fetch
+ * again; a revision from before persistence, which ignores `persist`,
+ * must fetch the bars a second time. Each side is judged by what its
+ * revision does, so a base that persists is held to one fetch as the head
+ * is. Paired like handshake-first-read: one run a batch.
  */
 async function reloadReads(d: Driver): Promise<E2eResult> {
   const context = await d.browser.newContext();
@@ -348,7 +367,7 @@ async function reloadReads(d: Driver): Promise<E2eResult> {
     const setup = await open(context, d.pageUrl);
     try {
       await api(setup).setup(side, ns, id);
-      if (side === "head") {
+      if (d.persists[side]) {
         await expect.poll(() => api(setup).stored(id)).toBeGreaterThan(0);
       }
     } finally {
@@ -358,7 +377,7 @@ async function reloadReads(d: Driver): Promise<E2eResult> {
     try {
       const run = await api(page).read(side, ns, id);
       const seen = Object.values(await fetches(d.origin, ns));
-      const expected = side === "head" ? 1 : 2;
+      const expected = d.persists[side] ? 1 : 2;
       if (seen.length !== 1 || seen[0] !== expected) {
         throw new Error(
           `reload-first-read ${side}: the bars were fetched ${JSON.stringify(seen)} times, expected ${expected}`,
@@ -601,7 +620,38 @@ async function fastScroll(d: Driver): Promise<E2eResult> {
   }
 }
 
-/** Runs the scenarios in Chromium: paired with a base, or the smoke. */
+function runScenario(d: Driver, scenario: Scenario): Promise<E2eResult> {
+  switch (scenario) {
+    case "handshake-first-read":
+      return firstReads(d);
+    case "reload-first-read":
+      return reloadReads(d);
+    case "fast-scroll":
+      return fastScroll(d);
+    default:
+      return inPage(d, scenario);
+  }
+}
+
+/**
+ * One line for a scenario that finished, logged as it does, so the
+ * scenarios that passed are in the log even when a later one fails.
+ */
+function line({ name, sample, value, expected, ms }: E2eResult): string {
+  if (sample !== undefined) {
+    const { baseMs, headMs, ratio, low, high } = sample;
+    return `${name}: base ${baseMs.toPrecision(3)} ms, head ${headMs.toPrecision(3)} ms, head/base ${ratio.toFixed(3)} (${low.toFixed(3)}–${high.toFixed(3)})`;
+  }
+  const took = ms === undefined ? "" : `, ${ms.toPrecision(3)} ms`;
+  return `${name}: ${value} (expected ${expected})${took}`;
+}
+
+/**
+ * Runs the scenarios in Chromium: paired with a base, or the smoke. A
+ * scenario that fails does not stop the others; once all have run, the
+ * failures are thrown together, so a wrong result or a fetch too many
+ * still fails the run.
+ */
 export async function runE2e(run: E2eRun): Promise<E2eResult[]> {
   const out = join(run.work, "e2e");
   const sides: Side[] = run.baseSrc === undefined ? ["head"] : ["base", "head"];
@@ -626,21 +676,35 @@ export async function runE2e(run: E2eRun): Promise<E2eResult[]> {
       origin,
       pageUrl: `${origin}/?${formats}`,
       sides,
+      persists: {
+        base: run.baseSrc !== undefined && persists(run.baseSrc),
+        head: persists(run.headSrc),
+      },
       rounds: run.rounds,
     };
     const selected = (Object.keys(SCENARIOS) as Scenario[]).filter(
       (s) => run.only === undefined || run.only.includes(s),
     );
     const results: E2eResult[] = [];
+    const failures: Error[] = [];
     for (const scenario of selected) {
-      results.push(
-        scenario === "handshake-first-read"
-          ? await firstReads(d)
-          : scenario === "reload-first-read"
-            ? await reloadReads(d)
-            : scenario === "fast-scroll"
-              ? await fastScroll(d)
-              : await inPage(d, scenario),
+      try {
+        const done = await runScenario(d, scenario);
+        console.log(`e2e ${line(done)}`);
+        results.push(done);
+      } catch (error) {
+        console.error(`e2e ${scenario} failed:`, error);
+        failures.push(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `${failures.length} of ${selected.length} e2e scenarios failed: ${failures
+          .map((e) => e.message)
+          .join("; ")}`,
       );
     }
     return results;
