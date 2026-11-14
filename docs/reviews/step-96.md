@@ -12,7 +12,7 @@ Commits, by subject:
   - `#insertChunks` said "a chunk is a run that shares a segment". It now says the batch is written one write run at a time in ascending slot order, defines the write run as N70 does, and says stored points never decide where a run ends.
   - `#together` said two batch points "certainly share a segment" and that stored points "can only narrow the gap". It now says the two points belong to the same write run and that stored points between them are not counted.
   - `#insert` said every stored segment within K slots of the chunk "belongs to the same run". It now says such segments are merged with the run into one segment but never decide where the run ends.
-- `docs(review): step 96 scope and verification`. This file, and the review-file count and size in `docs/INDEX.md`. The merge below superseded the `docs/INDEX.md` change: the branch's net diff does not touch that file.
+- `docs(review): step 96 scope and verification`. This file, and the review-file count and size in `docs/INDEX.md`. The merge below superseded that `docs/INDEX.md` change; the branch's only net change to that file is the `site/` row, from the pre-review fixes.
 - `Merge remote-tracking branch 'origin/main' into docs/96-merge-comments-n70`. Brings in `main` up to step 104 (`7c2e35d`); see Blocked, then cleared.
 - `docs(review): step 96 size-budget block and how it was cleared`. The section of that name in this file.
 - `docs: fix the step 96 pre-review findings`. `site/how-it-works/code-tour.md` (pre-review finding 1) and this file (findings 1–3); the `site/` row of `docs/INDEX.md` re-measured (257.7 KB of Markdown).
