@@ -1,6 +1,6 @@
 # Step Reviews
 
-One file per commit-plan step, `step-NN.md`, written by the implementer during the review loop (`docs/workflow.md`) and committed on the step branch after each round as `docs(review): step NN round K triage`. It is the audit trail the user reads before merging, and the reviewer reads it in later rounds to check fixes and contest rejections.
+One file per commit-plan step, `step-NN.md` (`NN` is the step number, two or more digits: `step-07.md`, `step-102.md`), written by the implementer during the review loop (`docs/workflow.md`) and committed on the step branch after each round as `docs(review): step NN round K triage`. It is the audit trail the user reads before merging, and the reviewer reads it in later rounds to check fixes and contest rejections.
 
 Project-wide reviews sit beside the step files: [`2026-11-review.md`](2026-11-review.md) (2026-11-10) and its follow-up [`2026-11-review-update.md`](2026-11-review-update.md) (2026-11-11).
 

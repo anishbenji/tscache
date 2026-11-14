@@ -5,6 +5,8 @@
 #   scripts/codex-review.sh <NN> --adversarial "<focus>" adversarial review (prompt D)
 #   scripts/codex-review.sh <NN> [...] --print-prompt    print the prompt only
 #
+# NN is the step number: two or more digits (07, 42, 102).
+#
 # Codex runs headless in a read-only sandbox, which cannot run `bun run ci`
 # (installs and builds need to write), so CI runs here first and its result
 # is handed to the reviewer. Each run is a fresh Codex session; later rounds
@@ -17,7 +19,7 @@ usage() {
   exit 2
 }
 
-[[ $# -ge 1 && $1 =~ ^[0-9]{2}$ ]] || usage
+[[ $# -ge 1 && $1 =~ ^[0-9]{2,}$ ]] || usage
 step=$1
 shift
 focus=""
