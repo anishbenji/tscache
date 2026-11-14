@@ -48,15 +48,25 @@ async function nextDraw(page: Page): Promise<void> {
 
 /**
  * Drags the chart by most of its width: right goes back in time, left
- * forward.
+ * forward. With `pause`, the drag stops half-way, the button still held,
+ * until `pause` resolves, as a drag on a loaded machine may stop.
  */
-async function drag(page: Page, toward: "back" | "forward"): Promise<void> {
+async function drag(
+  page: Page,
+  toward: "back" | "forward",
+  pause?: () => Promise<unknown>,
+): Promise<void> {
   const box = await page.locator("#chart").boundingBox();
   if (box === null) throw new Error("no chart");
   const y = box.y + box.height / 3;
   const [from, to] = toward === "back" ? [0.2, 0.9] : [0.9, 0.2];
   await page.mouse.move(box.x + box.width * from, y);
   await page.mouse.down();
+  if (pause !== undefined) {
+    const half = (from + to) / 2;
+    await page.mouse.move(box.x + box.width * half, y, { steps: 10 });
+    await pause();
+  }
   await page.mouse.move(box.x + box.width * to, y, { steps: 20 });
   await page.mouse.up();
 }
@@ -498,8 +508,22 @@ for (const app of [
       const page = await openTab(context);
       await waitNotices(page, 1);
       await expect(page.getByTestId("missing")).toHaveText("nothing missing");
-      await control(page, { failNext: 2 });
-      await drag(page, "back");
+      // Every fetch fails until the test lets them through: how many fetches
+      // a drag makes is not the test's to count. A drag that stops mid-way,
+      // as on a loaded machine, reads where it stopped and again where it
+      // ends (SCROLL_PAUSE_MS in session.ts), each read fetching the forming
+      // bar besides the history it lacks. This drag stops on every run.
+      await control(page, { failNext: 1000 });
+      const before = (await notices(page)).length;
+      const history = async () =>
+        (await notices(page)).slice(before).filter(isHistory);
+      await drag(page, "back", () => waitHistory(page, before));
+      await expect
+        .poll(async () => (await history()).length)
+        .toBeGreaterThan(1);
+      expect((await history()).map((notice) => notice.outcome)).not.toContain(
+        "ok",
+      );
       await expect(page.getByTestId("missing")).toContainText("fetch failed");
       await control(page, { failNext: 0 });
       await page.getByRole("button", { name: "Retry" }).click();
@@ -564,11 +588,16 @@ for (const app of [
       // ends three bars before the first pushed bar, as after a stream outage.
       await page.clock.setSystemTime((await stats(page)).now - 3 * MINUTE);
       await recordNotices(page);
+      // The stream held until the first read is counted: on a loaded machine
+      // it could otherwise open, and the gap be read through, before the
+      // counts below, which would then already hold the bars it adds.
+      const opening = await holdStream(page);
       await page.goto("/");
       await expect(page.getByTestId("connection")).toHaveText("live");
       await expect(page.getByTestId("summary")).toContainText("bars");
       const fetched = (await notices(page)).length;
       const opened = await barCount(page);
+      opening.release();
       // The fetch flank reaches one bar past the read, so two remain to fill.
       await expect
         .poll(() => barCount(page))
