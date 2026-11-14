@@ -53,3 +53,9 @@ Not run: the full mutation suite over every area (about 40 minutes in all), as t
 ## Pre-review (Fable), not the gate
 
 No P0 or P1; the pre-review reproduced the lockfile comparison with its own resolver (0 changed, 0 missing, 113 added) and found no install scripts in the new packages. One P2 (the run time read as per area; it is about 40 minutes for all six) and three nits (the CI row named no head; `docs/INDEX.md`'s own size; `AGENTS.md`'s heavy-job list does not name a mutation run) were fixed in `docs: step 91 pre-review fixes`, except the `AGENTS.md` line, which is the user's file and is proposed to the user. Its decision concern (the step 84 provenance sentence) is settled by stating when the numbers were measured without describing how.
+
+## Security lane (Claude), not the gate
+
+run 1, head 1a3a5c6: P0 0, P1 0, P2 1
+
+S1.1 P2: a dependency question, with the user (it does not block)
