@@ -83,3 +83,9 @@ None.
 ## Decision concerns
 
 None yet; the review has not run.
+
+## Merge with `main` after step 92
+
+Step 92 (#122) added the M7 proposal and its own `docs/design/` row. The merge keeps one row naming both
+proposals, re-measures it and the roadmap row, and moves the roadmap citation in this proposal's §1 from
+`:132-135` to `:138-141`, where the sketch now sits.
