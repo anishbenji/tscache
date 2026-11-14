@@ -742,8 +742,11 @@ async function ffmpeg(args: string[]): Promise<void> {
 /**
  * Moves each finished file over its committed one, unless shutdown has
  * begun. Synchronous, so no signal handler runs between the check and the
- * last move: a scenario's three files are replaced together or not at all.
- * A move across file systems copies.
+ * last move: a signal never leaves a scenario's three files half replaced.
+ * A file system error during the moves (a read-only or full directory) can:
+ * the error propagates and the recorder exits 1, and `git restore` recovers
+ * the committed media. No rollback could make the moves atomic across the two
+ * media directories. A move across file systems copies.
  */
 function install(moves: [from: string, to: string][]): void {
   stopIfCancelled();

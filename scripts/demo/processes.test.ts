@@ -167,7 +167,8 @@ describe("Processes", () => {
     if (started.group !== undefined) leftovers.push(started.group);
     // While it still runs: copied as it arrives, not when it exits.
     await expect.poll(() => copied).toBe("warn\n");
-    expect(started.output()).toContain("out\n");
+    // stdout is its own pipe: wait for it too rather than rely on its order.
+    await expect.poll(() => started.output()).toContain("out\n");
     expect(started.output()).toContain("warn\n");
     await processes.stop();
   });
