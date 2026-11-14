@@ -56,7 +56,8 @@ The `:87` survivors of row 20 are already gone in the "before" run: step 94 kill
 
 - `bunx vitest run packages/tscache/test/persist-clear-disk.test.ts`: 15 of 15 pass.
 - `bun scripts/test-clocks.ts packages/tscache/test/persist-clear-disk.test.ts`: `test-clocks: 1 files clean`.
-- `bun run ci` runs through the heavy-job lock on the branch head before it is handed to the director.
+- `bun run ci` through the heavy-job lock on `2c5a5b5`: exit 0 (Vitest 2,729, Playwright 187, bench smoke `ok`).
+  The branch then merged `main` (step 96's comment-only change to `merge.ts`).
 
 ## Contract-test changes
 
@@ -65,3 +66,8 @@ None: no contract test was changed or removed. The new case is appended to `pers
 ## Decision concerns
 
 None.
+
+## Pre-review (Claude), not the gate
+
+head 383f8b3: no findings. It reproduced the mutant at `:83`, found the test also pins the `due` boundary
+(`<` to `<=` at `:50` fails it), and confirmed the `performance.now` spy does not leak into the next test.
