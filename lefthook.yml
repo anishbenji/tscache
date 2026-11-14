@@ -37,5 +37,8 @@ pre-push:
             run: bun run check:integrations
     - name: fallow
       run: bun run fallow
+    # The health floor, as in scripts/ci.sh (step 83).
+    - name: fallow-health
+      run: bun run fallow:health
     - name: tests
       run: bunx vitest run --passWithNoTests
