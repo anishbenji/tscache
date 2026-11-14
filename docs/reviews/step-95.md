@@ -83,3 +83,7 @@ None. No contract test was touched; the changed tests are end-to-end and script 
 ## Decision concerns
 
 None.
+
+## Security lane (Claude), not the gate
+
+run 1, head 1be6356: P0 0, P1 0, P2 0
