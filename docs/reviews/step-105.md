@@ -1,0 +1,47 @@
+# Step 105 — Two `AGENTS.md` lines
+
+Branch: `docs/105-agents-lines` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
+
+## Scope
+
+User decision 63 (b) (2026-11-15) approved two one-line additions to `AGENTS.md`, proposed by the reviews of steps 83 and 91. Both go into "Toolchain hard rules"; nothing else in the file changes.
+
+1. **Hook staging.** The pre-push hook runs the Fallow health floor since step 83 (`lefthook.yml`, job `fallow-health`, `bun run fallow:health`, which is `fallow health --min-score 90`). The hook-staging line now names it after the Fallow audit: "Fallow (`bun run fallow`) and the health floor (`bun run fallow:health`)".
+2. **Heavy jobs.** A mutation run (`bun run mutation`, about 40 minutes for all areas, `docs/benchmarks/mutation.md` on step 91's branch) is a heavy job. The "one heavy job at a time" list now names it.
+
+Documentation only: no code, no tests, no configuration changes.
+
+`CLAUDE.md` and `docs/workflow.md` do not repeat either list: `CLAUDE.md` imports `AGENTS.md`, and `docs/workflow.md` (Toolchain, item 3) already describes the health floor in the pre-push hook. Neither needed a change.
+
+**Ordering with step 91.** The `mutation` script arrives with step 91 (`chore/91-stryker-deps`), not yet on `main` when this branch was cut. Until step 91 merges, the heavy-job line names a script that does not exist yet; the line is still correct as a rule, and the user merges both.
+
+| Commit (by subject)                                       | What                                                        |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| `docs: name the health floor and mutation runs in agents` | The two `AGENTS.md` lines; this file; `docs/INDEX.md` sizes |
+| `docs(review): step 105 pre-review`                       | This file's pre-review section; the `docs/INDEX.md` sizes   |
+
+## Verification
+
+- `bun run docs:check`: passes.
+- `~/code/tscache-reports/bin/heavy-run.sh "105 child: ci" bun run ci`: exits 0 on the final head.
+
+## Pre-review (Claude Opus), not the gate
+
+Run on head `62a7ab4` (the director's merge of `origin/main` into this branch, with the `docs/INDEX.md` rows re-measured). No P0, P1 or P2 findings; every claim in this file was checked, including the health-floor line against `lefthook.yml` and `package.json` (`fallow:health`) and the size figures.
+
+| #    | Sev | Finding                                                                        | Decision | Resolution                                              |
+| ---- | --- | ------------------------------------------------------------------------------ | -------- | ------------------------------------------------------- |
+| PR-1 | nit | `AGENTS.md` names `bun run mutation` before pull request #119 adds that script | accepted | No change; the pull request says to merge it after #119 |
+
+## Contract-test changes
+
+None.
+
+## Decision concerns
+
+None.
+
+## Round 1 (GPT-6.1 Sol, high), head 8f7dd62
+
+No findings; verdict merge. The round noted that #119 has merged, so `bun run mutation` now exists on `main` and
+the pre-review nit's ordering condition holds. `bun run ci` exit 0 on that head (run by the round). Settled.

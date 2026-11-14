@@ -31,10 +31,10 @@ The per-step pipeline, the review loop, copy-paste prompts and the adversarial-r
 
 ## Toolchain hard rules
 
-- **One heavy job at a time on this machine:** `bun run ci`, Playwright, a bench or stress run, a Codex review. When `~/code/tscache-reports/bin/heavy-run.sh` exists, run each through it (`heavy-run.sh "<label>" <command...>`); it waits for the lock, holds it and releases it.
+- **One heavy job at a time on this machine:** `bun run ci`, Playwright, a bench or stress run, a Codex review, a mutation run (`bun run mutation`, about 40 minutes for all areas). When `~/code/tscache-reports/bin/heavy-run.sh` exists, run each through it (`heavy-run.sh "<label>" <command...>`); it waits for the lock, holds it and releases it.
 - **Never `bun test`** — Vitest runs under Node (≥22.12). Use `bun run test` or `bunx vitest run`. Bun for everything else (workspaces, scripts).
 - Build: tsdown (ESM-only, `isolatedDeclarations: true`). **tsup is EOL — do not use.** `tsc --noEmit` is the authoritative type check, on TypeScript 7 (the native compiler; user-confirmed 2026-10-23). TypeScript 7 ships no JS API: a tool that needs one gets TS 6 under an npm alias.
-- Hook staging: pre-commit = Biome (staged) + gitleaks + commitlint (sub-second); pre-push = tsc + full Biome + build, then Knip and the integration snippets (`bun run check:integrations`) + Fallow (`bun run fallow`) + Vitest; `bun run ci` = superset incl. build + publint/attw + Playwright + bench smoke, plus gitleaks and commitlint over `main..HEAD` as the backstop for any skipped hook.
+- Hook staging: pre-commit = Biome (staged) + gitleaks + commitlint (sub-second); pre-push = tsc + full Biome + build, then Knip and the integration snippets (`bun run check:integrations`) + Fallow (`bun run fallow`) and the health floor (`bun run fallow:health`) + Vitest; `bun run ci` = superset incl. build + publint/attw + Playwright + bench smoke, plus gitleaks and commitlint over `main..HEAD` as the backstop for any skipped hook.
 - Multi-tab tests: standalone Playwright, one `BrowserContext` + multiple pages (Vitest browser mode cannot share a SharedWorker across tabs).
 - Tests follow `docs/testing.md`: no wall clock, no timing assertion, no sleep, no retries (`bun scripts/test-clocks.ts` in `bun run ci`). Hunt flakes with `scripts/flake-hunt.sh`.
 
