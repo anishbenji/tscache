@@ -17,22 +17,26 @@ const OTHER = "/repo/other.ts";
 interface Fake {
   context: Context;
   emitted: unknown[];
+  /** The arguments of every `resolve` call, in order. */
+  resolved: unknown[][];
 }
 
 /**
  * A plugin context in `consumer`'s environment that resolves `./fetcher`
  * and `./same` to FILE, `./other` to OTHER and nothing else, and numbers
- * the chunks it emits.
+ * the chunks it emits, recording each `resolve` call.
  */
 function fake(consumer: "client" | "server" = "client"): Fake {
   const emitted: unknown[] = [];
+  const resolved: unknown[][] = [];
   const ids: Record<string, string> = {
     "./fetcher": FILE,
     "./same": FILE,
     "./other": OTHER,
   };
   const context: Context = {
-    async resolve(source) {
+    async resolve(source, importer, options) {
+      resolved.push([source, importer, options]);
       const id = ids[source];
       return id === undefined ? null : { id };
     },
@@ -42,7 +46,7 @@ function fake(consumer: "client" | "server" = "client"): Fake {
     },
     environment: { config: { consumer } },
   };
-  return { context, emitted };
+  return { context, emitted, resolved };
 }
 
 /** A plugin after Vite resolved its config. */
@@ -59,7 +63,48 @@ async function virtualId(p: Plugin, source: string): Promise<string> {
   return id;
 }
 
+describe("fetcherUrl's plugin (step 109)", () => {
+  it("is named tscache:fetcher-url", () => {
+    expect(fetcherUrl().name).toBe("tscache:fetcher-url");
+  });
+
+  it("warns, word for word, when a browser build makes IIFE workers", () => {
+    const warnings: string[] = [];
+    fetcherUrl().buildStart.call({
+      environment: {
+        mode: "build",
+        config: {
+          consumer: "client",
+          worker: { format: "iife" },
+          logger: { warn: (message: string) => warnings.push(message) },
+        },
+      },
+    });
+    expect(warnings).toEqual([
+      "[tscache] Vite builds workers as IIFE (worker.format 'iife'), which cannot code-split: the tscache worker's persistence code is inlined into the worker file, so every app downloads it, persisting or not. Set worker: { format: 'es' } in vite.config.ts to make it a chunk the worker loads only when a cache persists. See https://github.com/anishbenji/tscache/blob/main/site/guides/vite.md",
+    ]);
+  });
+});
+
 describe("fetcherUrl's resolveId (step 109)", () => {
+  it("resolves the import without its query, from its importer, skipping itself", async () => {
+    const p = plugin("build");
+    const { context, resolved } = fake();
+    await p.resolveId.call(context, "./fetcher?fetcher", "/repo/main.ts");
+    expect(resolved).toEqual([
+      ["./fetcher", "/repo/main.ts", { skipSelf: true }],
+    ]);
+  });
+
+  it("leaves an import whose query only contains ?fetcher alone", async () => {
+    const p = plugin("build");
+    const { context, resolved } = fake();
+    expect(
+      await p.resolveId.call(context, "./x?fetcher&y", "/repo/main.ts"),
+    ).toBeUndefined();
+    expect(resolved).toEqual([]);
+  });
+
   it("gives nothing for a ?fetcher import whose module does not resolve", async () => {
     const p = plugin("build");
     expect(
@@ -151,10 +196,16 @@ describe("fetcherUrl's resolveFileUrl (step 109)", () => {
 describe("fetcherUrl's generateBundle (step 109)", () => {
   const HELPER = "window.dispatchEvent(new Event('vite:preloadError'))";
 
-  /** Runs the bundle check; gives the error it raised, if any. */
-  async function check(bundle: Bundle): Promise<string | undefined> {
+  /**
+   * Runs the bundle check with the fetchers `sources` name (FILE's by
+   * default); gives the error it raised, if any.
+   */
+  async function check(
+    bundle: Bundle,
+    sources: string[] = ["./fetcher?fetcher"],
+  ): Promise<string | undefined> {
     const p = plugin("build");
-    await virtualId(p, "./fetcher?fetcher");
+    for (const source of sources) await virtualId(p, source);
     const errors: string[] = [];
     const context = {
       error(message: string): never {
@@ -183,6 +234,39 @@ describe("fetcherUrl's generateBundle (step 109)", () => {
     });
     expect(message).toMatch(/^The fetcher fetcher\.js uses import\(\)/);
     expect(message).toContain("(in b.js)");
+  });
+
+  it("fails with the whole message, naming the fetcher and the chunk", async () => {
+    const message = await check({
+      "fetcher.js": {
+        type: "chunk",
+        code: "",
+        facadeModuleId: FILE,
+        imports: ["a.js"],
+      },
+      "a.js": { type: "chunk", code: HELPER },
+    });
+    expect(message).toBe(
+      `The fetcher fetcher.js uses import(): Vite wraps it in a helper (in a.js) that needs document and window, which tscache's worker lacks. Import the fetcher's dependencies statically, or build the fetcher on its own and pass that file's URL instead of using ?fetcher (see "Building the fetcher on its own" in tscache's worker setup guide).`,
+    );
+  });
+
+  it("checks every fetcher: fails on the second when only it reaches the helper", async () => {
+    const message = await check(
+      {
+        "fetcher.js": { type: "chunk", code: "", facadeModuleId: FILE },
+        "other.js": {
+          type: "chunk",
+          code: "",
+          facadeModuleId: OTHER,
+          dynamicImports: ["lazy.js"],
+        },
+        "lazy.js": { type: "chunk", code: HELPER },
+      },
+      ["./fetcher?fetcher", "./other?fetcher"],
+    );
+    expect(message).toMatch(/^The fetcher other\.js uses import\(\)/);
+    expect(message).toContain("(in lazy.js)");
   });
 
   it("fails on the helper in the fetcher's own chunk", async () => {
