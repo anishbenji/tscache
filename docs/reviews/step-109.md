@@ -15,6 +15,7 @@ User decision 66 B (2026-11-15): after step 106 the Fallow health score was 96.4
 | `docs(review): step 109, the ci result`                                  | The CI row of the verification table.                                                                      |
 | `test(vite): pin fetcherUrl's messages, name, resolve call and fetchers` | The pre-review's four test gaps (below).                                                                   |
 | `docs(review): step 109, the fable pre-review`                           | The pre-review section and its verification.                                                               |
+| `docs(review): step 109, the pre-review ci result`                       | The CI rows after the pre-review.                                                                          |
 
 ### `fetcherUrl`
 
@@ -94,8 +95,10 @@ The `vite` entry grows by the six function headers (minified 2,593 to 2,781 byte
 | `bunx fallow health --score --format json`                                                                                                | 97.9 A (table above)                                                                                                                             |
 | `bun scripts/size.ts`                                                                                                                     | Every entry within budget (table above)                                                                                                          |
 | `heavy-run.sh "109 child: ci" bun run ci` on cbffb71                                                                                      | Exit 0; Vitest 137 files, 2,736 tests passed; Playwright 187 passed; health 98 A; every size entry within budget; every bench smoke case matched |
+| `bunx vitest run` on the same five files after the pre-review tests (a380871)                                                             | 5 files, 57 tests passed                                                                                                                         |
+| `heavy-run.sh "109 child: ci" bun run ci` on fd69f97 (after the pre-review)                                                               | Exit 0; Vitest 138 files, 2,746 tests passed; Playwright 187 passed; health 98 A; every size entry within budget; every bench smoke case matched |
 
-After cbffb71 only this table row changed, so `bun run ci` was not run again.
+A run on a380871 exited 1 only because the working tree held this file's pre-review section unformatted (Biome's formatter check); it was formatted and committed as fd69f97 and the run repeated. After fd69f97 only these table rows changed, so `bun run ci` was not run again.
 
 Not verified: the recorder was not run end to end against a real demo with ffmpeg (it records and re-encodes the committed media for many minutes); the launcher spec drives it with a stand-in ffmpeg, a probe scenario and fake builds.
 
