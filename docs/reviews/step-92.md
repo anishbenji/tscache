@@ -8,10 +8,11 @@ The first of the three design steps of user decision 46 A (2026-11-13: after 0.1
 
 Documentation only: no code, no tests, nothing under `packages/` changes.
 
-| Commit (by subject)                                           | What                                                                                                                                        |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs: propose the change-notification design for finding m7` | `docs/design/m7-change-events.md`; a paragraph in the roadmap's subscriptions sketch linking to it; a `docs/design/` row in `docs/INDEX.md` |
-| `docs(review): step 92 scope and verification`                | This file; the `docs/INDEX.md` sizes                                                                                                        |
+| Commit (by subject)                                           | What                                                                                                                                                                    |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs: propose the change-notification design for finding m7` | `docs/design/m7-change-events.md`; a paragraph in the roadmap's subscriptions sketch linking to it; a `docs/design/` row in `docs/INDEX.md`                             |
+| `docs(review): step 92 scope and verification`                | This file; the `docs/INDEX.md` sizes                                                                                                                                    |
+| `docs: correct the m7 proposal's cleared semantics`           | §3.1 of the proposal: `cleared: true` comes with the `written` ranges of a version-mismatch put, as §3.2 says; a wording fix in D4; this file's verification; the sizes |
 
 **Where the design lives.** A proposal file, `docs/design/m7-change-events.md`, rather than a section of `docs/architecture.md`. The architecture document records approved contracts; this design has thirteen open decision rows, several of which would rewrite whole paragraphs. Once the user decides them, the contract-test step moves the approved text into architecture §2.7, §2.8, §3.1–§3.2 and §4.6–§4.8 and adds the decision files, as the persistence sketch became §4.10. The proposal file's first section says the same.
 
@@ -32,12 +33,13 @@ All thirteen rows, D1–D13, are open and listed with options, pros, cons and a 
 
 ## Verification
 
-| Check                                                                                          | Result                                                                                                                                            |
-| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bun run build`, then `bun run docs:check`                                                     | exit 0; `doc-anchors: 246 anchors in 42 pages resolve` (without the build, the site's snippets cannot resolve `@anishbenji/tscache` and it fails) |
-| `~/code/tscache-reports/bin/heavy-run.sh "92 child: ci" bun run ci` on the step's first commit | see below                                                                                                                                         |
-| Line references in the proposal                                                                | each read at the cited lines with `sed -n` or `grep -n` on `98b7bbf`                                                                              |
-| `docs/INDEX.md` sizes                                                                          | re-measured with `wc -c` after the last edit (1 KB = 1,000 bytes)                                                                                 |
+| Check                                                                          | Result                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run build`, then `bun run docs:check`                                     | exit 0; `doc-anchors: 246 anchors in 42 pages resolve` (without the build, the site's snippets cannot resolve `@anishbenji/tscache` and it fails)                                               |
+| `~/code/tscache-reports/bin/heavy-run.sh "92 child: ci" bun run ci`, first run | exit 1: Biome's format check failed on an edit to the proposal made while the run was in progress (uncommitted); formatted and committed in `docs: correct the m7 proposal's cleared semantics` |
+| The same command on the final head                                             | recorded in the step's report to the director (a result written here would change the head it describes)                                                                                        |
+| Line references in the proposal                                                | each read at the cited lines with `sed -n` or `grep -n` on `98b7bbf`                                                                                                                            |
+| `docs/INDEX.md` sizes                                                          | re-measured with `wc -c` after the last edit (1 KB = 1,000 bytes)                                                                                                                               |
 
 Not verified: nothing is built, so no behaviour in the proposal is tested; the cost estimates in its §3.6 are reasoned from the code, not measured.
 
