@@ -12,6 +12,10 @@
 // line (the launcher hearing the exit, printing the line, the pipe carrying
 // it). A request sent in that interval, or already on its way, can still
 // reach whatever binds the port meanwhile.
+// The same window opens when the launcher starts the stop itself (another
+// app failed): it prints the line and signals every app server at once, and
+// nothing makes the recorder read the line before the recorded app's server
+// has exited and freed its port.
 
 import { request } from "./request";
 

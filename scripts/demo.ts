@@ -24,7 +24,7 @@ import { stripVTControlCharacters } from "node:util";
 import { type App, appDir, apps } from "../e2e/examples/apps";
 import { demoPorts, hubPort } from "./demo/catalog";
 import { hub } from "./demo/hub";
-import { HUB_LINE, STOPPING_LINE } from "./demo/lines";
+import { HUB_LINE, STOPPING_NOTICE } from "./demo/lines";
 import { Processes, type Started } from "./demo/processes";
 
 const root = new URL("..", import.meta.url);
@@ -54,13 +54,13 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 let exiting: Promise<never> | undefined;
 
 /**
- * The one way out: says it is stopping (STOPPING_LINE, which the demo
+ * The one way out: says it is stopping (STOPPING_NOTICE, which the demo
  * recorder reads), stops the hub and every subprocess, then exits.
  */
 function shutdown(code: number, reason?: string): Promise<never> {
   exiting ??= (async () => {
     // First, before any app server is signalled or its port let go.
-    console.error(STOPPING_LINE);
+    console.error(STOPPING_NOTICE);
     if (reason !== undefined) console.error(reason);
     void server?.stop(true);
     await processes.stop();

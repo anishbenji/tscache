@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { STOPPING_LINE, stopping } from "./lines";
+import { STOPPING_LINE, STOPPING_NOTICE, stopping } from "./lines";
 
 // The line the demo launcher (scripts/demo.ts) prints first thing as it
 // starts stopping, which the recorder (scripts/demo/record.ts) reads to stop
@@ -21,6 +21,14 @@ describe("stopping", () => {
       stopping(`built tscache\n${STOPPING_LINE}\nsolid-uplot: exited\n`),
     ).toBe(true);
     expect(stopping(`built tscache\r\n${STOPPING_LINE}\r\n`)).toBe(true);
+  });
+
+  it("finds the launcher's notice even right after a partial line", () => {
+    // An app server's last stderr chunk can end mid-line just before the
+    // launcher prints its notice (step 89, security lane S1.1).
+    expect(stopping(`Error: listen EADDR${STOPPING_NOTICE}\nINUSE\n`)).toBe(
+      true,
+    );
   });
 
   it("is not fooled by the line inside another line", () => {
