@@ -1,6 +1,6 @@
 # Step 93 — Fallow health toward 95, off protected paths
 
-Branch: `refactor/93-health-toward-95` · Reviewer: not yet run · Rounds: 0 · Status: built, awaiting review
+Branch: `chore/93-health-toward-95` · Reviewer: not yet run · Rounds: 0 · Status: built, awaiting review
 
 ## Scope
 
