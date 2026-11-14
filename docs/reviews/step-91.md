@@ -59,3 +59,13 @@ No P0 or P1; the pre-review reproduced the lockfile comparison with its own reso
 run 1, head 1a3a5c6: P0 0, P1 0, P2 1
 
 S1.1 P2: a dependency question, with the user (it does not block)
+
+## Codex review
+
+Round 1 (gpt-6.1-sol, effort high, head 34f79c5): no findings; verdict merge. It re-checked the lockfile (no
+existing resolution changed, no package version lost) and `git diff --check`; `bun run ci` exit 0 on that head.
+
+## Merge with `main`
+
+`main` moved to a553b0c (steps 84 and 85) after the round. The merge conflicted only in the `docs/reviews/` row of
+`docs/INDEX.md`, resolved by re-measuring it (90 files); no reviewed file changed.
