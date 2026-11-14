@@ -137,3 +137,7 @@ None.
 
 - Whether the health measure should exclude `e2e/**`, `integrations/test/**` and `scripts/**/*.test.ts`, as it already excludes `packages/*/test/**` (option 3 above).
 - Whether `vite/fetcher-url.ts` (`fetcherUrl`, 103 lines) may be split in a step that touches that protected path.
+
+## Security lane (Claude), not the gate
+
+run 1, head c86e1f8: P0 0, P1 0, P2 0
