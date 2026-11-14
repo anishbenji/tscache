@@ -1,6 +1,6 @@
 # Step 105 — Two `AGENTS.md` lines
 
-Branch: `docs/105-agents-lines` · Reviewer: not yet run · Rounds: 0 · Status: open · Verdict after triage: pending
+Branch: `docs/105-agents-lines` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -40,3 +40,8 @@ None.
 ## Decision concerns
 
 None.
+
+## Round 1 (GPT-6.1 Sol, high), head 8f7dd62
+
+No findings; verdict merge. The round noted that #119 has merged, so `bun run mutation` now exists on `main` and
+the pre-review nit's ordering condition holds. `bun run ci` exit 0 on that head (run by the round). Settled.
