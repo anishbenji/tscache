@@ -1,6 +1,6 @@
 # Step 92 — Design spec for change notifications (M7)
 
-Branch: `docs/92-m7-change-events-spec` · Reviewer: not yet run (the director runs the review) · Rounds: 0 · Status: awaiting review · Verdict after triage: pending
+Branch: `docs/92-m7-change-events-spec` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
@@ -17,7 +17,7 @@ Documentation only: no code, no tests, nothing under `packages/` changes.
 
 **Where the design lives.** A proposal file, `docs/design/m7-change-events.md`, rather than a section of `docs/architecture.md`. The architecture document records approved contracts; this design has thirteen open decision rows, several of which would rewrite whole paragraphs. Once the user decides them, the contract-test step moves the approved text into architecture §2.7, §2.8, §3.1–§3.2 and §4.6–§4.8 and adds the decision files, as the persistence sketch became §4.10. The proposal file's first section says the same.
 
-**What it covers,** as the brief asked: the event's shape and payload (notify-only, `written` and `removed` ranges, `cleared`, `requestId`); what counts as a change, per operation, including a version clear, `hydrate`, a persistence load, eviction later, and the calls that change nothing; delivery per mutating call, the order of events for one call and across calls, and the SharedWorker, dedicated and in-process hostings; the interactions with `cacheOnly`, orchestrated fetches, `mergeWarning`, `cacheCleared`, auth pending and persistence; zero cost without a subscriber and the cost per change with one; the public API (`client.on`, `cache.on`, the unsubscribe, `client.features`) and what the integrations do; an additive protocol change with `hello.features` and a compatibility rule offered to M5; and 24 contract and browser tests for the later step.
+**What it covers,** as the brief asked: the event's shape and payload (notify-only, `written` and `removed` ranges, `cleared`, `requestId`); what counts as a change, per operation, including a version clear, `hydrate`, a persistence load, eviction (its reporting deferred to M3 after round 1), and the calls that change nothing; delivery per mutating call, the order of events for one call and across calls, and the SharedWorker, dedicated and in-process hostings; the interactions with `cacheOnly`, orchestrated fetches, `mergeWarning`, `cacheCleared`, auth pending and persistence; zero cost without a subscriber and the cost per change with one; the public API (`client.on`, `cache.on`, the unsubscribe, `client.features`) and what the integrations do; an additive protocol change with `hello.features` and a compatibility rule offered to M5; and 24 contract and browser tests for the later step.
 
 **Two findings the spec makes about the roadmap sketch.** (1) Re-reading with a fetching `get` on every event loops wherever a cache has a volatile region: the forming bar is never covered, so each fetching read fetches it, each fetch writes it, and each write notifies (§3.5 of the proposal). The proposal's rule is a `cacheOnly` re-read after a write and a fetching one only after coverage was withdrawn. (2) Per-macrotask coalescing in a worker rarely merges anything, since each message and each fetch completion runs in its own task; the proposal coalesces per mutating call, without a timer, and leaves per-frame coalescing to the integrations (D3).
 
@@ -31,6 +31,8 @@ All thirteen rows, D1–D13, are open and listed with options, pros, cons and a 
 
 - **D7** (`hydrate` sends `cacheChanged` for what it applied) amends the "No events" bullet of architecture §2.8 (N35, N36) for this one event.
 - **D9** (a) follows N37 for the new ops but adds an optional `features` field to the hello of architecture §3.1, whose handshake is marked locked; N37 covers additive ops, not the handshake's shape, so (a) needs the user's explicit approval. Option (d), added after the pre-review, carries the same list in an op and leaves §3.1 as it is. Its option (c), a protocol bump, would lean on N25 and reject `createClient` across a deploy skew.
+
+One row gained an option the user may want: **D5** (c), added after round 1, would add public API (an `own` flag or a public `client.id`) so a tab can tell its own events apart; the recommendation stays (a).
 
 ## Verification
 
@@ -63,10 +65,20 @@ Run by the director on `439ce3c`; predicted verdict: merge after fixes. Each fin
 
 The reviewer also noted that `docs/reviews/2026-11-review-update.md` still shows M7 and decision 46 as open; the director keeps that file, so this step leaves it unchanged.
 
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge after fixes
+
+Run on `d6d7f1c` (the branch with `main` merged in by the director). The director's Fable check of the findings: valid 2, partly valid 1, invalid 0, decision 0. With no P0 or P1 left after the check, the round settles the step once these fixes land.
+
+| #    | Sev (gate → check) | Finding                                                                                                                                                                                                              | Check        | Decision       | Resolution                                                                                                                                                                                                                                                                                                                                                                           |
+| ---- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1-1 | P1 → P2            | The eviction row of §3.2 reports only withdrawn coverage, so evicting a page that holds points but no coverage sends an empty event, though `get` returns uncovered points (N16); the row also told M3 how to report | partly valid | accepted as P2 | The row now says eviction changes what a read returns and will be reported on this event, and defers the field, the read rule and the points-without-coverage case to M3's decision rows (step 98's draft: E16, an `evicted` list; E8, pinning provisional pages), decided together with D2 and D12. Contract test 1 excludes that row: a docs step cannot write a test first for it |
+| R1-2 | P2                 | §3.3 and D5 (a) said a tab can skip its own events by the `clientId` prefix, but no public API exposes the `clientId` or a call's request id                                                                         | valid        | accepted       | Confirmed: `clientId` lives on the internal `PortClient` (`rpc/port-client.ts:42`), held in the private `#port` (`client/client.ts:154`). The sentence is gone from §3.3 and from D5 (a)'s pros; D5 (a)'s cons now say a tab cannot tell its own events apart; new option D5 (c), an `own` flag or a public `client.id`, is the user's to choose, since it is new public API         |
+| R1-3 | P2                 | §3.5 claimed the in-flight dedup fetches once for all reacting tabs, but it covers only fetches still in flight, and the volatile tail is never covered                                                              | valid        | accepted       | Confirmed: a decided fetch leaves the list (`orchestrator/orchestrator.ts:587-593`). §3.5 now says views whose `get`s overlap in flight share a fetch, and otherwise each may fetch what is still uncovered: at most one fetch per reacting view per call                                                                                                                            |
+
 ## Contract-test changes
 
 None.
 
 ## Decision concerns
 
-None yet; the review has not run.
+None.
