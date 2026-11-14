@@ -11,10 +11,12 @@ Step 96's review round ran `bun run ci` on a comment-only change, and two record
 
 CI on `main` passes; both failures were intermittent. They have one cause, and it is a bug in the recorder, not in the tests.
 
-| Commit (by subject)                                                  | What                                                                                      |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `fix(demo): let the recorder wait for the launcher's whole stop`     | `Processes` takes a grace; the recorder gives its launcher `LAUNCHER_GRACE_MS`; the test. |
-| `docs(review): step 110, the recorder waits for its launcher's stop` | This file.                                                                                |
+| Commit (by subject)                                                        | What                                                                                      |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `fix(demo): let the recorder wait for the launcher's whole stop`           | `Processes` takes a grace; the recorder gives its launcher `LAUNCHER_GRACE_MS`; the test. |
+| `docs(review): step 110, the recorder waits for its launcher's stop`       | This file.                                                                                |
+| `fix(demo): test the sigkill after a custom grace and say when it is sent` | Pre-review findings P-1, P-3 and P-4 (below).                                             |
+| `docs(review): step 110 pre-review triage`                                 | The pre-review section of this file.                                                      |
 
 ## The cause
 
@@ -64,6 +66,17 @@ The two tests, each 20 times on one worker with no retries and one busy loop per
 | `a recorder stopped while it converts leaves the media as they were and stops ffmpeg` | 20   | 20     | 0      |
 
 Playwright reported `40 passed (3.2m)`, with ten busy loops running throughout.
+
+## Pre-review (Fable), not the gate
+
+On head `7b423ef` (the director's merge of `origin/main` into this branch). The pre-review confirmed that the recorder cannot hang (`#stopAll` is bounded by the grace plus `KILL_MS`, about 10 s, and `stop()` returns even when a group never empties), that the launcher's default is unchanged (`scripts/demo.ts` and `scripts/demo-bench.ts` still use `new Processes()`), and that the 3 s margin covers the launcher's poll overshoot. It predicted merge after fixes.
+
+| #   | Sev | Finding                                                                                                                | Decision | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --- | --- | ---------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P-1 | P1  | No test reaches the SIGKILL pass after a custom grace; dropping it would leave every test green                        | accepted | Validated: every child in `processes.test.ts` honoured SIGTERM, so no test reached the SIGKILL pass at all. New fake-timer test, written first: a group that ignores SIGTERM (it prints `ready` once its trap is set) under `LAUNCHER_GRACE_MS` has had SIGTERM only 1 ms before the grace ends and SIGTERM then SIGKILL at its end, and `stop()` resolves with `groups` empty. With the SIGKILL pass temporarily removed (undone with the Edit tool) it failed: `expected [ 'SIGTERM' ] to deeply equal [ 'SIGTERM', 'SIGKILL' ]`. |
+| P-2 | P2  | The step-110 test leaks its `sleep 60` server if it fails where it guards: only the launcher's group is in `leftovers` | rejected | Validated against the code: `echoedPid` (`processes.test.ts`) pushes the pid it reads into `leftovers`, and `afterEach` sends SIGKILL to both `-pid` and `pid`. The pid it reads is the server's group id (the stand-in prints `server.group`), so the server's group is already killed after the test however it ends. A comment at the call now says so; a second push would only repeat it.                                                                                                                                      |
+| P-3 | P2  | A backstop SIGKILL can leave app servers running while the recorder exits as if clean                                  | accepted | `Processes` logs one stderr line when its SIGKILL pass signals a live group (`demo: groups <ids> did not exit within <ms> ms of SIGTERM; sent SIGKILL`); the P-1 test asserts the line, once, naming the group, and its absence before the grace ends. The recorder's header and its registry's TSDoc call the backstop best-effort. Closing that case is left out of this step, as directed.                                                                                                                                       |
+| P-4 | nit | The TSDoc on the recorder's `processes` constant says it starts the launcher                                           | accepted | Reworded to describe the registry the launcher is started in and its grace.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 ## Contract-test changes
 
