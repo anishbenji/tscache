@@ -1,6 +1,6 @@
 # Step 94 — Tests for the engine's real mutation survivors
 
-Branch: `chore/94-mutation-survivors` · Reviewer: not yet run · Rounds: 1 · Status: settled · Verdict after triage: pending
+Branch: `chore/94-mutation-survivors` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
