@@ -32,7 +32,8 @@
     "size": "bun scripts/size.ts",
     "bench": "bun scripts/bench.ts compare",
     "bench:smoke": "bun scripts/bench.ts smoke",
-    "bench:e2e": "bun scripts/bench.ts e2e"
+    "bench:e2e": "bun scripts/bench.ts e2e",
+    "mutation": "stryker run"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
