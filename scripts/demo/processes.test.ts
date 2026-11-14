@@ -98,7 +98,7 @@ describe("Processes", () => {
       .toBe(false);
     // The group probe fails once the child has exited, but its pid answers
     // until launchd reaps the zombie: wait for that, as for any effect.
-    await expect.poll(() => running(child)).toBe(false);
+    await expect.poll(() => running(child), { timeout: 5000 }).toBe(false);
     await processes.stop();
     expect(signalsTo(calls, group)).toEqual([]);
   });
@@ -115,7 +115,7 @@ describe("Processes", () => {
     await processes.stop();
     expect(signalsTo(calls, group)).toEqual(["SIGTERM"]);
     // Stopped, but its pid answers until launchd reaps the zombie.
-    await expect.poll(() => running(child)).toBe(false);
+    await expect.poll(() => running(child), { timeout: 5000 }).toBe(false);
     expect(processes.groups.size).toBe(0);
   });
 
