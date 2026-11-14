@@ -17,14 +17,14 @@ interface Variant {
   hashes: { shared: string; lazy: string; nested: string };
   /** A doc comment that tsdown keeps in the chunks. */
   comment: string;
-  /** What `shared` returns: the code itself. */
-  value: number;
+  /** Constants in each chunk's code: the code itself. */
+  code: { shared: number; lazy: number; nested: number };
 }
 
 const base: Variant = {
   hashes: { shared: "AAAAAAAA", lazy: "BBBBBBBB", nested: "CCCCCCCC" },
   comment: "/** Original wording. */",
-  value: 42,
+  code: { shared: 42, lazy: 7, nested: 3 },
 };
 
 /**
@@ -44,20 +44,20 @@ export async function load() {
 `,
     [`shared-${shared}.js`]: `${v.comment}
 export function shared() {
-  return ${v.value};
+  return ${v.code.shared};
 }
 `,
     [`lazy-${lazy}.js`]: `import { shared } from "./shared-${shared}.js";
 ${v.comment}
 export async function lazy(x) {
   const { nested } = await import("./nested-${nested}.js");
-  return nested(x) + shared();
+  return nested(x) + shared() + ${v.code.lazy};
 }
 `,
     [`nested-${nested}.js`]: `import { shared } from "./shared-${shared}.js";
 ${v.comment}
 export function nested(x) {
-  return x * shared();
+  return x * shared() * ${v.code.nested};
 }
 `,
   });
@@ -95,7 +95,7 @@ async function measure(dists: string[]): Promise<EntrySize[]> {
 
 describe("measureEntry", () => {
   it("measures the same size when only chunk hashes or comments change", async () => {
-    const [original, renamed, reworded, changed] = await measure([
+    const [original, renamed, reworded] = await measure([
       writeDist("original", base),
       // A rebuild that gives the chunks other content hashes.
       writeDist("renamed", {
@@ -109,14 +109,40 @@ describe("measureEntry", () => {
         comment:
           "/** Reworded at greater length, with no change to the code it documents. */",
       }),
-      // A code change, which must still move the size.
-      writeDist("changed", { ...base, value: 4_242_424 }),
     ]);
     expect(original?.lazy).toBeDefined();
     expect(original?.nested).toBeDefined();
     expect(renamed).toEqual(original);
     expect(reworded).toEqual(original);
-    expect(changed).not.toEqual(original);
+  });
+
+  it("moves the row of the chunk whose code changes, and only that row", async () => {
+    const rows = ["initial", "lazy", "nested"] as const;
+    // shared is in the entry's initial load; the lazy rows leave it out.
+    const chunkOfRow = { initial: "shared", lazy: "lazy", nested: "nested" };
+    const [original, ...changed] = await measure([
+      writeDist("code-original", base),
+      ...rows.map((row) =>
+        writeDist(`code-${row}`, {
+          ...base,
+          code: { ...base.code, [chunkOfRow[row]]: 4_242_424 },
+        }),
+      ),
+    ]);
+    rows.forEach((row, i) => {
+      const sizes = changed[i];
+      for (const other of rows) {
+        if (other === row) {
+          expect(sizes?.[other], `${row} change, ${other} row`).not.toEqual(
+            original?.[other],
+          );
+        } else {
+          expect(sizes?.[other], `${row} change, ${other} row`).toEqual(
+            original?.[other],
+          );
+        }
+      }
+    });
   });
 
   it("fails on a left-out chunk whose file name carries no 8-character hash", async () => {
@@ -136,7 +162,7 @@ describe("measureEntry", () => {
       "lazy-BBBBBBBB.js": "export const b = 2;\n",
     });
     await expect(measure([dist])).rejects.toThrow(
-      /would both be measured as \.\/lazy-00000000\.js/,
+      /would both be measured as \.\/lazy-00000000\.js: give the chunks distinct names/,
     );
   });
 });

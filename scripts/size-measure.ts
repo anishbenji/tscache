@@ -74,7 +74,10 @@ export function checkEntryImports(
  * included, although the minifier drops those comments; left in an import
  * string, it would move the compressed size by a few bytes of noise. An
  * application's bundler names the chunks it emits itself, so the package's
- * hashes never reach what its users download.
+ * hashes never reach what its users download. A name cannot tell a hash from
+ * other text: any name ending in a dash and eight characters is renamed, an
+ * unhashed one (`./foo-internal.js`) included, which is harmless because such
+ * a name is stable already and keeps its length; any other name fails.
  */
 function stableChunkName(specifier: string): string {
   const match = /^(\.\/[\w-]+)-[\w-]{8}\.js$/.exec(specifier);
@@ -101,7 +104,7 @@ function leaveOut(files: ReadonlySet<string>): Bun.BunPlugin {
         const other = named.get(path);
         if (other !== undefined && other !== args.path) {
           throw new Error(
-            `${other} and ${args.path} would both be measured as ${path}`,
+            `${other} and ${args.path} would both be measured as ${path}: give the chunks distinct names in the build, or make stableChunkName in scripts/size-measure.ts tell them apart`,
           );
         }
         named.set(path, args.path);
