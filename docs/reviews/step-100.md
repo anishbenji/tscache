@@ -1,6 +1,6 @@
 # Step 100 — Design spec for deploy skew (M5)
 
-Branch: `docs/100-m5-deploy-skew-spec` · Reviewer: GPT-6.1 Sol (high), after a Claude Opus pre-review · Rounds: 4 · Status: round 5 pending (round 4's P1 fixed by stating the limit) · Verdict after triage: —
+Branch: `docs/100-m5-deploy-skew-spec` · Reviewer: GPT-6.1 Sol (high), after a Claude Opus pre-review · Rounds: 5 · Status: settled (round 5: no findings) · Verdict after triage: merge
 
 ## Scope
 
