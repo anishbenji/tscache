@@ -1,6 +1,6 @@
 # Step 110 — the recorder waits for its launcher's whole stop
 
-Branch: `fix/110-recorder-cleanup-races` · Reviewer: GPT-6.1 Sol · Rounds: 0 (the director runs the review) · Status: open
+Branch: `fix/110-recorder-cleanup-races` · Reviewer: GPT-6.1 Sol · Rounds: 1 · Status: settled (round 1: no findings)
 
 ## Scope
 
@@ -89,3 +89,9 @@ None.
 ## Security lane (Claude), not the gate
 
 run 1, head 1811cba: P0 0, P1 0, P2 0
+
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `a88a638`. No findings: the accepted pre-review findings P-1, P-3 and P-4 are fixed, and P-2's rejection
+holds. The reviewer re-ran both type checks; the round's `bun run ci` exited 0. Raw output:
+`.reviews/step-110/round-1.md`. The review has settled.
