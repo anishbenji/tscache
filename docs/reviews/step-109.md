@@ -1,6 +1,6 @@
 # Step 109 — split the last long functions
 
-Branch: `chore/109-long-functions` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: in review
+Branch: `chore/109-long-functions` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled (round 1: no findings)
 
 ## Scope
 
@@ -126,3 +126,9 @@ None.
 ## Security lane (Claude), not the gate
 
 run 1, head 46c215d: P0 0, P1 0, P2 0
+
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `94e4d13`. No findings: the accepted pre-review findings PR-1 to PR-4 are fixed. The reviewer re-ran
+both type checks; the round's `bun run ci` exited 0. Raw output: `.reviews/step-109/round-1.md`. The review has
+settled.
