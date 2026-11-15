@@ -1,6 +1,6 @@
 # Step 108 — a size measurement stable against chunk-hash and comment noise
 
-Branch: `chore/108-stable-size` · Reviewer: GPT-6.1 Sol · Rounds: 0 · Status: pre-review triaged, awaiting the gate
+Branch: `chore/108-stable-size` · Reviewer: GPT-6.1 Sol · Rounds: 1 · Status: settled (round 1: no findings)
 
 ## Scope
 
@@ -77,3 +77,9 @@ None.
 ## Security lane (Claude), not the gate
 
 run 1, head 84275da: P0 0, P1 0, P2 0
+
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `f44a4fe`. No findings: the three accepted pre-review findings are fixed. The reviewer re-ran the type
+checks and a read-only measurement (all eight budgets pass); the round's `bun run ci` exited 0. Raw output:
+`.reviews/step-108/round-1.md`. The review has settled.
