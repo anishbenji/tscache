@@ -108,6 +108,12 @@ Test numbers: round 4 inserted a browser test 23, so the library-skew test is 24
 
 Decision rows changed: F2 (pros and cons of (a); pros of (d)). No recommendation changed.
 
+## Round 5 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `00f53e3`. No findings: the reviewer found every accepted finding from the pre-review and rounds 1 to 4
+addressed, and no new issue. The round's `bun run ci` exited 0. Raw output: `.reviews/step-100/round-5.md`. The review
+has settled.
+
 ## Verification
 
 | Check                                                                | Result                                                                                                                         |
