@@ -42,7 +42,9 @@ either in the read or reported after it.
 
 ### Reading after an event
 
-Read the range you show again, by this rule:
+Read the range you show again, by this rule. "Your range" is the range as read: snapped outward to the
+grid, as `get` snaps it, so a view of 101–199 on a 100 ms grid shows the points at 100 and 200, and a
+change there counts.
 
 - The event wrote something, and a written or removed range overlaps your range, or `cleared` is set:
   read it with `get(range, { cacheOnly: true })`. What was written is already in the cache.

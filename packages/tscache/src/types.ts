@@ -343,8 +343,10 @@ export interface ClientEvents {
    * removed range overlaps it, or `cleared` is set; with a fetching `get`
    * when nothing was written and `cleared` is set or a removed range
    * overlaps it; otherwise not at all. A fetching read after every event
-   * would loop over a volatile tail. Coalesce bursts, for example to one
-   * read per animation frame.
+   * would loop over a volatile tail. "The range you show" is that range
+   * as read: snapped outward to the grid, as `get` snaps it, so a change
+   * at a grid point just outside an unaligned range counts. Coalesce
+   * bursts, for example to one read per animation frame.
    *
    * Needs a worker that offers it (`client.features.has('cacheChanged')`):
    * against an older worker the listener is never called.
