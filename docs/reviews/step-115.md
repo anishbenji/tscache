@@ -26,18 +26,26 @@ The number is N85, not the N71 the record suggested: `main` ends at N70, and ste
 
 Kept as written: the summary, context, measurements, decision for each layer, lighter alternatives, the rest of the consequences, "When to revisit" (question 6 kept the four conditions), risks, sources, the review record and the appendix. The file no longer names the old `docs/adr/` path anywhere.
 
-**Size.** The file is 49.3 KB (`wc -c`: 49,279 bytes), far longer than any other decision file (the other 78 total 84.8 KB). It is kept whole, because the user asked for the record to move, not to be cut. Its `docs/INDEX.md` row tells a reader to start with the Resolution and Decisions, which together are about 2.2 KB.
+**Size.** The file is 49.6 KB (`wc -c`: 49,569 bytes), far longer than any other decision file (the other 78 total 84.8 KB). It is kept whole, because the user asked for the record to move, not to be cut. Its `docs/INDEX.md` row tells a reader to start with the Resolution and Decisions, which together are about 2.2 KB.
 
 **Index entries.** Architecture §8 lists every decision on one line in a padded table; the N85 line follows that format, and its summary is the resolution's first clause. `docs/INDEX.md` has no row per decision, but it does give some files inside a listed directory a row of their own (`docs/reviews/2026-11-review.md` beside `docs/reviews/`). N85 gets such a row, because no task would otherwise cite it: its trigger is the wording the record suggested ("When a task proposes or reopens adopting Effect or another runtime framework"). The `docs/decisions/` row's text was reworded within its old length ("full text" to "in full", "list them one line each" to "list each on one line", one serial comma dropped) so that the table's column widths, and so every other row, stay unchanged; this keeps conflicts with other steps that edit the index to the rows this step changes.
 
 ## Verification
 
 - `bun run docs:check` (after `bun install --frozen-lockfile` and `bun run build` in the fresh worktree): exit 0, `doc-anchors: 246 anchors in 42 pages resolve`. Before the build it failed with `TS2307` on `@anishbenji/tscache` in `site/snippets/`, because the package was not yet built; unrelated to this step.
-- **Sizes in `docs/INDEX.md`**, re-measured with `wc -c` after the last edit to each file: `docs/architecture.md` 243.1 KB (243,117 bytes), `docs/decisions/` 134.1 KB (134,073 bytes, 79 files), `docs/decisions/N85-effect-adoption.md` 49.3 KB (49,279 bytes). The `docs/reviews/` row and the index's own row carry no size (user decision 70 A).
+- **Sizes in `docs/INDEX.md`**, re-measured with `wc -c` after the last edit to each file: `docs/architecture.md` 243.1 KB (243,117 bytes), `docs/decisions/` 134.4 KB (134,363 bytes, 79 files), `docs/decisions/N85-effect-adoption.md` 49.6 KB (49,569 bytes; after the pre-review fixes). The `docs/reviews/` row and the index's own row carry no size (user decision 70 A).
 - **Table shape.** Every line of the `docs/INDEX.md` table has the same length as on `main` (579 characters, now 33 lines); the §8 table line for N85 has the length of its neighbours (263 characters).
-- `~/code/tscache-reports/bin/heavy-run.sh "115 child: ci" bun run ci` is run on the final head, after this file is committed; its result is reported with the head SHA.
+- `~/code/tscache-reports/bin/heavy-run.sh "115 child: ci" bun run ci`: exit 0 on `2c2f556` (Playwright's `[WebServer] … exited with code 143` lines are its preview servers stopping at the end).
 
 Not verified: the record's measurements, sources and review findings were not re-run or re-checked; they are moved as written, as the brief asks. The record's own review record says its revised text has had no second review round; per decision 75 the director decides whether this step's review round serves as that second round.
+
+## Pre-review (Claude), not the gate
+
+Claude Opus 5.5 on `2c2f556`: one P2 and two nits, all accepted and fixed by the director.
+
+- PR-1 (P2): N85 stated the clear-disk test gap as current, although step 111 closed it. Fixed: the three statements (the resolution, the module description and finding 4) are dated to the evaluation, and finding 4 names step 111.
+- PR-2 (nit): the opening sentence did not list every edit made in the move. Fixed: it now names the `AGENTS.md` wording change and the dated sentences.
+- PR-3 (nit): the CI row was a promise. Fixed: it gives the result and head.
 
 ## Contract-test changes
 
