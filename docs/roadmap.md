@@ -154,6 +154,19 @@ Today a protocol mismatch rejects `createClient`, a fetcher whose URL changed is
 worker, and a worker whose URL changed runs beside the old one, unreported, both writing the origin's
 database (architecture §4.10.7, N52).
 
+## Design sketch: calendar grid
+
+**Proposed in detail in [`docs/design/calendar-grid.md`](design/calendar-grid.md) (step 118, finding
+M4), with its open choices as decision rows for the user.** It adds built-in calendar intervals to the
+config: one slot per day, week, month, quarter or year, starting at a local time in an IANA zone, with
+the zone rules taken from the runtime's `Intl` and nothing bundled. Inside the engine only `grid.ts`
+changes, since everything else runs on slot indices; snapshots, payloads and records of a calendar
+cache gain a second format, while those of a fixed cache stay byte for byte as they are.
+
+Today the grid is fixed milliseconds (N9), so daily bars stamped at a session open in a daylight-saving
+zone are rejected as `'misaligned'` for half the year, and weekly and monthly bars rely on the recipes
+of `site/concepts/grid.md` (decision 32 A, step 71): dates at 00:00 UTC, and months as ordinals.
+
 ## Deferred features (starter §10)
 
 - Aggregation and resampling across intervals, likely with user-defined rules per dataset. Today a series
