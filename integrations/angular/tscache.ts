@@ -28,6 +28,7 @@ import {
   type StateKey,
   signal,
   TransferState,
+  untracked,
 } from "@angular/core";
 import type {
   CacheConfig,
@@ -36,6 +37,7 @@ import type {
   Range,
   TscacheClient,
 } from "@anishbenji/tscache";
+import { ChangeWatch, NextRead } from "../shared/changes";
 import {
   type Connection,
   type ConnectionState,
@@ -174,7 +176,10 @@ function withPreviousValue<T>(source: Resource<T>, initial: T): Resource<T> {
  *
  * A read rejected because the worker was lost is not an error: the
  * connection's next client reads again. A connection that failed, or a read
- * that fails on a live client, is: `error()`.
+ * that fails on a live client, is: `error()`. A change to the cache over
+ * the range, from any tab, reads it again, at most once per frame: from the
+ * cache alone, or with a fetch after a change that wrote nothing
+ * (architecture §2.7, shared/changes.ts).
  */
 export function cacheResource(
   config: CacheConfig,
@@ -189,6 +194,16 @@ export function cacheResource(
     });
   }
   const tscache = inject(Tscache);
+  const changed = signal(0);
+  const next = new NextRead();
+  const changes = new ChangeWatch({
+    shown: () => untracked(range),
+    reread: (how) => {
+      next.ask(how);
+      changed.update((n) => n + 1);
+    },
+  });
+  inject(DestroyRef).onDestroy(() => changes.dispose());
   const live = resource({
     params: () => {
       const asked = range();
@@ -196,13 +211,18 @@ export function cacheResource(
       const state = tscache.state();
       if (state.status === "connecting") throw ResourceParamsStatus.LOADING;
       if (state.status === "failed") throw state.error;
-      return { client: state.client, range: asked };
+      return { client: state.client, range: asked, changed: changed() };
     },
     // A lost worker's client emits workerLost before this get's rejection is
     // handled, so by then the state, hence the params, have changed, and
     // resource() drops the rejection with the request it belongs to.
-    loader: async ({ params }) =>
-      (await tscache.cache(params.client, config)).get(params.range),
+    loader: async ({ params }) => {
+      const cacheOnly = next.cacheOnly(params.client, params.range);
+      const cache = await tscache.cache(params.client, config);
+      // Subscribe, then read; a new client's handle replaces the old.
+      changes.follow(cache);
+      return cache.get(params.range, { cacheOnly });
+    },
   });
   return withPreviousValue(live, tscache.takeServerRead(config)?.result);
 }

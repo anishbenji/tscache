@@ -6,7 +6,8 @@
 // the range), so a new client, cache or range loads in a background render
 // while the previous answer stays on screen. Without that, a reconnect
 // would bring back the Suspense fallback: a store update cannot be a
-// transition.
+// transition. A change to the cache over the range on screen, from any
+// tab, reads it again, at most once per frame (shared/changes.ts).
 
 import type {
   CacheConfig,
@@ -21,8 +22,11 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
+  useState,
   useSyncExternalStore,
 } from "react";
+import { ChangeWatch, type Reread } from "../shared/changes";
 import type { Connection, ConnectionState, Seed } from "../shared/connection";
 
 interface Source {
@@ -80,6 +84,12 @@ const unsubscribed = () => () => {};
  * that a newer range overtook. A failed connection, or a read that failed
  * on a live client, throws to the nearest error boundary; a read cut short
  * by a lost worker is asked again of the client replacing it.
+ *
+ * A change to the cache over the range reads it again (architecture §2.7):
+ * from the cache alone, or with a fetch after a change that wrote nothing.
+ * The subscription starts in an effect, after the first read went out, so
+ * it reads the cache alone once more when it starts: a change in between
+ * shows too.
  */
 export function useSeries(config: CacheConfig, range: Range): GetResult {
   const { connection, seeds } = use(SourceContext);
@@ -92,16 +102,71 @@ export function useSeries(config: CacheConfig, range: Range): GetResult {
   const cache = useDeferredValue(config);
   const start = useDeferredValue(range.start);
   const end = useDeferredValue(range.end);
+  const changed = useChanges(connection, snapshot, cache, start, end);
 
   const read =
     connection === null
       ? undefined
-      : readFor(connection, snapshot, cache, start, end);
+      : readFor(connection, snapshot, cache, start, end, changed);
   useEffect(() => read?.show(), [read]);
 
   if (read !== undefined) return use(read.answer);
   if (snapshot.status === "failed") throw snapshot.error;
   return serverAnswer(seeds, cache, start, end);
+}
+
+/** How often the cache changed over a range, and how the last change asks to read. */
+interface Changed {
+  n: number;
+  how: Reread;
+  start: number;
+  end: number;
+}
+
+const UNCHANGED: Changed = { n: 0, how: "fetch", start: 0, end: 0 };
+
+/**
+ * Follows the connected client's cache for the range on screen; returns
+ * the changes so far over that range (none after the range moved, whose
+ * read fetches anyway).
+ */
+function useChanges(
+  connection: Connection | null,
+  snapshot: Snapshot,
+  config: CacheConfig,
+  start: number,
+  end: number,
+): Changed {
+  const [changed, setChanged] = useState(UNCHANGED);
+  const shown = useRef<Range | undefined>(undefined);
+  useEffect(() => {
+    shown.current = { start, end };
+  }, [start, end]);
+  useEffect(() => {
+    if (connection === null || snapshot.status !== "connected") return;
+    const watch = new ChangeWatch({
+      shown: () => shown.current,
+      reread: (how) => {
+        const range = shown.current;
+        if (range === undefined) return;
+        setChanged((previous) => ({ n: previous.n + 1, how, ...range }));
+      },
+      catchUp: true,
+    });
+    let live = true;
+    connection.cache(snapshot.client, config).then(
+      (cache) => {
+        if (live) watch.follow(cache);
+      },
+      // The read through the same cache reports what failed.
+      () => {},
+    );
+    return () => {
+      live = false;
+      watch.dispose();
+    };
+  }, [connection, snapshot, config]);
+  return changed.start === start && changed.end === end ? changed : UNCHANGED;
 }
 
 /**
@@ -116,12 +181,15 @@ function readFor(
   config: CacheConfig,
   start: number,
   end: number,
+  changed: Changed,
 ): Read | undefined {
   if (snapshot.status === "connected") {
-    return readOf(connection, promiseOf(snapshot.client), config, start, end);
+    const client = promiseOf(snapshot.client);
+    return readOf(connection, client, config, start, end, changed);
   }
   if (snapshot.status === "connecting") {
-    return readOf(connection, clientOf(connection), config, start, end);
+    const client = clientOf(connection);
+    return readOf(connection, client, config, start, end, changed);
   }
   return undefined;
 }
@@ -222,7 +290,8 @@ const readsOf = new WeakMap<Promise<TscacheClient>, Map<string, Read>>();
 /**
  * The read of a range through `client`: the same object on every render
  * that asks for it, so `use` sees one promise. A new client starts with no
- * reads.
+ * reads. Each change over the range is a read of its own, from the cache
+ * alone unless the change asked for a fetch.
  */
 function readOf(
   connection: Connection,
@@ -230,16 +299,19 @@ function readOf(
   config: CacheConfig,
   start: number,
   end: number,
+  changed: Changed = UNCHANGED,
 ): Read {
   let reads = readsOf.get(client);
   if (reads === undefined) {
     reads = new Map();
     readsOf.set(client, reads);
   }
-  const key = `${keyOf(config)} ${start} ${end}`;
+  const key = `${keyOf(config)} ${start} ${end} ${changed.n}`;
   let read = reads.get(key);
   if (read === undefined) {
-    read = new Read(answer(connection, client, config, start, end), reads, key);
+    const cacheOnly = changed.n > 0 && changed.how === "cache";
+    const promise = answer(connection, client, config, start, end, cacheOnly);
+    read = new Read(promise, reads, key);
     reads.set(key, read);
   }
   return read;
@@ -251,11 +323,12 @@ async function answer(
   config: CacheConfig,
   start: number,
   end: number,
+  cacheOnly: boolean,
 ): Promise<GetResult> {
   const client = await awaited;
   try {
     const cache = await connection.cache(client, config);
-    return await cache.get({ start, end });
+    return await cache.get({ start, end }, { cacheOnly });
   } catch (error) {
     const { state } = connection;
     if (state.status === "connected" && state.client === client) throw error;

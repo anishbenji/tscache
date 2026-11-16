@@ -1,8 +1,11 @@
 // tscache without a framework: a series shows the cache's answer for the
-// range on screen, and drops answers that a newer range has overtaken. One
+// range on screen, and drops answers that a newer range has overtaken. It
+// follows the cache's changes, from any tab (shared/changes.ts): an event
+// over the range on screen reads it again, at most once per frame. One
 // connection (shared/connection.ts) serves every series of the page.
 
 import type { CacheConfig, GetResult, Range } from "@anishbenji/tscache";
+import { ChangeWatch, type Frame } from "../shared/changes";
 import type { Connection } from "../shared/connection";
 
 /** The cache's answer for a range. */
@@ -17,6 +20,8 @@ export interface SeriesOptions {
   render(answer: Answer): void;
   /** A read failed, or the client could not connect. Default: reportError. */
   fail?(error: unknown): void;
+  /** For tests: the frame scheduler of the change watch. */
+  frame?: Frame;
 }
 
 export interface Series {
@@ -30,21 +35,29 @@ export interface Series {
    */
   refresh(range?: Range): void;
   /**
-   * Stops rendering; an answer still in flight is dropped, and later
-   * show() and refresh() calls (from a callback still pending) do nothing.
+   * Stops rendering and following changes; an answer still in flight is
+   * dropped, and later show() and refresh() calls (from a callback still
+   * pending) do nothing.
    */
   dispose(): void;
 }
 
 export function series(
   connection: Connection,
-  { config, render, fail = reportError }: SeriesOptions,
+  { config, render, fail = reportError, frame }: SeriesOptions,
 ): Series {
   let range: Range | undefined;
   let latest = 0;
   /** The request number of the show() read in flight, or 0. */
   let showing = 0;
   let disposed = false;
+  /** A change arrived while a show() read was in flight: read after it. */
+  let stale = false;
+  const changes = new ChangeWatch({
+    shown: () => range,
+    reread: (how) => (how === "fetch" ? read() : changed()),
+    ...(frame === undefined ? {} : { frame }),
+  });
 
   function read(cacheOnly = false): void {
     if (disposed) return;
@@ -59,7 +72,12 @@ export function series(
     if (!cacheOnly) showing = request;
     connection
       .cache(state.client, config)
-      .then((cache) => cache.get(asked, { cacheOnly }))
+      .then((cache) => {
+        // Subscribe, then read: a change after the subscription is in this
+        // read or reported after it. A new client's handle replaces the old.
+        if (!disposed && connection.state === state) changes.follow(cache);
+        return cache.get(asked, { cacheOnly });
+      })
       .then(
         (result) => {
           if (request === latest) render({ range: asked, result });
@@ -71,8 +89,26 @@ export function series(
         },
       )
       .finally(() => {
-        if (showing === request) showing = 0;
+        if (showing !== request) return;
+        showing = 0;
+        if (stale) changed();
       });
+  }
+
+  /**
+   * A change touched the range on screen: read it from the cache, or once
+   * the show() read in flight has answered, since that read may have been
+   * taken just before the change.
+   */
+  function changed(): void {
+    stale = showing !== 0;
+    if (!stale) refresh();
+  }
+
+  function refresh(next = range): void {
+    if (showing !== 0 || next === undefined) return;
+    range = next;
+    read(true);
   }
 
   // A new client (the first, or one replacing a lost worker) reads again.
@@ -82,14 +118,11 @@ export function series(
       range = next;
       read();
     },
-    refresh(next = range) {
-      if (showing !== 0 || next === undefined) return;
-      range = next;
-      read(true);
-    },
+    refresh,
     dispose() {
       disposed = true;
       unsubscribe();
+      changes.dispose();
       latest++;
     },
   };

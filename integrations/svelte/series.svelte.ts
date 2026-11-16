@@ -2,7 +2,9 @@
 // and hands it to the app as root context when it mounts or hydrates it; a
 // Series is a runes class that holds the cache's answer for a range. Effects
 // do not run on the server, so a server render, which has no connection,
-// shows the answer it was given and reads nothing.
+// shows the answer it was given and reads nothing. A change to the cache
+// over the range on screen, from any tab, reads it again, at most once per
+// frame (shared/changes.ts).
 
 import type {
   CacheConfig,
@@ -13,6 +15,7 @@ import type {
 } from "@anishbenji/tscache";
 import { getContext } from "svelte";
 import { createSubscriber } from "svelte/reactivity";
+import { ChangeWatch, NextRead } from "../shared/changes";
 import type { Connection, ConnectionState } from "../shared/connection";
 
 const CONNECTION = Symbol("tscache connection");
@@ -53,8 +56,10 @@ export interface Answer {
 }
 
 /**
- * The cache's answer for `range`, read again whenever `range` changes and
- * whenever a new client replaces one whose worker was lost. Create it while
+ * The cache's answer for `range`, read again whenever `range` changes,
+ * whenever a new client replaces one whose worker was lost, and when the
+ * cache changes over the range (from the cache alone, or with a fetch after
+ * a change that wrote nothing; architecture §2.7). Create it while
  * a component initialises, since it reads the app's context and owns an
  * effect, which ends with the component.
  */
@@ -64,6 +69,9 @@ export class Series {
   #answer: Answer | undefined;
   #failure = $state.raw<{ error: unknown }>();
   #reads = 0;
+  /** Bumped by the change watch: the effect reads again. */
+  #changed = $state(0);
+  readonly #next = new NextRead();
 
   /**
    * `shown` is the answer to show until the first read lands, such as the
@@ -73,6 +81,14 @@ export class Series {
     this.range = $state.raw(range);
     this.#answer = $state.raw(shown);
     const connection = getContext<TrackedConnection | undefined>(CONNECTION);
+    const changes = new ChangeWatch({
+      shown: () => this.range,
+      reread: (how) => {
+        this.#next.ask(how);
+        this.#changed++;
+      },
+    });
+    $effect(() => () => changes.dispose());
     $effect(() => {
       if (connection === undefined) {
         throw new Error(
@@ -81,6 +97,7 @@ export class Series {
       }
       const state = connection.state;
       const range = this.range;
+      this.#changed;
       if (state.status === "failed") {
         this.#failure = { error: state.error };
         return;
@@ -92,9 +109,14 @@ export class Series {
       // effect, when this read is still the last one started.
       const read = ++this.#reads;
       const latest = () => read === this.#reads && this.range === range;
+      const cacheOnly = this.#next.cacheOnly(state, range);
       connection
         .cache(state.client, config)
-        .then((cache) => cache.get(range))
+        .then((cache) => {
+          // Subscribe, then read; a new client's handle replaces the old.
+          if (latest()) changes.follow(cache);
+          return cache.get(range, { cacheOnly });
+        })
         .then(
           (result) => {
             if (latest()) this.#answer = { range, result };

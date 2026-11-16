@@ -3,8 +3,9 @@
 // is Solid's own latest-wins machinery: an answer for a range that a newer
 // range has overtaken never lands, and while the next answer loads, the
 // previous one stays on screen with isPending() true, so a chart never
-// flashes a fallback. One connection (shared/connection.ts) serves every
-// series of the app.
+// flashes a fallback. A change to the cache over the range on screen, from
+// any tab, runs the memo again, at most once per frame (shared/changes.ts).
+// One connection (shared/connection.ts) serves every series of the app.
 
 import type {
   CacheConfig,
@@ -19,6 +20,7 @@ import {
   createSignal,
   onCleanup,
 } from "solid-js";
+import { ChangeWatch, NextRead } from "../shared/changes";
 import { type Connection, connect, type Seed } from "../shared/connection";
 
 /** The cache's answer for a range. */
@@ -67,7 +69,9 @@ export interface SeriesOptions {
  *
  * A read that a lost worker rejected is not an error: the connection's
  * state moves on, the memo runs again, and the connection's next client
- * reads the range again.
+ * reads the range again. A change to the cache over `range()` reads it
+ * again: from the cache alone, or with a fetch after a change that wrote
+ * nothing (architecture §2.7).
  */
 export function createSeries(
   connection: Connection,
@@ -77,19 +81,35 @@ export function createSeries(
 ): Accessor<Answer> {
   const [state, setState] = createSignal(connection.state);
   onCleanup(connection.subscribe(() => setState(connection.state)));
+  const [changed, setChanged] = createSignal(0);
+  const next = new NextRead();
+  const changes = new ChangeWatch({
+    shown: range,
+    reread: (how) => {
+      next.ask(how);
+      setChanged((n) => n + 1);
+    },
+  });
+  onCleanup(() => changes.dispose());
 
   return createMemo<Answer>(
     () => {
       const current = state();
       const asked = range();
+      changed();
       if (current.status === "failed") throw current.error;
       // Pending until the client connects, which runs the memo again. A
       // fresh promise each time: one shared promise would keep the
       // callbacks of every run that ever waited on it.
       if (current.status === "connecting") return new Promise<never>(() => {});
+      const cacheOnly = next.cacheOnly(current, asked);
       return connection
         .cache(current.client, config)
-        .then((cache) => cache.get(asked))
+        .then((cache) => {
+          // Subscribe, then read; a new client's handle replaces the old.
+          if (connection.state === current) changes.follow(cache);
+          return cache.get(asked, { cacheOnly });
+        })
         .then(
           (result) => ({ range: asked, result }),
           (error: unknown) => {

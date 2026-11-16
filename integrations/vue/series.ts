@@ -4,7 +4,9 @@
 // which Vue never calls on the server (a server render never unmounts, so a
 // subscription made in setup would outlive it). A server render therefore
 // subscribes to nothing, and a hydration render changes no ref, so it
-// shows what the server rendered.
+// shows what the server rendered. A change to the cache over the range on
+// screen, from any tab, reads it again, at most once per frame
+// (shared/changes.ts).
 
 import type {
   CacheConfig,
@@ -27,6 +29,7 @@ import {
   toValue,
   watch,
 } from "vue";
+import { ChangeWatch, NextRead } from "../shared/changes";
 import { type Connection, connect, type Seed } from "../shared/connection";
 
 /** The cache's answer for a range. */
@@ -71,8 +74,10 @@ export interface Series {
 }
 
 /**
- * The cache's answer for `range`, read again when the range changes and
- * when a new client replaces one whose worker was lost. Only the answer for
+ * The cache's answer for `range`, read again when the range changes, when
+ * a new client replaces one whose worker was lost, and when the cache
+ * changes over the range (from the cache alone, or with a fetch after a
+ * change that wrote nothing; architecture §2.7). Only the answer for
  * the latest range lands. Move the range by giving a new object (a
  * shallowRef suits it): a range changed in place is not seen.
  *
@@ -102,15 +107,27 @@ export function useSeries(
         state.value = connection.state;
       }),
     );
+    const changed = shallowRef(0);
+    const next = new NextRead();
+    const changes = new ChangeWatch({
+      shown: () => toRaw(toValue(range)),
+      reread: (how) => {
+        next.ask(how);
+        changed.value++;
+      },
+    });
+    onScopeDispose(() => changes.dispose());
     watch(
-      [state, () => toValue(range)],
+      [state, () => toValue(range), changed],
       ([current, asked]) => {
         if (current.status === "failed") {
           error.value = current.error;
           pending.value = false;
           return;
         }
-        pending.value = true;
+        const cacheOnly = next.cacheOnly(current, asked);
+        // A read after a change keeps the answer it replaces as current.
+        if (!cacheOnly) pending.value = true;
         if (current.status === "connecting") return;
         let latest = true;
         onWatcherCleanup(() => {
@@ -120,7 +137,11 @@ export function useSeries(
         const plain = toRaw(asked);
         connection
           .cache(current.client, config)
-          .then((cache) => cache.get(plain))
+          .then((cache) => {
+            // Subscribe, then read; a new client's handle replaces the old.
+            if (latest) changes.follow(cache);
+            return cache.get(plain, { cacheOnly });
+          })
           .then(
             (result) => {
               if (!latest) return;

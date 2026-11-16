@@ -24,6 +24,11 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
 - `server.ts`: `serverReader(options)` reads through one in-process client per server process, shared
   by every render. Every visitor reads the same cache: public data only.
 - `candles.ts`: the dataset every snippet shows, and the one line of text that stands in for a chart.
+- `changes.ts`: `ChangeWatch` follows a cache's `cacheChanged` events for one view and reads the range
+  it shows again, at most once per animation frame, by the read rule of architecture §2.7 (N84): from
+  the cache alone when the frame's events wrote something, with a fetch when one wrote nothing and
+  cleared or withdrew coverage over the view. Each adapter subscribes before it reads, or reads the
+  cache once more after subscribing, so no change is missed.
 
 ## The frameworks
 
@@ -49,6 +54,8 @@ overtaken), `client-only.ts`, and `ssr-server.ts` with `ssr-browser.ts`.
 - A read rejected because the worker was lost is not an error; the next client reads again. A
   connection that failed, or a read that failed on a live client, is surfaced the framework's way.
 - Typed arrays are never made deeply reactive or copied.
+- A view follows its cache: a change over its range, from this tab or another tab of a SharedWorker,
+  reads the range again (`shared/changes.ts`), at most once per frame and never in a loop.
 - A server-rendered page's hydration render shows the server's read, so it matches the server's markup;
   the live answer then replaces it. The server half and the browser half are separate files, so no
   server code reaches the browser bundle. Without the browser half, a page is rendered on the server

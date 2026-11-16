@@ -1,5 +1,6 @@
 import type { GetOptions, Range } from "@anishbenji/tscache";
 import { afterEach, describe, expect, it } from "vitest";
+import type { Frame } from "../shared/changes";
 import { type Connection, connect } from "../shared/connection";
 import { type Answer, series } from "../vanilla/series";
 import { config, type Lossy, lossy, until } from "./helpers";
@@ -21,6 +22,12 @@ async function connected() {
   return { connection, clients };
 }
 
+/**
+ * A frame that never comes: these tests pin show() and refresh(), so the
+ * series' own reads after a change (test/changes.test.ts) stay out of them.
+ */
+const never: Frame = () => () => {};
+
 function recorder(connection: Connection) {
   const answers: Answer[] = [];
   const failures: unknown[] = [];
@@ -28,6 +35,7 @@ function recorder(connection: Connection) {
     config,
     render: (answer) => answers.push(answer),
     fail: (error) => failures.push(error),
+    frame: never,
   });
   return { chart, answers, failures };
 }
