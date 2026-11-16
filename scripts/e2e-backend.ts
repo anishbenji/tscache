@@ -18,6 +18,13 @@ export type Gate = "candles" | "refresh";
 interface BackendState {
   /** Reported by candles answers, as it was when the request arrived. */
   version: string;
+  /**
+   * When not empty, candles answers take these versions in turn instead,
+   * one per request (a rolling deploy's backends).
+   */
+  alternate: string[];
+  /** Candles requests answered from `alternate` so far. */
+  turns: number;
   /** The one valid access token and the one valid refresh token. */
   access: string;
   refresh: string;
@@ -50,6 +57,8 @@ export interface BackendSnapshot {
 /** POST /backend/<ns>/control. */
 export interface BackendControl {
   version?: string;
+  /** Versions candles answers take in turn, one per request; [] stops it. */
+  alternate?: string[];
   /** Replaces the access token only; the refresh token stays valid. */
   expire?: true;
   /** Sets how many upcoming requests of each kind to hold. */
@@ -65,6 +74,8 @@ function stateOf(ns: string): BackendState {
   if (state === undefined) {
     state = {
       version: "v1",
+      alternate: [],
+      turns: 0,
       access: "at-0",
       refresh: "rt-0",
       generation: 0,
@@ -115,7 +126,10 @@ async function candles(
   const key = `${start}-${end}`;
   const calls = (state.requests[key] ?? 0) + 1;
   state.requests[key] = calls;
-  const version = state.version;
+  const version =
+    state.alternate.length > 0
+      ? (state.alternate[state.turns++ % state.alternate.length] as string)
+      : state.version;
   const valid =
     request.headers.get("authorization") === `Bearer ${state.access}`;
   await pass(state, "candles");
@@ -158,6 +172,10 @@ async function control(
 ): Promise<Response> {
   const body = (await request.json()) as BackendControl;
   if (body.version !== undefined) state.version = body.version;
+  if (body.alternate !== undefined) {
+    state.alternate = body.alternate;
+    state.turns = 0;
+  }
   if (body.expire === true) {
     state.generation++;
     state.access = `at-${state.generation}`;
