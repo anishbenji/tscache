@@ -107,7 +107,14 @@ The plant was undone with the Edit tool, and `git status --short` then showed on
 
 **Pre-push.** `bunx lefthook validate`: `All good`. `bunx lefthook run pre-push --job built` from a deleted `dist/` ran `build`, `biome-full`, `knip` and `integrations` in that order, all passing.
 
-**Pre-commit** is unchanged: its staged `biome` job was not edited and ran in 0.48 s on the fix commit. As before, it lints only the staged files, and sees package types when `dist/` happens to be built.
+**Pre-commit** is unchanged: its staged `biome` job was not edited and ran in 0.48 s on the fix commit. As before, it lints only the staged files, and sees package types when `dist/` happens to be built. A `dist/` older than `src/` can also make the promise rules report a correct `await` or bare call on a package type in a staged file; if pre-commit fails that way, rebuild (`bun run build`) and commit again.
+
+### Pre-review 2 (Claude Opus 5.5, on `fbc8fe6`)
+
+No P0 or P1. Two P2s, both accepted and fixed by the director:
+
+- PR2-1 (P2): `CONTRIBUTING.md` called `bun run check` "the Biome lint", which now matches CI only with a fresh build. Fixed: the line says to run it after `bun run build`, because the promise rules read the package's types from `dist/`.
+- PR2-2 (P2): pre-commit's staged Biome reads whatever `dist/` exists, so an old build can report a correct call. Fixed: the pre-commit paragraph above says so and gives the remedy (rebuild).
 
 ## Contract-test changes
 
