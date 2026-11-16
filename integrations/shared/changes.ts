@@ -460,6 +460,10 @@ export class ViewReads {
   }
 
   #ask(how: Reread): void {
+    // A view that shows nothing records no decision: a change seen before
+    // it went idle must not make its next read cache-only, since a removal
+    // while idle is not seen (round 3, P1).
+    if (this.#options.shown() === undefined) return;
     // A fetch already asked for this frame takes the change with it.
     if (this.#how !== "fetch" && this.#hold.holds(how)) return;
     this.#how = how === "fetch" || this.#how === "fetch" ? "fetch" : "cache";

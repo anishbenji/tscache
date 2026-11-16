@@ -133,7 +133,7 @@ describe("ViewReads (PR-1, PR2-1)", () => {
     const answers: GetResult[] = [];
     let latest = 0;
     const reads: boolean[] = [];
-    let range: Range = shown;
+    let range: Range | undefined = shown;
     let owner: unknown = "client";
     const views = new ViewReads({
       shown: () => range,
@@ -143,6 +143,8 @@ describe("ViewReads (PR-1, PR2-1)", () => {
     });
     opened.push(views);
     function read(): void {
+      // As Angular: a view that shows nothing reads nothing.
+      if (range === undefined) return;
       const request = ++latest;
       // `fresh`: a new object with the same endpoints for every read, as a
       // derived accessor gives.
@@ -167,6 +169,10 @@ describe("ViewReads (PR-1, PR2-1)", () => {
       move(next: Range) {
         range = next;
       },
+      /** Shows nothing, as an Angular view whose range is undefined. */
+      idle() {
+        range = undefined;
+      },
       /** Gives the view a new owner, as a replaced client does. */
       own(next: unknown) {
         owner = next;
@@ -185,6 +191,25 @@ describe("ViewReads (PR-1, PR2-1)", () => {
     clock.run();
     await until(() => v.answers.length === 2);
     expect(v.reads).toEqual([false, true]);
+  });
+
+  it("a change whose frame comes while the view shows nothing is forgotten (round 3, P1)", async () => {
+    const { client } = await connected(true);
+    const clock = frames();
+    const v = view(client, clock.frame);
+    v.read();
+    await until(() => v.answers.length === 1);
+    const writer = await client.cache(config);
+    await writer.put({ timestamps: [150], fields: { v: [1], n: [1] } });
+    await until(() => clock.count() === 1);
+    v.idle();
+    clock.run();
+    // Not seen: the view shows nothing.
+    await writer.invalidate(shown);
+    v.move(shown);
+    v.read();
+    await until(() => v.answers.length === 2);
+    expect(v.reads).toEqual([false, false]);
   });
 
   it("a new owner at the same range fetches (a replaced client)", async () => {
