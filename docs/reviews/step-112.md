@@ -1,6 +1,6 @@
 # Step 112 — raise the Fallow health floor from 90 to 95
 
-Branch: `chore/112-fallow-floor-95` · Reviewer: not yet reviewed · Rounds: 0 · Status: awaiting review
+Branch: `chore/112-fallow-floor-95` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled (round 1: no findings)
 
 ## Scope
 
@@ -35,6 +35,12 @@ Measured on the branch, cut from `origin/main` at `781c378`:
 ## Contract-test changes
 
 None.
+
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `f76d33b`. No findings. The reviewer checked that the floor reads 95 everywhere it is stated and that CI and
+pre-push share the one script; the round's `bun run ci` exited 0. Raw output: `.reviews/step-112/round-1.md`. The
+review has settled.
 
 ## Decision concerns
 
