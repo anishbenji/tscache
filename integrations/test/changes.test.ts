@@ -42,8 +42,14 @@ function frames(): { frame: Frame; run(): void; count(): number } {
 }
 
 const opened: { dispose(): unknown }[] = [];
+/** What the series of a test reported as failed. */
+const failures: unknown[] = [];
 afterEach(async () => {
-  for (const item of opened.splice(0)) await item.dispose();
+  // A read that failed on a live client fails the test that made it.
+  expect(failures.splice(0)).toEqual([]);
+  // Views first: a disposed series drops the reads its client's disposal
+  // then rejects.
+  for (const item of opened.splice(0).reverse()) await item.dispose();
 });
 
 describe("reaction (the read rule, N84)", () => {
@@ -165,9 +171,7 @@ describe("series follows the cache", () => {
     const chart = series(connection, {
       config,
       render: (answer) => answers.push(answer),
-      fail: (error) => {
-        throw error;
-      },
+      fail: (error) => failures.push(error),
       frame: clock.frame,
     });
     opened.push(chart);
