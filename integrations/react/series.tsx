@@ -27,7 +27,12 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { ChangeWatch, cacheOnlyAfter, type Reread } from "../shared/changes";
+import {
+  ChangeHold,
+  ChangeWatch,
+  cacheOnlyAfter,
+  type Reread,
+} from "../shared/changes";
 import type { Connection, ConnectionState, Seed } from "../shared/connection";
 
 interface Source {
@@ -109,7 +114,17 @@ export function useSeries(config: CacheConfig, range: Range): GetResult {
   // holds against it, and a cache-only read waits for its answer
   // (shared/changes.ts, cacheOnlyAfter).
   const newest = useRef<Read | undefined>(undefined);
-  const latest = useChanges(connection, snapshot, cache, start, end, newest);
+  const watching = useRef<ChangeWatch | undefined>(undefined);
+  // Holds a cache-only change while the newest read fetches, and releases
+  // it through the frame once that read settled (shared/changes.ts): the
+  // same piece ViewReads uses, so the rule lives in one place.
+  const holding = useRef<ChangeHold | undefined>(undefined);
+  holding.current ??= new ChangeHold(() => watching.current?.schedule("cache"));
+  const hold = holding.current;
+  const latest = useChanges(connection, snapshot, cache, start, end, {
+    hold,
+    watching,
+  });
   // Deferred like the inputs above: a change's read suspends in a
   // background render, never back to the Suspense fallback.
   const recorded = useDeferredValue(latest);
@@ -134,6 +149,7 @@ export function useSeries(config: CacheConfig, range: Range): GetResult {
       view,
     });
     newest.current = started;
+    if (started !== undefined) hold.started(started);
     read = readFor(connection, snapshot, cache, start, end, {
       changed: over(recorded),
       base: undefined,
@@ -170,12 +186,12 @@ const UNCHANGED: Changed = {
 
 /**
  * Follows the connected client's cache for the range on screen; returns
- * the changes so far, with the range they were over (the caller ignores
- * them after the range moved, whose read fetches anyway).
- *
- * A cache-only change waits while the newest read this view started
- * still fetches: its answer alone says whether the fetch failed. The
- * change is asked again through the frame once that read has settled.
+ * the changes so far, with the view they were over (the caller ignores
+ * them for another view, whose read fetches anyway). `hold` decides
+ * whether a change waits for the newest read (shared/changes.ts); this
+ * hook keeps no hold of its own. The subscription follows the config by
+ * its value (`keyOf`), so an equal config made on every render does not
+ * subscribe again.
  */
 function useChanges(
   connection: Connection | null,
@@ -183,44 +199,37 @@ function useChanges(
   config: CacheConfig,
   start: number,
   end: number,
-  newest: { readonly current: Read | undefined },
+  {
+    hold,
+    watching,
+  }: { hold: ChangeHold; watching: { current: ChangeWatch | undefined } },
 ): Changed {
   const [changed, setChanged] = useState(UNCHANGED);
   const shown = useRef<Range | undefined>(undefined);
-  const watching = useRef<ChangeWatch | undefined>(undefined);
+  const current = useRef(config);
+  current.current = config;
+  const configKey = keyOf(config);
   useEffect(() => {
     // An event that arrived before this commit was judged against the
     // previous range: read the new one from the cache once more.
     if (shown.current !== undefined) watching.current?.schedule("cache");
     shown.current = { start, end };
-  }, [start, end]);
+  }, [start, end, watching]);
   useEffect(() => {
     if (connection === null || snapshot.status !== "connected") return;
-    let held = false;
     const watch: ChangeWatch = new ChangeWatch({
       shown: () => shown.current,
       reread: (how) => {
         const range = shown.current;
-        if (range === undefined) return;
-        const reading = newest.current;
-        if (how === "cache" && reading?.fetching === true) {
-          if (held) return;
-          held = true;
-          const release = () => {
-            held = false;
-            watch.schedule("cache");
-          };
-          reading.answer.then(release, release);
-          return;
-        }
-        const view = { owner: snapshot, config: keyOf(config), ...range };
+        if (range === undefined || hold.holds(how)) return;
+        const view = { owner: snapshot, config: configKey, ...range };
         setChanged((previous) => ({ n: previous.n + 1, how, ...view }));
       },
       catchUp: true,
     });
     watching.current = watch;
     let live = true;
-    connection.cache(snapshot.client, config).then(
+    connection.cache(snapshot.client, current.current).then(
       (cache) => {
         if (live) watch.follow(cache);
       },
@@ -232,7 +241,7 @@ function useChanges(
       watch.dispose();
       if (watching.current === watch) watching.current = undefined;
     };
-  }, [connection, snapshot, config, newest]);
+  }, [connection, snapshot, configKey, hold, watching]);
   return changed;
 }
 
@@ -298,8 +307,8 @@ const KEEP_MS = 30_000;
  */
 class Read {
   readonly answer: Promise<GetResult>;
-  readonly #cacheOnly: boolean;
-  #settled = false;
+  /** Whether it fetches; a cache-only read holds no change (ChangeHold). */
+  readonly fetching: boolean;
   readonly #reads: Map<string, Read>;
   readonly #key: string;
   #shown = 0;
@@ -312,19 +321,11 @@ class Read {
     cacheOnly: boolean,
   ) {
     this.answer = answer;
-    this.#cacheOnly = cacheOnly;
+    this.fetching = !cacheOnly;
     this.#reads = reads;
     this.#key = key;
-    const settled = () => {
-      this.#settled = true;
-      this.#expire();
-    };
+    const settled = () => this.#expire();
     answer.then(settled, settled);
-  }
-
-  /** Whether this read fetches and has not answered yet. */
-  get fetching(): boolean {
-    return !this.#cacheOnly && !this.#settled;
   }
 
   /** Keeps the read while a mounted component shows it; returns the release. */

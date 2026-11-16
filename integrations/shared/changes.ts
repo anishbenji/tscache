@@ -221,6 +221,72 @@ export function cacheOnlyAfter(
   );
 }
 
+/** A read a view started, as {@link ChangeHold} follows it. */
+export interface StartedRead {
+  /** Whether it fetches (a cache-only read holds nothing). */
+  fetching: boolean;
+  /** Its answer: the read has settled once this settles. */
+  answer: Promise<unknown>;
+}
+
+/**
+ * Whether a view's cache-only change must wait, and when it comes back:
+ * one piece that `ViewReads` and the React adapter share, so the rule is
+ * written once.
+ *
+ * - Only the latest read the view started counts. An older one that
+ *   latest-wins has dropped holds nothing, and its settling releases
+ *   nothing.
+ * - While that read fetches and has not settled, a cache-only change is
+ *   held: reading now would replace the answer that alone says whether
+ *   the fetch failed.
+ * - When that read settles, a held change is released through `release`
+ *   (the frame scheduler), so the framework has applied the answer before
+ *   the view reads again.
+ * - A cache-only read started meanwhile shows the change: the hold ends.
+ */
+export class ChangeHold {
+  readonly #release: () => void;
+  #latest: StartedRead | undefined;
+  #settled = false;
+  #held = false;
+
+  /** `release` asks the view to read again: through the frame. */
+  constructor(release: () => void) {
+    this.#release = release;
+  }
+
+  /**
+   * The view started `read`, its latest. Idempotent for the same read, so
+   * a render that runs twice reports it once.
+   */
+  started(read: StartedRead): void {
+    if (read === this.#latest) return;
+    this.#latest = read;
+    this.#settled = false;
+    if (!read.fetching) {
+      this.#held = false;
+      return;
+    }
+    const settled = () => {
+      if (read !== this.#latest) return;
+      this.#settled = true;
+      if (!this.#held) return;
+      this.#held = false;
+      this.#release();
+    };
+    read.answer.then(settled, settled);
+  }
+
+  /** Whether a change asking for `how` waits; a held one comes back later. */
+  holds(how: Reread): boolean {
+    if (how !== "cache") return false;
+    if (this.#latest?.fetching !== true || this.#settled) return false;
+    this.#held = true;
+    return true;
+  }
+}
+
 /** How a read of the view is to read: decided by the changes, or forced. */
 export type ReadMode = "auto" | "fetch" | "cache";
 
@@ -272,16 +338,16 @@ export class ViewReads {
   #how: Reread | undefined;
   /** What the previous read was of: its range's endpoints and its owner. */
   #last: { start: number; end: number; owner: unknown } | undefined;
-  /** The latest read started: only it can hold a change. */
-  #latest: { fetching: boolean; settled: boolean } | undefined;
-  /** A cache-only change arrived while the latest read was fetching. */
-  #held = false;
+  /** Holds a cache-only change while the latest read fetches. */
+  readonly #hold: ChangeHold;
   /** The answer of the latest read started, once it resolved. */
   #landed: Promise<GetResult> | undefined;
   #disposed = false;
 
   constructor(options: ViewReadsOptions) {
     this.#options = options;
+    // Through the frame: by then the framework has applied the answer.
+    this.#hold = new ChangeHold(() => this.#watch.schedule("cache"));
     this.#watch = new ChangeWatch({
       shown: options.shown,
       reread: (how) => this.#ask(how),
@@ -323,14 +389,7 @@ export class ViewReads {
       ? cacheOnlyAfter(this.#landed, get, this.#options.interval)
       : get();
     this.#landed = answer;
-    const started = { fetching: !cacheOnly, settled: false };
-    this.#latest = started;
-    // A cache-only read started now shows any change held so far.
-    if (cacheOnly) this.#held = false;
-    else {
-      const settled = () => this.#settled(started);
-      answer.then(settled, settled);
-    }
+    this.#hold.started({ fetching: !cacheOnly, answer });
     return { cacheOnly, answer };
   }
 
@@ -341,22 +400,9 @@ export class ViewReads {
   }
 
   #ask(how: Reread): void {
-    const latest = this.#latest;
-    const fetching = latest?.fetching === true && !latest.settled;
-    if (how === "cache" && this.#how !== "fetch" && fetching) {
-      this.#held = true;
-      return;
-    }
+    // A fetch already asked for this frame takes the change with it.
+    if (this.#how !== "fetch" && this.#hold.holds(how)) return;
     this.#how = how === "fetch" || this.#how === "fetch" ? "fetch" : "cache";
     this.#options.reread();
-  }
-
-  #settled(read: { settled: boolean }): void {
-    read.settled = true;
-    // A newer read holds on its own; this one was dropped by latest-wins.
-    if (read !== this.#latest || !this.#held) return;
-    this.#held = false;
-    // Through the frame: by then the framework has applied the answer.
-    this.#watch.schedule("cache");
   }
 }

@@ -54,6 +54,8 @@ interface Backend {
   fetches: Record<string, number>;
   hold?: Promise<void>;
   entered?: () => void;
+  /** Holds for the next fetches, one each, in order. */
+  holds: { wait: Promise<void>; entered: () => void }[];
   fail: boolean;
 }
 const backend = (): Backend =>
@@ -61,12 +63,16 @@ const backend = (): Backend =>
 function resetBackend(): void {
   (globalThis as unknown as { __m7react: Backend }).__m7react = {
     fetches: {},
+    holds: [],
     fail: false,
   };
 }
 resetBackend();
 
-/** Answers every fetch with one bar at 150, counting fetches per cache. */
+/**
+ * Answers every fetch with one bar 50 ms into the range asked (150 for
+ * 100-200), counting fetches per cache.
+ */
 const fetcher = `data:text/javascript,${encodeURIComponent(`
   export default {
     async fetch(request) {
@@ -78,8 +84,16 @@ const fetcher = `data:text/javascript,${encodeURIComponent(`
         b.entered?.();
         await hold;
       }
+      const queued = b.holds.shift();
+      if (queued !== undefined) {
+        queued.entered();
+        await queued.wait;
+      }
       if (b.fail) throw new Error("backend down");
-      return { timestamps: [150], fields: { v: [7], n: [1] } };
+      return {
+        timestamps: [request.range.start + 50],
+        fields: { v: [7], n: [1] },
+      };
     },
   };
 `)}`;
@@ -102,8 +116,10 @@ interface Rendered {
 /** What the mounted view rendered, and how often the fallback showed. */
 const seen = { renders: [] as Rendered[], fallbacks: 0 };
 
-function Chart(props: { config: CacheConfig; range: Range }) {
-  const result: GetResult = useSeries(props.config, props.range);
+function Chart(props: { config: CacheConfig; range: Range; inline: boolean }) {
+  // `inline`: an equal config, but a new object on every render.
+  const cacheConfig = props.inline ? { ...props.config } : props.config;
+  const result: GetResult = useSeries(cacheConfig, props.range);
   seen.renders.push({
     cache: props.config.id,
     points: Array.from(result.timestamps),
@@ -122,7 +138,7 @@ function mount(connection: Connection) {
   seen.fallbacks = 0;
   const root: Root = createRoot(container as never);
   teardown.push(() => root.unmount());
-  const show = (cacheConfig: CacheConfig, range: Range) =>
+  const show = (cacheConfig: CacheConfig, range: Range, inline = false) =>
     root.render(
       createElement(
         TscacheProvider,
@@ -130,7 +146,7 @@ function mount(connection: Connection) {
         createElement(
           Suspense,
           { fallback: createElement(Fallback) },
-          createElement(Chart, { config: cacheConfig, range }),
+          createElement(Chart, { config: cacheConfig, range, inline }),
         ),
       ),
     );
@@ -138,6 +154,38 @@ function mount(connection: Connection) {
 }
 
 const range = { start: 100, end: 200 };
+
+/** Animation frames the test runs by hand. */
+function stubFrames(): { queued: FrameRequestCallback[]; run(): void } {
+  const queued: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    queued.push(callback);
+    return queued.length;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+    queued[id - 1] = () => {};
+  });
+  return {
+    queued,
+    run: () => {
+      for (const callback of queued.splice(0)) callback(0);
+    },
+  };
+}
+
+/** Holds the next fetch not held yet; resolves `entered` once it waits. */
+function holdFetch(): { entered: Promise<void>; release(): void } {
+  let release = () => {};
+  let entered = () => {};
+  const waiting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const wait = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  backend().holds.push({ wait, entered });
+  return { entered: waiting, release };
+}
 
 /** Every get the page made, as `<cache> <start>-<end> <fetch|cache>`. */
 const gets: string[] = [];
@@ -343,5 +391,95 @@ describe("React useSeries follows its cache", () => {
     // range in between is caught by one cache-only read of the new one.
     await until(() => gets.includes("h 100-210 fetch"));
     await until(() => gets.includes("h 100-210 cache"));
+  });
+
+  it("a change held on an overtaken fetch does not block the current view's (PR3-1)", async () => {
+    const frames = stubFrames();
+    const { connection, clients } = await connected();
+    const view = mount(connection);
+    const elsewhere = { start: 300, end: 400 };
+    view.show(config, range);
+    await until(() => view.renders.at(-1)?.points.length === 1);
+    await until(() => frames.queued.length > 0);
+    frames.run(); // the subscription's catch-up
+    await until(() => gets.includes("h 100-200 cache"));
+    // The writer shares the view's port: when a write resolves, its event
+    // has arrived and its frame is queued.
+    const writer = await (clients[0] as TscacheClient).cache(config);
+    // The first range refetches after an invalidate, and that fetch hangs.
+    const stuck = holdFetch();
+    await writer.invalidate(range);
+    frames.run();
+    await stuck.entered;
+    // A bar during the hung fetch: held on it.
+    await writer.put({ timestamps: [160], fields: { v: [8], n: [1] } });
+    frames.run();
+    // The view moves on; its new range's fetch lands, and the range
+    // commits: its commit reads the new range from the cache once (PR-4),
+    // which also says the view now follows changes over it.
+    view.show(config, elsewhere);
+    await until(() => view.renders.at(-1)?.points.includes(350) === true);
+    while (!gets.includes("h 300-400 cache")) {
+      await until(
+        () => frames.queued.length > 0 || gets.includes("h 300-400 cache"),
+      );
+      frames.run();
+    }
+    // On the new range: an invalidate refetches, and a bar arrives during
+    // that fetch, held on it.
+    const current = holdFetch();
+    await writer.invalidate(elsewhere);
+    frames.run();
+    await current.entered;
+    await writer.put({ timestamps: [360], fields: { v: [9], n: [1] } });
+    frames.run();
+    const reads = () => gets.filter((get) => get === "h 300-400 cache").length;
+    const before = reads();
+    // That fetch fails: it writes nothing, so no event of its own follows,
+    // and only the hold's release can bring the held change back, while
+    // the first range's fetch still hangs.
+    backend().fail = true;
+    current.release();
+    await until(() =>
+      (view.renders.at(-1)?.misses ?? []).includes("fetch-failed"),
+    );
+    await until(() => frames.queued.length > 0);
+    frames.run();
+    await until(() => reads() === before + 1);
+    expect(view.renders.at(-1)?.points).toContain(360);
+    expect(view.renders.at(-1)?.misses).toContain("fetch-failed");
+    stuck.release();
+  });
+
+  it("an inline config with equal content subscribes once and reads no more after its catch-up (PR3-2)", async () => {
+    const post = vi.spyOn(MessagePort.prototype, "postMessage");
+    const subscribes = () =>
+      post.mock.calls.filter(
+        ([message]) => (message as { op?: string }).op === "subscribe",
+      ).length;
+    const frames = stubFrames();
+    const { connection, clients } = await connected();
+    const view = mount(connection);
+    view.show(config, range, true);
+    await until(() => view.renders.at(-1)?.points.length === 1);
+    await until(() => frames.queued.length > 0);
+    frames.run(); // the catch-up
+    await until(() => gets.includes("h 100-200 cache"));
+    // Another writer's bar: its read and render come after every commit
+    // and effect of the catch-up, so a re-subscription has happened by then.
+    const writer = await (clients[0] as TscacheClient).cache(config);
+    await writer.put({ timestamps: [160], fields: { v: [8], n: [1] } });
+    await until(() => frames.queued.length > 0);
+    frames.run();
+    await until(() => view.renders.at(-1)?.points.length === 2);
+    const before = view.renders.length;
+    view.show(config, range, true);
+    await until(() => view.renders.length > before);
+    expect(subscribes()).toBe(1);
+    expect(gets).toEqual([
+      "h 100-200 fetch",
+      "h 100-200 cache",
+      "h 100-200 cache",
+    ]);
   });
 });
