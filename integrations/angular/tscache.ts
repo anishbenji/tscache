@@ -218,6 +218,7 @@ export function cacheResource(
   const views = new ViewReads({
     shown: () => untracked(range),
     interval: config.interval,
+    alignmentOffset: config.alignmentOffset ?? 0,
     reread: (how) => {
       // A read that may fetch goes through the resource, and shows as
       // loading. One from the cache alone is read here, so the resource

@@ -24,13 +24,44 @@ function overlaps(a: Range, b: Range): boolean {
   return a.start <= b.end && b.start <= a.end;
 }
 
+/** A cache's grid, as its config names it. */
+export interface Grid {
+  interval: number;
+  /** Default 0. */
+  alignmentOffset?: number;
+}
+
+/**
+ * `range` snapped outward to the grid: what a read of it returns (§2.3,
+ * N1), from the grid point at or before its start to the one at or after
+ * its end. The root entry does not export the package's grid module, so
+ * this is the same rule, in milliseconds.
+ */
+function snappedOut(
+  range: Range,
+  { interval, alignmentOffset = 0 }: Grid,
+): Range {
+  const floor = (t: number) =>
+    alignmentOffset + Math.floor((t - alignmentOffset) / interval) * interval;
+  const ceil = (t: number) =>
+    alignmentOffset + Math.ceil((t - alignmentOffset) / interval) * interval;
+  return { start: floor(range.start), end: ceil(range.end) };
+}
+
 /**
  * What one event asks of a view showing `shown` (N84): a cache-only read
  * when it wrote something and touched the view, a fetching read when it
  * wrote nothing and cleared or withdrew coverage over the view, else
- * nothing.
+ * nothing. With `grid`, the view is the range as read, snapped outward: an
+ * unaligned view shows the grid points at both its edges too, and a change
+ * there is a change on screen (round 2, R2-1).
  */
-export function reaction(event: Changed, shown: Range): Reread | undefined {
+export function reaction(
+  event: Changed,
+  range: Range,
+  grid?: Grid,
+): Reread | undefined {
+  const shown = grid === undefined ? range : snappedOut(range, grid);
   if (event.written.length > 0) {
     const touched =
       event.cleared ||
@@ -60,6 +91,11 @@ export const nextFrame: Frame = (callback) => {
 export interface ChangeWatchOptions {
   /** The range the view shows now; undefined while it shows none. */
   shown(): Range | undefined;
+  /**
+   * The cache's grid: an event is judged against the shown range snapped
+   * outward to it, the range a read returns. Without it, the raw range.
+   */
+  grid?: Grid;
   /** Reads the shown range again; called at most once per frame. */
   reread(how: Reread): void;
   /**
@@ -111,7 +147,10 @@ export class ChangeWatch {
     this.#cache = cache;
     this.#unsubscribe = cache.on("cacheChanged", (event) => {
       const shown = this.#options.shown();
-      const how = shown === undefined ? undefined : reaction(event, shown);
+      const how =
+        shown === undefined
+          ? undefined
+          : reaction(event, shown, this.#options.grid);
       if (how !== undefined) this.schedule(how);
     });
     release();
@@ -307,6 +346,11 @@ export interface ViewReadsOptions {
   /** The cache's interval: misses lie on its grid. */
   interval: number;
   /**
+   * The cache's alignment offset (default 0): with `interval`, the grid an
+   * event is judged on, so a change at a snapped edge of the view counts.
+   */
+  alignmentOffset?: number;
+  /**
    * A change asks the view to read its range again: run the view's read.
    * `how` is how that read reads while the view has not moved: an adapter
    * whose reads show as loading uses it to keep a read from the cache
@@ -361,6 +405,10 @@ export class ViewReads {
     this.#hold = new ChangeHold(() => this.#watch.schedule("cache"));
     this.#watch = new ChangeWatch({
       shown: options.shown,
+      grid: {
+        interval: options.interval,
+        alignmentOffset: options.alignmentOffset ?? 0,
+      },
       reread: (how) => this.#ask(how),
       ...(options.frame === undefined ? {} : { frame: options.frame }),
     });

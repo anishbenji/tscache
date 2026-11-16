@@ -113,6 +113,7 @@ export function useSeries(
     const views = new ViewReads({
       shown: () => toRaw(toValue(range)),
       interval: config.interval,
+      alignmentOffset: config.alignmentOffset ?? 0,
       reread: () => {
         changed.value++;
       },

@@ -89,6 +89,7 @@ export function createSeries(
   const views = new ViewReads({
     shown: range,
     interval: config.interval,
+    alignmentOffset: config.alignmentOffset ?? 0,
     reread: () => setChanged((n) => n + 1),
   });
   /** Counts the memo's runs: only the latest run's cache-only answer lands. */

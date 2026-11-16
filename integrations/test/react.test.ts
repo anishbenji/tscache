@@ -421,6 +421,33 @@ describe("React useSeries follows its cache", () => {
     ]);
   });
 
+  it("a change at the snapped edge of an unaligned view reads it again (round 2, R2-1)", async () => {
+    const { connection, clients } = await connected();
+    const edge = { ...config, id: "edge", interval: 100 };
+    const view = mount(connection);
+    // Start from a covered range, so the view's reads need no fetch.
+    view.show(config, range);
+    await until(() => view.renders.at(-1)?.points.length === 1);
+    const writer = await (clients[0] as TscacheClient).cache(edge);
+    await writer.put(
+      { timestamps: [100, 200], fields: { v: [1, 2], n: [1, 1] } },
+      { range: { start: 100, end: 200 } },
+    );
+    view.show(edge, { start: 101, end: 199 });
+    await until(
+      () =>
+        view.renders.at(-1)?.cache === "edge" &&
+        view.renders.at(-1)?.points.length === 2,
+    );
+    await until(() => gets.includes("edge 101-199 cache"));
+    // A new bar value at 100: outside the raw view, inside the read.
+    const before = gets.filter((get) => get === "edge 101-199 cache").length;
+    await writer.put({ timestamps: [100], fields: { v: [9], n: [1] } });
+    await until(
+      () => gets.filter((get) => get === "edge 101-199 cache").length > before,
+    );
+  });
+
   it("a change re-read never brings back the Suspense fallback (PR-2)", async () => {
     const { connection, clients } = await connected();
     const view = mount(connection);

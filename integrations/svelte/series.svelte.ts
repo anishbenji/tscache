@@ -85,6 +85,7 @@ export class Series {
     const views = new ViewReads({
       shown: () => this.range,
       interval: config.interval,
+      alignmentOffset: config.alignmentOffset ?? 0,
       reread: () => {
         this.#changed++;
       },

@@ -358,6 +358,7 @@ class View {
     return new ViewReads({
       shown: () => this.#of.range,
       interval: this.#of.config.interval,
+      alignmentOffset: this.#of.config.alignmentOffset ?? 0,
       reread: () => this.#reread(),
       frame: this.#frame,
     });

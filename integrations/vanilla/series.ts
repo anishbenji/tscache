@@ -56,6 +56,7 @@ export function series(
   const views = new ViewReads({
     shown: () => range,
     interval: config.interval,
+    alignmentOffset: config.alignmentOffset ?? 0,
     reread: () => read("auto"),
     ...(frame === undefined ? {} : { frame }),
   });

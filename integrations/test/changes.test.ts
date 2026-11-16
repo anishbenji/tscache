@@ -149,6 +149,40 @@ describe("ChangeWatch", () => {
   });
 });
 
+describe("reaction over an unaligned view (round 2, R2-1)", () => {
+  // A read snaps its range outward to the grid (architecture §2.3, N1),
+  // so the view shows the grid points at both edges too: a change there
+  // is a change on screen.
+  const edges = { interval: 100, alignmentOffset: 0 };
+  const view = { start: 101, end: 199 };
+  const at = (t: number) => [{ start: t, end: t }];
+
+  it.each([100, 200])("a write at the snapped edge %i: cache", (t) => {
+    expect(reaction(event(at(t)), view, edges)).toBe("cache");
+  });
+
+  it.each([100, 200])("a removal at the snapped edge %i: fetch", (t) => {
+    expect(reaction(event([], at(t)), view, edges)).toBe("fetch");
+  });
+
+  it.each([0, 300])("a write beyond the snapped range, at %i: nothing", (t) => {
+    expect(reaction(event(at(t)), view, edges)).toBeUndefined();
+  });
+
+  it.each([
+    { t: 123, how: "cache" },
+    { t: 103, how: "cache" },
+    { t: 133, how: undefined },
+    { t: 93, how: undefined },
+  ])(
+    "with an offset (interval 10, offset 3, view 104-118 reads 103-123): a write at $t gives $how",
+    ({ t, how }) => {
+      const grid = { interval: 10, alignmentOffset: 3 };
+      expect(reaction(event(at(t)), { start: 104, end: 118 }, grid)).toBe(how);
+    },
+  );
+});
+
 describe("series follows the cache", () => {
   async function connected(): Promise<{
     connection: Connection;
@@ -191,5 +225,33 @@ describe("series follows the cache", () => {
     chart.dispose();
     await writer.put({ timestamps: [170], fields: { v: [3], n: [1] } });
     expect(clock.count()).toBe(0);
+  });
+
+  it("a change at the snapped edge of an unaligned view reads it again (round 2, R2-1)", async () => {
+    const { connection, client } = await connected();
+    const edge = { ...config, id: "edge", interval: 100 };
+    const writer = await client.cache(edge);
+    await writer.put(
+      { timestamps: [100, 200], fields: { v: [1, 2], n: [1, 1] } },
+      { range: { start: 100, end: 200 } },
+    );
+    const answers: Answer[] = [];
+    const clock = frames();
+    const chart = series(connection, {
+      config: edge,
+      render: (answer) => answers.push(answer),
+      fail: (error) => failures.push(error),
+      frame: clock.frame,
+    });
+    opened.push(chart);
+    chart.show({ start: 101, end: 199 });
+    await until(() => answers.length === 1);
+    expect(Array.from(answers[0]?.result.fields.v ?? [])).toEqual([1, 2]);
+    // A new value at 100: outside the raw view, inside the read.
+    await writer.put({ timestamps: [100], fields: { v: [9], n: [1] } });
+    expect(clock.count()).toBe(1);
+    clock.run();
+    await until(() => answers.length === 2);
+    expect(Array.from(answers[1]?.result.fields.v ?? [])).toEqual([9, 2]);
   });
 });
