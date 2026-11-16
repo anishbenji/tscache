@@ -263,6 +263,13 @@ Codex at `46ae12e` (`~/code/tscache-reports/reviews/step-114/codex-round-2.md`);
 
 `bunx vitest run integrations`: 94 tests passed.
 
+
+### Pre-review before round 3 (Claude Opus 5.5, on `b9790f6`)
+
+R2-1 and R2-2 checked as fixed everywhere they apply. One P2, accepted and fixed by the director:
+
+- PR5-1 (P2): `grid` was optional on `reaction` and `ChangeWatchOptions`, so a caller that left it out judged changes against the raw range, which is the R2-1 bug. Fixed: `grid` is required on both; the three test call sites that omitted it pass the test config's grid (their ranges are on that grid, so their expectations are unchanged).
+- The same finding notes that `ChangeWatch`'s `catchUp` option has no production caller since the React redesign. Kept, with its test: removing it would delete a test, and the option is internal to the integrations. A later step may drop both together.
 ## Decision concerns
 
 None.

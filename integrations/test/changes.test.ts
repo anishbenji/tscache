@@ -86,7 +86,7 @@ describe("reaction (the read rule, N84)", () => {
     },
     { name: "a clear", e: event([], [], true), how: "fetch" },
   ])("$name: $how", ({ e, how }) => {
-    expect(reaction(e, shown)).toBe(how);
+    expect(reaction(e, shown, { interval: config.interval })).toBe(how);
   });
 });
 
@@ -99,6 +99,7 @@ describe("ChangeWatch", () => {
     const clock = frames();
     const watch = new ChangeWatch({
       shown: () => shown,
+      grid: { interval: config.interval },
       reread: (how) => reads.push(how),
       catchUp,
       frame: clock.frame,

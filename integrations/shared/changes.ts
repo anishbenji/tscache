@@ -52,16 +52,17 @@ function snappedOut(
  * What one event asks of a view showing `shown` (N84): a cache-only read
  * when it wrote something and touched the view, a fetching read when it
  * wrote nothing and cleared or withdrew coverage over the view, else
- * nothing. With `grid`, the view is the range as read, snapped outward: an
+ * nothing. The view is the range as read, snapped outward to `grid`: an
  * unaligned view shows the grid points at both its edges too, and a change
- * there is a change on screen (round 2, R2-1).
+ * there is a change on screen (round 2, R2-1). `grid` is required, so no
+ * caller can judge a change against the raw range.
  */
 export function reaction(
   event: Changed,
   range: Range,
-  grid?: Grid,
+  grid: Grid,
 ): Reread | undefined {
-  const shown = grid === undefined ? range : snappedOut(range, grid);
+  const shown = snappedOut(range, grid);
   if (event.written.length > 0) {
     const touched =
       event.cleared ||
@@ -93,9 +94,9 @@ export interface ChangeWatchOptions {
   shown(): Range | undefined;
   /**
    * The cache's grid: an event is judged against the shown range snapped
-   * outward to it, the range a read returns. Without it, the raw range.
+   * outward to it, the range a read returns. Required (round 3).
    */
-  grid?: Grid;
+  grid: Grid;
   /** Reads the shown range again; called at most once per frame. */
   reread(how: Reread): void;
   /**

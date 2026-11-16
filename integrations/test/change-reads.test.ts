@@ -363,6 +363,7 @@ describe("ChangeWatch.started (PR-6)", () => {
     const clock = frames();
     const watch = new ChangeWatch({
       shown: () => shown,
+      grid: { interval: config.interval },
       reread: (how) => reads.push(how),
       frame: clock.frame,
     });
