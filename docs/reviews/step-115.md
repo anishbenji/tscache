@@ -1,6 +1,6 @@
 # Step 115 — Effect is not adopted (N85)
 
-Branch: `docs/115-effect-decision` · Reviewer: GPT-6.1 Sol (high) · Rounds: 0 · Status: awaiting review
+Branch: `docs/115-effect-decision` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled (round 1: no findings)
 
 ## Scope
 
@@ -46,6 +46,12 @@ Claude Opus 5.5 on `2c2f556`: one P2 and two nits, all accepted and fixed by the
 - PR-1 (P2): N85 stated the clear-disk test gap as current, although step 111 closed it. Fixed: the three statements (the resolution, the module description and finding 4) are dated to the evaluation, and finding 4 names step 111.
 - PR-2 (nit): the opening sentence did not list every edit made in the move. Fixed: it now names the `AGENTS.md` wording change and the dated sentences.
 - PR-3 (nit): the CI row was a promise. Fixed: it gives the result and head.
+
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `b98bfb1`. No findings; the reviewer confirmed the three pre-review fixes. The round's `bun run ci`
+exited 0. This round is also the second Codex round on the record's revised text (decision 75 left it to the
+director). Raw output: `.reviews/step-115/round-1.md`. The review has settled.
 
 ## Contract-test changes
 
