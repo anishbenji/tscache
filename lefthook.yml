@@ -19,10 +19,9 @@ pre-push:
   jobs:
     - name: typecheck
       run: bun run typecheck
-    - name: biome-full
-      run: bunx biome check .
     # The checks that read the built package, in order after one build, as
-    # in scripts/ci.sh: Knip loads the examples' Vite configs, which import
+    # in scripts/ci.sh: Biome's promise rules read the package's types from
+    # dist/, Knip loads the examples' Vite configs, which import
     # @anishbenji/tscache/vite from dist/, and the integration snippets type-check
     # against it, as an app would.
     - name: built
@@ -31,6 +30,8 @@ pre-push:
         jobs:
           - name: build
             run: bun run build >/dev/null
+          - name: biome-full
+            run: bunx biome check .
           - name: knip
             run: bunx knip
           - name: integrations
