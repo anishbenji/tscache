@@ -58,7 +58,7 @@ bun run --cwd site api
 bunx knip
 bun run fallow
 # The health floor: the project's Fallow health score (0-100) may not drop
-# below 90 (step 83). Raising it to 95 is a later refactoring step.
+# below 95 (step 83 set it at 90; step 112 raised it).
 bun run fallow:health
 bunx vitest run --passWithNoTests
 # What npm would publish: exactly the manifest, README, license and the
