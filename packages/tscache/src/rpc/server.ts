@@ -2,7 +2,8 @@
  * Worker-side RPC shell (docs/architecture.md §3, §4.7): one Engine, any
  * number of ports. Each port gets a hello with its clientId, must answer
  * with a matching init, and from then on its requests are dispatched to the
- * engine while events fan out to every ready port.
+ * engine while events fan out to every ready port, except cacheChanged,
+ * which goes only to the ports subscribed to its cache (N74).
  */
 
 import type { ReaderChange } from "../engine/cache";
