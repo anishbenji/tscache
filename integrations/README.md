@@ -28,9 +28,12 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
   it shows again, at most once per animation frame, by the read rule of architecture §2.7 (N84): from
   the cache alone when the frame's events wrote something, with a fetch when one wrote nothing and
   cleared or withdrew coverage over the view. Each adapter subscribes before it reads, or reads the
-  cache once more after subscribing, so no change is missed. A cache-only re-read waits while the
-  view's fetching read is in flight (`NextRead`), and keeps the failure labels (`fetch-failed`,
-  `auth-pending`) the answer before it showed for misses still missing (`keepFailures`).
+  cache once more after subscribing, so no change is missed. `ViewReads` owns a view's reads in the
+  order no adapter may change: a cache-only change waits while the view's fetching read is in
+  flight, comes back through the frame only after that read's answer landed, and its answer keeps
+  the failure labels (`fetch-failed`, `auth-pending`) of the answer before it (`keepFailures`).
+  Adapters only call `read` from their reactivity and apply latest-wins; React, whose reads start
+  while rendering, uses the same `cacheOnlyAfter` and holds against its newest read.
 
 ## The frameworks
 

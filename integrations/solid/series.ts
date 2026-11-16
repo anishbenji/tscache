@@ -20,7 +20,7 @@ import {
   createSignal,
   onCleanup,
 } from "solid-js";
-import { ChangeWatch, keepFailures, NextRead } from "../shared/changes";
+import { ViewReads } from "../shared/changes";
 import { type Connection, connect, type Seed } from "../shared/connection";
 
 /** The cache's answer for a range. */
@@ -82,15 +82,14 @@ export function createSeries(
   const [state, setState] = createSignal(connection.state);
   onCleanup(connection.subscribe(() => setState(connection.state)));
   const [changed, setChanged] = createSignal(0);
-  const next = new NextRead(() => setChanged((n) => n + 1));
-  const changes = new ChangeWatch({
+  // Holds a change during a fetching read, keeps failure labels, and
+  // releases after the answer landed (shared/changes.ts).
+  const views = new ViewReads({
     shown: range,
-    reread: (how) => next.ask(how),
+    interval: config.interval,
+    reread: () => setChanged((n) => n + 1),
   });
-  onCleanup(() => changes.dispose());
-  /** The latest run's answer: what a cache-only answer keeps labels from. */
-  let shown: GetResult | undefined = initial?.result;
-  let runs = 0;
+  onCleanup(() => views.dispose());
 
   return createMemo<Answer>(
     () => {
@@ -102,27 +101,10 @@ export function createSeries(
       // fresh promise each time: one shared promise would keep the
       // callbacks of every run that ever waited on it.
       if (current.status === "connecting") return new Promise<never>(() => {});
-      const read = next.start(current, asked);
-      const run = ++runs;
-      return connection
-        .cache(current.client, config)
-        .then((cache) => {
-          // Subscribe, then read; a new client's handle replaces the old.
-          if (connection.state === current) {
-            changes.follow(cache);
-            changes.started(!read.cacheOnly);
-          }
-          return cache.get(asked, { cacheOnly: read.cacheOnly });
-        })
-        .finally(read.settled)
-        .then(
-          (answer) => {
-            const result = read.cacheOnly
-              ? keepFailures(shown, answer, config.interval)
-              : answer;
-            if (run === runs) shown = result;
-            return { range: asked, result };
-          },
+      return views
+        .read(connection.cache(current.client, config), asked, [current, asked])
+        .answer.then(
+          (result) => ({ range: asked, result }),
           (error: unknown) => {
             // Only a failure on a live client counts. After a loss the memo
             // has run again on the new state, so this read stays pending

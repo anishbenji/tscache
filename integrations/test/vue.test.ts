@@ -1,5 +1,5 @@
 import { createClient, type TscacheClient } from "@anishbenji/tscache";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRenderer, defineComponent, h, shallowRef } from "vue";
 import { createTscache, type Series, useSeries } from "../vue/series";
 import { config, until } from "./helpers";
@@ -60,6 +60,7 @@ const View = defineComponent(function View() {
 const unmounts: (() => void)[] = [];
 afterEach(() => {
   for (const unmount of unmounts.splice(0)) unmount();
+  vi.unstubAllGlobals();
   (globalThis as unknown as { __m7vue: Gate }).__m7vue = { fail: false };
 });
 
@@ -103,6 +104,66 @@ describe("Vue useSeries follows its cache", () => {
     expect(reasons).toContain("fetch-failed");
     expect(Array.from(series?.answer.value?.result.timestamps ?? [])).toEqual([
       150,
+    ]);
+  });
+
+  it("a frame that fires while the fetch is held keeps the fetch's failure (PR2-1)", async () => {
+    // Animation frames the test runs by hand, so one fires mid-fetch.
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      queued.push(callback);
+      return queued.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      queued[id - 1] = () => {};
+    });
+    const runFrames = () => {
+      for (const callback of queued.splice(0)) callback(0);
+    };
+    let client: TscacheClient | undefined;
+    const open = async () => {
+      client = await createClient({
+        mode: "in-process",
+        fetcher: { module: fetcher },
+      });
+      return client;
+    };
+    let release = () => {};
+    const entered = new Promise<void>((resolve) => {
+      gate().entered = resolve;
+    });
+    gate().hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const app = createApp(View);
+    app.use(createTscache(open));
+    app.mount({});
+    unmounts.push(() => app.unmount());
+    await entered;
+
+    const writer = await (client as TscacheClient).cache(config);
+    await writer.put({ timestamps: [150], fields: { v: [1], n: [1] } });
+    expect(queued).toHaveLength(1);
+    runFrames(); // while the fetch is still held
+    gate().fail = true;
+    release();
+    await until(() => series?.pending.value === false);
+    // The fetching read's answer landed, with its failure.
+    const landed = series?.answer.value;
+    expect(landed?.result.misses.map((m) => m.reason)).toEqual([
+      "fetch-failed",
+      "fetch-failed",
+    ]);
+    // The held change comes back on a later frame, once the answer landed,
+    // and its cache-only answer replaces it.
+    await until(() => queued.length > 0);
+    runFrames();
+    await until(() => series?.answer.value !== landed);
+    const result = series?.answer.value?.result;
+    expect(Array.from(result?.timestamps ?? [])).toEqual([150]);
+    expect(result?.misses.map((m) => m.reason)).toEqual([
+      "fetch-failed",
+      "fetch-failed",
     ]);
   });
 });

@@ -5,7 +5,7 @@
 // connection (shared/connection.ts) serves every series of the page.
 
 import type { CacheConfig, GetResult, Range } from "@anishbenji/tscache";
-import { ChangeWatch, type Frame, keepFailures } from "../shared/changes";
+import { type Frame, type ReadMode, ViewReads } from "../shared/changes";
 import type { Connection } from "../shared/connection";
 
 /** The cache's answer for a range. */
@@ -51,17 +51,16 @@ export function series(
   /** The request number of the show() read in flight, or 0. */
   let showing = 0;
   let disposed = false;
-  /** A change arrived while a show() read was in flight: read after it. */
-  let stale = false;
-  /** The answer on screen: what a cache-only answer keeps labels from. */
-  let shown: GetResult | undefined;
-  const changes = new ChangeWatch({
+  // Holds a change during a fetching read, keeps failure labels, and
+  // releases after the answer landed (shared/changes.ts).
+  const views = new ViewReads({
     shown: () => range,
-    reread: (how) => (how === "fetch" ? read() : changed()),
+    interval: config.interval,
+    reread: () => read("auto"),
     ...(frame === undefined ? {} : { frame }),
   });
 
-  function read(cacheOnly = false): void {
+  function read(mode: ReadMode): void {
     if (disposed) return;
     const state = connection.state;
     if (state.status === "failed") {
@@ -71,30 +70,17 @@ export function series(
     if (state.status !== "connected" || range === undefined) return;
     const request = ++latest;
     const asked = range;
-    if (!cacheOnly) showing = request;
-    connection
-      .cache(state.client, config)
-      .then((cache) => {
-        // Subscribe, then read: a change after the subscription is in this
-        // read or reported after it. A new client's handle replaces the old.
-        // A read of its own after events arrived shows them: the frame's
-        // read of them would only repeat it.
-        if (!disposed && connection.state === state) {
-          changes.follow(cache);
-          changes.started(!cacheOnly);
-        }
-        return cache.get(asked, { cacheOnly });
-      })
+    const reading = views.read(
+      connection.cache(state.client, config),
+      asked,
+      [state, asked],
+      mode,
+    );
+    if (!reading.cacheOnly) showing = request;
+    reading.answer
       .then(
-        (fresh) => {
-          if (request !== latest) return;
-          // A cache-only read cannot know that a fetch failed; keep what
-          // the answer on screen said about the misses still missing.
-          const result = cacheOnly
-            ? keepFailures(shown, fresh, config.interval)
-            : fresh;
-          shown = result;
-          render({ range: asked, result });
+        (result) => {
+          if (request === latest) render({ range: asked, result });
         },
         (error: unknown) => {
           // A lost worker rejects what was pending; the connection's next
@@ -103,42 +89,28 @@ export function series(
         },
       )
       .finally(() => {
-        if (showing !== request) return;
-        showing = 0;
-        if (!stale) return;
-        stale = false;
-        refresh();
+        if (showing === request) showing = 0;
       });
-  }
-
-  /**
-   * A change touched the range on screen: read it from the cache, or once
-   * the show() read in flight has answered, since that read may have been
-   * taken just before the change.
-   */
-  function changed(): void {
-    stale = showing !== 0;
-    if (!stale) refresh();
   }
 
   function refresh(next = range): void {
     if (showing !== 0 || next === undefined) return;
     range = next;
-    read(true);
+    read("cache");
   }
 
   // A new client (the first, or one replacing a lost worker) reads again.
-  const unsubscribe = connection.subscribe(() => read());
+  const unsubscribe = connection.subscribe(() => read("fetch"));
   return {
     show(next) {
       range = next;
-      read();
+      read("fetch");
     },
     refresh,
     dispose() {
       disposed = true;
       unsubscribe();
-      changes.dispose();
+      views.dispose();
       latest++;
     },
   };

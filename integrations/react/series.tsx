@@ -21,12 +21,13 @@ import {
   use,
   useDeferredValue,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
-import { ChangeWatch, keepFailures, type Reread } from "../shared/changes";
+import { ChangeWatch, cacheOnlyAfter, type Reread } from "../shared/changes";
 import type { Connection, ConnectionState, Seed } from "../shared/connection";
 
 interface Source {
@@ -103,26 +104,35 @@ export function useSeries(config: CacheConfig, range: Range): GetResult {
   const cache = useDeferredValue(config);
   const start = useDeferredValue(range.start);
   const end = useDeferredValue(range.end);
-  const shownRead = useRef<Read | undefined>(undefined);
+  const view = useId();
+  // The newest read this view started, set while rendering: a change
+  // holds against it, and a cache-only read waits for its answer
+  // (shared/changes.ts, cacheOnlyAfter).
+  const newest = useRef<Read | undefined>(undefined);
+  const latest = useChanges(connection, snapshot, cache, start, end, newest);
   // Deferred like the inputs above: a change's read suspends in a
   // background render, never back to the Suspense fallback.
-  const recorded = useDeferredValue(
-    useChanges(connection, snapshot, cache, start, end, shownRead),
-  );
-  const changed =
-    recorded.start === start && recorded.end === end ? recorded : UNCHANGED;
+  const recorded = useDeferredValue(latest);
+  const over = (c: Changed) =>
+    c.start === start && c.end === end ? c : UNCHANGED;
 
-  // The read on screen, which a new cache-only read keeps failure labels
-  // from (shared/changes.ts, keepFailures).
-  const base = shownRead.current;
-  const read =
-    connection === null
-      ? undefined
-      : readFor(connection, snapshot, cache, start, end, changed, base);
-  useEffect(() => {
-    shownRead.current = read;
-    return read?.show();
-  }, [read]);
+  let read: Read | undefined;
+  if (connection !== null) {
+    // Started for the newest change, even while the deferred render below
+    // still shows an older one; each render finds it again by its key.
+    const started = readFor(connection, snapshot, cache, start, end, {
+      changed: over(latest),
+      base: newest.current,
+      view,
+    });
+    newest.current = started;
+    read = readFor(connection, snapshot, cache, start, end, {
+      changed: over(recorded),
+      base: undefined,
+      view,
+    });
+  }
+  useEffect(() => read?.show(), [read]);
 
   if (read !== undefined) return use(read.answer);
   if (snapshot.status === "failed") throw snapshot.error;
@@ -144,9 +154,9 @@ const UNCHANGED: Changed = { n: 0, how: "fetch", start: 0, end: 0 };
  * the changes so far, with the range they were over (the caller ignores
  * them after the range moved, whose read fetches anyway).
  *
- * A cache-only read waits while the read on screen still fetches: its
- * answer would replace that read's, which alone says whether the fetch
- * failed. The change is asked again once that read has settled.
+ * A cache-only change waits while the newest read this view started
+ * still fetches: its answer alone says whether the fetch failed. The
+ * change is asked again through the frame once that read has settled.
  */
 function useChanges(
   connection: Connection | null,
@@ -154,7 +164,7 @@ function useChanges(
   config: CacheConfig,
   start: number,
   end: number,
-  shownRead: { readonly current: Read | undefined },
+  newest: { readonly current: Read | undefined },
 ): Changed {
   const [changed, setChanged] = useState(UNCHANGED);
   const shown = useRef<Range | undefined>(undefined);
@@ -173,7 +183,7 @@ function useChanges(
       reread: (how) => {
         const range = shown.current;
         if (range === undefined) return;
-        const reading = shownRead.current;
+        const reading = newest.current;
         if (how === "cache" && reading?.fetching === true) {
           if (held) return;
           held = true;
@@ -202,7 +212,7 @@ function useChanges(
       watch.dispose();
       if (watching.current === watch) watching.current = undefined;
     };
-  }, [connection, snapshot, config, shownRead]);
+  }, [connection, snapshot, config, newest]);
   return changed;
 }
 
@@ -218,16 +228,15 @@ function readFor(
   config: CacheConfig,
   start: number,
   end: number,
-  changed: Changed,
-  base: Read | undefined,
+  after: After,
 ): Read | undefined {
   if (snapshot.status === "connected") {
     const client = promiseOf(snapshot.client);
-    return readOf(connection, client, config, start, end, changed, base);
+    return readOf(connection, client, config, start, end, after);
   }
   if (snapshot.status === "connecting") {
     const client = clientOf(connection);
-    return readOf(connection, client, config, start, end, changed, base);
+    return readOf(connection, client, config, start, end, after);
   }
   return undefined;
 }
@@ -334,15 +343,27 @@ function keyOf({ fields, ...rest }: CacheConfig): string {
   ]);
 }
 
+/** What a read after a change depends on. */
+interface After {
+  /** The change it reads after; UNCHANGED for a plain read. */
+  changed: Changed;
+  /** The view's newest read before it, whose answer a cache-only read waits for. */
+  base: Read | undefined;
+  /** The view (useId): reads after a change are the view's own. */
+  view: string;
+}
+
+const PLAIN: After = { changed: UNCHANGED, base: undefined, view: "" };
+
 /** The reads made through each client's promise, by config and range. */
 const readsOf = new WeakMap<Promise<TscacheClient>, Map<string, Read>>();
 
 /**
  * The read of a range through `client`: the same object on every render
  * that asks for it, so `use` sees one promise. A new client starts with no
- * reads. Each change over the range is a read of its own, from the cache
- * alone unless the change asked for a fetch; a cache-only read keeps the
- * failure labels of `base`, the read on screen when it was made.
+ * reads. Each change over the range is a read of its own and of its view,
+ * from the cache alone unless the change asked for a fetch; a cache-only
+ * read starts once `base` has answered and keeps its failure labels.
  */
 function readOf(
   connection: Connection,
@@ -350,28 +371,22 @@ function readOf(
   config: CacheConfig,
   start: number,
   end: number,
-  changed: Changed = UNCHANGED,
-  base?: Read,
+  { changed, base, view }: After = PLAIN,
 ): Read {
   let reads = readsOf.get(client);
   if (reads === undefined) {
     reads = new Map();
     readsOf.set(client, reads);
   }
-  const key = `${keyOf(config)} ${start} ${end} ${changed.n}`;
+  const after = changed.n === 0 ? "" : ` ${view}:${changed.n}`;
+  const key = `${keyOf(config)} ${start} ${end}${after}`;
   let read = reads.get(key);
   if (read === undefined) {
     const cacheOnly = changed.n > 0 && changed.how === "cache";
-    const fresh = answer(connection, client, config, start, end, cacheOnly);
-    const promise =
-      cacheOnly && base !== undefined
-        ? fresh.then((next) =>
-            base.answer.then(
-              (previous) => keepFailures(previous, next, config.interval),
-              () => next,
-            ),
-          )
-        : fresh;
+    const get = () => answer(connection, client, config, start, end, cacheOnly);
+    const promise = cacheOnly
+      ? cacheOnlyAfter(base?.answer, get, config.interval)
+      : get();
     read = new Read(promise, reads, key, cacheOnly);
     reads.set(key, read);
   }

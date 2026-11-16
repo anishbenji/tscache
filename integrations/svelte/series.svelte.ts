@@ -15,7 +15,7 @@ import type {
 } from "@anishbenji/tscache";
 import { getContext } from "svelte";
 import { createSubscriber } from "svelte/reactivity";
-import { ChangeWatch, keepFailures, NextRead } from "../shared/changes";
+import { ViewReads } from "../shared/changes";
 import type { Connection, ConnectionState } from "../shared/connection";
 
 const CONNECTION = Symbol("tscache connection");
@@ -69,11 +69,8 @@ export class Series {
   #answer: Answer | undefined;
   #failure = $state.raw<{ error: unknown }>();
   #reads = 0;
-  /** Bumped by the change watch: the effect reads again. */
+  /** Bumped when a change asks for a read: the effect reads again. */
   #changed = $state(0);
-  readonly #next = new NextRead(() => {
-    this.#changed++;
-  });
 
   /**
    * `shown` is the answer to show until the first read lands, such as the
@@ -83,11 +80,16 @@ export class Series {
     this.range = $state.raw(range);
     this.#answer = $state.raw(shown);
     const connection = getContext<TrackedConnection | undefined>(CONNECTION);
-    const changes = new ChangeWatch({
+    // Holds a change during a fetching read, keeps failure labels, and
+    // releases after the answer landed (shared/changes.ts).
+    const views = new ViewReads({
       shown: () => this.range,
-      reread: (how) => this.#next.ask(how),
+      interval: config.interval,
+      reread: () => {
+        this.#changed++;
+      },
     });
-    $effect(() => () => changes.dispose());
+    $effect(() => () => views.dispose());
     $effect(() => {
       if (connection === undefined) {
         throw new Error(
@@ -108,25 +110,11 @@ export class Series {
       // effect, when this read is still the last one started.
       const read = ++this.#reads;
       const latest = () => read === this.#reads && this.range === range;
-      const started = this.#next.start(state, range);
-      connection
-        .cache(state.client, config)
-        .then((cache) => {
-          // Subscribe, then read; a new client's handle replaces the old.
-          if (latest()) {
-            changes.follow(cache);
-            changes.started(!started.cacheOnly);
-          }
-          return cache.get(range, { cacheOnly: started.cacheOnly });
-        })
-        .finally(started.settled)
-        .then(
-          (fresh) => {
-            if (!latest()) return;
-            const result = started.cacheOnly
-              ? keepFailures(this.#answer?.result, fresh, config.interval)
-              : fresh;
-            this.#answer = { range, result };
+      views
+        .read(connection.cache(state.client, config), range, [state, range])
+        .answer.then(
+          (result) => {
+            if (latest()) this.#answer = { range, result };
           },
           (error: unknown) => {
             // A lost worker rejects what was pending; the connection's next

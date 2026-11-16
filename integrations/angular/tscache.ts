@@ -37,7 +37,7 @@ import type {
   Range,
   TscacheClient,
 } from "@anishbenji/tscache";
-import { ChangeWatch, keepFailures, NextRead } from "../shared/changes";
+import { ViewReads } from "../shared/changes";
 import {
   type Connection,
   type ConnectionState,
@@ -195,14 +195,14 @@ export function cacheResource(
   }
   const tscache = inject(Tscache);
   const changed = signal(0);
-  const next = new NextRead(() => changed.update((n) => n + 1));
-  const changes = new ChangeWatch({
+  // Holds a change during a fetching read, keeps failure labels, and
+  // releases after the answer landed (shared/changes.ts).
+  const views = new ViewReads({
     shown: () => untracked(range),
-    reread: (how) => next.ask(how),
+    interval: config.interval,
+    reread: () => changed.update((n) => n + 1),
   });
-  inject(DestroyRef).onDestroy(() => changes.dispose());
-  /** The latest load's answer: what a cache-only answer keeps labels from. */
-  let shown: GetResult | undefined;
+  inject(DestroyRef).onDestroy(() => views.dispose());
   const live = resource({
     params: () => {
       const asked = range();
@@ -215,25 +215,11 @@ export function cacheResource(
     // A lost worker's client emits workerLost before this get's rejection is
     // handled, so by then the state, hence the params, have changed, and
     // resource() drops the rejection with the request it belongs to.
-    loader: async ({ params, abortSignal }) => {
-      const read = next.start(params.client, params.range);
-      try {
-        const cache = await tscache.cache(params.client, config);
-        // Subscribe, then read; a new client's handle replaces the old.
-        changes.follow(cache);
-        changes.started(!read.cacheOnly);
-        const fresh = await cache.get(params.range, {
-          cacheOnly: read.cacheOnly,
-        });
-        const result = read.cacheOnly
-          ? keepFailures(shown, fresh, config.interval)
-          : fresh;
-        if (!abortSignal.aborted) shown = result;
-        return result;
-      } finally {
-        read.settled();
-      }
-    },
+    loader: ({ params }) =>
+      views.read(tscache.cache(params.client, config), params.range, [
+        params.client,
+        params.range,
+      ]).answer,
   });
   return withPreviousValue(live, tscache.takeServerRead(config)?.result);
 }

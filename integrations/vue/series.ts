@@ -29,7 +29,7 @@ import {
   toValue,
   watch,
 } from "vue";
-import { ChangeWatch, keepFailures, NextRead } from "../shared/changes";
+import { ViewReads } from "../shared/changes";
 import { type Connection, connect, type Seed } from "../shared/connection";
 
 /** The cache's answer for a range. */
@@ -108,14 +108,16 @@ export function useSeries(
       }),
     );
     const changed = shallowRef(0);
-    const next = new NextRead(() => {
-      changed.value++;
-    });
-    const changes = new ChangeWatch({
+    // Holds a change during a fetching read, keeps failure labels, and
+    // releases after the answer landed (shared/changes.ts).
+    const views = new ViewReads({
       shown: () => toRaw(toValue(range)),
-      reread: (how) => next.ask(how),
+      interval: config.interval,
+      reread: () => {
+        changed.value++;
+      },
     });
-    onScopeDispose(() => changes.dispose());
+    onScopeDispose(() => views.dispose());
     watch(
       [state, () => toValue(range), changed],
       ([current, asked]) => {
@@ -128,45 +130,35 @@ export function useSeries(
           pending.value = true;
           return;
         }
-        const read = next.start(current, asked);
-        // A read after a change keeps the answer it replaces as current.
-        if (!read.cacheOnly) pending.value = true;
         let latest = true;
         onWatcherCleanup(() => {
           latest = false;
         });
         // A worker cannot be posted a reactive proxy, as ref() makes one.
         const plain = toRaw(asked);
-        connection
-          .cache(current.client, config)
-          .then((cache) => {
-            // Subscribe, then read; a new client's handle replaces the old.
-            if (latest) {
-              changes.follow(cache);
-              changes.started(!read.cacheOnly);
-            }
-            return cache.get(plain, { cacheOnly: read.cacheOnly });
-          })
-          .finally(read.settled)
-          .then(
-            (fresh) => {
-              if (!latest) return;
-              const result = read.cacheOnly
-                ? keepFailures(answer.value?.result, fresh, config.interval)
-                : fresh;
-              answer.value = { range: plain, result };
-              error.value = undefined;
-              pending.value = false;
-            },
-            (failure: unknown) => {
-              // A lost worker rejects what was pending; the connection's
-              // next client reads again, so only a failure on a live client
-              // counts.
-              if (!latest || connection.state !== current) return;
-              error.value = failure;
-              pending.value = false;
-            },
-          );
+        const read = views.read(
+          connection.cache(current.client, config),
+          plain,
+          [current, plain],
+        );
+        // A read after a change keeps the answer it replaces as current.
+        if (!read.cacheOnly) pending.value = true;
+        read.answer.then(
+          (result) => {
+            if (!latest) return;
+            answer.value = { range: plain, result };
+            error.value = undefined;
+            pending.value = false;
+          },
+          (failure: unknown) => {
+            // A lost worker rejects what was pending; the connection's
+            // next client reads again, so only a failure on a live client
+            // counts.
+            if (!latest || connection.state !== current) return;
+            error.value = failure;
+            pending.value = false;
+          },
+        );
       },
       { immediate: true },
     );

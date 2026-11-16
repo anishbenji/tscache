@@ -7,9 +7,10 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ChangeWatch,
+  cacheOnlyAfter,
   type Frame,
   keepFailures,
-  NextRead,
+  ViewReads,
 } from "../shared/changes";
 import { type Connection, connect } from "../shared/connection";
 import { type Answer, series } from "../vanilla/series";
@@ -47,6 +48,8 @@ interface Gate {
   entered?: () => void;
   /** Whether fetches reject. */
   fail: boolean;
+  /** Whether fetches are refused for credentials. */
+  auth?: boolean;
 }
 const gate = (): Gate => (globalThis as unknown as { __m7view: Gate }).__m7view;
 function resetGate(): void {
@@ -65,6 +68,11 @@ const fetcher = `data:text/javascript,${encodeURIComponent(`
         await hold;
       }
       if (g.fail) throw new Error("backend down");
+      if (g.auth) {
+        const e = new Error("401");
+        e.code = "tscache:auth-invalid";
+        throw e;
+      }
       return { timestamps: [], fields: { v: [], n: [] } };
     },
   };
@@ -112,40 +120,126 @@ async function connected(withFetcher = false): Promise<{
   return { connection, client: client as TscacheClient };
 }
 
-describe("NextRead (PR-1)", () => {
-  it("holds a cache-only change while a fetching read is in flight, then asks it again", () => {
-    let bumps = 0;
-    const next = new NextRead(() => bumps++);
-    const first = next.start("client", shown);
-    expect(first.cacheOnly).toBe(false);
-    next.ask("cache");
-    expect(bumps).toBe(0);
-    first.settled();
-    expect(bumps).toBe(1);
-    expect(next.start("client", shown).cacheOnly).toBe(true);
+describe("ViewReads (PR-1, PR2-1)", () => {
+  /**
+   * A view on ViewReads with only the glue an adapter adds: reading again
+   * when asked, and latest-wins over the answers.
+   */
+  function view(client: TscacheClient, frame: Frame) {
+    const answers: GetResult[] = [];
+    let latest = 0;
+    const reads: boolean[] = [];
+    const views = new ViewReads({
+      shown: () => shown,
+      interval: config.interval,
+      reread: () => read(),
+      frame,
+    });
+    opened.push(views);
+    function read(): void {
+      const request = ++latest;
+      const started = views.read(client.cache(config), shown, [
+        "client",
+        shown,
+      ]);
+      reads.push(started.cacheOnly);
+      started.answer.then(
+        (result) => {
+          if (request === latest) answers.push(result);
+        },
+        (error: unknown) => failures.push(error),
+      );
+    }
+    return { read, answers, reads };
+  }
+
+  it.each([
+    {
+      name: "fails",
+      set: (g: Gate) => (g.fail = true),
+      reason: "fetch-failed",
+    },
+    {
+      name: "meets invalid credentials",
+      set: (g: Gate) => (g.auth = true),
+      reason: "auth-pending",
+    },
+  ])(
+    "a frame while the fetch is held, then the fetch $name: the view ends on $reason",
+    async ({ set, reason }) => {
+      const { client } = await connected(true);
+      const clock = frames();
+      const v = view(client, clock.frame);
+      const held = holdNextFetch();
+      v.read();
+      await held.entered;
+      // Another writer's put reaches the view while its fetch is held.
+      const writer = await client.cache(config);
+      await writer.put({ timestamps: [150], fields: { v: [1], n: [1] } });
+      expect(clock.count()).toBe(1);
+      clock.run(); // the frame fires while the fetch is held
+      expect(v.reads).toEqual([false]);
+      set(gate());
+      held.release();
+      await until(() => v.answers.length === 1);
+      // The held change comes back through the frame, after the answer.
+      expect(clock.count()).toBe(1);
+      clock.run();
+      await until(() => v.answers.length === 2);
+      expect(v.reads).toEqual([false, true]);
+      const last = v.answers.at(-1) as GetResult;
+      expect(Array.from(last.timestamps)).toEqual([150]);
+      expect(last.misses.map((m) => m.reason)).toEqual([reason, reason]);
+    },
+  );
+
+  it("a held change reads the cache once the fetch answered", async () => {
+    const { client } = await connected(true);
+    const clock = frames();
+    const v = view(client, clock.frame);
+    const held = holdNextFetch();
+    v.read();
+    await held.entered;
+    const writer = await client.cache(config);
+    await writer.put({ timestamps: [150], fields: { v: [1], n: [1] } });
+    clock.run();
+    held.release();
+    await until(() => v.answers.length === 1);
+    clock.run();
+    await until(() => v.answers.length === 2);
+    expect(v.reads).toEqual([false, true]);
+    expect(v.answers[1]?.misses).toEqual([]);
   });
 
-  it("lets a fetch through at once, and waits for the last fetching read", () => {
-    let bumps = 0;
-    const next = new NextRead(() => bumps++);
-    const a = next.start("client", shown);
-    next.ask("fetch");
-    expect(bumps).toBe(1);
-    const b = next.start("client", shown);
-    expect(b.cacheOnly).toBe(false);
-    next.ask("cache");
-    a.settled();
-    expect(bumps).toBe(1);
-    b.settled();
-    b.settled();
-    expect(bumps).toBe(2);
-  });
-
-  it("fetches when the range or the client moved, whatever the change asked", () => {
-    const next = new NextRead(() => {});
-    next.start("client", shown).settled();
-    next.ask("cache");
-    expect(next.start("client", { start: 0, end: 50 }).cacheOnly).toBe(false);
+  it("a cache-only read starts only once the answer before it settled", async () => {
+    let settle: (r: GetResult) => void = () => {};
+    const base = new Promise<GetResult>((resolve) => {
+      settle = resolve;
+    });
+    const started: string[] = [];
+    const after = cacheOnlyAfter(
+      base,
+      async () => {
+        started.push("read");
+        return {
+          timestamps: new Float64Array(),
+          fields: {},
+          coverage: [],
+          misses: [{ range: shown, reason: "uncached" }],
+        };
+      },
+      10,
+    );
+    await Promise.resolve();
+    expect(started).toEqual([]);
+    settle({
+      timestamps: new Float64Array(),
+      fields: {},
+      coverage: [],
+      misses: [{ range: shown, reason: "fetch-failed" }],
+    });
+    expect((await after).misses.map((m) => m.reason)).toEqual(["fetch-failed"]);
+    expect(started).toEqual(["read"]);
   });
 });
 

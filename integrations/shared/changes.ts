@@ -202,78 +202,147 @@ export function keepFailures(
   return { ...next, misses };
 }
 
-/** A read a reactive view started, as {@link NextRead.start} returns it. */
-export interface StartedRead {
+/**
+ * A cache-only read that lands after `base`, the view's previous answer:
+ * it starts only once `base` has settled, and keeps its failure labels
+ * (`keepFailures`). Starting it any earlier could replace an answer that
+ * has not landed yet, and lose what only that answer says: that a fetch
+ * failed, or waits for credentials.
+ */
+export function cacheOnlyAfter(
+  base: Promise<GetResult> | undefined,
+  read: () => Promise<GetResult>,
+  interval: number,
+): Promise<GetResult> {
+  if (base === undefined) return read();
+  return base.then(
+    (previous) => read().then((next) => keepFailures(previous, next, interval)),
+    () => read(),
+  );
+}
+
+/** How a read of the view is to read: decided by the changes, or forced. */
+export type ReadMode = "auto" | "fetch" | "cache";
+
+/** A read {@link ViewReads.read} started. */
+export interface ViewRead {
   /** Whether it reads the cache alone. */
   cacheOnly: boolean;
-  /** Call once it settled, whether or not its answer landed. */
-  settled(): void;
+  /** The answer to show, failure labels kept; the view applies latest-wins. */
+  answer: Promise<GetResult>;
+}
+
+export interface ViewReadsOptions {
+  /** The range the view shows now; undefined while it shows none. */
+  shown(): Range | undefined;
+  /** The cache's interval: misses lie on its grid. */
+  interval: number;
+  /** A change asks the view to read its range again: run the view's read. */
+  reread(): void;
+  /** For tests: the frame scheduler. Default: the next animation frame. */
+  frame?: Frame;
 }
 
 /**
- * Which kind of read a reactive view starts next. A change asks for one
- * (`ask`), and `bump` makes the view read again; the read then reads the
- * cache alone only when the change asked for that and nothing else of the
- * read moved: a new range or a new client always fetches.
+ * One view's reads, and its following of the cache, in one place, so the
+ * order no adapter may change is kept here (architecture §2.7, N84):
  *
- * A cache-only read waits while a fetching read of the view is in flight.
- * Latest-wins would drop the fetching read's answer for it, and only that
- * answer says whether the fetch failed or met invalid credentials; nothing
- * else would tell the view. The change is asked again once the last
- * fetching read has settled, since the change may have landed after that
- * read took its answer; the adapter keeps the failure labels across it
- * with {@link keepFailures}.
+ * 1. A read follows the client's handle, then reads (subscribe, then read).
+ * 2. It reads the cache alone only when a change asked for that and the
+ *    view's inputs (client state, range) did not move; otherwise it fetches.
+ * 3. A cache-only change that arrives while a fetching read is in flight
+ *    is held: reading now would replace the answer that alone says
+ *    whether the fetch failed.
+ * 4. A held change is released only after the last fetching read's answer
+ *    has resolved, and through the frame scheduler, so the framework has
+ *    applied that answer before the view reads again.
+ * 5. A cache-only answer keeps the failure labels of the answer before it.
+ *
+ * The adapter's part is only framework glue: calling `read` from its
+ * reactivity, applying latest-wins, and calling `dispose` on teardown.
  */
-export class NextRead {
-  readonly #bump: () => void;
+export class ViewReads {
+  readonly #options: ViewReadsOptions;
+  readonly #watch: ChangeWatch;
   #how: Reread | undefined;
   #last: readonly unknown[] | undefined;
   /** Fetching reads started and not settled yet. */
   #fetching = 0;
   /** A cache-only change arrived while a fetching read was in flight. */
   #held = false;
+  /** The answer of the latest read started, once it resolved. */
+  #landed: Promise<GetResult> | undefined;
+  #disposed = false;
 
-  constructor(bump: () => void) {
-    this.#bump = bump;
-  }
-
-  /** A change asks the view to read again, `how`; a fetch wins in a frame. */
-  ask(how: Reread): void {
-    if (how === "cache" && this.#how !== "fetch" && this.#fetching > 0) {
-      this.#held = true;
-      return;
-    }
-    this.#how = how === "fetch" || this.#how === "fetch" ? "fetch" : "cache";
-    this.#bump();
+  constructor(options: ViewReadsOptions) {
+    this.#options = options;
+    this.#watch = new ChangeWatch({
+      shown: options.shown,
+      reread: (how) => this.#ask(how),
+      ...(options.frame === undefined ? {} : { frame: options.frame }),
+    });
   }
 
   /**
-   * Starts the view's read over these inputs (the client's state and the
-   * range, compared by identity): whether it reads the cache alone, and
-   * the call that says it settled.
+   * Reads `range` through `cache` (the client's handle, or its promise).
+   * `inputs` are what the read depends on, compared by identity with the
+   * previous read's; `mode` forces a fetch or a cache-only read.
    */
-  start(...inputs: readonly unknown[]): StartedRead {
+  read(
+    cache: CacheHandle | Promise<CacheHandle>,
+    range: Range,
+    inputs: readonly unknown[],
+    mode: ReadMode = "auto",
+  ): ViewRead {
     const last = this.#last;
     const same =
       last !== undefined &&
       last.length === inputs.length &&
       inputs.every((input, i) => input === last[i]);
-    const cacheOnly = same && this.#how === "cache";
+    const cacheOnly =
+      mode === "cache" || (mode === "auto" && same && this.#how === "cache");
     this.#how = undefined;
     this.#last = inputs;
-    if (cacheOnly) return { cacheOnly, settled: () => {} };
-    this.#fetching++;
-    let done = false;
-    return {
-      cacheOnly,
-      settled: () => {
-        if (done) return;
-        done = true;
-        this.#fetching--;
-        if (this.#fetching > 0 || !this.#held) return;
-        this.#held = false;
-        this.ask("cache");
-      },
-    };
+    const get = () =>
+      Promise.resolve(cache).then((handle) => {
+        if (!this.#disposed) {
+          this.#watch.follow(handle);
+          this.#watch.started(!cacheOnly);
+        }
+        return handle.get(range, { cacheOnly });
+      });
+    const answer = cacheOnly
+      ? cacheOnlyAfter(this.#landed, get, this.#options.interval)
+      : get();
+    this.#landed = answer;
+    if (!cacheOnly) {
+      this.#fetching++;
+      const settled = () => this.#settled();
+      answer.then(settled, settled);
+    }
+    return { cacheOnly, answer };
+  }
+
+  /** Stops following the cache; a read scheduled for the frame is dropped. */
+  dispose(): void {
+    this.#disposed = true;
+    this.#watch.dispose();
+  }
+
+  #ask(how: Reread): void {
+    if (how === "cache" && this.#how !== "fetch" && this.#fetching > 0) {
+      this.#held = true;
+      return;
+    }
+    this.#how = how === "fetch" || this.#how === "fetch" ? "fetch" : "cache";
+    this.#options.reread();
+  }
+
+  #settled(): void {
+    this.#fetching--;
+    if (this.#fetching > 0 || !this.#held) return;
+    this.#held = false;
+    // Through the frame: by then the framework has applied the answer.
+    this.#watch.schedule("cache");
   }
 }
