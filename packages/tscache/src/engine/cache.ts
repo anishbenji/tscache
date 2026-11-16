@@ -121,6 +121,43 @@ export type CacheChange =
   | { kind: "version" }
   | { kind: "watermark" };
 
+/**
+ * What one mutating call changed for a reader of the cache (M7, §4.5), in
+ * slots. Each list is ascending, disjoint and has no two adjacent ranges.
+ */
+export interface ReaderChange {
+  /**
+   * The slots the call touched: a put's authority or batch span, a
+   * hydrate's parts, provisional slots included, whether or not values
+   * differed, and also when the write failed part-way.
+   */
+  written: SlotRange[];
+  /** The coverage the call actually withdrew; empty when `cleared`. */
+  removed: SlotRange[];
+  /** Every point and all coverage the cache held before the call went. */
+  cleared: boolean;
+}
+
+/** Adds `range` to an ascending, disjoint list, merging overlapping and adjacent ranges. */
+function include(list: SlotRange[], range: SlotRange): void {
+  let first = 0;
+  while (
+    first < list.length &&
+    (list[first] as SlotRange).end < range.start - 1
+  ) {
+    first++;
+  }
+  let { start, end } = range;
+  let next = first;
+  for (; next < list.length; next++) {
+    const existing = list[next] as SlotRange;
+    if (existing.start > end + 1) break;
+    start = Math.min(start, existing.start);
+    end = Math.max(end, existing.end);
+  }
+  list.splice(first, next - first, { start, end });
+}
+
 /** Hooks the owner may pass; each is optional. */
 export interface CacheStateHooks {
   /**
@@ -143,6 +180,20 @@ export interface CacheStateHooks {
    * independent of whether the call changed anything the disk holds.
    */
   onMutate?: () => void;
+  /**
+   * Asked once at the start of every mutating call: whether a reader
+   * listens to this cache (M7, §3.6). Only then is the call's
+   * `ReaderChange` collected, the withdrawn coverage computed and
+   * `onReaderChange` called; otherwise a change costs this one call.
+   */
+  hasReaders?: () => boolean;
+  /**
+   * Called once at the end of a mutating call that `hasReaders` gated in
+   * and that changed what a read returns, returned or thrown: after
+   * `onMutate` and after the call's `cacheCleared` (§3.3). Never by
+   * `restore`.
+   */
+  onReaderChange?: (change: ReaderChange) => void;
 }
 
 /** What `restore` applied (§4.10.5). */
@@ -212,6 +263,8 @@ export class CacheState {
   #finalizedUntil: number | undefined;
   /** First provisional slot; undefined when nothing is provisional. */
   #volatileFrom: number | undefined;
+  /** The running mutating call's reader change, while a reader listens. */
+  #reader: ReaderChange | undefined;
 
   constructor(config: ResolvedCacheConfig, hooks: CacheStateHooks = {}) {
     this.config = config;
@@ -273,14 +326,57 @@ export class CacheState {
 
   /**
    * Runs a mutating call that passed validation, then signals `onMutate`
-   * once, after its `onChange` calls, also when it throws (§4.10.4).
+   * once, after its `onChange` calls, also when it throws (§4.10.4); then
+   * `after` (the engine's `cacheCleared` of a manual clear); then, while a
+   * reader listens, the call's reader change, if it changed anything (M7).
    */
-  #mutating<T>(call: () => T): T {
+  #mutating<T>(call: () => T, after?: () => void): T {
+    const outer = this.#reader;
+    this.#reader =
+      this.#hooks.hasReaders?.() === true
+        ? { written: [], removed: [], cleared: false }
+        : undefined;
     try {
       return call();
     } finally {
-      this.#hooks.onMutate?.();
+      const change = this.#reader;
+      // A listener's own mutation of this cache, inside the call, has its own.
+      this.#reader = outer;
+      try {
+        this.#hooks.onMutate?.();
+        after?.();
+      } finally {
+        if (
+          change !== undefined &&
+          (change.cleared ||
+            change.written.length > 0 ||
+            change.removed.length > 0)
+        ) {
+          this.#hooks.onReaderChange?.(change);
+        }
+      }
     }
+  }
+
+  /** Records slots the running call touched, for its reader change. */
+  #wrote(slots: SlotRange | undefined): void {
+    if (this.#reader !== undefined && slots !== undefined) {
+      include(this.#reader.written, slots);
+    }
+  }
+
+  /**
+   * Subtracts coverage. While a reader listens, first records the coverage
+   * actually withdrawn: a `covered` lookup, never the requested slots (D12).
+   */
+  #withdraw(slots: SlotRange): void {
+    const reader = this.#reader;
+    if (reader !== undefined && !reader.cleared) {
+      for (const range of this.#coverage.covered(slots)) {
+        include(reader.removed, range);
+      }
+    }
+    this.#coverage.subtract(slots);
   }
 
   #putValid(
@@ -291,6 +387,8 @@ export class CacheState {
     const cleared = this.#applyVersion(meta.version);
     const wm = meta.finalizedUntil;
     const touched = authority ?? spanOf(points);
+    // Unclipped, and before the write: a failed write's prefix may be read.
+    this.#wrote(touched);
     const claim = claimOf(touched, wm?.slot);
     const slotWarnings = this.#writeOrWithdraw(
       points,
@@ -384,6 +482,7 @@ export class CacheState {
     if (wm !== undefined) this.#reportWatermark(this.#advance(wm.t, wm.slot));
     const parts = this.#unknownParts(valid.coverage);
     for (const part of parts) {
+      this.#wrote(part);
       this.#apply(valid, part);
       this.#hooks.onChange?.({ kind: "write", slots: part });
     }
@@ -400,7 +499,7 @@ export class CacheState {
     try {
       this.#store.put(points, part);
     } catch (error) {
-      this.#coverage.subtract(part);
+      this.#withdraw(part);
       this.#hooks.onChange?.({ kind: "remove", slots: part });
       throw error;
     }
@@ -458,22 +557,33 @@ export class CacheState {
   invalidate(range: Range): void {
     const slots = snapOut(range, this.config);
     this.#mutating(() => {
-      this.#coverage.subtract(slots);
+      this.#withdraw(slots);
       this.#hooks.onChange?.({ kind: "remove", slots });
     });
   }
 
-  /** Drops segments and coverage; config, version and watermark stay. */
-  clear(): void {
+  /**
+   * Drops segments and coverage; config, version and watermark stay.
+   * `notify` runs after the state call and before its reader change: the
+   * engine emits `cacheCleared` from it (§3.3).
+   */
+  clear(notify?: () => void): void {
     this.#mutating(() => {
       this.#clear();
       this.#hooks.onChange?.({ kind: "clear" });
-    });
+    }, notify);
   }
 
   #clear(): void {
     this.#store.clear();
     this.#coverage.clear();
+    const reader = this.#reader;
+    if (reader !== undefined) {
+      // Nothing written before the clear survives it.
+      reader.cleared = true;
+      reader.written.length = 0;
+      reader.removed.length = 0;
+    }
   }
 
   /** Sets the watermark exactly; moving it back makes points provisional again. */
@@ -499,7 +609,7 @@ export class CacheState {
       return this.#write(points, authority, limit);
     } catch (error) {
       if (touched !== undefined) {
-        this.#coverage.subtract(touched);
+        this.#withdraw(touched);
         this.#hooks.onChange?.({ kind: "remove", slots: touched });
       }
       // The write failure is the error the caller must see; a listener that
@@ -558,7 +668,7 @@ export class CacheState {
     // Nothing was provisional before, or the region grew: forget its coverage.
     if (this.#volatileFrom === undefined || slot < this.#volatileFrom) {
       removed = { start: slot, end: Number.MAX_SAFE_INTEGER };
-      this.#coverage.subtract(removed);
+      this.#withdraw(removed);
     }
     const changed = t !== this.#finalizedUntil;
     this.#finalizedUntil = t;
