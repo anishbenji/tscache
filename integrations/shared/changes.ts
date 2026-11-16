@@ -392,6 +392,8 @@ export class ViewReads {
   readonly #options: ViewReadsOptions;
   readonly #watch: ChangeWatch;
   #how: Reread | undefined;
+  /** The range `#how` was decided for: it applies to a read of that range only. */
+  #howFor: Range | undefined;
   /** What the previous read was of: its range's endpoints and its owner. */
   #last: { start: number; end: number; owner: unknown } | undefined;
   /** Holds a cache-only change while the latest read fetches. */
@@ -433,9 +435,15 @@ export class ViewReads {
       last.owner === owner &&
       last.start === range.start &&
       last.end === range.end;
+    const decided =
+      this.#howFor !== undefined &&
+      this.#howFor.start === range.start &&
+      this.#howFor.end === range.end;
     const cacheOnly =
-      mode === "cache" || (mode === "auto" && same && this.#how === "cache");
+      mode === "cache" ||
+      (mode === "auto" && same && decided && this.#how === "cache");
     this.#how = undefined;
+    this.#howFor = undefined;
     this.#last = { start: range.start, end: range.end, owner };
     const get = () =>
       Promise.resolve(cache).then((handle) => {
@@ -463,10 +471,15 @@ export class ViewReads {
     // A view that shows nothing records no decision: a change seen before
     // it went idle must not make its next read cache-only, since a removal
     // while idle is not seen (round 3, P1).
-    if (this.#options.shown() === undefined) return;
+    const shown = this.#options.shown();
+    if (shown === undefined) return;
     // A fetch already asked for this frame takes the change with it.
     if (this.#how !== "fetch" && this.#hold.holds(how)) return;
     this.#how = how === "fetch" || this.#how === "fetch" ? "fetch" : "cache";
+    // A decision made while the view showed one range never makes a read of
+    // another cache-only, however long the adapter takes to read (round 4,
+    // security lane: Angular reads a moved view only when its resource loads).
+    this.#howFor = { start: shown.start, end: shown.end };
     this.#options.reread(this.#how);
   }
 }

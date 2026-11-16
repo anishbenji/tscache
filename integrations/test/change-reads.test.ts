@@ -135,10 +135,15 @@ describe("ViewReads (PR-1, PR2-1)", () => {
     const reads: boolean[] = [];
     let range: Range | undefined = shown;
     let owner: unknown = "client";
+    // `false`: a change asks for a read the adapter does not start yet, as
+    // Angular after a move, whose resource has not loaded the new range.
+    let rereads = true;
     const views = new ViewReads({
       shown: () => range,
       interval: config.interval,
-      reread: () => read(),
+      reread: () => {
+        if (rereads) read();
+      },
       frame,
     });
     opened.push(views);
@@ -173,6 +178,10 @@ describe("ViewReads (PR-1, PR2-1)", () => {
       idle() {
         range = undefined;
       },
+      /** Whether a change's ask starts a read (see `rereads`). */
+      rereading(on: boolean) {
+        rereads = on;
+      },
       /** Gives the view a new owner, as a replaced client does. */
       own(next: unknown) {
         owner = next;
@@ -206,6 +215,29 @@ describe("ViewReads (PR-1, PR2-1)", () => {
     clock.run();
     // Not seen: the view shows nothing.
     await writer.invalidate(shown);
+    v.move(shown);
+    v.read();
+    await until(() => v.answers.length === 2);
+    expect(v.reads).toEqual([false, false]);
+  });
+
+  it("a change decision made for one range is not used for another (round 4, security lane)", async () => {
+    const { client } = await connected(true);
+    const clock = frames();
+    const v = view(client, clock.frame);
+    v.read();
+    await until(() => v.answers.length === 1);
+    // Moved to B, whose read the adapter has not started; a change over B.
+    const b = { start: 300, end: 400 };
+    v.rereading(false);
+    v.move(b);
+    const writer = await client.cache(config);
+    await writer.put({ timestamps: [350], fields: { v: [1], n: [1] } });
+    await until(() => clock.count() === 1);
+    clock.run();
+    v.idle();
+    await writer.invalidate(shown);
+    v.rereading(true);
     v.move(shown);
     v.read();
     await until(() => v.answers.length === 2);
