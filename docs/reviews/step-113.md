@@ -1,6 +1,6 @@
 # Step 113 — a dated history table for mutation runs
 
-Branch: `docs/113-mutation-history` · Reviewer: GPT-6.1 Sol · Rounds: 0 · Status: awaiting review
+Branch: `docs/113-mutation-history` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled (round 1: no findings)
 
 ## Scope
 
@@ -34,6 +34,12 @@ The per-area scores come from `reports/mutation/mutation.json`, with each file g
 ## Contract-test changes
 
 None.
+
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `1cb51d4`. No findings. The reviewer checked the scores and survivor updates against the Stryker report
+and its source commit `7acab39`; the round's `bun run ci` exited 0. Raw output: `.reviews/step-113/round-1.md`. The
+review has settled.
 
 ## Decision concerns
 
