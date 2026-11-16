@@ -114,8 +114,10 @@ with this sketch: its envelope is the cache record above and its segments the pa
 
 ## Design sketch: subscriptions (dirty notifications)
 
-**Proposed in detail in [`docs/design/m7-change-events.md`](design/m7-change-events.md) (step 92,
-finding M7), with its open choices as decision rows for the user.** It keeps this sketch's notify-only,
+**Specified in `docs/architecture.md` §2.7 (decisions N71–N84, user decision 65 of 2026-11-16) and
+built in step 114; where this sketch and the architecture differ, the architecture governs.** The
+proposal [`docs/design/m7-change-events.md`](design/m7-change-events.md) (step 92, finding M7) records
+the alternatives. It keeps this sketch's notify-only,
 cache-scoped event and changes three things: one event per mutating call rather than per macrotask; the
 payload separates written ranges from withdrawn coverage; and a reader re-reads a written range with
 `cacheOnly`, because a fetching re-read on every event loops wherever a cache has a volatile region.
