@@ -112,7 +112,10 @@ describe("liveFeed on a SharedWorker's cache", () => {
         };
       },
     };
-    const client = { mode: "shared" } as TscacheClient;
+    const client = {
+      mode: "shared",
+      features: new Set(["cacheChanged"]),
+    } as unknown as TscacheClient;
     const connection = {
       state: { status: "connected", client },
       cache: async () => cache,
@@ -156,6 +159,49 @@ describe("liveFeed on a SharedWorker's cache", () => {
     expect(put).not.toHaveBeenCalled();
     stop();
     expect(listener).toBeUndefined();
+  });
+});
+
+describe("liveFeed on a SharedWorker without cacheChanged (PR-5)", () => {
+  const stops: (() => void)[] = [];
+  afterEach(() => {
+    for (const stop of stops.splice(0)) stop();
+  });
+
+  it("redraws from the holder's messages, as before change events", async () => {
+    const on = vi.fn(() => () => {});
+    const put = vi.fn();
+    // A worker script from before change events: no features (N80).
+    const client = {
+      mode: "shared",
+      features: new Set(),
+    } as unknown as TscacheClient;
+    const connection = {
+      state: { status: "connected", client },
+      cache: async () => ({ put, get: vi.fn(), on }),
+      subscribe: () => () => {},
+    } as unknown as Connection;
+    const drawn: Range[] = [];
+    stops.push(
+      liveFeed({
+        connection,
+        config: market,
+        source: () => () => {},
+        onBatch: (span) => drawn.push(span),
+        onOpened: () => {},
+      }),
+    );
+    const holder = new BroadcastChannel(`tscache-reference:feed:${market.id}`);
+    stops.push(() => holder.close());
+    holder.postMessage({
+      kind: "batch",
+      batch: { timestamps: [60_000, 120_000], fields: {} },
+    });
+    await vi.waitFor(() => expect(drawn).toHaveLength(1));
+    expect(drawn).toEqual([{ start: 60_000, end: 120_000 }]);
+    // One cache: the holder's put already went in; nothing listens for events.
+    expect(put).not.toHaveBeenCalled();
+    expect(on).not.toHaveBeenCalled();
   });
 });
 
