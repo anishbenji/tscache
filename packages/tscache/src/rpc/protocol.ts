@@ -16,7 +16,7 @@ import {
   TscacheError,
   UnknownCacheError,
 } from "../errors";
-import type { Snapshot } from "../types";
+import type { Snapshot, WorkerFeature } from "../types";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -37,7 +37,13 @@ export type Op =
   | "updateAuth"
   | "dispose"
   /** §2.8 (N36); additive, so the protocol stays 1 (N37). */
-  | "hydrate";
+  | "hydrate"
+  /** §2.7 (N74); additive, announced in `hello.features` (N79). */
+  | "subscribe"
+  | "unsubscribe";
+
+/** The optional features this package's worker offers, sent in hello (N79). */
+export const WORKER_FEATURES: readonly WorkerFeature[] = ["cacheChanged"];
 
 export interface WireError {
   name: string;
@@ -58,6 +64,8 @@ export type Hello = {
   clientId: string;
   /** The Web Lock a SharedWorker holds for its lifetime (N32). */
   lock?: string;
+  /** Optional features the worker offers (N79); absent from older workers. */
+  features?: string[];
 };
 export type Init = { t: "init"; protocol: number; fetcher?: FetcherConfig };
 export type InitResult = { t: "init-ok" } | { t: "init-err"; error: WireError };

@@ -5,6 +5,7 @@
  */
 
 import { ProtocolMismatchError, show, TscacheError } from "../errors";
+import type { WorkerFeature } from "../types";
 import {
   type Evt,
   type FetcherConfig,
@@ -17,6 +18,7 @@ import {
   PROTOCOL_VERSION,
   type Req,
   type ToClient,
+  WORKER_FEATURES,
 } from "./protocol";
 
 interface Pending {
@@ -46,6 +48,17 @@ function protocolMismatch(protocol: unknown): ProtocolMismatchError {
       clientProtocol: PROTOCOL_VERSION,
       workerProtocol: typeof protocol === "number" ? protocol : Number.NaN,
     },
+  );
+}
+
+/**
+ * The features of a hello this client knows (N79): names it does not know
+ * are ignored, and a malformed field counts as none.
+ */
+function featuresOf(features: unknown): ReadonlySet<WorkerFeature> {
+  if (!Array.isArray(features)) return new Set();
+  return new Set(
+    WORKER_FEATURES.filter((feature) => features.includes(feature)),
   );
 }
 
@@ -98,6 +111,8 @@ export class PortClient {
   readonly clientId: string;
   /** hello.lock: the worker's lifetime lock, when it holds one (N32). */
   readonly lock: string | undefined;
+  /** hello.features this client knows (N79); empty for an older worker. */
+  readonly features: ReadonlySet<WorkerFeature>;
   readonly #port: MessagePortLike;
   readonly #pending = new Map<number, Pending>();
   readonly #listeners = new Set<(evt: Evt) => void>();
@@ -111,10 +126,12 @@ export class PortClient {
     port: MessagePortLike,
     clientId: string,
     lock: string | undefined,
+    features: ReadonlySet<WorkerFeature>,
   ) {
     this.#port = port;
     this.clientId = clientId;
     this.lock = lock;
+    this.features = features;
     this.#unlisten = listen(port, {
       onMessage: (data) => this.#receive(data),
       // The other side went away (worker died, server detached): nothing
@@ -142,6 +159,7 @@ export class PortClient {
       let stage: "hello" | "init" = "hello";
       let clientId = "";
       let lock: string | undefined;
+      let features: ReadonlySet<WorkerFeature> = new Set();
       let unlisten = () => {};
       // Cancelled by the caller (handshake timeout, worker error): stop
       // listening and close this side's port, so a late hello completes
@@ -167,6 +185,7 @@ export class PortClient {
         clientId = message.clientId;
         // Only a name can be queued on; anything else watches nothing.
         lock = typeof message.lock === "string" ? message.lock : undefined;
+        features = featuresOf(message.features);
         stage = "init";
         afterHello?.(lock);
         try {
@@ -181,7 +200,7 @@ export class PortClient {
         ok: () => {
           signal?.removeEventListener("abort", onAbort);
           unlisten();
-          resolve(new PortClient(port, clientId, lock));
+          resolve(new PortClient(port, clientId, lock, features));
         },
         fail: finish,
       };

@@ -256,10 +256,17 @@ function enlist(list: readonly Inflight[], added: readonly Inflight[]) {
   return out;
 }
 
+/**
+ * Runs an engine call on behalf of a request (§4.7): the RPC server names
+ * the request that caused the change events the call reports (N75).
+ */
+export type Caused = <T>(requestId: string | undefined, call: () => T) => T;
+
 export class Orchestrator {
   readonly #engine: Engine;
   readonly #auth: AuthState;
   readonly #broadcast: (evt: Evt) => void;
+  readonly #caused: Caused;
   /** Per cache, its fetches in flight, ascending by start (§4.9.1 rule 1). */
   readonly #inflight = new Map<string, Inflight[]>();
   /** cacheCleared count per cache: the version fence (N29). */
@@ -276,9 +283,15 @@ export class Orchestrator {
   #loading: Promise<void> | undefined;
   #context: unknown;
 
-  constructor(engine: Engine, broadcast: (evt: Evt) => void) {
+  /** `caused` wraps the put that applies a fetch, under the issuing get's id. */
+  constructor(
+    engine: Engine,
+    broadcast: (evt: Evt) => void,
+    caused: Caused = (_requestId, call) => call(),
+  ) {
     this.#engine = engine;
     this.#broadcast = broadcast;
+    this.#caused = caused;
     this.#auth = new AuthState(broadcast);
     engine.on("cacheCleared", ({ cacheId }) => {
       this.#generation.set(cacheId, this.#generationOf(cacheId) + 1);
@@ -674,7 +687,9 @@ export class Orchestrator {
   ): Outcome {
     let warnings: MergeWarning[];
     try {
-      ({ warnings } = this.#engine.put(cacheId, response, { range }));
+      ({ warnings } = this.#caused(requestId, () =>
+        this.#engine.put(cacheId, response, { range }),
+      ));
     } catch (error) {
       return { kind: "failed", error: describe(error) };
     }

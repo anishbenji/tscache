@@ -138,6 +138,18 @@ export interface ReaderChange {
   cleared: boolean;
 }
 
+/** A reader change that changed nothing yet. */
+function unchanged(): ReaderChange {
+  return { written: [], removed: [], cleared: false };
+}
+
+/** Whether a reader change changed what a read returns. */
+function changed(change: ReaderChange): boolean {
+  return (
+    change.cleared || change.written.length > 0 || change.removed.length > 0
+  );
+}
+
 /** Adds `range` to an ascending, disjoint list, merging overlapping and adjacent ranges. */
 function include(list: SlotRange[], range: SlotRange): void {
   let first = 0;
@@ -333,9 +345,7 @@ export class CacheState {
   #mutating<T>(call: () => T, after?: () => void): T {
     const outer = this.#reader;
     this.#reader =
-      this.#hooks.hasReaders?.() === true
-        ? { written: [], removed: [], cleared: false }
-        : undefined;
+      this.#hooks.hasReaders?.() === true ? unchanged() : undefined;
     try {
       return call();
     } finally {
@@ -346,12 +356,7 @@ export class CacheState {
         this.#hooks.onMutate?.();
         after?.();
       } finally {
-        if (
-          change !== undefined &&
-          (change.cleared ||
-            change.written.length > 0 ||
-            change.removed.length > 0)
-        ) {
+        if (change !== undefined && changed(change)) {
           this.#hooks.onReaderChange?.(change);
         }
       }

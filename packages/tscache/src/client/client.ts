@@ -13,8 +13,10 @@ import type {
   ClientOptions,
   HostingMode,
   ResolvedCacheConfig,
+  WorkerFeature,
 } from "../types";
 import { CacheHandle } from "./cache";
+import { ChangeSubscriptions } from "./changes";
 import { warnMerges } from "./dev";
 import { ClientEmitter } from "./events";
 import {
@@ -43,6 +45,12 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5000;
 export interface TscacheClient {
   /** Which hosting won the fallback chain. */
   readonly mode: HostingMode;
+  /**
+   * The optional features this client's worker offers (N79): empty for a
+   * worker script from before them (a stale cached script during a deploy).
+   * Without `'cacheChanged'`, its listeners are never called.
+   */
+  readonly features: ReadonlySet<WorkerFeature>;
   /** Get-or-create (N4). */
   cache(config: CacheConfig): Promise<CacheHandle>;
   /**
@@ -57,6 +65,8 @@ export interface TscacheClient {
   /**
    * Events, including workerLost (N32): the worker behind this client is
    * gone, every pending and later call rejects, and a new client is needed.
+   * A `cacheChanged` listener here hears every cache's changes; the first
+   * one subscribes this client to them and the last one's removal ends it.
    */
   on<E extends keyof ClientEvents>(
     event: E,
@@ -150,9 +160,16 @@ async function connect(
 
 class Client implements TscacheClient {
   readonly mode: HostingMode;
+  readonly features: ReadonlySet<WorkerFeature>;
   readonly #hosting: Hosting;
   readonly #port: PortClient;
   readonly #events = new ClientEmitter();
+  readonly #changes: ChangeSubscriptions;
+  /** client.on cacheChanged listeners, each with its subscription's release. */
+  readonly #changeListeners = new Map<
+    (payload: ClientEvents["cacheChanged"]) => void,
+    () => void
+  >();
   /** Why calls reject from now on: disposed, or the worker was lost. */
   #ended: string | undefined;
 
@@ -160,6 +177,8 @@ class Client implements TscacheClient {
     this.#hosting = hosting;
     this.#port = hosting.client;
     this.mode = hosting.mode;
+    this.features = this.#port.features;
+    this.#changes = new ChangeSubscriptions(this.#port);
     this.#port.on((evt) => {
       this.#warnFetched(evt);
       this.#events.receive(evt);
@@ -211,7 +230,12 @@ class Client implements TscacheClient {
       "cache",
       config,
     )) as ResolvedCacheConfig;
-    return new CacheHandle(resolved.id, this.#port, this.#events);
+    return new CacheHandle(
+      resolved.id,
+      this.#port,
+      this.#events,
+      this.#changes,
+    );
   }
 
   async clearAll(): Promise<void> {
@@ -228,7 +252,14 @@ class Client implements TscacheClient {
     event: E,
     fn: (payload: ClientEvents[E]) => void,
   ): () => void {
-    return this.#events.on(event, fn);
+    const off = this.#events.on(event, fn);
+    if (event !== "cacheChanged") return off;
+    const listener = fn as (payload: ClientEvents["cacheChanged"]) => void;
+    // As the emitter: a listener registered twice is one listener.
+    if (!this.#changeListeners.has(listener)) {
+      this.#changeListeners.set(listener, this.#changes.hold({ all: true }));
+    }
+    return () => this.off(event, fn);
   }
 
   off<E extends keyof ClientEvents>(
@@ -236,6 +267,12 @@ class Client implements TscacheClient {
     fn: (payload: ClientEvents[E]) => void,
   ): void {
     this.#events.off(event, fn);
+    if (event !== "cacheChanged") return;
+    const listener = fn as (payload: ClientEvents["cacheChanged"]) => void;
+    const release = this.#changeListeners.get(listener);
+    if (release === undefined) return;
+    this.#changeListeners.delete(listener);
+    release();
   }
 
   async dispose(): Promise<void> {
