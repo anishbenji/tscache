@@ -1,6 +1,6 @@
 # Step 114 — M7 change events
 
-Branch: `feat/114-m7-change-events` · Reviewer: none yet (the director runs the pre-review, the security lane and the Codex gate) · Rounds: 0 · Status: implemented, awaiting review · Verdict after triage: pending
+Branch: `feat/114-m7-change-events` · Reviewer: GPT-6.1 Sol (high) · Rounds: 4 · Status: settled (round 4: no findings)
 
 ## Scope
 
@@ -289,6 +289,10 @@ R3-1's fix checked against every adapter; no P0 or P1. One P2, accepted and fixe
 ### Security lane run 4 (Claude), on `48b83b3`
 
 No findings. Outside the lane it noted a second path to the R3-1 failure: Angular's change read returns without reading after a move (PR6-1), so a cache-only decision made while the view showed B stayed recorded; after going idle, an invalidate of A, and a return to A, the read of A used it and skipped the fetch. Accepted and fixed by the director in the shared code: `ViewReads` records the range a decision was made for, and a read uses it only for that range. Test "a change decision made for one range is not used for another (round 4, security lane)" fails on `48b83b3` (`[false, true]`) and passes. This closes the class: no adapter's timing can carry a decision to another range.
+
+## Round 4 — reviewer verdict: merge
+
+GPT-6.1 Sol (high) on `57db97c`: no findings; every accepted finding of rounds 1–3 and the pre-reviews checked as fixed. The round's `bun run ci` exited 0. Raw output: `.reviews/step-114/round-4.md`. The review has settled.
 
 ## Decision concerns
 
