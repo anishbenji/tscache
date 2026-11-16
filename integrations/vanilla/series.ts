@@ -73,7 +73,7 @@ export function series(
     const reading = views.read(
       connection.cache(state.client, config),
       asked,
-      [state, asked],
+      state,
       mode,
     );
     if (!reading.cacheOnly) showing = request;

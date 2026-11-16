@@ -102,7 +102,7 @@ export function createSeries(
       // callbacks of every run that ever waited on it.
       if (current.status === "connecting") return new Promise<never>(() => {});
       return views
-        .read(connection.cache(current.client, config), asked, [current, asked])
+        .read(connection.cache(current.client, config), asked, current)
         .answer.then(
           (result) => ({ range: asked, result }),
           (error: unknown) => {

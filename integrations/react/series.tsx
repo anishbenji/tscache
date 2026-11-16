@@ -113,8 +113,16 @@ export function useSeries(config: CacheConfig, range: Range): GetResult {
   // Deferred like the inputs above: a change's read suspends in a
   // background render, never back to the Suspense fallback.
   const recorded = useDeferredValue(latest);
+  // A change applies only to the view it was recorded for: the same range,
+  // the same client (a replaced worker is a new view) and the same cache.
+  const configKey = keyOf(cache);
   const over = (c: Changed) =>
-    c.start === start && c.end === end ? c : UNCHANGED;
+    c.start === start &&
+    c.end === end &&
+    c.owner === snapshot &&
+    c.config === configKey
+      ? c
+      : UNCHANGED;
 
   let read: Read | undefined;
   if (connection !== null) {
@@ -145,9 +153,20 @@ interface Changed {
   how: Reread;
   start: number;
   end: number;
+  /** The connection state the change was heard on: its client. */
+  owner: Snapshot | undefined;
+  /** The cache's config, as `keyOf` gives it. */
+  config: string;
 }
 
-const UNCHANGED: Changed = { n: 0, how: "fetch", start: 0, end: 0 };
+const UNCHANGED: Changed = {
+  n: 0,
+  how: "fetch",
+  start: 0,
+  end: 0,
+  owner: undefined,
+  config: "",
+};
 
 /**
  * Follows the connected client's cache for the range on screen; returns
@@ -194,7 +213,8 @@ function useChanges(
           reading.answer.then(release, release);
           return;
         }
-        setChanged((previous) => ({ n: previous.n + 1, how, ...range }));
+        const view = { owner: snapshot, config: keyOf(config), ...range };
+        setChanged((previous) => ({ n: previous.n + 1, how, ...view }));
       },
       catchUp: true,
     });

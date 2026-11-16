@@ -68,8 +68,11 @@ overtaken), `client-only.ts`, and `ssr-server.ts` with `ssr-browser.ts`.
 
 ## Checks and limits
 
-The shared core and the vanilla snippet run under Vitest (`integrations/test/`). The framework
-snippets are type-checked only in CI; during step ⑭ each was also run in throwaway probes (the server
+The shared core and the vanilla snippet run under Vitest (`integrations/test/`), and so do the Vue,
+Solid and React series adapters, without a DOM: Vue through its custom renderer, Solid's browser
+build (its reactive core needs no DOM), React through `react-dom/client` on a stub container (step
+114). The other framework snippets are type-checked only in CI; during step ⑭ each was also run in
+throwaway probes (the server
 half under Node or Bun, the browser half in Chromium) whose results are recorded in
 `docs/reviews/step-14.md`. Svelte and Angular templates, and the Svelte component in its README, are
 not type-checked.

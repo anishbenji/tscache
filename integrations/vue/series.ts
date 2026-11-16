@@ -139,7 +139,7 @@ export function useSeries(
         const read = views.read(
           connection.cache(current.client, config),
           plain,
-          [current, plain],
+          current,
         );
         // A read after a change keeps the answer it replaces as current.
         if (!read.cacheOnly) pending.value = true;

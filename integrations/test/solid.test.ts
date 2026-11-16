@@ -22,6 +22,9 @@ interface Gate {
   hold?: Promise<void>;
   entered?: () => void;
   fail: boolean;
+  /** Answer with one bar and a watermark inside the view, counting fetches. */
+  tail?: boolean;
+  fetches?: number;
 }
 const gate = (): Gate =>
   (globalThis as unknown as { __m7solid: Gate }).__m7solid;
@@ -38,6 +41,14 @@ const fetcher = `data:text/javascript,${encodeURIComponent(`
         await hold;
       }
       if (g.fail) throw new Error("backend down");
+      if (g.tail) {
+        g.fetches = (g.fetches ?? 0) + 1;
+        return {
+          timestamps: [190],
+          fields: { v: [1], n: [1] },
+          meta: { finalizedUntil: 150 },
+        };
+      }
       return { timestamps: [], fields: { v: [], n: [] } };
     },
   };
@@ -121,5 +132,47 @@ describe("Solid createSeries follows its cache", () => {
       "fetch-failed",
       "fetch-failed",
     ]);
+  });
+
+  it("a derived range accessor reads its own change from the cache, never fetching in a loop (round 1, P0)", async () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      queued.push(callback);
+      return queued.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      queued[id - 1] = () => {};
+    });
+    gate().tail = true;
+    const connection = connect(() =>
+      createClient({ mode: "in-process", fetcher: { module: fetcher } }),
+    );
+    teardown.push(() => connection.dispose());
+    const shown: Answer[] = [];
+    createRoot((dispose) => {
+      teardown.push(dispose);
+      // A new object on every run: the same view by value.
+      const series = createSeries(connection, config, () => ({
+        start: 100,
+        end: 200,
+      }));
+      createEffect(
+        () => series(),
+        (answer) => {
+          shown.push(answer);
+        },
+      );
+    });
+    // The first read fetches; its write (provisional from 150) sends the
+    // event whose frame is now queued: the answer arrives after the event.
+    await until(() => shown.length === 1);
+    expect(gate().fetches).toBe(1);
+    expect(queued).toHaveLength(1);
+    for (const callback of queued.splice(0)) callback(0);
+    flush();
+    await until(() => shown.length === 2);
+    // A cache-only read: no fetch, so no write and no further event.
+    expect(gate().fetches).toBe(1);
+    expect(queued).toHaveLength(0);
   });
 });

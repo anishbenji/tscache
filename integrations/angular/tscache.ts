@@ -216,10 +216,11 @@ export function cacheResource(
     // handled, so by then the state, hence the params, have changed, and
     // resource() drops the rejection with the request it belongs to.
     loader: ({ params }) =>
-      views.read(tscache.cache(params.client, config), params.range, [
-        params.client,
+      views.read(
+        tscache.cache(params.client, config),
         params.range,
-      ]).answer,
+        params.client,
+      ).answer,
   });
   return withPreviousValue(live, tscache.takeServerRead(config)?.result);
 }

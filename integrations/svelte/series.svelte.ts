@@ -111,7 +111,7 @@ export class Series {
       const read = ++this.#reads;
       const latest = () => read === this.#reads && this.range === range;
       views
-        .read(connection.cache(state.client, config), range, [state, range])
+        .read(connection.cache(state.client, config), range, state)
         .answer.then(
           (result) => {
             if (latest()) this.#answer = { range, result };

@@ -125,12 +125,18 @@ describe("ViewReads (PR-1, PR2-1)", () => {
    * A view on ViewReads with only the glue an adapter adds: reading again
    * when asked, and latest-wins over the answers.
    */
-  function view(client: TscacheClient, frame: Frame) {
+  function view(
+    client: TscacheClient,
+    frame: Frame,
+    { fresh = false }: { fresh?: boolean } = {},
+  ) {
     const answers: GetResult[] = [];
     let latest = 0;
     const reads: boolean[] = [];
+    let range: Range = shown;
+    let owner: unknown = "client";
     const views = new ViewReads({
-      shown: () => shown,
+      shown: () => range,
       interval: config.interval,
       reread: () => read(),
       frame,
@@ -138,20 +144,89 @@ describe("ViewReads (PR-1, PR2-1)", () => {
     opened.push(views);
     function read(): void {
       const request = ++latest;
-      const started = views.read(client.cache(config), shown, [
-        "client",
-        shown,
-      ]);
+      // `fresh`: a new object with the same endpoints for every read, as a
+      // derived accessor gives.
+      const asked = fresh ? { ...range } : range;
+      const started = views.read(client.cache(config), asked, owner);
       reads.push(started.cacheOnly);
       started.answer.then(
         (result) => {
           if (request === latest) answers.push(result);
         },
-        (error: unknown) => failures.push(error),
+        // As an adapter: a dropped read's failure is not the view's.
+        (error: unknown) => {
+          if (request === latest) failures.push(error);
+        },
       );
     }
-    return { read, answers, reads };
+    return {
+      read,
+      answers,
+      reads,
+      /** Moves the view to `next`. */
+      move(next: Range) {
+        range = next;
+      },
+      /** Gives the view a new owner, as a replaced client does. */
+      own(next: unknown) {
+        owner = next;
+      },
+    };
   }
+
+  it("a fresh range object with the same endpoints is the same view (round 1, P0)", async () => {
+    const { client } = await connected(true);
+    const clock = frames();
+    const v = view(client, clock.frame, { fresh: true });
+    v.read();
+    await until(() => v.answers.length === 1);
+    const writer = await client.cache(config);
+    await writer.put({ timestamps: [150], fields: { v: [1], n: [1] } });
+    clock.run();
+    await until(() => v.answers.length === 2);
+    expect(v.reads).toEqual([false, true]);
+  });
+
+  it("a new owner at the same range fetches (a replaced client)", async () => {
+    const { client } = await connected(true);
+    const clock = frames();
+    const v = view(client, clock.frame);
+    v.read();
+    await until(() => v.answers.length === 1);
+    const writer = await client.cache(config);
+    await writer.put({ timestamps: [150], fields: { v: [1], n: [1] } });
+    v.own("another client");
+    clock.run();
+    await until(() => v.answers.length === 2);
+    expect(v.reads).toEqual([false, false]);
+  });
+
+  it("a fetch that latest-wins dropped holds no change (round 1, P1)", async () => {
+    const { client } = await connected(true);
+    const clock = frames();
+    const v = view(client, clock.frame);
+    const writer = await client.cache(config);
+    const elsewhere = { start: 300, end: 400 };
+    // The second view's range is covered: its read needs no fetch.
+    await writer.put(
+      { timestamps: [300], fields: { v: [1], n: [1] } },
+      { range: elsewhere },
+    );
+    const held = holdNextFetch();
+    v.read(); // the first range: its fetch stays held
+    await held.entered;
+    v.move(elsewhere);
+    v.read();
+    await until(() => v.answers.length === 1);
+    await writer.put({ timestamps: [310], fields: { v: [2], n: [1] } });
+    expect(clock.count()).toBe(1);
+    clock.run();
+    // Read again at once, while the dropped fetch is still held.
+    await until(() => v.answers.length === 2);
+    expect(v.reads).toEqual([false, false, true]);
+    expect(Array.from(v.answers[1]?.timestamps ?? [])).toEqual([300, 310]);
+    held.release();
+  });
 
   it.each([
     {
@@ -368,6 +443,37 @@ describe("vanilla series and its own reads", () => {
     await until(() => answers.length === 2);
     expect(Array.from(answers[1]?.result.timestamps ?? [])).toEqual([150]);
     expect(clock.count()).toBe(0);
+  });
+
+  it("an overtaken show() fetch holds no change in the range now shown (round 1, P1)", async () => {
+    const { connection, client } = await connected(true);
+    const answers: Answer[] = [];
+    const clock = frames();
+    const chart = series(connection, {
+      config,
+      render: (answer) => answers.push(answer),
+      fail: (error) => failures.push(error),
+      frame: clock.frame,
+    });
+    opened.push(chart);
+    const writer = await client.cache(config);
+    const elsewhere = { start: 300, end: 400 };
+    await writer.put(
+      { timestamps: [300], fields: { v: [1], n: [1] } },
+      { range: elsewhere },
+    );
+    const held = holdNextFetch();
+    chart.show(shown);
+    await held.entered;
+    chart.show(elsewhere);
+    await until(() => answers.length === 1);
+    await writer.put({ timestamps: [310], fields: { v: [2], n: [1] } });
+    expect(clock.count()).toBe(1);
+    clock.run();
+    // The range on screen reads again while the first fetch is still held.
+    await until(() => answers.length === 2);
+    expect(Array.from(answers[1]?.result.timestamps ?? [])).toEqual([300, 310]);
+    held.release();
   });
 
   it("a change while show() fetches keeps the fetch's failure on screen (PR-1)", async () => {
