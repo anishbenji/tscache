@@ -106,7 +106,6 @@ function spanOf({ timestamps }: PutBatch): Range {
   };
 }
 
-/** The time a cacheChanged event's written ranges cover, ascending and disjoint. */
 /**
  * Whether the client's cache tells this tab of every tab's writes: one
  * SharedWorker cache whose worker offers cacheChanged. A worker script
@@ -117,6 +116,7 @@ function evented(client: TscacheClient): boolean {
   return client.mode === "shared" && client.features.has("cacheChanged");
 }
 
+/** The time a cacheChanged event's written ranges cover, ascending and disjoint. */
 function hullOf(written: readonly Range[]): Range | undefined {
   const first = written[0];
   const last = written[written.length - 1];
