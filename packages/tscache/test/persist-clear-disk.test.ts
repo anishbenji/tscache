@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { clearDisk } from "../src/persist/clear-disk";
 import type { PersistStore } from "../src/persist/store";
 import { deferred, MemoryStore } from "./persist-memory-store";
@@ -219,5 +219,33 @@ describe("clearDisk (§4.10.7, N66)", () => {
     expect(cleared.done).toBe(true);
     // Attempts at 0, 100, 200, 300 and 400 ms.
     expect(clearCalls(store)).toBe(5);
+  });
+
+  it("a retry whose timer runs at the deadline, before the deadline's timer, starts no clear", async () => {
+    vi.useFakeTimers({ now: 0 });
+    // The fake clock runs every timer on time. A thread busy from 1000 ms to
+    // the deadline is modelled by a lag on the clock clearDisk reads: the
+    // 1000 ms retry timer then runs when that clock reads 5000 ms, while the
+    // deadline's own timer is still queued behind it.
+    const fakeNow = performance.now.bind(performance);
+    let lag = 0;
+    const now = vi.spyOn(performance, "now");
+    now.mockImplementation(() => fakeNow() + lag);
+    onTestFinished(() => now.mockRestore());
+    const { store, close } = seeded();
+    store.fail("clearAll", Number.POSITIVE_INFINITY);
+    const cleared = tracked(clearDisk(async () => store));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(clearCalls(store)).toBe(1);
+    lag = 4000;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(cleared.done).toBe(true);
+    // N61: no attempt starts at or after the deadline.
+    expect(clearCalls(store)).toBe(1);
+    expect(close).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(clearCalls(store)).toBe(1);
+    expect(store.records("persist").pages).toHaveLength(1);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

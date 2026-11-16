@@ -142,73 +142,29 @@ export function fetcherUrl(): FetcherUrlPlugin {
     // environment, but only the browser one builds workers. The flag keeps a
     // watch build's rebuilds to one warning.
     buildStart() {
-      const { mode, config } = this.environment;
-      if (warned || mode !== "build" || config.consumer !== "client") return;
-      if (config.worker.format !== "iife") return;
+      if (warned || !buildsIifeWorker(this.environment)) return;
       warned = true;
-      config.logger.warn(IIFE_WARNING);
+      this.environment.config.logger.warn(IIFE_WARNING);
     },
     async resolveId(source, importer) {
       if (!source.endsWith(QUERY)) return undefined;
       const target = source.slice(0, -QUERY.length);
       const resolved = await this.resolve(target, importer, { skipSelf: true });
       if (!resolved) return undefined;
-      let n = files.indexOf(resolved.id);
-      if (n < 0) n = files.push(resolved.id) - 1;
-      return `${PREFIX}${n}`;
+      return `${PREFIX}${fileNumber(files, resolved.id)}`;
     },
     load(id) {
       if (!id.startsWith(PREFIX)) return undefined;
       const file = files[Number(id.slice(PREFIX.length))];
       if (file === undefined) return undefined;
-      if (serve) {
-        // Server code gets the absolute path, which Vite's module runner
-        // resolves as it is (it does not decode URLs); the browser, an
-        // encoded URL under the base.
-        return this.environment.config.consumer === "server"
-          ? `export default ${JSON.stringify(file)};`
-          : `export default ${JSON.stringify(devUrl(base, file))};`;
-      }
-      const ref = this.emitFile({
-        type: "chunk",
-        id: file,
-        preserveSignature: "strict",
-      });
-      chunks.add(ref);
-      return `export default import.meta.ROLLUP_FILE_URL_${ref};`;
+      if (serve) return devModule(this.environment.config.consumer, base, file);
+      return chunkModule(this, file, chunks);
     },
     // No chunk the worker runs (the fetcher's and every chunk it reaches)
     // may carry Vite's preload helper; its event name marks it in any form.
     generateBundle(_options, bundle) {
-      const fetchers = Object.entries(bundle)
-        .filter(
-          ([, chunk]) =>
-            chunk.type === "chunk" &&
-            typeof chunk.facadeModuleId === "string" &&
-            files.includes(chunk.facadeModuleId),
-        )
-        .map(([name]) => name);
-      for (const fetcher of fetchers) {
-        const pending = [fetcher];
-        const seen = new Set<string>();
-        for (
-          let name = pending.pop();
-          name !== undefined;
-          name = pending.pop()
-        ) {
-          if (seen.has(name)) continue;
-          seen.add(name);
-          const chunk = bundle[name];
-          if (chunk?.code?.includes("vite:preloadError")) {
-            this.error(
-              `The fetcher ${fetcher} uses import(): Vite wraps it in a helper (in ${name}) that needs document and window, which tscache's worker lacks. Import the fetcher's dependencies statically, or build the fetcher on its own and pass that file's URL instead of using ?fetcher (see "Building the fetcher on its own" in tscache's worker setup guide).`,
-            );
-          }
-          pending.push(
-            ...(chunk?.imports ?? []),
-            ...(chunk?.dynamicImports ?? []),
-          );
-        }
+      for (const fetcher of fetcherChunks(bundle, files)) {
+        rejectPreloadHelper(this, bundle, fetcher);
       }
     },
     // Vite renders a file URL as a path under the base, which only a
@@ -219,4 +175,91 @@ export function fetcherUrl(): FetcherUrlPlugin {
       return serverFileUrl(relativePath);
     },
   };
+}
+
+/** The number of `file` in `files`, which it joins when new. */
+function fileNumber(files: string[], file: string): number {
+  const n = files.indexOf(file);
+  return n < 0 ? files.push(file) - 1 : n;
+}
+
+/** Whether a build of `environment` builds workers as IIFE. */
+function buildsIifeWorker(
+  environment: BuildStartContext["environment"],
+): boolean {
+  const { mode, config } = environment;
+  if (mode !== "build" || config.consumer !== "client") return false;
+  return config.worker.format === "iife";
+}
+
+/**
+ * The build's module for fetcher `file`: the file is emitted as a chunk of
+ * its own, its signature kept, and its reference recorded in `chunks`.
+ */
+function chunkModule(
+  context: Context,
+  file: string,
+  chunks: Set<string>,
+): string {
+  const ref = context.emitFile({
+    type: "chunk",
+    id: file,
+    preserveSignature: "strict",
+  });
+  chunks.add(ref);
+  return `export default import.meta.ROLLUP_FILE_URL_${ref};`;
+}
+
+/**
+ * The dev server's module for fetcher `file`. Server code gets the
+ * absolute path, which Vite's module runner resolves as it is (it does not
+ * decode URLs); the browser, an encoded URL under the base.
+ */
+function devModule(
+  consumer: "client" | "server",
+  base: string,
+  file: string,
+): string {
+  return consumer === "server"
+    ? `export default ${JSON.stringify(file)};`
+    : `export default ${JSON.stringify(devUrl(base, file))};`;
+}
+
+/** The names of the bundle's chunks that are fetcher entries. */
+function fetcherChunks(
+  bundle: Record<string, OutputChunkLike>,
+  files: readonly string[],
+): string[] {
+  return Object.entries(bundle)
+    .filter(
+      ([, chunk]) =>
+        chunk.type === "chunk" &&
+        typeof chunk.facadeModuleId === "string" &&
+        files.includes(chunk.facadeModuleId),
+    )
+    .map(([name]) => name);
+}
+
+/**
+ * Fails the build when chunk `fetcher`, or any chunk it reaches by a
+ * static or dynamic import, carries Vite's preload helper.
+ */
+function rejectPreloadHelper(
+  context: { error(message: string): never },
+  bundle: Record<string, OutputChunkLike>,
+  fetcher: string,
+): void {
+  const pending = [fetcher];
+  const seen = new Set<string>();
+  for (let name = pending.pop(); name !== undefined; name = pending.pop()) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const chunk = bundle[name];
+    if (chunk?.code?.includes("vite:preloadError")) {
+      context.error(
+        `The fetcher ${fetcher} uses import(): Vite wraps it in a helper (in ${name}) that needs document and window, which tscache's worker lacks. Import the fetcher's dependencies statically, or build the fetcher on its own and pass that file's URL instead of using ?fetcher (see "Building the fetcher on its own" in tscache's worker setup guide).`,
+      );
+    }
+    pending.push(...(chunk?.imports ?? []), ...(chunk?.dynamicImports ?? []));
+  }
 }

@@ -1,5 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { type Kill, Processes } from "./processes";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { type Kill, LAUNCHER_GRACE_MS, Processes, STOP_MS } from "./processes";
 
 // The demo launcher's process registry (step 30 R4-1): a group is signalled
 // only while it is registered and has members, and is retired, never to be
@@ -33,6 +37,16 @@ function signalsTo(calls: Call[], group: number): (NodeJS.Signals | 0)[] {
 function probesOf(calls: Call[], group: number): number {
   return calls.filter((call) => call.pid === -group && call.signal === 0)
     .length;
+}
+
+/** Whether process group `group` still has a member. */
+function groupAlive(group: number): boolean {
+  try {
+    process.kill(-group, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function running(pid: number): boolean {
@@ -190,6 +204,93 @@ describe("Processes", () => {
     await expect.poll(() => started.output()).toContain("out\n");
     expect(started.output()).toContain("warn\n");
     await processes.stop();
+  });
+
+  it("never sends SIGKILL to a launcher still within its own stop, and resolves once it and its groups are gone (step 110)", async () => {
+    // A launcher as scripts/demo.ts is one: on SIGTERM it stops its own
+    // groups and then exits. This one begins that stop only when the test
+    // sends SIGUSR2, so it stands in for a launcher whose stop takes as
+    // long as the test likes; the test lets STOP_MS pass, the longest a
+    // launcher's own stop takes. A SIGKILL to the launcher before then would
+    // leave its server running in a group the SIGKILL does not reach.
+    const dir = await mkdtemp(join(tmpdir(), "tscache-processes-"));
+    const script = join(dir, "launcher.ts");
+    const module = fileURLToPath(new URL("./processes.ts", import.meta.url));
+    await writeFile(
+      script,
+      `import { Processes } from ${JSON.stringify(module)};
+const processes = new Processes();
+process.on("SIGTERM", () => {});
+process.on("SIGUSR2", async () => {
+  await processes.stop();
+  process.exit(143);
+});
+const server = processes.start(["sleep", "60"], { cwd: process.cwd() });
+console.log(server.group);
+`,
+    );
+    try {
+      const { kill, calls } = recording();
+      const processes = new Processes(kill, { graceMs: LAUNCHER_GRACE_MS });
+      const launcher = processes.start(["bun", script], { cwd, capture: true });
+      const group = launcher.group;
+      if (group === undefined) throw new Error("the launcher did not start");
+      leftovers.push(group);
+      // Printed once its handlers are installed; echoedPid registers the
+      // server, which leads its own group, for afterEach to kill.
+      const server = await echoedPid(launcher.output);
+      vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "Date"] });
+      const stopped = processes.stop();
+      await vi.advanceTimersByTimeAsync(STOP_MS);
+      expect(signalsTo(calls, group)).toEqual(["SIGTERM"]);
+      expect(groupAlive(group)).toBe(true);
+      process.kill(group, "SIGUSR2");
+      expect(await launcher.exited).toBe(143);
+      // A probe within the grace left finds the launcher's group empty.
+      await vi.advanceTimersByTimeAsync(LAUNCHER_GRACE_MS - STOP_MS - 1);
+      await stopped;
+      expect(signalsTo(calls, group)).toEqual(["SIGTERM"]);
+      expect(groupAlive(server)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sends SIGKILL once a custom grace has passed, says so, and resolves with every group retired (step 110)", async () => {
+    // Ignores SIGTERM, as a launcher stalled past its grace does; says
+    // "ready" once it does, so the SIGTERM below cannot come first.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { kill, calls } = recording();
+    const processes = new Processes(kill, { graceMs: LAUNCHER_GRACE_MS });
+    const started = processes.start(
+      ["sh", "-c", 'trap "" TERM; echo ready; exec sleep 60'],
+      { cwd, capture: true },
+    );
+    const group = started.group;
+    if (group === undefined) throw new Error("sh did not start");
+    leftovers.push(group);
+    try {
+      await expect.poll(() => started.output()).toBe("ready\n");
+      vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "Date"] });
+      const stopped = processes.stop();
+      await vi.advanceTimersByTimeAsync(LAUNCHER_GRACE_MS - 1);
+      expect(signalsTo(calls, group)).toEqual(["SIGTERM"]);
+      expect(errors).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(signalsTo(calls, group)).toEqual(["SIGTERM", "SIGKILL"]);
+      expect(errors).toHaveBeenCalledTimes(1);
+      expect(String(errors.mock.calls[0]?.[0])).toContain(String(group));
+      expect(await started.exited).toBe(null);
+      // The next probe finds the group empty.
+      await vi.runOnlyPendingTimersAsync();
+      await stopped;
+      expect(processes.groups.size).toBe(0);
+      expect(errors).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      errors.mockRestore();
+    }
   });
 
   it("refuses to start once stopping", async () => {

@@ -11,7 +11,8 @@
 // on the demo's ports (DEMO_PORT moves them), and refuses to start when one is
 // taken, such as by a `bun run demo` already running. It stops the demo at
 // the end; Ctrl-C, SIGTERM or SIGHUP stops it, Chromium and everything the
-// demo started too. Every scenario runs on the vanilla reference
+// demo started too (best effort past a launcher that does not stop within
+// LAUNCHER_GRACE_MS: see `processes` below). Every scenario runs on the vanilla reference
 // client in a fresh browser context, so a fresh SharedWorker. The recorded
 // page is a stage this script serves: a caption, a strip of the app's
 // mock-backend counters since the scenario began, and the app itself in one
@@ -39,7 +40,7 @@ import { Backend } from "./backend";
 import { demoPorts, hubPort } from "./catalog";
 import { HUB_LINE, stopping } from "./lines";
 import { Owner } from "./owned";
-import { Processes, type Started } from "./processes";
+import { LAUNCHER_GRACE_MS, Processes, type Started } from "./processes";
 import { request } from "./request";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -627,6 +628,49 @@ interface Clip {
   notes: string[];
 }
 
+/**
+ * The Recording `scenario` drives on the stage's `page`. `minute` is the
+ * quiet minute a live scenario started in, `notes` collects what it
+ * observed, and `mark` runs when it marks where the published clip starts.
+ */
+function recordingOn(
+  page: Page,
+  scenario: Scenario,
+  minute: number | undefined,
+  notes: string[],
+  mark: () => void,
+): Recording {
+  return {
+    page,
+    async caption(text) {
+      await page.evaluate(
+        (t) => (globalThis as unknown as StageWindow).stageCaption(t),
+        text,
+      );
+    },
+    async open(i, path) {
+      const url = new URL(path, appOrigin).href;
+      await page.locator(`#tab-${i}`).evaluate((frame, src) => {
+        (frame as unknown as { src: string }).src = src;
+      }, url);
+      return page.frameLocator(`#tab-${i}`);
+    },
+    hold: (ms) => Bun.sleep(ms),
+    async start() {
+      mark();
+    },
+    note: (text) => notes.push(text),
+    claim(ok, failure) {
+      if (minute !== undefined && Math.floor(Date.now() / MINUTE) !== minute) {
+        throw new Error(
+          `${scenario.name} ran past the minute it started in, so its counts cannot be checked`,
+        );
+      }
+      if (!ok) throw new Error(failure);
+    },
+  };
+}
+
 async function record(
   browser: Browser,
   stage: ReturnType<typeof startStage>,
@@ -654,35 +698,9 @@ async function record(
   let from: number | undefined;
   await page.goto(stage.origin);
   await resetCounters(page);
-  const recording: Recording = {
-    page,
-    async caption(text) {
-      await page.evaluate(
-        (t) => (globalThis as unknown as StageWindow).stageCaption(t),
-        text,
-      );
-    },
-    async open(i, path) {
-      const url = new URL(path, appOrigin).href;
-      await page.locator(`#tab-${i}`).evaluate((frame, src) => {
-        (frame as unknown as { src: string }).src = src;
-      }, url);
-      return page.frameLocator(`#tab-${i}`);
-    },
-    hold: (ms) => Bun.sleep(ms),
-    async start() {
-      from = at();
-    },
-    note: (text) => notes.push(text),
-    claim(ok, failure) {
-      if (minute !== undefined && Math.floor(Date.now() / MINUTE) !== minute) {
-        throw new Error(
-          `${scenario.name} ran past the minute it started in, so its counts cannot be checked`,
-        );
-      }
-      if (!ok) throw new Error(failure);
-    },
-  };
+  const recording = recordingOn(page, scenario, minute, notes, () => {
+    from = at();
+  });
   try {
     await scenario.run(recording);
   } finally {
@@ -890,7 +908,15 @@ async function waitForHub(demo: Started): Promise<void> {
   throw new Error(`the demo hub did not answer on ${hubOrigin}`);
 }
 
-const processes = new Processes();
+/**
+ * The registry the demo's launcher is started in, with LAUNCHER_GRACE_MS.
+ * The launcher stops its app servers on SIGTERM and exits only once they are
+ * gone, and the grace covers that whole stop (step 110). The SIGKILL after it
+ * is a best-effort backstop for a launcher that stalls: it reaches the
+ * launcher alone, so app servers may outlive the recorder, and Processes says
+ * so on stderr.
+ */
+const processes = new Processes(undefined, { graceMs: LAUNCHER_GRACE_MS });
 let exiting: Promise<never> | undefined;
 
 /**
@@ -939,10 +965,11 @@ process.on("SIGINT", () => void shutdown(130));
 process.on("SIGTERM", () => void shutdown(143));
 process.on("SIGHUP", () => void shutdown(129));
 
-async function main(): Promise<void> {
-  if (Bun.which(FFMPEG) === null) {
-    throw new Error(`${FFMPEG} is not on PATH (macOS: brew install ffmpeg)`);
-  }
+/**
+ * The scenarios to record: those `--only` names, else every scenario but
+ * the tests' probe. Fails when `--only` names none of them.
+ */
+function chosenScenarios(): Scenario[] {
   const only = option("--only")?.split(",");
   const known = PROBE_MODE === undefined ? scenarios : [...scenarios, PROBE];
   const chosen = known.filter((s) => only?.includes(s.name) ?? s !== PROBE);
@@ -951,11 +978,15 @@ async function main(): Promise<void> {
       `--only names none of ${known.map((s) => s.name).join(", ")}`,
     );
   }
-  await demoPortsFree();
-  await mkdir(GIF_DIR, { recursive: true });
-  await mkdir(VIDEO_DIR, { recursive: true });
-  const rawDir = await mkdtemp(join(tmpdir(), "tscache-record-"));
-  own(() => rm(rawDir, { recursive: true, force: true }));
+  return chosen;
+}
+
+/**
+ * Starts the demo launcher and waits for its hub; from then on, the
+ * backend is this run's. The demo is owned, and its exit, if it comes
+ * before shutdown, shuts the recorder down.
+ */
+async function startDemo(): Promise<void> {
   const demoArgs = process.argv.includes("--reuse-builds")
     ? ["--reuse-builds"]
     : [];
@@ -984,11 +1015,14 @@ async function main(): Promise<void> {
   await waitForHub(demo);
   // The hub is this run's launcher's, and so is its backend.
   backend.accept();
-  stopIfCancelled();
-  const stage = startStage();
-  own(() => stage.stop());
-  // The recorder handles the signals itself: Playwright's handlers would
-  // close Chromium and exit without stopping the demo.
+}
+
+/**
+ * Launches Chromium, owned from the launch on. The recorder handles the
+ * signals itself: Playwright's handlers would close Chromium and exit
+ * without stopping the demo.
+ */
+async function launchBrowser(): Promise<Browser> {
   stopIfCancelled();
   const launching = chromium.launch({
     handleSIGINT: false,
@@ -997,16 +1031,13 @@ async function main(): Promise<void> {
   });
   // Owned from the launch on, so a Chromium still launching is closed too.
   own(async () => (await launching.catch(() => undefined))?.close());
-  const browser = await launching;
-  const results: { clip: Clip; files: string[] }[] = [];
-  for (const scenario of chosen) {
-    stopIfCancelled();
-    const clip = await record(browser, stage, scenario, rawDir);
-    if (scenario.name === "live-feed-reconnect") {
-      await control({ resetClock: true });
-    }
-    results.push({ clip, files: await convert(clip, rawDir) });
-  }
+  return launching;
+}
+
+/** Prints each clip's length, its notes and its media files' sizes. */
+async function report(
+  results: { clip: Clip; files: string[] }[],
+): Promise<void> {
   for (const { clip, files } of results) {
     console.log(
       `\n${clip.scenario.name}: ${(clip.to - clip.from).toFixed(1)} s`,
@@ -1019,6 +1050,33 @@ async function main(): Promise<void> {
       );
     }
   }
+}
+
+async function main(): Promise<void> {
+  if (Bun.which(FFMPEG) === null) {
+    throw new Error(`${FFMPEG} is not on PATH (macOS: brew install ffmpeg)`);
+  }
+  const chosen = chosenScenarios();
+  await demoPortsFree();
+  await mkdir(GIF_DIR, { recursive: true });
+  await mkdir(VIDEO_DIR, { recursive: true });
+  const rawDir = await mkdtemp(join(tmpdir(), "tscache-record-"));
+  own(() => rm(rawDir, { recursive: true, force: true }));
+  await startDemo();
+  stopIfCancelled();
+  const stage = startStage();
+  own(() => stage.stop());
+  const browser = await launchBrowser();
+  const results: { clip: Clip; files: string[] }[] = [];
+  for (const scenario of chosen) {
+    stopIfCancelled();
+    const clip = await record(browser, stage, scenario, rawDir);
+    if (scenario.name === "live-feed-reconnect") {
+      await control({ resetClock: true });
+    }
+    results.push({ clip, files: await convert(clip, rawDir) });
+  }
+  await report(results);
 }
 
 try {
