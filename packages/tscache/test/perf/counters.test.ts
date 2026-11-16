@@ -206,6 +206,34 @@ describe("a cached read through the port", () => {
   });
 });
 
+describe("a put through the port", () => {
+  // M7 (architecture §2.7, N74): a put costs its subscribers one small
+  // event each, carrying no buffer, and costs nothing more without one.
+  it.each([0, 1])(
+    "with %i cacheChanged subscriber: one message up, the answer and one event per subscriber down",
+    async (subscribers) => {
+      const { up, down, client } = await connect();
+      const cacheId = candleConfig("perf").id;
+      if (subscribers === 1) {
+        await client.request("subscribe", { cacheId });
+      }
+      const t = year.range.end;
+      const before = { up: { ...up }, down: { ...down } };
+      await client.request("put", {
+        cacheId,
+        batch: {
+          timestamps: [t],
+          fields: { open: [1], high: [1], low: [1], close: [1], volume: [1] },
+        },
+      });
+      expect(up.messages - before.up.messages).toBe(1);
+      expect(down.messages - before.down.messages).toBe(1 + subscribers);
+      expect(down.transferred - before.down.transferred).toBe(0);
+      expect(down.copiedBuffers - before.down.copiedBuffers).toBe(0);
+    },
+  );
+});
+
 describe("an orchestrated get", () => {
   it("reads the engine once, whether it fetches or not", async () => {
     (globalThis as unknown as { __perf: unknown }).__perf = {
