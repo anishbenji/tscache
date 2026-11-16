@@ -1,0 +1,110 @@
+# Step 114 — M7 change events
+
+Branch: `feat/114-m7-change-events` · Reviewer: none yet (the director runs the pre-review, the security lane and the Codex gate) · Rounds: 0 · Status: implemented, awaiting review · Verdict after triage: pending
+
+## Scope
+
+Builds finding M7 of the review of 2026-11-10, as designed in `docs/design/m7-change-events.md` (step 92) and decided by the user on 2026-11-16 (decision 65): a cache-scoped `cacheChanged` event that tells a reader where what a `get` returns may have changed.
+
+- **Architecture.** The approved text moved into `docs/architecture.md` §2.1 (`client.features`), §2.7 (the event, delivery, the read rule, cost), §2.8 (the amended "No events" bullet), §3.1 (`hello.features`), §3.2 (the two ops and the event envelope), §4.6–§4.8 (engine reader report, server subscriptions and request causes, client listener counting). Decision files N71–N84, indexed in §8; dated amendment notes on N35 and N36. The design proposal and the roadmap sketch are marked specified.
+- **Engine.** `CacheState` collects a `ReaderChange` (`written`, `removed`, `cleared`, in slots) during each mutating call while its owner says a reader listens, and reports it once when the call ends, after the call's `onMutate` and `cacheCleared`. The engine fans it out through the internal `CacheObserver` seam (`hasReaders`, `onReaderChange`); its public events are unchanged.
+- **RPC.** `hello.features: ['cacheChanged']`; additive ops `subscribe` and `unsubscribe` (`{ cacheId }` or `{ all: true }`); the server keeps per-cache and every-cache subscriber sets, answers `hasReaders` from them, converts the report to ms and posts one `evt scope:'cache'` per subscribed connection with the request id of the cause. Ops deferred by the persistence keep their id; `Persistence.clearAll` takes the memory clear as an optional argument for that; the orchestrator applies a fetch under the issuing `get`'s id.
+- **Client.** `client.on` / `cache.on('cacheChanged')` count listeners per key and send `subscribe` for the first and `unsubscribe` for the last (`client/changes.ts`); `client.features`; against a worker without the feature nothing is posted and a development build warns once. Types: `ClientEvents['cacheChanged']`, `WorkerFeature`, `CacheEvent` gains `'cacheChanged'`.
+- **Integrations.** `integrations/shared/changes.ts`: `reaction` (the read rule), `ChangeWatch` (one view, at most one read per animation frame, fetching only when an event of the frame wrote nothing and cleared or withdrew), `NextRead`. Vanilla, Solid, Vue, Svelte and Angular subscribe just before each read; React subscribes in an effect and reads the cache once more when the subscription starts (`catchUp`).
+- **Reference clients.** In the SharedWorker hosting, `liveFeed` redraws from `cacheChanged` (every tab, the holder's own included) instead of the holder's `BroadcastChannel` batch message; the channel still carries the bars for the dedicated and in-process hostings and every opening of a source.
+- **Docs.** `site/concepts/events.md` (change events, the read rule, hostings, older workers, a snippet), `site/guides/live-feeds.md` (the known-limit box now states the remaining limit, one cache per tab outside a SharedWorker; "Many tabs, one feed"), `site/how-it-works/live-feeds.md`, `site/index.md` (limits qualified for 0.2.0), `docs/guides/patterns.md`, `docs/benchmarking.md`, `reference/README.md`, `integrations/README.md`, `docs/releases/0.2.0.md` (in preparation; the version is not bumped).
+
+## Decisions applied
+
+User decision 65 (2026-11-16): rows D1 (a), D2 (c), D3 (a) with per-frame coalescing in the integrations, D4 (a), D5 (a) (no `client.id`, no `own` flag), D6 (a), D7 (a) with the amendment to the locked §2.8 bullet, D8 (a), D9 (a) with the amendment to the locked §3.1 handshake (optional `hello.features`, `PROTOCOL_VERSION` stays 1), D10 (a), D11 (a), D12 (a), D13 (a); the read rule of §3.5 as written, with its cost; the `index (lazy)` size edit budgeted in this step. Recorded as N71 (D1), N72 (D2), N73 (D3), N74 (D4), N75 (D5), N76 (D6), N77 (D7), N78 (D8), N79 (D9), N80 (D10), N81 (D11), N82 (D12), N83 (D13) and N84 (the read rule).
+
+User decision 67 (2026-11-16, finding M3), rows E16 (a) and E21 (a), both **M3-conditional**: they apply only to a cache with a memory budget, which does not exist until M3 is built (`docs/design/m3-memory.md`). Architecture §2.7 now states them in that form, replacing the design's "Eviction … deferred to M3" row: eviction will be reported on `cacheChanged` as a separate `evicted` list that needs no re-read (E16); and with a budget, a removal also reports in `removed` the part of its range that is in the cache's index of evicted coverage (E21), a qualification recorded on N82. Without a budget, N82 (D12 a) is unchanged. No `evicted` field is added to the public types or the wire format in this step (M3 adds it as an optional, additive field), and no contract test changed: tests 1–11 exclude eviction, and no cache in M7 has a budget.
+
+Choices made in this step without a decision row, each the simplest reading of the approved text:
+
+- `subscribe` and `unsubscribe` run at once, never through the persistence's `durably`: they touch no data. Malformed params (`{}`, a non-string id, `all` other than `true`, both fields) are answered with `TscacheError`. Both are idempotent; a client counts its own listeners, so the server keeps sets, not counts.
+- A subscription to a cache id that does not exist yet is accepted; it takes effect when the cache is created.
+- `client.features` keeps only the feature names the client knows; a malformed `hello.features` counts as none.
+- The integrations' frame scheduler is `requestAnimationFrame`, falling back to a zero timer where it is absent; a hidden tab therefore reads once when it shows again.
+- In the reference clients, `onBatch` in the SharedWorker hosting receives the hull of every `cacheChanged` event's written ranges, whichever tab wrote (a feed bar or a fetch). Its existing guards (a span before the view is ignored, one meeting the view's end extends it with a cache-only read, one after a gap starts a catch-up) handle each; no loop is possible, since a fetch's event leads only to a cache-only read or to a catch-up whose own event meets the view.
+
+## Contract-test changes
+
+Codex's four files (`packages/tscache/test/m7-change-events.test.ts`, `m7-change-failures.test.ts`, `m7-change-property.test.ts`, `m7-change-test-helpers.ts`; 80 tests) landed with the engine commit. Every assertion is unchanged. One wiring edit: `m7-change-test-helpers.ts` no longer exports the interfaces `ReaderReport` and `ReaderObserver`, which nothing imports, because Knip fails the build on unused exports. The engine implements the adapter's member names as written (`hasReaders`, `onReaderChange` on `CacheObserver`), so no other adaptation was needed.
+
+No contract test looked wrong against the spec.
+
+## Other test changes
+
+- `packages/tscache/test/rpc.test.ts`, "hello names the server's lifetime lock": the exact expected hello now includes `features: ['cacheChanged']` (N79). Still an exact `toEqual`.
+- `integrations/test/vanilla.test.ts`: the suite's `recorder` passes the series a frame scheduler that never runs, so the existing `show()` / `refresh()` tests still pin exactly the reads they make. Without it, a test's own `put` would add the series' automatic re-read. That behaviour is tested in the new `integrations/test/changes.test.ts`.
+- `integrations/test/helpers.ts`: the `lossy()` client facade gains the new `features` member (`TscacheClient` requires it).
+- `reference/shared/test/live.test.ts`: the dedicated-tab fake connection gains `subscribe`, part of the `Connection` interface that `liveFeed` now calls.
+
+## New tests
+
+| Spec test (design §5) | Where                                                                                                                                                           |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1–11                  | Codex's contract tests (above)                                                                                                                                  |
+| 12, 13                | `packages/tscache/test/m7-change-rpc.test.ts`, "M7 over the port: order and fan-out"                                                                            |
+| 14                    | same file, "M7 client listeners"                                                                                                                                |
+| 15                    | same file, "M7 subscribe, then read" (three interleavings, one driven by a held fetch)                                                                          |
+| 16, 17                | same file, "M7 orchestrated fetches and reads" (issuing get's id, joined get, failed and auth-refused fetches, the version fence, `cacheOnly` and `updateAuth`) |
+| 18                    | same file, "M7 and the persistence" (a deferred invalidate and a deferred `clearAll` keep their ids; the event precedes the durable answer)                     |
+| 19                    | same file, "M7 across versions" (old worker, malformed features, old client)                                                                                    |
+| 20                    | same file (two in-process clients) and `e2e/changes.spec.ts` (two tabs on dedicated workers)                                                                    |
+| 21                    | same file, dispose and `bye`                                                                                                                                    |
+| 22–24                 | `e2e/changes.spec.ts` (one `BrowserContext`, two pages; the mock backend gains an `alternate` control for test 24)                                              |
+| Bench budget          | `packages/tscache/test/perf/counters.test.ts`, "a put through the port"                                                                                         |
+| Integrations          | `integrations/test/changes.test.ts` (`reaction`, `ChangeWatch` coalescing, catch-up, dispose; the vanilla series re-reading after another writer's puts)        |
+| Reference clients     | `reference/shared/test/live.test.ts`, "liveFeed on a SharedWorker's cache"                                                                                      |
+
+Two of the new RPC tests were checked against temporary mutants of `rpc/server.ts` (no `requestId`; events to every connection instead of subscribers): 5 and 1 tests failed respectively, and the code was restored.
+
+## Sizes
+
+Brotli bytes, measured with `scripts/size.ts` on the merge base (`781c378`) and on this branch:
+
+| Entry                  | Before |  After | Growth | Budget before | Budget after |
+| ---------------------- | -----: | -----: | -----: | ------------: | -----------: |
+| `index`                |  4,721 |  5,124 |   +403 |         5,008 |        5,648 |
+| `index (lazy)`         | 12,415 | 13,016 |   +601 |        12,976 |       13,536 |
+| `index (lazy, nested)` |  5,485 |  5,485 |      0 |         6,000 |    unchanged |
+| `worker`               | 13,663 | 14,305 |   +642 |        13,728 |       14,832 |
+| `worker (lazy)`        |  5,485 |  5,485 |      0 |         5,824 |    unchanged |
+| `engine`               | 10,099 | 10,338 |   +239 |        10,272 |       10,864 |
+| `fetcher`              |    178 |    178 |      0 |           656 |    unchanged |
+| `vite`                 |  1,266 |  1,266 |      0 |         1,488 |    unchanged |
+
+New budgets follow the rule in `scripts/size-budget.ts`: measured + max(512 B, 3 %), rounded up to 16 B.
+
+## Verification
+
+See the step's report for the exact commands and results of the final head; the table below is filled in from them.
+
+| Check                      | Command                                                                                                                                                            | Result                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Contract tests             | `bunx vitest run packages/tscache/test/m7-change-events.test.ts packages/tscache/test/m7-change-failures.test.ts packages/tscache/test/m7-change-property.test.ts` | 80 passed                                                                                                         |
+| RPC and client tests 12–21 | `bunx vitest run packages/tscache/test/m7-change-rpc.test.ts`                                                                                                      | 19 passed                                                                                                         |
+| Package unit suite         | `bunx vitest run packages/tscache/test`                                                                                                                            | 109 files, 2,446 tests passed (before the bench test was added)                                                   |
+| Integrations and reference | `bunx vitest run integrations reference/shared`                                                                                                                    | 42 and 41 passed                                                                                                  |
+| Browser tests 20, 22–24    | `E2E_EXAMPLES= heavy-run.sh … bunx playwright test e2e/changes.spec.ts --project chromium`                                                                         | 4 passed                                                                                                          |
+| Test clocks                | `bun scripts/test-clocks.ts`                                                                                                                                       | 179 files clean                                                                                                   |
+| Type checks                | `bun run typecheck`, `bun run check:integrations`, `bun run docs:check`                                                                                            | clean                                                                                                             |
+| Knip, Fallow               | `bunx knip`, `bun run fallow`, `bun run fallow:health`                                                                                                             | clean; Fallow reports two existing unused-member warnings (`CacheHandle.clear`, `setFinalizedUntil`); health 98 A |
+| Sizes                      | `bun scripts/size.ts`                                                                                                                                              | every entry within its budget                                                                                     |
+| CI                         | `heavy-run.sh "114 child: ci" bun run ci`                                                                                                                          | see the report                                                                                                    |
+| Bench                      | `heavy-run.sh "114 child: bench" bun run bench --gate` (`caa4d62` against `781c378`, origin/main)                                                                  | exit 0; no gated case failed (below)                                                                              |
+
+## Bench
+
+`bun run bench --gate` measured `caa4d62` (the code of the final head; later commits change documents only) against the merge base `781c378`. Exit 0; every case `ok`.
+
+- **Bun (gated cases):** the A/A control left its bounds (0.968, CI 0.946–1.010), so the run is called noisy and nothing could fail. Head/base medians: `read-viewport` 1.037, `read-viewport-sessions` 0.989, `read-year` 1.040 (reports), `put-page` 1.009, `put-live-bar` 1.022, `append-bars` 1.035 (CI 1.015–1.060), `fill-month` 1.004, `snapshot-roundtrip` 1.026, `read-transfer` 1.015. None is near the 10 % failure threshold.
+- **Chromium (reported, no case gated):** A/A 0.997 (0.986–1.014). Medians from 0.976 (`put-page`) to 1.033 (`snapshot-roundtrip`).
+
+With nobody subscribed, a mutating call costs one `hasReaders` check per observer; the engine collects nothing, so no change in the timed cases was expected. A rerun on a quiet machine would confirm the Bun numbers under a calibrated control.
+
+## Decision concerns
+
+None.
