@@ -12,14 +12,22 @@ User decision 75 (2026-11-16): add the `AGENTS.md` line worded in the Effect ADR
 
 `docs/decisions/N85-effect-adoption.md` is not on `main` when this branch is cut; step 115 adds it. The line points at that path as decided, so the reference resolves once step 115 merges. No check in the repository validates paths named in `AGENTS.md`, so nothing fails in the meantime.
 
-`AGENTS.md` is the user's merge (`docs/INDEX.md`, owner column).
+`AGENTS.md` is the user's merge (`docs/INDEX.md`, owner column). Merge it after step 115, which adds `docs/decisions/N85-effect-adoption.md`, the file the line points at. The line says "the decision lists which" where the approved wording says "the ADR lists which", because it now names the decision file; step 115 uses the same words in N85's Guardrails section.
 
 ## Verification
 
 | Command                                      | Result                                                                                                                                 |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `bun run docs:check` (after `bun run build`) | Exit 0; `doc-anchors: 246 anchors in 42 pages resolve`. Before the build it failed on site snippets importing the unbuilt package only |
-| `heavy-run.sh "117 child: ci" bun run ci`    | See the final report for the result on the final head                                                                                  |
+| `heavy-run.sh "117 child: ci" bun run ci`    | Exit 0 on `3cb5773` plus the review commit (`e87e271`); bench smoke and e2e checks `ok`                                                |
+
+## Pre-review (Claude), not the gate
+
+Claude Opus 5.5 on `e87e271`: two P2 and a nit, all accepted.
+
+- PR-1 (P2): the line's "the decision lists which" differs from the approved "the ADR lists which". Accepted: step 115 now writes the same words into N85's Guardrails section, and Scope says why.
+- PR-2 (P2): the line points at a file that is not on `main` until step 115 merges. Accepted: Scope and the pull request name the merge order (115 first).
+- PR-3 (nit): the CI row had no result. Fixed: it now gives the exit code and head.
 
 ## Contract-test changes
 
