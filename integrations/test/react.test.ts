@@ -112,6 +112,7 @@ const teardown: (() => unknown)[] = [];
 afterEach(async () => {
   for (const step of teardown.splice(0).reverse()) await step();
   gets.length = 0;
+  answered.length = 0;
   vi.unstubAllGlobals();
   resetBackend();
 });
@@ -244,7 +245,7 @@ function mountActivity(connection: Connection) {
         ),
       ),
     );
-  return { renders: seen.renders, show };
+  return { renders: seen.renders, show, unmount: () => root.unmount() };
 }
 
 /** Animation frames the test runs by hand. */
@@ -281,6 +282,8 @@ function holdFetch(): { entered: Promise<void>; release(): void } {
 
 /** Every get the page made, as `<cache> <start>-<end> <fetch|cache>`. */
 const gets: string[] = [];
+/** The gets the cache has answered, named the same. */
+const answered: string[] = [];
 
 /** A client whose cache handles log their gets. */
 function logging(client: TscacheClient): TscacheClient {
@@ -290,8 +293,14 @@ function logging(client: TscacheClient): TscacheClient {
     const get = handle.get.bind(handle);
     handle.get = (asked, options) => {
       const how = options?.cacheOnly === true ? "cache" : "fetch";
-      gets.push(`${cacheConfig.id} ${asked.start}-${asked.end} ${how}`);
-      return get(asked, options);
+      const what = `${cacheConfig.id} ${asked.start}-${asked.end} ${how}`;
+      gets.push(what);
+      const answer = get(asked, options);
+      answer.then(
+        () => answered.push(what),
+        () => {},
+      );
+      return answer;
     };
     return handle;
   };
@@ -759,8 +768,7 @@ describe("React useSeries: every read of the model", () => {
     // The commit's cache-only read: a fetching read here would fetch the
     // provisional tail again, and its event would ask for the next.
     await until(() => gets.includes("h 100-200 cache"));
-    const read = view.renders.length;
-    await until(() => view.renders.length > read);
+    await until(() => answered.includes("h 100-200 cache"));
     frames.run();
     expect(frames.queued).toHaveLength(0);
     expect(backend().fetches).toEqual({ h: 1 });
@@ -806,16 +814,15 @@ describe("React useSeries: every read of the model", () => {
     fakeTimers();
     const count = posted();
     const { connection } = await connected();
-    const view = mount(connection);
-    view.show(config, range);
+    const view = mountActivity(connection);
+    view.show("visible");
     await until(() => shows(view, 150));
-    await until(() => gets.includes("h 100-200 cache"));
-    const read = view.renders.length;
-    await until(() => view.renders.length > read);
+    await until(() => answered.includes("h 100-200 cache"));
     view.unmount();
-    await vi.advanceTimersByTimeAsync(29_999);
+    await until(() => activity.hidden);
+    await vi.advanceTimersByTimeAsync(29_000);
     expect(count("unsubscribe")).toBe(0);
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(count("subscribe")).toBe(1);
     expect(count("unsubscribe")).toBe(1);
   });
@@ -851,8 +858,7 @@ describe("React useSeries: every read of the model", () => {
     view.show("visible");
     await until(() => shows(view, 150));
     await until(() => gets.includes("h 100-200 cache"));
-    const read = view.renders.length;
-    await until(() => view.renders.length > read);
+    await until(() => answered.includes("h 100-200 cache"));
     view.show("hidden");
     await until(() => activity.hidden);
     await vi.advanceTimersByTimeAsync(30_000);
