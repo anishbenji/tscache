@@ -1,6 +1,6 @@
 # Step 116 — four Biome promise and switch rules, and noImplicitReturns
 
-Branch: `chore/116-promise-lint-rules` · Reviewer: GPT-6.1 Sol (pending) · Rounds: 0 · Status: pre-review fixed; Codex round 1 not yet run
+Branch: `chore/116-promise-lint-rules` · Reviewer: GPT-6.1 Sol (high) · Rounds: 1 · Status: settled (round 1: no findings)
 
 ## Scope
 
@@ -115,6 +115,12 @@ No P0 or P1. Two P2s, both accepted and fixed by the director:
 
 - PR2-1 (P2): `CONTRIBUTING.md` called `bun run check` "the Biome lint", which now matches CI only with a fresh build. Fixed: the line says to run it after `bun run build`, because the promise rules read the package's types from `dist/`.
 - PR2-2 (P2): pre-commit's staged Biome reads whatever `dist/` exists, so an old build can report a correct call. Fixed: the pre-commit paragraph above says so and gives the remedy (rebuild).
+
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `7450707`. No findings; the reviewer confirmed the five accepted pre-review fixes and checked
+`bash -n scripts/ci.sh` and the type check. The round's `bun run ci` exited 0. The security lane (run 1) had no
+findings. Raw output: `.reviews/step-116/round-1.md`. The review has settled.
 
 ## Contract-test changes
 
