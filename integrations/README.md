@@ -27,13 +27,14 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
 - `changes.ts`: `ChangeWatch` follows a cache's `cacheChanged` events for one view and reads the range
   it shows again, at most once per animation frame, by the read rule of architecture §2.7 (N84): from
   the cache alone when the frame's events wrote something, with a fetch when one wrote nothing and
-  cleared or withdrew coverage over the view. Each adapter subscribes before it reads, or reads the
-  cache once more after subscribing, so no change is missed. `ViewReads` owns a view's reads in the
+  cleared or withdrew coverage over the view. Each adapter subscribes before it reads, so no change
+  is missed. `ViewReads` owns a view's reads in the
   order no adapter may change: a cache-only change waits while the view's fetching read is in
   flight, comes back through the frame only after that read's answer landed, and its answer keeps
   the failure labels (`fetch-failed`, `auth-pending`) of the answer before it (`keepFailures`).
-  Adapters only call `read` from their reactivity and apply latest-wins; React, whose reads start
-  while rendering, uses the same `cacheOnlyAfter` and holds against its newest read.
+  Adapters only call `read` from their reactivity and apply latest-wins. In React, whose reads start
+  while rendering, each client, cache and range a component shows is a view with a `ViewReads` of its
+  own, which reads again only while the component shows it (`react/series.tsx`).
 
 ## The frameworks
 
@@ -41,7 +42,7 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
 | ---------- | ----------------------------------- | --------------------------------------------------------- | ------------------------------------ |
 | `vanilla/` | `series(connection, options)`       | a request counter: latest wins                            | a JSON script element                |
 | `react/`   | `TscacheProvider`, `useSeries`      | `use()` under Suspense, inputs through `useDeferredValue` | a JSON script element                |
-| `solid/`   | `createConnection`, `createSeries`  | an async `createMemo` (Solid 2.0 RC)                      | a JSON script element                |
+| `solid/`   | `createConnection`, `createSeries`  | an async derived signal (Solid 2.0 RC)                    | a JSON script element                |
 | `vue/`     | `createTscache` plugin, `useSeries` | `watch` with `onWatcherCleanup` into `shallowRef`s        | a JSON script element                |
 | `svelte/`  | `tscacheContext`, `Series`          | `$effect` into `$state.raw`, `createSubscriber`           | a JSON script element, then props    |
 | `angular/` | `provideTscache`, `cacheResource`   | `resource()`                                              | `TransferState`                      |
@@ -89,5 +90,6 @@ Limits every variant shares:
 - Reading a range again (after `updateAuth`, say) means asking for it again: the vanilla series reads
   on each `show`, and its `refresh` reads from the cache alone (after a put of pushed data, say); the
   Solid, Vue, Svelte and Angular adapters read again when given a new range object. React's
-  `useSeries` caches answers by range value, so it reads again only for a new range or a new client.
+  `useSeries` compares the range by value, so it reads again only when the range, the cache or the
+  client changes; going back to an earlier range is such a change.
   The reference clients (`reference/`) add the credential refresh and pushed data.

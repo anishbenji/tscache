@@ -68,7 +68,10 @@ export interface ChangeWatchOptions {
    * that read and the subscription is then shown too.
    */
   catchUp?: boolean;
-  /** For tests: the frame scheduler. Default: the next animation frame. */
+  /**
+   * The frame scheduler, for tests and for a view that reads only while it
+   * is on screen (React). Default: the next animation frame.
+   */
   frame?: Frame;
 }
 
@@ -222,7 +225,7 @@ export function cacheOnlyAfter(
 }
 
 /** A read a view started, as {@link ChangeHold} follows it. */
-export interface StartedRead {
+interface StartedRead {
   /** Whether it fetches (a cache-only read holds nothing). */
   fetching: boolean;
   /** Its answer: the read has settled once this settles. */
@@ -231,8 +234,8 @@ export interface StartedRead {
 
 /**
  * Whether a view's cache-only change must wait, and when it comes back:
- * one piece that `ViewReads` and the React adapter share, so the rule is
- * written once.
+ * the hold of `ViewReads`, which every adapter reads through, so the rule
+ * is written once.
  *
  * - Only the latest read the view started counts. An older one that
  *   latest-wins has dropped holds nothing, and its settling releases
@@ -245,7 +248,7 @@ export interface StartedRead {
  *   the view reads again.
  * - A cache-only read started meanwhile shows the change: the hold ends.
  */
-export class ChangeHold {
+class ChangeHold {
   readonly #release: () => void;
   #latest: StartedRead | undefined;
   #settled = false;
@@ -303,9 +306,17 @@ export interface ViewReadsOptions {
   shown(): Range | undefined;
   /** The cache's interval: misses lie on its grid. */
   interval: number;
-  /** A change asks the view to read its range again: run the view's read. */
-  reread(): void;
-  /** For tests: the frame scheduler. Default: the next animation frame. */
+  /**
+   * A change asks the view to read its range again: run the view's read.
+   * `how` is how that read reads while the view has not moved: an adapter
+   * whose reads show as loading uses it to keep a read from the cache
+   * alone out of that state.
+   */
+  reread(how: Reread): void;
+  /**
+   * The frame scheduler, for tests and for a view that reads only while it
+   * is on screen (React). Default: the next animation frame.
+   */
   frame?: Frame;
 }
 
@@ -403,6 +414,6 @@ export class ViewReads {
     // A fetch already asked for this frame takes the change with it.
     if (this.#how !== "fetch" && this.#hold.holds(how)) return;
     this.#how = how === "fetch" || this.#how === "fetch" ? "fetch" : "cache";
-    this.#options.reread();
+    this.#options.reread(this.#how);
   }
 }

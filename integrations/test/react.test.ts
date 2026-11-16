@@ -5,7 +5,14 @@ import {
   type Range,
   type TscacheClient,
 } from "@anishbenji/tscache";
-import { createElement, Suspense } from "react";
+import {
+  Activity,
+  createElement,
+  type ExoticComponent,
+  StrictMode,
+  Suspense,
+  useEffect,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TscacheProvider, useSeries } from "../react/series";
@@ -57,6 +64,8 @@ interface Backend {
   /** Holds for the next fetches, one each, in order. */
   holds: { wait: Promise<void>; entered: () => void }[];
   fail: boolean;
+  /** Answer with a watermark inside the range: its tail stays provisional. */
+  tail?: boolean;
 }
 const backend = (): Backend =>
   (globalThis as unknown as { __m7react: Backend }).__m7react;
@@ -93,6 +102,7 @@ const fetcher = `data:text/javascript,${encodeURIComponent(`
       return {
         timestamps: [request.range.start + 50],
         fields: { v: [7], n: [1] },
+        ...(b.tail ? { meta: { finalizedUntil: request.range.start + 20 } } : {}),
       };
     },
   };
@@ -105,6 +115,8 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   resetBackend();
 });
+
+const range = { start: 100, end: 200 };
 
 /** What the view rendered, newest last. */
 interface Rendered {
@@ -133,12 +145,89 @@ function Fallback() {
   return null;
 }
 
-function mount(connection: Connection) {
+function mount(connection: Connection, strict = false) {
   seen.renders = [];
   seen.fallbacks = 0;
   const root: Root = createRoot(container as never);
   teardown.push(() => root.unmount());
-  const show = (cacheConfig: CacheConfig, range: Range, inline = false) =>
+  const show = (cacheConfig: CacheConfig, range: Range, inline = false) => {
+    const tree = createElement(
+      TscacheProvider,
+      { connection },
+      createElement(
+        Suspense,
+        { fallback: createElement(Fallback) },
+        createElement(Chart, { config: cacheConfig, range, inline }),
+      ),
+    );
+    root.render(strict ? createElement(StrictMode, null, tree) : tree);
+  };
+  return {
+    renders: seen.renders,
+    show,
+    fallbacks: () => seen.fallbacks,
+    unmount: () => root.unmount(),
+  };
+}
+
+/** Two series in one component, so one Suspense boundary waits on both. */
+function Pair(props: { first: CacheConfig; second: CacheConfig }) {
+  const first = useSeries(props.first, range);
+  const second = useSeries(props.second, range);
+  seen.renders.push({
+    cache: `${props.first.id}+${props.second.id}`,
+    points: [...first.timestamps, ...second.timestamps],
+    misses: [...first.misses, ...second.misses].map((miss) => miss.reason),
+  });
+  return null;
+}
+
+function mountPair(
+  connection: Connection,
+  first: CacheConfig,
+  second: CacheConfig,
+) {
+  seen.renders = [];
+  seen.fallbacks = 0;
+  const root: Root = createRoot(container as never);
+  teardown.push(() => root.unmount());
+  root.render(
+    createElement(
+      TscacheProvider,
+      { connection },
+      createElement(
+        Suspense,
+        { fallback: createElement(Fallback) },
+        createElement(Pair, { first, second }),
+      ),
+    ),
+  );
+  return { renders: seen.renders };
+}
+
+/** Activity, typed so that createElement takes its children as arguments. */
+const Hideable = Activity as ExoticComponent<{ mode: "visible" | "hidden" }>;
+
+/** Whether the Activity's effects are torn down: it is hidden. */
+const activity = { hidden: false };
+function Effects() {
+  useEffect(() => {
+    activity.hidden = false;
+    return () => {
+      activity.hidden = true;
+    };
+  }, []);
+  return null;
+}
+
+/** A chart inside an Activity the test hides and shows. */
+function mountActivity(connection: Connection) {
+  seen.renders = [];
+  seen.fallbacks = 0;
+  activity.hidden = false;
+  const root: Root = createRoot(container as never);
+  teardown.push(() => root.unmount());
+  const show = (mode: "visible" | "hidden") =>
     root.render(
       createElement(
         TscacheProvider,
@@ -146,14 +235,17 @@ function mount(connection: Connection) {
         createElement(
           Suspense,
           { fallback: createElement(Fallback) },
-          createElement(Chart, { config: cacheConfig, range, inline }),
+          createElement(
+            Hideable,
+            { mode },
+            createElement(Chart, { config, range, inline: false }),
+            createElement(Effects),
+          ),
         ),
       ),
     );
-  return { renders: seen.renders, show, fallbacks: () => seen.fallbacks };
+  return { renders: seen.renders, show };
 }
-
-const range = { start: 100, end: 200 };
 
 /** Animation frames the test runs by hand. */
 function stubFrames(): { queued: FrameRequestCallback[]; run(): void } {
@@ -481,5 +573,297 @@ describe("React useSeries follows its cache", () => {
       "h 100-200 cache",
       "h 100-200 cache",
     ]);
+  });
+});
+
+// The model in docs/reviews/step-114.md, "React state model": one test per
+// event that the tests above do not pin.
+describe("React useSeries: every read of the model", () => {
+  const elsewhere = { start: 300, end: 400 };
+  const fetchesOf = (what: string) =>
+    gets.filter((get) => get === `${what} fetch`).length;
+  /** The last render shows exactly `points`, with no miss. */
+  const shows = (view: { renders: Rendered[] }, ...points: number[]) => {
+    const last = view.renders.at(-1);
+    return last?.points.join() === points.join() && last.misses.length === 0;
+  };
+
+  it("going back to a range invalidated meanwhile fetches it again (PR4-1)", async () => {
+    const { connection, clients } = await connected();
+    const view = mount(connection);
+    view.show(config, range);
+    await until(() => shows(view, 150));
+    view.show(config, elsewhere);
+    await until(() => shows(view, 350));
+    // A render is not yet a commit (React may delay one that follows a
+    // fallback); the cache-only read of a new range's commit is.
+    await until(() => gets.includes("h 300-400 cache"));
+    const writer = await (clients[0] as TscacheClient).cache(config);
+    await writer.invalidate(range);
+    const returned = gets.length;
+    view.show(config, range);
+    // The move back is a read of its own: it fetches what the invalidate
+    // withdrew, whatever the view read there before.
+    await until(() => backend().fetches.h === 3);
+    await until(() => shows(view, 150));
+    expect(
+      gets.slice(returned).find((get) => get.startsWith("h 100-200")),
+    ).toBe("h 100-200 fetch");
+    expect(view.renders.slice(-1)[0]?.misses).toEqual([]);
+  });
+
+  it("going back to a range whose first visit React abandoned is a fetching read of its own", async () => {
+    const { connection } = await connected();
+    const view = mount(connection);
+    const third = { start: 500, end: 600 };
+    view.show(config, range);
+    await until(() => shows(view, 150));
+    // The move to 300-400 loads in a background render, and a newer range
+    // overtakes it before its read answers.
+    const slow = holdFetch();
+    view.show(config, elsewhere);
+    await slow.entered;
+    view.show(config, third);
+    await until(() => shows(view, 550));
+    slow.release();
+    await until(() => gets.includes("h 500-600 cache"));
+    view.show(config, elsewhere);
+    await until(() => shows(view, 350));
+    expect(fetchesOf("h 300-400")).toBe(2);
+  });
+
+  it("a remount is a new view: its first read fetches", async () => {
+    const { connection, clients } = await connected();
+    const first = mount(connection);
+    first.show(config, range);
+    await until(() => shows(first, 150));
+    await until(() => gets.includes("h 100-200 cache"));
+    first.unmount();
+    const writer = await (clients[0] as TscacheClient).cache(config);
+    await writer.invalidate(range);
+    const again = mount(connection);
+    again.show(config, range);
+    await until(() => backend().fetches.h === 2);
+    await until(() => shows(again, 150));
+    expect(fetchesOf("h 100-200")).toBe(2);
+  });
+
+  it("a render waiting on a second read finds its first again (Suspense retries)", async () => {
+    const { connection } = await connected();
+    const a = { ...config, id: "a" };
+    const b = { ...config, id: "b" };
+    const first = holdFetch();
+    const second = holdFetch();
+    const view = mountPair(connection, a, b);
+    await first.entered;
+    first.release();
+    // The first read has answered and the render tried again: the second
+    // read is out, and the boundary waits on it.
+    await second.entered;
+    second.release();
+    await until(() => view.renders.at(-1)?.points.join() === "150,150");
+    expect(backend().fetches).toEqual({ a: 1, b: 1 });
+    expect(gets.filter((get) => get.endsWith("fetch"))).toEqual([
+      "a 100-200 fetch",
+      "b 100-200 fetch",
+    ]);
+    expect(seen.fallbacks).toBe(1);
+  });
+
+  it("an invalidate between a read's answer and its commit fetches once it commits", async () => {
+    const { connection, clients } = await connected();
+    const a = { ...config, id: "a" };
+    const b = { ...config, id: "b" };
+    const first = holdFetch();
+    const second = holdFetch();
+    const view = mountPair(connection, a, b);
+    await first.entered;
+    first.release();
+    await second.entered;
+    // a's read has answered; the commit waits for b's. Another tab
+    // invalidates a meanwhile.
+    const writer = await (clients[0] as TscacheClient).cache(a);
+    await writer.invalidate(range);
+    second.release();
+    await until(() => backend().fetches.a === 2);
+    await until(() => {
+      const last = view.renders.at(-1);
+      return last?.points.join() === "150,150" && last.misses.length === 0;
+    });
+    expect(fetchesOf("a 100-200")).toBe(2);
+    expect(backend().fetches.b).toBe(1);
+  });
+
+  it("a change while the first mount's read fetches is read after it commits, labels kept", async () => {
+    const { connection, clients } = await connected();
+    const view = mount(connection);
+    const slow = holdFetch();
+    view.show(config, range);
+    await slow.entered;
+    const writer = await (clients[0] as TscacheClient).cache(config);
+    await writer.put({ timestamps: [160], fields: { v: [8], n: [1] } });
+    backend().fail = true;
+    slow.release();
+    await until(() =>
+      (view.renders.at(-1)?.misses ?? []).includes("fetch-failed"),
+    );
+    await until(() => gets.includes("h 100-200 cache"));
+    await until(() => view.renders.length >= 2);
+    expect(gets).toEqual(["h 100-200 fetch", "h 100-200 cache"]);
+    expect(view.renders.at(-1)?.points).toEqual([160]);
+    expect(view.renders.at(-1)?.misses).not.toContain("uncached");
+    expect(view.fallbacks()).toBe(1);
+  });
+
+  it("a first mount whose worker is lost while it loads is answered by the replacement", async () => {
+    const clients: { client: TscacheClient; lose(): void }[] = [];
+    const connection = connect(async () => {
+      const next = await losable();
+      clients.push(next);
+      return next.client;
+    });
+    teardown.push(() => connection.dispose());
+    const view = mount(connection);
+    const slow = holdFetch();
+    view.show(config, range);
+    await slow.entered;
+    clients[0]?.lose();
+    await until(() => clients.length === 2);
+    await until(() => shows(view, 150));
+    // One fetching read per client, and the fallback of the first mount only.
+    expect(fetchesOf("h 100-200")).toBe(2);
+    expect(view.fallbacks()).toBe(1);
+    slow.release();
+  });
+
+  it("StrictMode's doubled render and effects make one view and one fetching read", async () => {
+    const { connection, clients } = await connected();
+    const view = mount(connection, true);
+    view.show(config, range);
+    await until(() => shows(view, 150));
+    await until(() => gets.includes("h 100-200 cache"));
+    const writer = await (clients[0] as TscacheClient).cache(config);
+    await writer.put({ timestamps: [160], fields: { v: [8], n: [1] } });
+    await until(() => shows(view, 150, 160));
+    expect(backend().fetches).toEqual({ h: 1 });
+    expect(fetchesOf("h 100-200")).toBe(1);
+  });
+
+  it("a view over a provisional tail reads its own fetch's event from the cache, never fetching in a loop (N84)", async () => {
+    const frames = stubFrames();
+    backend().tail = true;
+    const { connection } = await connected();
+    const view = mount(connection);
+    view.show(config, range);
+    await until(() => view.renders.at(-1)?.points.join() === "150");
+    // The commit's cache-only read: a fetching read here would fetch the
+    // provisional tail again, and its event would ask for the next.
+    await until(() => gets.includes("h 100-200 cache"));
+    const read = view.renders.length;
+    await until(() => view.renders.length > read);
+    frames.run();
+    expect(frames.queued).toHaveLength(0);
+    expect(backend().fetches).toEqual({ h: 1 });
+    expect(gets).toEqual(["h 100-200 fetch", "h 100-200 cache"]);
+  });
+
+  it("a change over a range the view has left reads nothing", async () => {
+    const { connection, clients } = await connected();
+    const view = mount(connection);
+    view.show(config, range);
+    await until(() => shows(view, 150));
+    await until(() => gets.includes("h 100-200 cache"));
+    view.show(config, elsewhere);
+    await until(() => shows(view, 350));
+    await until(() => gets.includes("h 300-400 cache"));
+    const left = gets.length;
+    const writer = await (clients[0] as TscacheClient).cache(config);
+    await writer.put({ timestamps: [160], fields: { v: [8], n: [1] } });
+    // A later change over the range on screen: its read comes after any
+    // read the first change would have caused.
+    await writer.put({ timestamps: [360], fields: { v: [9], n: [1] } });
+    await until(() => shows(view, 350, 360));
+    expect(gets.slice(left)).toEqual(["h 300-400 cache"]);
+  });
+
+  /** The ops the page posted to its worker, counted by name. */
+  function posted(): (op: string) => number {
+    const post = vi.spyOn(MessagePort.prototype, "postMessage");
+    teardown.push(() => post.mockRestore());
+    return (op) =>
+      post.mock.calls.filter(
+        ([message]) => (message as { op?: string }).op === op,
+      ).length;
+  }
+
+  /** Fake timers for the 30 s a view is kept; frames and React still run. */
+  function fakeTimers(): void {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    teardown.push(() => vi.useRealTimers());
+  }
+
+  it("a view no component shows stops following 30 s after it was last shown", async () => {
+    fakeTimers();
+    const count = posted();
+    const { connection } = await connected();
+    const view = mount(connection);
+    view.show(config, range);
+    await until(() => shows(view, 150));
+    await until(() => gets.includes("h 100-200 cache"));
+    const read = view.renders.length;
+    await until(() => view.renders.length > read);
+    view.unmount();
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(count("unsubscribe")).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(count("subscribe")).toBe(1);
+    expect(count("unsubscribe")).toBe(1);
+  });
+
+  it("a hidden Activity reads nothing, and reads what changed when it is shown again", async () => {
+    const frames = stubFrames();
+    const { connection, clients } = await connected();
+    const view = mountActivity(connection);
+    view.show("visible");
+    await until(() => shows(view, 150));
+    await until(() => gets.includes("h 100-200 cache"));
+    view.show("hidden");
+    await until(() => activity.hidden);
+    frames.run();
+    const since = gets.length;
+    // A change while hidden schedules no frame: the view waits to be shown.
+    const writer = await (clients[0] as TscacheClient).cache(config);
+    await writer.put({ timestamps: [160], fields: { v: [8], n: [1] } });
+    expect(frames.queued).toHaveLength(0);
+    view.show("visible");
+    await until(() => frames.queued.length > 0);
+    frames.run();
+    await until(() => shows(view, 150, 160));
+    expect(gets.slice(since)).toEqual(["h 100-200 cache"]);
+    expect(backend().fetches).toEqual({ h: 1 });
+  });
+
+  it("an Activity hidden for longer than a view is kept starts afresh with a fetch", async () => {
+    fakeTimers();
+    const count = posted();
+    const { connection, clients } = await connected();
+    const view = mountActivity(connection);
+    view.show("visible");
+    await until(() => shows(view, 150));
+    await until(() => gets.includes("h 100-200 cache"));
+    const read = view.renders.length;
+    await until(() => view.renders.length > read);
+    view.show("hidden");
+    await until(() => activity.hidden);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(count("unsubscribe")).toBe(1);
+    // Unheard, since the view no longer follows: another tab's invalidate.
+    const writer = await (clients[0] as TscacheClient).cache(config);
+    await writer.invalidate(range);
+    view.show("visible");
+    await until(() => backend().fetches.h === 2);
+    await until(() => shows(view, 150));
+    expect(fetchesOf("h 100-200")).toBe(2);
+    expect(count("subscribe")).toBe(2);
   });
 });

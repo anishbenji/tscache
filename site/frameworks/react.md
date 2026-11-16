@@ -22,11 +22,19 @@ that is a module constant and the range on screen:
   config and the range through `useDeferredValue`, so a new client, cache or range loads in a background
   render while the previous answer stays on screen, and an overtaken answer never shows. Only a first
   answer shows the fallback.
-- `use()` needs the same promise on every render of a read, so reads are cached per client, config and
-  range; one that is neither pending nor shown is dropped 30 s after it settled or was last shown.
+- `use()` needs the same promise on every render of a read, so each client, config and range a
+  component reads is a view, made while rendering and found again by every retry. It follows its cache
+  from before its first read, which fetches. Once a component commits with a view, the view is that
+  component's alone, so a later mount, or a move back to the same range, reads with a fetch again. A
+  view no component shows reads nothing and is dropped 30 s after its newest read settled or it was
+  last shown.
+- A change to the cache over the range on screen reads it again in a background render, at most once
+  per frame: from the cache alone, or with a fetch after a change that wrote nothing
+  ([change events](/concepts/events)).
 - A read rejected because the worker was lost is asked again of the replacing client, so it never
   reaches an error boundary.
-- An answer is cached for its range: after `updateAuth`, change the range to read again.
+- While the range stays on screen, it is read again only when the cache changes over it: after
+  `updateAuth`, change the range to read again.
 
 <<< ../../integrations/react/series.tsx{tsx}
 
