@@ -4,7 +4,8 @@
 // range has overtaken never lands, and while the next answer loads, the
 // previous one stays on screen with isPending() true, so a chart never
 // flashes a fallback. A change to the cache over the range on screen, from
-// any tab, runs the memo again, at most once per frame (shared/changes.ts).
+// any tab, runs the memo again, at most once per frame (shared/changes.ts);
+// a read from the cache alone then replaces the answer without pending.
 // One connection (shared/connection.ts) serves every series of the app.
 
 import type {
@@ -16,7 +17,6 @@ import type {
 import {
   type Accessor,
   createContext,
-  createMemo,
   createSignal,
   onCleanup,
 } from "solid-js";
@@ -71,7 +71,9 @@ export interface SeriesOptions {
  * state moves on, the memo runs again, and the connection's next client
  * reads the range again. A change to the cache over `range()` reads it
  * again: from the cache alone, or with a fetch after a change that wrote
- * nothing (architecture §2.7).
+ * nothing (architecture §2.7). Only a read that may fetch is pending
+ * (`isPending`): a read from the cache alone, after a live bar say, leaves
+ * the answer on screen current until its own replaces it.
  */
 export function createSeries(
   connection: Connection,
@@ -89,32 +91,64 @@ export function createSeries(
     interval: config.interval,
     reread: () => setChanged((n) => n + 1),
   });
-  onCleanup(() => views.dispose());
+  /** Counts the memo's runs: only the latest run's cache-only answer lands. */
+  let run = 0;
+  /** A cache-only read's failure on a live client, for the next run to throw. */
+  let failed: { error: unknown } | undefined;
+  onCleanup(() => {
+    run++;
+    views.dispose();
+  });
 
-  return createMemo<Answer>(
-    () => {
+  // A memo that can also be written (a derived signal): a cache-only
+  // answer is written over the last one, so it never makes the series
+  // pending, and the next run that fetches replaces it.
+  const [answer, setAnswer] = createSignal<Answer>(
+    (previous: Answer | undefined) => {
       const current = state();
       const asked = range();
       changed();
+      const mine = ++run;
+      if (failed !== undefined) {
+        const { error } = failed;
+        failed = undefined;
+        throw error;
+      }
       if (current.status === "failed") throw current.error;
       // Pending until the client connects, which runs the memo again. A
       // fresh promise each time: one shared promise would keep the
       // callbacks of every run that ever waited on it.
       if (current.status === "connecting") return new Promise<never>(() => {});
-      return views
-        .read(connection.cache(current.client, config), asked, current)
-        .answer.then(
-          (result) => ({ range: asked, result }),
+      const read = views.read(
+        connection.cache(current.client, config),
+        asked,
+        current,
+      );
+      const landing = read.answer.then((result) => ({ range: asked, result }));
+      if (read.cacheOnly && previous !== undefined) {
+        landing.then(
+          (next) => {
+            if (run === mine) setAnswer(() => next);
+          },
           (error: unknown) => {
-            // Only a failure on a live client counts. After a loss the memo
-            // has run again on the new state, so this read stays pending
-            // and Solid drops it as overtaken, whatever the order in which
-            // the rejection and the state change arrive.
-            if (connection.state === current) throw error;
-            return new Promise<never>(() => {});
+            // As below: only a failure on a live client counts.
+            if (run !== mine || connection.state !== current) return;
+            failed = { error };
+            setChanged((n) => n + 1);
           },
         );
+        return previous;
+      }
+      return landing.catch((error: unknown) => {
+        // Only a failure on a live client counts. After a loss the memo
+        // has run again on the new state, so this read stays pending
+        // and Solid drops it as overtaken, whatever the order in which
+        // the rejection and the state change arrive.
+        if (connection.state === current) throw error;
+        return new Promise<never>(() => {});
+      });
     },
     initial === undefined ? undefined : { loadingValue: initial },
   );
+  return answer;
 }

@@ -149,16 +149,31 @@ export class Tscache {
   }
 }
 
+/** A cache-only answer, and the snapshot of the resource it was read after. */
+interface Fresh<T> {
+  after: ResourceSnapshot<T>;
+  snapshot: ResourceSnapshot<T>;
+}
+
 /**
  * `source`, except that while it loads it goes on showing its last value,
  * or `initial` before it has one: Angular's withPreviousValue recipe
  * (angular.dev/guide/signals/resource, "Resource composition with
- * snapshots").
+ * snapshots"). `fresh` goes over the source's snapshot it was read after,
+ * and lapses when the source moves on.
  */
-function withPreviousValue<T>(source: Resource<T>, initial: T): Resource<T> {
-  const snapshot = linkedSignal<ResourceSnapshot<T>, ResourceSnapshot<T>>({
-    source: source.snapshot,
-    computation: (next, previous) => {
+function withPreviousValue<T>(
+  source: Resource<T>,
+  initial: T,
+  fresh: Signal<Fresh<T> | undefined>,
+): Resource<T> {
+  const snapshot = linkedSignal<
+    { next: ResourceSnapshot<T>; over: Fresh<T> | undefined },
+    ResourceSnapshot<T>
+  >({
+    source: () => ({ next: source.snapshot(), over: fresh() }),
+    computation: ({ next, over }, previous) => {
+      if (over?.after === next) return over.snapshot;
       if (next.status !== "loading") return next;
       if (previous === undefined) return { status: "loading", value: initial };
       if (previous.value.status === "error") return next;
@@ -179,7 +194,9 @@ function withPreviousValue<T>(source: Resource<T>, initial: T): Resource<T> {
  * that fails on a live client, is: `error()`. A change to the cache over
  * the range, from any tab, reads it again, at most once per frame: from the
  * cache alone, or with a fetch after a change that wrote nothing
- * (architecture §2.7, shared/changes.ts).
+ * (architecture §2.7, shared/changes.ts). Only a read that may fetch is
+ * "loading": a read from the cache alone, after a live bar say, replaces
+ * the value while the status stays "resolved".
  */
 export function cacheResource(
   config: CacheConfig,
@@ -195,12 +212,41 @@ export function cacheResource(
   }
   const tscache = inject(Tscache);
   const changed = signal(0);
+  const fresh = signal<Fresh<GetResult | undefined> | undefined>(undefined);
   // Holds a change during a fetching read, keeps failure labels, and
   // releases after the answer landed (shared/changes.ts).
   const views = new ViewReads({
     shown: () => untracked(range),
     interval: config.interval,
-    reread: () => changed.update((n) => n + 1),
+    reread: (how) => {
+      // A read that may fetch goes through the resource, and shows as
+      // loading. One from the cache alone is read here, so the resource
+      // never loads for it, and its answer goes over the one shown.
+      if (how === "fetch") return changed.update((n) => n + 1);
+      const state = untracked(tscache.state);
+      const asked = untracked(range);
+      if (state.status !== "connected" || asked === undefined) return;
+      const after = untracked(live.snapshot);
+      const read = views.read(
+        tscache.cache(state.client, config),
+        asked,
+        state.client,
+      );
+      // Not from the cache alone after all: the view moved since the
+      // change, and the resource is about to read where it moved to.
+      if (!read.cacheOnly) return;
+      read.answer.then(
+        (value) =>
+          fresh.set({ after, snapshot: { status: "resolved", value } }),
+        (failure: unknown) => {
+          // Only a failure on a live client counts, as in the loader.
+          if (untracked(tscache.state) !== state) return;
+          const error =
+            failure instanceof Error ? failure : new Error(String(failure));
+          fresh.set({ after, snapshot: { status: "error", error } });
+        },
+      );
+    },
   });
   inject(DestroyRef).onDestroy(() => views.dispose());
   const live = resource({
@@ -222,5 +268,5 @@ export function cacheResource(
         params.client,
       ).answer,
   });
-  return withPreviousValue(live, tscache.takeServerRead(config)?.result);
+  return withPreviousValue(live, tscache.takeServerRead(config)?.result, fresh);
 }

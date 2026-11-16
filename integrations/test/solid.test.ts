@@ -1,5 +1,5 @@
 import { createClient, type TscacheClient } from "@anishbenji/tscache";
-import { createEffect, createRoot, flush } from "solid-js";
+import { createEffect, createRoot, flush, isPending } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { connect } from "../shared/connection";
 import { type Answer, createSeries } from "../solid/series";
@@ -174,5 +174,70 @@ describe("Solid createSeries follows its cache", () => {
     // A cache-only read: no fetch, so no write and no further event.
     expect(gate().fetches).toBe(1);
     expect(queued).toHaveLength(0);
+  });
+
+  it("a change's read from the cache alone never makes the series pending (PR4-2)", async () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      queued.push(callback);
+      return queued.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      queued[id - 1] = () => {};
+    });
+    const runFrames = () => {
+      for (const callback of queued.splice(0)) callback(0);
+      flush();
+    };
+    let client: TscacheClient | undefined;
+    const connection = connect(async () => {
+      client = await createClient({
+        mode: "in-process",
+        fetcher: { module: fetcher },
+      });
+      return client;
+    });
+    teardown.push(() => connection.dispose());
+    const shown: Answer[] = [];
+    const pending: boolean[] = [];
+    createRoot((dispose) => {
+      teardown.push(dispose);
+      const series = createSeries(connection, config, () => ({
+        start: 100,
+        end: 200,
+      }));
+      createEffect(
+        () => series(),
+        (answer) => {
+          shown.push(answer);
+        },
+      );
+      createEffect(
+        () => isPending(() => series()),
+        (now) => {
+          pending.push(now);
+        },
+      );
+    });
+    // The first read fetches (nothing, here); its own event's read follows.
+    await until(() => shown.length === 1);
+    await until(() => queued.length > 0);
+    runFrames();
+    await until(() => shown.length === 2);
+    const before = pending.length;
+    // A live bar: the frame's read is from the cache alone.
+    const writer = await (client as TscacheClient).cache(config);
+    await writer.put({ timestamps: [150], fields: { v: [1], n: [1] } });
+    expect(queued).toHaveLength(1);
+    runFrames();
+    await until(() => shown.length === 3);
+    expect(Array.from(shown[2]?.result.timestamps ?? [])).toEqual([150]);
+    expect(pending.slice(before)).not.toContain(true);
+    // A read that may fetch is pending, as before: an invalidate's.
+    await writer.invalidate({ start: 100, end: 200 });
+    expect(queued).toHaveLength(1);
+    runFrames();
+    await until(() => pending.slice(before).includes(true));
+    await until(() => pending.at(-1) === false);
   });
 });
