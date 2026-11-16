@@ -165,6 +165,11 @@ config, the payload, the snapshot and its JSON form, the cache record and the fe
 where they name the grid. Snapshots, payloads and records of a calendar cache gain a second format,
 while those of a fixed cache stay byte for byte as they are.
 
+Zone data differs between runtimes, so a record written under one can be read under another. In the
+recommended design a record stores the slot index of each instant that names a slot, and a reader whose
+zone data places one elsewhere refuses the record and fetches again; an exact check of every slot is
+specified as an option for applications that need it (row G8 of the proposal).
+
 Today the grid is fixed milliseconds (N9), so daily bars stamped at a session open in a daylight-saving
 zone are rejected as `'misaligned'` for half the year, and weekly and monthly bars rely on the recipes
 of `site/concepts/grid.md` (decision 32 A, step 71): dates at 00:00 UTC, and months as ordinals.
