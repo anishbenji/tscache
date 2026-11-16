@@ -150,15 +150,25 @@ function changed(change: ReaderChange): boolean {
   );
 }
 
-/** Adds `range` to an ascending, disjoint list, merging overlapping and adjacent ranges. */
-function include(list: SlotRange[], range: SlotRange): void {
-  let first = 0;
-  while (
-    first < list.length &&
-    (list[first] as SlotRange).end < range.start - 1
-  ) {
-    first++;
+/**
+ * Adds `range` to an ascending, disjoint list with no two adjacent ranges,
+ * merging the ranges it overlaps or touches. The first such range is found
+ * by binary search, as `CoverageIndex.add` does, so a call that collects
+ * its ranges in ascending order, as every mutating call does, costs
+ * O(log n) per range: the splice is at the end (security lane S1.1, step
+ * 114; a scan from the front made a 100,000-range hydrate quadratic).
+ * Exported for its tests only.
+ */
+export function includeRange(list: SlotRange[], range: SlotRange): void {
+  let lo = 0;
+  let hi = list.length;
+  // The first range whose end reaches range.start - 1: it may touch.
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if ((list[mid] as SlotRange).end < range.start - 1) lo = mid + 1;
+    else hi = mid;
   }
+  const first = lo;
   let { start, end } = range;
   let next = first;
   for (; next < list.length; next++) {
@@ -366,7 +376,7 @@ export class CacheState {
   /** Records slots the running call touched, for its reader change. */
   #wrote(slots: SlotRange | undefined): void {
     if (this.#reader !== undefined && slots !== undefined) {
-      include(this.#reader.written, slots);
+      includeRange(this.#reader.written, slots);
     }
   }
 
@@ -378,7 +388,7 @@ export class CacheState {
     const reader = this.#reader;
     if (reader !== undefined && !reader.cleared) {
       for (const range of this.#coverage.covered(slots)) {
-        include(reader.removed, range);
+        includeRange(reader.removed, range);
       }
     }
     this.#coverage.subtract(slots);
