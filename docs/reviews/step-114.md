@@ -279,6 +279,12 @@ GPT-6.1 Sol (high) on `42db5ee`: one P1. The finding check (Fable) found it vali
 | ---- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R3-1 | P1  | Angular: a change decision recorded before the view goes idle (range `undefined`) survives; an invalidate while idle is not seen; on resume the same range and client read cache-only and the invalidated range is never fetched again. The view's own fetch's write opens the same window. | Accepted, fixed by the director in the shared code: `ViewReads.#ask` records no decision while `shown()` is undefined. Test "a change whose frame comes while the view shows nothing is forgotten (round 3, P1)" fails on `42db5ee` (`[false, true]`) and passes. Only Angular lets the range be undefined after a read; the fix covers any adapter. The same-view audit gains an "idle" row. |
 
+### Pre-review before round 4 (Claude Opus 5.5, on `1ee3832`)
+
+R3-1's fix checked against every adapter; no P0 or P1. One P2, accepted and fixed by the director:
+
+- PR6-1 (P2): Angular's cache-only change read, run in a frame after a pan but before the resource's next load, called `views.read` for the new range, which fetched and was then discarded; the resource then fetched again. Fixed: the resource's loader records the client and range it read, and the change read reads only for that same view; after a move it leaves the read to the resource. Type-checked only: the Angular adapter has no Vitest harness (`@angular/compiler` is not installed).
+
 ## Decision concerns
 
 None.

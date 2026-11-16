@@ -213,6 +213,9 @@ export function cacheResource(
   const tscache = inject(Tscache);
   const changed = signal(0);
   const fresh = signal<Fresh<GetResult | undefined> | undefined>(undefined);
+  // What the resource last read: a change's cache-only read is for that
+  // view only. After a move the resource reads the new range itself.
+  let loaded: { client: TscacheClient; range: Range } | undefined;
   // Holds a change during a fetching read, keeps failure labels, and
   // releases after the answer landed (shared/changes.ts).
   const views = new ViewReads({
@@ -227,6 +230,16 @@ export function cacheResource(
       const state = untracked(tscache.state);
       const asked = untracked(range);
       if (state.status !== "connected" || asked === undefined) return;
+      // The view moved since the change (round 4 pre-review): the resource
+      // is about to read where it moved to, so read nothing here.
+      if (
+        loaded === undefined ||
+        loaded.client !== state.client ||
+        loaded.range.start !== asked.start ||
+        loaded.range.end !== asked.end
+      ) {
+        return;
+      }
       const after = untracked(live.snapshot);
       const read = views.read(
         tscache.cache(state.client, config),
@@ -262,12 +275,14 @@ export function cacheResource(
     // A lost worker's client emits workerLost before this get's rejection is
     // handled, so by then the state, hence the params, have changed, and
     // resource() drops the rejection with the request it belongs to.
-    loader: ({ params }) =>
-      views.read(
+    loader: ({ params }) => {
+      loaded = { client: params.client, range: params.range };
+      return views.read(
         tscache.cache(params.client, config),
         params.range,
         params.client,
-      ).answer,
+      ).answer;
+    },
   });
   return withPreviousValue(live, tscache.takeServerRead(config)?.result, fresh);
 }
