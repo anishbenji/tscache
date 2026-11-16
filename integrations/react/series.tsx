@@ -26,7 +26,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { ChangeWatch, type Reread } from "../shared/changes";
+import { ChangeWatch, keepFailures, type Reread } from "../shared/changes";
 import type { Connection, ConnectionState, Seed } from "../shared/connection";
 
 interface Source {
@@ -86,10 +86,11 @@ const unsubscribed = () => () => {};
  * by a lost worker is asked again of the client replacing it.
  *
  * A change to the cache over the range reads it again (architecture §2.7):
- * from the cache alone, or with a fetch after a change that wrote nothing.
- * The subscription starts in an effect, after the first read went out, so
- * it reads the cache alone once more when it starts: a change in between
- * shows too.
+ * from the cache alone, or with a fetch after a change that wrote nothing,
+ * deferred like the range so the previous answer stays on screen. The
+ * subscription starts in an effect, after the first read went out, so it
+ * reads the cache alone once more when it starts, and again when a new
+ * range commits: a change in between shows too.
  */
 export function useSeries(config: CacheConfig, range: Range): GetResult {
   const { connection, seeds } = use(SourceContext);
@@ -102,13 +103,26 @@ export function useSeries(config: CacheConfig, range: Range): GetResult {
   const cache = useDeferredValue(config);
   const start = useDeferredValue(range.start);
   const end = useDeferredValue(range.end);
-  const changed = useChanges(connection, snapshot, cache, start, end);
+  const shownRead = useRef<Read | undefined>(undefined);
+  // Deferred like the inputs above: a change's read suspends in a
+  // background render, never back to the Suspense fallback.
+  const recorded = useDeferredValue(
+    useChanges(connection, snapshot, cache, start, end, shownRead),
+  );
+  const changed =
+    recorded.start === start && recorded.end === end ? recorded : UNCHANGED;
 
+  // The read on screen, which a new cache-only read keeps failure labels
+  // from (shared/changes.ts, keepFailures).
+  const base = shownRead.current;
   const read =
     connection === null
       ? undefined
-      : readFor(connection, snapshot, cache, start, end, changed);
-  useEffect(() => read?.show(), [read]);
+      : readFor(connection, snapshot, cache, start, end, changed, base);
+  useEffect(() => {
+    shownRead.current = read;
+    return read?.show();
+  }, [read]);
 
   if (read !== undefined) return use(read.answer);
   if (snapshot.status === "failed") throw snapshot.error;
@@ -127,8 +141,12 @@ const UNCHANGED: Changed = { n: 0, how: "fetch", start: 0, end: 0 };
 
 /**
  * Follows the connected client's cache for the range on screen; returns
- * the changes so far over that range (none after the range moved, whose
- * read fetches anyway).
+ * the changes so far, with the range they were over (the caller ignores
+ * them after the range moved, whose read fetches anyway).
+ *
+ * A cache-only read waits while the read on screen still fetches: its
+ * answer would replace that read's, which alone says whether the fetch
+ * failed. The change is asked again once that read has settled.
  */
 function useChanges(
   connection: Connection | null,
@@ -136,23 +154,41 @@ function useChanges(
   config: CacheConfig,
   start: number,
   end: number,
+  shownRead: { readonly current: Read | undefined },
 ): Changed {
   const [changed, setChanged] = useState(UNCHANGED);
   const shown = useRef<Range | undefined>(undefined);
+  const watching = useRef<ChangeWatch | undefined>(undefined);
   useEffect(() => {
+    // An event that arrived before this commit was judged against the
+    // previous range: read the new one from the cache once more.
+    if (shown.current !== undefined) watching.current?.schedule("cache");
     shown.current = { start, end };
   }, [start, end]);
   useEffect(() => {
     if (connection === null || snapshot.status !== "connected") return;
-    const watch = new ChangeWatch({
+    let held = false;
+    const watch: ChangeWatch = new ChangeWatch({
       shown: () => shown.current,
       reread: (how) => {
         const range = shown.current;
         if (range === undefined) return;
+        const reading = shownRead.current;
+        if (how === "cache" && reading?.fetching === true) {
+          if (held) return;
+          held = true;
+          const release = () => {
+            held = false;
+            watch.schedule("cache");
+          };
+          reading.answer.then(release, release);
+          return;
+        }
         setChanged((previous) => ({ n: previous.n + 1, how, ...range }));
       },
       catchUp: true,
     });
+    watching.current = watch;
     let live = true;
     connection.cache(snapshot.client, config).then(
       (cache) => {
@@ -164,9 +200,10 @@ function useChanges(
     return () => {
       live = false;
       watch.dispose();
+      if (watching.current === watch) watching.current = undefined;
     };
-  }, [connection, snapshot, config]);
-  return changed.start === start && changed.end === end ? changed : UNCHANGED;
+  }, [connection, snapshot, config, shownRead]);
+  return changed;
 }
 
 /**
@@ -182,14 +219,15 @@ function readFor(
   start: number,
   end: number,
   changed: Changed,
+  base: Read | undefined,
 ): Read | undefined {
   if (snapshot.status === "connected") {
     const client = promiseOf(snapshot.client);
-    return readOf(connection, client, config, start, end, changed);
+    return readOf(connection, client, config, start, end, changed, base);
   }
   if (snapshot.status === "connecting") {
     const client = clientOf(connection);
-    return readOf(connection, client, config, start, end, changed);
+    return readOf(connection, client, config, start, end, changed, base);
   }
   return undefined;
 }
@@ -231,6 +269,8 @@ const KEEP_MS = 30_000;
  */
 class Read {
   readonly answer: Promise<GetResult>;
+  readonly #cacheOnly: boolean;
+  #settled = false;
   readonly #reads: Map<string, Read>;
   readonly #key: string;
   #shown = 0;
@@ -240,12 +280,22 @@ class Read {
     answer: Promise<GetResult>,
     reads: Map<string, Read>,
     key: string,
+    cacheOnly: boolean,
   ) {
     this.answer = answer;
+    this.#cacheOnly = cacheOnly;
     this.#reads = reads;
     this.#key = key;
-    const settled = () => this.#expire();
+    const settled = () => {
+      this.#settled = true;
+      this.#expire();
+    };
     answer.then(settled, settled);
+  }
+
+  /** Whether this read fetches and has not answered yet. */
+  get fetching(): boolean {
+    return !this.#cacheOnly && !this.#settled;
   }
 
   /** Keeps the read while a mounted component shows it; returns the release. */
@@ -291,7 +341,8 @@ const readsOf = new WeakMap<Promise<TscacheClient>, Map<string, Read>>();
  * The read of a range through `client`: the same object on every render
  * that asks for it, so `use` sees one promise. A new client starts with no
  * reads. Each change over the range is a read of its own, from the cache
- * alone unless the change asked for a fetch.
+ * alone unless the change asked for a fetch; a cache-only read keeps the
+ * failure labels of `base`, the read on screen when it was made.
  */
 function readOf(
   connection: Connection,
@@ -300,6 +351,7 @@ function readOf(
   start: number,
   end: number,
   changed: Changed = UNCHANGED,
+  base?: Read,
 ): Read {
   let reads = readsOf.get(client);
   if (reads === undefined) {
@@ -310,8 +362,17 @@ function readOf(
   let read = reads.get(key);
   if (read === undefined) {
     const cacheOnly = changed.n > 0 && changed.how === "cache";
-    const promise = answer(connection, client, config, start, end, cacheOnly);
-    read = new Read(promise, reads, key);
+    const fresh = answer(connection, client, config, start, end, cacheOnly);
+    const promise =
+      cacheOnly && base !== undefined
+        ? fresh.then((next) =>
+            base.answer.then(
+              (previous) => keepFailures(previous, next, config.interval),
+              () => next,
+            ),
+          )
+        : fresh;
+    read = new Read(promise, reads, key, cacheOnly);
     reads.set(key, read);
   }
   return read;

@@ -29,7 +29,7 @@ import {
   toValue,
   watch,
 } from "vue";
-import { ChangeWatch, NextRead } from "../shared/changes";
+import { ChangeWatch, keepFailures, NextRead } from "../shared/changes";
 import { type Connection, connect, type Seed } from "../shared/connection";
 
 /** The cache's answer for a range. */
@@ -108,13 +108,12 @@ export function useSeries(
       }),
     );
     const changed = shallowRef(0);
-    const next = new NextRead();
+    const next = new NextRead(() => {
+      changed.value++;
+    });
     const changes = new ChangeWatch({
       shown: () => toRaw(toValue(range)),
-      reread: (how) => {
-        next.ask(how);
-        changed.value++;
-      },
+      reread: (how) => next.ask(how),
     });
     onScopeDispose(() => changes.dispose());
     watch(
@@ -125,10 +124,13 @@ export function useSeries(
           pending.value = false;
           return;
         }
-        const cacheOnly = next.cacheOnly(current, asked);
+        if (current.status === "connecting") {
+          pending.value = true;
+          return;
+        }
+        const read = next.start(current, asked);
         // A read after a change keeps the answer it replaces as current.
-        if (!cacheOnly) pending.value = true;
-        if (current.status === "connecting") return;
+        if (!read.cacheOnly) pending.value = true;
         let latest = true;
         onWatcherCleanup(() => {
           latest = false;
@@ -139,12 +141,19 @@ export function useSeries(
           .cache(current.client, config)
           .then((cache) => {
             // Subscribe, then read; a new client's handle replaces the old.
-            if (latest) changes.follow(cache);
-            return cache.get(plain, { cacheOnly });
+            if (latest) {
+              changes.follow(cache);
+              changes.started(!read.cacheOnly);
+            }
+            return cache.get(plain, { cacheOnly: read.cacheOnly });
           })
+          .finally(read.settled)
           .then(
-            (result) => {
+            (fresh) => {
               if (!latest) return;
+              const result = read.cacheOnly
+                ? keepFailures(answer.value?.result, fresh, config.interval)
+                : fresh;
               answer.value = { range: plain, result };
               error.value = undefined;
               pending.value = false;

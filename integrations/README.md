@@ -28,7 +28,9 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
   it shows again, at most once per animation frame, by the read rule of architecture §2.7 (N84): from
   the cache alone when the frame's events wrote something, with a fetch when one wrote nothing and
   cleared or withdrew coverage over the view. Each adapter subscribes before it reads, or reads the
-  cache once more after subscribing, so no change is missed.
+  cache once more after subscribing, so no change is missed. A cache-only re-read waits while the
+  view's fetching read is in flight (`NextRead`), and keeps the failure labels (`fetch-failed`,
+  `auth-pending`) the answer before it showed for misses still missing (`keepFailures`).
 
 ## The frameworks
 

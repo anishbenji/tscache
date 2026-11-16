@@ -5,7 +5,7 @@
 // connection (shared/connection.ts) serves every series of the page.
 
 import type { CacheConfig, GetResult, Range } from "@anishbenji/tscache";
-import { ChangeWatch, type Frame } from "../shared/changes";
+import { ChangeWatch, type Frame, keepFailures } from "../shared/changes";
 import type { Connection } from "../shared/connection";
 
 /** The cache's answer for a range. */
@@ -53,6 +53,8 @@ export function series(
   let disposed = false;
   /** A change arrived while a show() read was in flight: read after it. */
   let stale = false;
+  /** The answer on screen: what a cache-only answer keeps labels from. */
+  let shown: GetResult | undefined;
   const changes = new ChangeWatch({
     shown: () => range,
     reread: (how) => (how === "fetch" ? read() : changed()),
@@ -75,12 +77,24 @@ export function series(
       .then((cache) => {
         // Subscribe, then read: a change after the subscription is in this
         // read or reported after it. A new client's handle replaces the old.
-        if (!disposed && connection.state === state) changes.follow(cache);
+        // A read of its own after events arrived shows them: the frame's
+        // read of them would only repeat it.
+        if (!disposed && connection.state === state) {
+          changes.follow(cache);
+          changes.started(!cacheOnly);
+        }
         return cache.get(asked, { cacheOnly });
       })
       .then(
-        (result) => {
-          if (request === latest) render({ range: asked, result });
+        (fresh) => {
+          if (request !== latest) return;
+          // A cache-only read cannot know that a fetch failed; keep what
+          // the answer on screen said about the misses still missing.
+          const result = cacheOnly
+            ? keepFailures(shown, fresh, config.interval)
+            : fresh;
+          shown = result;
+          render({ range: asked, result });
         },
         (error: unknown) => {
           // A lost worker rejects what was pending; the connection's next
@@ -91,7 +105,9 @@ export function series(
       .finally(() => {
         if (showing !== request) return;
         showing = 0;
-        if (stale) changed();
+        if (!stale) return;
+        stale = false;
+        refresh();
       });
   }
 

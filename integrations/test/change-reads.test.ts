@@ -1,0 +1,305 @@
+import {
+  createClient,
+  type GetResult,
+  type Range,
+  type TscacheClient,
+} from "@anishbenji/tscache";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  ChangeWatch,
+  type Frame,
+  keepFailures,
+  NextRead,
+} from "../shared/changes";
+import { type Connection, connect } from "../shared/connection";
+import { type Answer, series } from "../vanilla/series";
+import { config, until } from "./helpers";
+
+// How a view's own reads and its change re-reads meet (step 114
+// pre-review PR-1, PR-3 and PR-6): a cache-only re-read never replaces a
+// fetching read still in flight, a repeated read posts no subscription
+// churn, and a read the view starts itself takes the place of the frame's.
+
+const shown: Range = { start: 100, end: 200 };
+
+/** A frame scheduler the test runs by hand. */
+function frames(): { frame: Frame; run(): void; count(): number } {
+  const queued: (() => void)[] = [];
+  return {
+    frame: (callback) => {
+      queued.push(callback);
+      return () => {
+        const at = queued.indexOf(callback);
+        if (at !== -1) queued.splice(at, 1);
+      };
+    },
+    run: () => {
+      for (const callback of queued.splice(0)) callback();
+    },
+    count: () => queued.length,
+  };
+}
+
+/** Fetcher control, read per call by the module below. */
+interface Gate {
+  /** When set, the next fetch waits for it. */
+  hold?: Promise<void>;
+  entered?: () => void;
+  /** Whether fetches reject. */
+  fail: boolean;
+}
+const gate = (): Gate => (globalThis as unknown as { __m7view: Gate }).__m7view;
+function resetGate(): void {
+  (globalThis as unknown as { __m7view: Gate }).__m7view = { fail: false };
+}
+resetGate();
+
+const fetcher = `data:text/javascript,${encodeURIComponent(`
+  export default {
+    async fetch({ range }) {
+      const g = globalThis.__m7view;
+      if (g.hold !== undefined) {
+        const hold = g.hold;
+        g.hold = undefined;
+        g.entered?.();
+        await hold;
+      }
+      if (g.fail) throw new Error("backend down");
+      return { timestamps: [], fields: { v: [], n: [] } };
+    },
+  };
+`)}`;
+
+/** Holds the next fetch; resolves `entered` once it waits. */
+function holdNextFetch(): { entered: Promise<void>; release(): void } {
+  let release = () => {};
+  const entered = new Promise<void>((resolve) => {
+    gate().entered = resolve;
+  });
+  gate().hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { entered, release };
+}
+
+const opened: { dispose(): unknown }[] = [];
+afterEach(async () => {
+  for (const item of opened.splice(0)) await item.dispose();
+  vi.restoreAllMocks();
+  resetGate();
+});
+
+async function connected(withFetcher = false): Promise<{
+  connection: Connection;
+  client: TscacheClient;
+}> {
+  let client: TscacheClient | undefined;
+  const connection = connect(async () => {
+    client = await createClient({
+      mode: "in-process",
+      ...(withFetcher ? { fetcher: { module: fetcher } } : {}),
+    });
+    return client;
+  });
+  opened.push(connection);
+  await until(() => connection.state.status === "connected");
+  return { connection, client: client as TscacheClient };
+}
+
+describe("NextRead (PR-1)", () => {
+  it("holds a cache-only change while a fetching read is in flight, then asks it again", () => {
+    let bumps = 0;
+    const next = new NextRead(() => bumps++);
+    const first = next.start("client", shown);
+    expect(first.cacheOnly).toBe(false);
+    next.ask("cache");
+    expect(bumps).toBe(0);
+    first.settled();
+    expect(bumps).toBe(1);
+    expect(next.start("client", shown).cacheOnly).toBe(true);
+  });
+
+  it("lets a fetch through at once, and waits for the last fetching read", () => {
+    let bumps = 0;
+    const next = new NextRead(() => bumps++);
+    const a = next.start("client", shown);
+    next.ask("fetch");
+    expect(bumps).toBe(1);
+    const b = next.start("client", shown);
+    expect(b.cacheOnly).toBe(false);
+    next.ask("cache");
+    a.settled();
+    expect(bumps).toBe(1);
+    b.settled();
+    b.settled();
+    expect(bumps).toBe(2);
+  });
+
+  it("fetches when the range or the client moved, whatever the change asked", () => {
+    const next = new NextRead(() => {});
+    next.start("client", shown).settled();
+    next.ask("cache");
+    expect(next.start("client", { start: 0, end: 50 }).cacheOnly).toBe(false);
+  });
+});
+
+describe("keepFailures (PR-1)", () => {
+  const empty = { timestamps: new Float64Array(), fields: {}, coverage: [] };
+  const error = { name: "Error", message: "backend down" };
+
+  it("keeps a failure label where the slot is still missing, and only there", () => {
+    const previous: GetResult = {
+      ...empty,
+      misses: [
+        { range: { start: 100, end: 200 }, reason: "fetch-failed", error },
+      ],
+    };
+    const next: GetResult = {
+      ...empty,
+      misses: [
+        { range: { start: 50, end: 140 }, reason: "uncached" },
+        { range: { start: 160, end: 250 }, reason: "uncached" },
+      ],
+    };
+    expect(keepFailures(previous, next, 10).misses).toEqual([
+      { range: { start: 50, end: 90 }, reason: "uncached" },
+      { range: { start: 100, end: 140 }, reason: "fetch-failed", error },
+      { range: { start: 160, end: 200 }, reason: "fetch-failed", error },
+      { range: { start: 210, end: 250 }, reason: "uncached" },
+    ]);
+  });
+
+  it("returns the answer as it is when the previous one labelled nothing", () => {
+    const next: GetResult = {
+      ...empty,
+      misses: [{ range: shown, reason: "uncached" }],
+    };
+    expect(keepFailures(undefined, next, 10)).toBe(next);
+    expect(keepFailures(next, next, 10)).toBe(next);
+  });
+});
+
+describe("ChangeWatch.started (PR-6)", () => {
+  it("drops the frame's cache-only read, and a fetching one only for a fetching read", async () => {
+    const client = await createClient({ mode: "in-process" });
+    opened.push(client);
+    const cache = await client.cache(config);
+    const reads: string[] = [];
+    const clock = frames();
+    const watch = new ChangeWatch({
+      shown: () => shown,
+      reread: (how) => reads.push(how),
+      frame: clock.frame,
+    });
+    opened.push(watch);
+    watch.follow(cache);
+    const point = (t: number) => ({
+      timestamps: [t],
+      fields: { v: [t], n: [1] },
+    });
+    await cache.put(point(150));
+    watch.started(false);
+    clock.run();
+    expect(reads).toEqual([]);
+    await cache.invalidate(shown);
+    watch.started(false);
+    clock.run();
+    expect(reads).toEqual(["fetch"]);
+    await cache.invalidate(shown);
+    await cache.put(point(150));
+    await cache.invalidate(shown);
+    watch.started(true);
+    clock.run();
+    expect(reads).toEqual(["fetch"]);
+  });
+});
+
+describe("vanilla series and its own reads", () => {
+  /** Every subscribe and unsubscribe the page posts to its in-process worker. */
+  function subscriptionOps(): () => string[] {
+    const post = vi.spyOn(MessagePort.prototype, "postMessage");
+    return () =>
+      post.mock.calls.flatMap(([message]) => {
+        const op = (message as { t?: string; op?: string }).op;
+        return (message as { t?: string }).t === "req" &&
+          (op === "subscribe" || op === "unsubscribe")
+          ? [op]
+          : [];
+      });
+  }
+
+  it("a repeated refresh() posts no unsubscribe or subscribe (PR-3)", async () => {
+    const ops = subscriptionOps();
+    const { connection } = await connected();
+    const answers: Answer[] = [];
+    const chart = series(connection, {
+      config,
+      render: (answer) => answers.push(answer),
+      fail: (error) => {
+        throw error;
+      },
+      frame: () => () => {},
+    });
+    opened.push(chart);
+    chart.show(shown);
+    await until(() => answers.length === 1);
+    for (let i = 0; i < 3; i++) {
+      chart.refresh();
+      await until(() => answers.length === i + 2);
+    }
+    expect(ops()).toEqual(["subscribe"]);
+  });
+
+  it("a refresh after a change takes the place of the frame's re-read (PR-6)", async () => {
+    const { connection, client } = await connected();
+    const answers: Answer[] = [];
+    const clock = frames();
+    const chart = series(connection, {
+      config,
+      render: (answer) => answers.push(answer),
+      fail: (error) => {
+        throw error;
+      },
+      frame: clock.frame,
+    });
+    opened.push(chart);
+    chart.show(shown);
+    await until(() => answers.length === 1);
+    const writer = await client.cache(config);
+    await writer.put({ timestamps: [150], fields: { v: [1], n: [1] } });
+    expect(clock.count()).toBe(1);
+    chart.refresh();
+    await until(() => answers.length === 2);
+    expect(Array.from(answers[1]?.result.timestamps ?? [])).toEqual([150]);
+    expect(clock.count()).toBe(0);
+  });
+
+  it("a change while show() fetches keeps the fetch's failure on screen (PR-1)", async () => {
+    const { connection, client } = await connected(true);
+    const answers: Answer[] = [];
+    const clock = frames();
+    const chart = series(connection, {
+      config,
+      render: (answer) => answers.push(answer),
+      fail: (error) => {
+        throw error;
+      },
+      frame: clock.frame,
+    });
+    opened.push(chart);
+    const held = holdNextFetch();
+    chart.show(shown);
+    await held.entered;
+    const writer = await client.cache(config);
+    await writer.put({ timestamps: [150], fields: { v: [1], n: [1] } });
+    clock.run();
+    gate().fail = true;
+    held.release();
+    await until(() => answers.length > 0);
+    // The show's answer may be followed only by reads its failure allows.
+    await writer.get(shown, { cacheOnly: true });
+    clock.run();
+    const last = answers.at(-1)?.result as GetResult;
+    expect(last.misses.map((miss) => miss.reason)).toContain("fetch-failed");
+  });
+});
