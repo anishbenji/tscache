@@ -8,6 +8,17 @@ This is a measurement, not a gate: no CI job, hook or workflow runs Stryker, and
 
 The folders the test-first rule names (`AGENTS.md`, TDD): `packages/tscache/src/grid.ts`, `coverage.ts`, `segment/`, `engine/`, `orchestrator/` and `persist/`, 4,459 mutants in all. Each mutant runs against the package's own Vitest suite (`packages/tscache/test`, under Node), narrowed by Stryker's per-test coverage to the tests that reach the mutated code. Tests in `examples/`, `reference/`, `integrations/`, `e2e/`, `scripts/` and `site/` do not count, even where they would kill a mutant.
 
+## History
+
+A row is added after each merged step that touches engine logic (`grid.ts`, `coverage.ts`, `segment/`, `engine/`, `orchestrator/`, `persist/`), from a full run under the heavy-job lock (see "How to re-run"). Commit is the `main` commit measured; the scores are mutation scores, as in the Score column of the Results table below.
+
+| Date       | Commit    | Stryker | All   | grid.ts | coverage.ts | segment/ | engine/ | orchestrator/ | persist/ |
+| ---------- | --------- | ------- | ----- | ------- | ----------- | -------- | ------- | ------------- | -------- |
+| 2026-11-13 | `b2e1f06` | 10.1.1  | 89.17 | 93.10   | 98.08       | 95.91    | 91.36   | 86.63         | 82.87    |
+| 2026-11-16 | `7acab39` | 10.1.1  | 92.33 | 93.97   | 98.08       | 96.70    | 95.06   | 90.02         | 86.81    |
+
+The first row is the step 84 measurement (six per-area runs, Results below). The second (step 113) is one run of `bun run mutation` over the same 4,459 mutants: 3,895 killed, 222 timed out, 308 survived and 34 without coverage, in 68 minutes. The load average reached 127 during that run, which slowed it and may have turned some kills into timeouts; a timeout counts as killed, so a mutant that only timed out under load can raise the score. Of the twenty survivors listed below, 11 are now killed (4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 18), 5 in part (8: `:403` still survives; 13: four of five still survive; 16: four survive, none without coverage; 17: `:338`; 20: `:81`), and 1, 2, 3 and 19 still survive.
+
 ## Results
 
 Run on the head of `chore/84-mutation-measure` (`main` at `b2e1f06`, v0.1.0, plus the configuration), one Stryker run per area. Mutation score = (killed + timed out) / (killed + timed out + survived + no coverage); a timeout counts as killed, because the mutant made a test hang. "Covered" leaves out the mutants no test reaches.
@@ -94,7 +105,7 @@ File and line are in `packages/tscache/src` on `b2e1f06`. "Survived" means at le
 
 The step 84 numbers were measured on 2026-11-13, before Stryker was a dependency of the repository. Since step 91, `@stryker-mutator/core` and `@stryker-mutator/vitest-runner` (10.1.1, pinned exactly) are dev dependencies of the repository, and `bun run mutation` (`stryker run`) runs the measurement from the repository root.
 
-A run is a heavy job: run it under the heavy-job lock, never next to `bun run ci`. A run of all six areas takes about 40 minutes (37 m 35 s in step 84; from 42 s to 15 m 15 s per area). To scope a run, pass `--mutate` with a file or glob after the script name; it replaces the `mutate` list of the configuration for that run only, so the configuration file stays unchanged.
+A run is a heavy job: run it under the heavy-job lock, never next to `bun run ci`. A run of all six areas takes about 40 minutes (37 m 35 s in step 84; from 42 s to 15 m 15 s per area), longer on a loaded machine (68 minutes in step 113). To scope a run, pass `--mutate` with a file or glob after the script name; it replaces the `mutate` list of the configuration for that run only, so the configuration file stays unchanged.
 
 ```sh
 ~/code/tscache-reports/bin/heavy-run.sh "mutation" bun run mutation        # every area
