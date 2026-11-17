@@ -80,5 +80,22 @@ unsubscribe();
 
 // #endregion events
 
+// #region changes
+const shown = { start: 0, end: 3_600_000 };
+const overlaps = (r: { start: number; end: number }) =>
+  r.start <= shown.end && shown.start <= r.end;
+const stopFollowing = cache.on("cacheChanged", (change) => {
+  if (change.written.length > 0) {
+    // Written already: read it back from the cache alone.
+    if (change.cleared || [...change.written, ...change.removed].some(overlaps))
+      void cache.get(shown, { cacheOnly: true });
+  } else if (change.cleared || change.removed.some(overlaps)) {
+    void cache.get(shown); // coverage went: fetch it again
+  }
+});
+stopFollowing();
+
+// #endregion changes
+
 // Read by `bun run docs:run`, which checks what the example produced.
 export { result };

@@ -47,6 +47,10 @@ server alone.
   `withPreviousValue` recipe: `linkedSignal` over `snapshot`, then
   `resourceFromSnapshots`. Signals hold references, so the typed arrays are
   never copied or made deeply reactive.
+- When the cache changes over the range, a read that may fetch goes through
+  the resource and shows as `"loading"`. A read from the cache alone (after
+  a live bar, say) does not: its answer goes over the resource's snapshot in
+  the same `linkedSignal`, so `status()` stays `"resolved"`.
 - On the server, `cacheResource` reads through `SERVER_READER`, which
   `provideTscacheServer` provides with the process's `serverReader`. The
   resource holds a pending task while it loads, so the zoneless render waits

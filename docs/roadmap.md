@@ -114,8 +114,10 @@ with this sketch: its envelope is the cache record above and its segments the pa
 
 ## Design sketch: subscriptions (dirty notifications)
 
-**Proposed in detail in [`docs/design/m7-change-events.md`](design/m7-change-events.md) (step 92,
-finding M7), with its open choices as decision rows for the user.** It keeps this sketch's notify-only,
+**Specified in `docs/architecture.md` §2.7 (decisions N71–N84, user decision 65 of 2026-11-16) and
+built in step 114; where this sketch and the architecture differ, the architecture governs.** The
+proposal [`docs/design/m7-change-events.md`](design/m7-change-events.md) (step 92, finding M7) records
+the alternatives. It keeps this sketch's notify-only,
 cache-scoped event and changes three things: one event per mutating call rather than per macrotask; the
 payload separates written ranges from withdrawn coverage; and a reader re-reads a written range with
 `cacheOnly`, because a fetching re-read on every event loops wherever a cache has a volatile region.
@@ -153,6 +155,26 @@ no message to the handshake and keeps the protocol at version 1.
 Today a protocol mismatch rejects `createClient`, a fetcher whose URL changed is refused by the running
 worker, and a worker whose URL changed runs beside the old one, unreported, both writing the origin's
 database (architecture §4.10.7, N52).
+
+## Design sketch: calendar grid
+
+**Proposed in detail in [`docs/design/calendar-grid.md`](design/calendar-grid.md) (step 118, finding
+M4), with its open choices as decision rows for the user.** It adds built-in calendar intervals to the
+config: one slot per day, week, month, quarter or year, starting at a local time in an IANA zone, with
+the zone rules taken from the runtime's `Intl` and nothing bundled. Inside the engine the range
+arithmetic changes in `grid.ts` alone, since coverage, segments and pages run on slot indices; the
+config, the payload, the snapshot and its JSON form, the cache record and the fetch request change
+where they name the grid. Snapshots, payloads and records of a calendar cache gain a second format,
+while those of a fixed cache stay byte for byte as they are.
+
+Zone data differs between runtimes, so a record written under one can be read under another. In the
+recommended design a record stores the slot index of each instant that names a slot, and a reader whose
+zone data places one elsewhere refuses the record and fetches again; an exact check of every slot is
+specified as an option for applications that need it (row G8 of the proposal).
+
+Today the grid is fixed milliseconds (N9), so daily bars stamped at a session open in a daylight-saving
+zone are rejected as `'misaligned'` for half the year, and weekly and monthly bars rely on the recipes
+of `site/concepts/grid.md` (decision 32 A, step 71): dates at 00:00 UTC, and months as ordinals.
 
 ## Deferred features (starter §10)
 

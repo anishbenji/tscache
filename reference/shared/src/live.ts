@@ -4,11 +4,15 @@
 //
 // One tab per browser holds the feed, elected with a Web Lock: when it
 // closes, the lock passes to a waiting tab, which starts the source again.
-// The holder brings each new bar into the cache, then tells the other tabs
-// on a BroadcastChannel. With a SharedWorker every tab reads the one cache
-// the holder filled, so the others only redraw; a tab with a cache of its
-// own (a dedicated worker, or in-process) fills it itself. All tabs of a
-// browser get the same hosting mode, so a holder and its readers agree on
+// The holder brings each new bar into the cache. With a SharedWorker every
+// tab reads the one cache the holder filled, and the cache's cacheChanged
+// event tells every tab, the holder's own included, where new bars landed
+// (architecture §2.7), so they redraw; a SharedWorker script from before
+// that event redraws through the channel instead. A tab with a cache of its own (a
+// dedicated worker, or in-process) hears no other tab's change: the holder
+// passes each batch on a BroadcastChannel, and the tab fills its cache
+// itself. The channel also carries every opening of a source. All tabs of
+// a browser get the same hosting mode, so a holder and its readers agree on
 // which case they are in.
 //
 // A pushing source (SSE, WebSocket) brings put batches. A put without a
@@ -26,7 +30,13 @@
 // the opening (onOpened) before the source's first bar, and a read that
 // fetches over the provisional end mends both.
 
-import type { CacheConfig, PutBatch, Range } from "@anishbenji/tscache";
+import type {
+  CacheConfig,
+  CacheHandle,
+  PutBatch,
+  Range,
+  TscacheClient,
+} from "@anishbenji/tscache";
 import type { Connection } from "@tscache/integrations/shared/connection";
 import { formingBar } from "./market";
 
@@ -55,7 +65,11 @@ export interface LiveFeedOptions {
   config: CacheConfig;
   /** What the holder runs. */
   source: Source;
-  /** New bars are in the cache; `span` is the time they cover. */
+  /**
+   * New bars are in the cache; `span` is the time they cover. With a
+   * SharedWorker it is the time any write to the cache covered, whichever
+   * tab made it: a feed bar, or a fetch.
+   */
   onBatch(span: Range): void;
   /**
    * A source opened, after an outage or under another tab: read the newest
@@ -90,6 +104,25 @@ function spanOf({ timestamps }: PutBatch): Range {
     start: Number(timestamps[0]),
     end: Number(timestamps[timestamps.length - 1]),
   };
+}
+
+/**
+ * Whether the client's cache tells this tab of every tab's writes: one
+ * SharedWorker cache whose worker offers cacheChanged. A worker script
+ * from before the event (N80) offers none, and the channel carries the
+ * redraws as before it.
+ */
+function evented(client: TscacheClient): boolean {
+  return client.mode === "shared" && client.features.has("cacheChanged");
+}
+
+/** The time a cacheChanged event's written ranges cover, ascending and disjoint. */
+function hullOf(written: readonly Range[]): Range | undefined {
+  const first = written[0];
+  const last = written[written.length - 1];
+  return first === undefined || last === undefined
+    ? undefined
+    : { start: first.start, end: last.end };
 }
 
 /**
@@ -136,6 +169,9 @@ export function liveFeed({
     const applied = queue.then(async () => {
       const state = connection.state;
       if (state.status !== "connected") return false;
+      // One cache for every tab: its cacheChanged redraws them all.
+      const shared = evented(state.client);
+      if (shared && !held) return true;
       let complete = true;
       let failed = false;
       let span =
@@ -165,7 +201,7 @@ export function liveFeed({
         }
         if (failed) return false;
       }
-      if (!stop.signal.aborted) onBatch(span);
+      if (!shared && !stop.signal.aborted) onBatch(span);
       return complete;
     });
     queue = applied.then(() => {});
@@ -175,6 +211,34 @@ export function liveFeed({
   function pass(message: FeedMessage): void {
     if (!stop.signal.aborted) channel.postMessage(message);
   }
+
+  // With a SharedWorker, each client's cache tells this tab of every write.
+  let watched: CacheHandle | undefined;
+  let unwatch = () => {};
+  function watch(): void {
+    const state = connection.state;
+    if (state.status !== "connected" || !evented(state.client)) return;
+    connection.cache(state.client, config).then(
+      (cache) => {
+        if (stop.signal.aborted || cache === watched) return;
+        unwatch();
+        watched = cache;
+        unwatch = cache.on("cacheChanged", ({ written }) => {
+          const span = hullOf(written);
+          if (span === undefined) return;
+          queue = queue.then(() => {
+            if (!stop.signal.aborted) onBatch(span);
+          });
+        });
+      },
+      (error: unknown) => {
+        // A lost worker fails it; the client replacing it is watched instead.
+        if (connection.state === state) reportError(error);
+      },
+    );
+  }
+  const stopWatching = connection.subscribe(watch);
+  watch();
 
   channel.onmessage = ({ data }: MessageEvent<FeedMessage>) => {
     void (data.kind === "opened" ? opened() : apply(data, false));
@@ -216,6 +280,8 @@ export function liveFeed({
 
   return () => {
     stop.abort();
+    stopWatching();
+    unwatch();
     channel.close();
   };
 }

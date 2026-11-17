@@ -33,6 +33,9 @@ export async function lossy(): Promise<Lossy> {
     get mode() {
       return real.mode;
     },
+    get features() {
+      return real.features;
+    },
     cache: (c) => live(() => real.cache(c)),
     clearAll: () => live(() => real.clearAll()),
     updateAuth: (context) => live(() => real.updateAuth(context)),

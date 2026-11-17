@@ -6,10 +6,12 @@
 // the range), so a new client, cache or range loads in a background render
 // while the previous answer stays on screen. Without that, a reconnect
 // would bring back the Suspense fallback: a store update cannot be a
-// transition.
+// transition. A change to the cache over the range on screen, from any
+// tab, reads it again, at most once per frame (shared/changes.ts).
 
 import type {
   CacheConfig,
+  CacheHandle,
   GetResult,
   Range,
   TscacheClient,
@@ -21,8 +23,15 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useSyncExternalStore,
 } from "react";
+import {
+  type Frame,
+  nextFrame,
+  type ReadMode,
+  ViewReads,
+} from "../shared/changes";
 import type { Connection, ConnectionState, Seed } from "../shared/connection";
 
 interface Source {
@@ -80,6 +89,13 @@ const unsubscribed = () => () => {};
  * that a newer range overtook. A failed connection, or a read that failed
  * on a live client, throws to the nearest error boundary; a read cut short
  * by a lost worker is asked again of the client replacing it.
+ *
+ * A change to the cache over the range reads it again (architecture §2.7):
+ * from the cache alone, or with a fetch after a change that wrote nothing,
+ * in a background render, so the previous answer stays on screen. Each
+ * range, client and cache the component shows is a view of its own (see
+ * View): it follows its cache from before its first read, which fetches,
+ * and reads again only while the component shows it.
  */
 export function useSeries(config: CacheConfig, range: Range): GetResult {
   const { connection, seeds } = use(SourceContext);
@@ -92,38 +108,58 @@ export function useSeries(config: CacheConfig, range: Range): GetResult {
   const cache = useDeferredValue(config);
   const start = useDeferredValue(range.start);
   const end = useDeferredValue(range.end);
-
-  const read =
+  // The view this component shows, set when it commits. A render for the
+  // same client, cache and range finds it here; any other is a move.
+  const shown = useRef<View | undefined>(undefined);
+  const view =
     connection === null
       ? undefined
-      : readFor(connection, snapshot, cache, start, end);
-  useEffect(() => read?.show(), [read]);
+      : viewFor(connection, snapshot, cache, start, end, shown.current);
+  const newest = useSyncExternalStore(
+    view?.subscribe ?? unsubscribed,
+    () => view?.newest,
+    () => view?.newest,
+  );
+  // Deferred like the inputs above: a change's read suspends in a
+  // background render, never back to the Suspense fallback.
+  const read = useDeferredValue(newest);
+  useEffect(() => {
+    if (view === undefined) return;
+    shown.current = view;
+    return view.show();
+  }, [view]);
 
-  if (read !== undefined) return use(read.answer);
+  if (read !== undefined) return use(read);
   if (snapshot.status === "failed") throw snapshot.error;
   return serverAnswer(seeds, cache, start, end);
 }
 
 /**
- * The read a render suspends on: from the snapshot's client, or from the
- * next client while the connection connects. A render that suspended while
- * connecting finds the same read once connected (see clientOf), since
- * React replays a suspended render expecting the same promise.
+ * The view a render reads through: the one the component shows, when the
+ * render is for the same client, cache and range; else the view of a move
+ * (or of a first mount), found again by every retry of that render. While
+ * the connection connects it is the next client's: a render that suspended
+ * while connecting finds the same view once connected (see clientOf).
  */
-function readFor(
+function viewFor(
   connection: Connection,
   snapshot: Snapshot,
   config: CacheConfig,
   start: number,
   end: number,
-): Read | undefined {
-  if (snapshot.status === "connected") {
-    return readOf(connection, promiseOf(snapshot.client), config, start, end);
+  shown: View | undefined,
+): View | undefined {
+  if (snapshot.status !== "connected" && snapshot.status !== "connecting") {
+    return undefined;
   }
-  if (snapshot.status === "connecting") {
-    return readOf(connection, clientOf(connection), config, start, end);
-  }
-  return undefined;
+  const client =
+    snapshot.status === "connected"
+      ? promiseOf(snapshot.client)
+      : clientOf(connection);
+  const what = whatOf(config, start, end);
+  if (shown?.is(client, what) === true) return shown;
+  const key = shown === undefined ? what : shown.moveTo(what);
+  return viewOf(connection, client, config, start, end, key);
 }
 
 /**
@@ -149,65 +185,23 @@ function serverAnswer(
 }
 
 /**
- * How long a settled read that no mounted component shows stays cached.
- * A suspended render commits only once every read it waits on has settled,
+ * How long a view that no mounted component shows is kept, from when its
+ * newest read settled or, if later, from when it was last shown. A
+ * suspended render commits only once every read it waits on has settled,
  * and React reports no render it abandons; this outlasts that wait, so
- * each retry finds the promise it suspended on.
+ * each retry finds the view it suspended on.
  */
 const KEEP_MS = 30_000;
-
-/**
- * One client's read of one range. A pending read, and a read a mounted
- * component shows, stay cached; any other is dropped KEEP_MS after it
- * settled or was last shown. Nothing is dropped during a render.
- */
-class Read {
-  readonly answer: Promise<GetResult>;
-  readonly #reads: Map<string, Read>;
-  readonly #key: string;
-  #shown = 0;
-  #expiry: ReturnType<typeof setTimeout> | undefined;
-
-  constructor(
-    answer: Promise<GetResult>,
-    reads: Map<string, Read>,
-    key: string,
-  ) {
-    this.answer = answer;
-    this.#reads = reads;
-    this.#key = key;
-    const settled = () => this.#expire();
-    answer.then(settled, settled);
-  }
-
-  /** Keeps the read while a mounted component shows it; returns the release. */
-  show(): () => void {
-    this.#shown++;
-    clearTimeout(this.#expiry);
-    return () => {
-      this.#shown--;
-      this.#expire();
-    };
-  }
-
-  #expire(): void {
-    if (this.#shown > 0) return;
-    clearTimeout(this.#expiry);
-    this.#expiry = setTimeout(() => {
-      if (this.#reads.get(this.#key) === this) this.#reads.delete(this.#key);
-    }, KEEP_MS);
-  }
-}
 
 const byName = ([a]: [string, unknown], [b]: [string, unknown]) =>
   a < b ? -1 : a > b ? 1 : 0;
 
 /**
  * A config's whole value as a key, the same however its properties are
- * ordered. Equal configs share their reads; one that conflicts with
- * another of the same id gets reads of its own, which reach the client and
- * fail with its ConfigError. Computed on each render, so a config changed
- * in place is judged afresh.
+ * ordered. Equal configs are one cache to a view; one that conflicts with
+ * another of the same id gets a view of its own, whose reads reach the
+ * client and fail with its ConfigError. Computed on each render, so a
+ * config changed in place is judged afresh.
  */
 function keyOf({ fields, ...rest }: CacheConfig): string {
   return JSON.stringify([
@@ -216,52 +210,227 @@ function keyOf({ fields, ...rest }: CacheConfig): string {
   ]);
 }
 
-/** The reads made through each client's promise, by config and range. */
-const readsOf = new WeakMap<Promise<TscacheClient>, Map<string, Read>>();
+/** What a view is of, besides its client: the cache and the range, by value. */
+function whatOf(config: CacheConfig, start: number, end: number): string {
+  return `${keyOf(config)} ${start} ${end}`;
+}
 
-/**
- * The read of a range through `client`: the same object on every render
- * that asks for it, so `use` sees one promise. A new client starts with no
- * reads.
- */
-function readOf(
+/** The views no component has committed yet, by client and key. */
+const viewsOf = new WeakMap<Promise<TscacheClient>, Map<string, View>>();
+let views = 0;
+
+/** The view under `key` among `client`'s uncommitted ones, made if absent. */
+function viewOf(
   connection: Connection,
   client: Promise<TscacheClient>,
   config: CacheConfig,
   start: number,
   end: number,
-): Read {
-  let reads = readsOf.get(client);
-  if (reads === undefined) {
-    reads = new Map();
-    readsOf.set(client, reads);
+  key: string,
+): View {
+  let waiting = viewsOf.get(client);
+  if (waiting === undefined) {
+    waiting = new Map();
+    viewsOf.set(client, waiting);
   }
-  const key = `${keyOf(config)} ${start} ${end}`;
-  let read = reads.get(key);
-  if (read === undefined) {
-    read = new Read(answer(connection, client, config, start, end), reads, key);
-    reads.set(key, read);
+  let view = waiting.get(key);
+  if (view === undefined) {
+    const of = { connection, client, config, range: { start, end } };
+    view = new View(of, waiting, key);
+    waiting.set(key, view);
   }
-  return read;
+  return view;
 }
 
-async function answer(
-  connection: Connection,
-  awaited: Promise<TscacheClient>,
-  config: CacheConfig,
-  start: number,
-  end: number,
-): Promise<GetResult> {
-  const client = await awaited;
-  try {
-    const cache = await connection.cache(client, config);
-    return await cache.get({ start, end });
-  } catch (error) {
-    const { state } = connection;
-    if (state.status === "connected" && state.client === client) throw error;
-    // The worker was lost: the client rejected what was pending, and the
-    // connection is replacing it. The next client answers instead.
-    return readOf(connection, clientOf(connection), config, start, end).answer;
+/** What a view reads: one range of one cache, through one client. */
+interface Of {
+  connection: Connection;
+  client: Promise<TscacheClient>;
+  config: CacheConfig;
+  range: Range;
+}
+
+/**
+ * One view of the cache: one client, one cache and one range, which never
+ * change, with the shared `ViewReads` every adapter uses (shared/changes.ts).
+ * It follows the client's handle before its first read, which fetches;
+ * every later read is a change's, so `ViewReads` reads the cache alone, or
+ * fetches after a change that wrote nothing, holds a change while a fetch
+ * is in flight, and keeps failure labels. React keeps only two things here.
+ *
+ * Where a view is found. A render must find the read it suspended on, and a
+ * first mount that suspends keeps no state, so a view is made while
+ * rendering and kept in a map: under its client, cache and range for a
+ * first mount, and for a mounted component's move also under the view the
+ * component shows, so each move is a view of its own. Once a component
+ * commits with a view, the view leaves the map and belongs to that
+ * component: no later mount or move finds it, so theirs fetch.
+ *
+ * When a view reads. Its changes are scheduled through a frame that waits
+ * until a mounted component shows it. A view no component shows reads
+ * nothing, so `newest` never changes under a suspended render, and it
+ * misses nothing: it goes on following, and reads once when it is shown.
+ * After KEEP_MS a view nobody shows stops following; shown again after
+ * that, it starts afresh with a fetch.
+ */
+class View {
+  /** The newest read's answer: what a render suspends on. */
+  newest: Promise<GetResult>;
+  readonly #of: Of;
+  readonly #what: string;
+  readonly #waiting: Map<string, View>;
+  readonly #key: string;
+  readonly #id = ++views;
+  readonly #handle: Promise<CacheHandle>;
+  readonly #listeners = new Set<() => void>();
+  #reads: ViewReads;
+  #shown = 0;
+  /** Whether a component has committed with it. */
+  #committed = false;
+  /** Starts the frame of a change that waits for the view to be shown. */
+  #parked: (() => void) | undefined;
+  #expiry: ReturnType<typeof setTimeout> | undefined;
+  #closed = false;
+
+  constructor(of: Of, waiting: Map<string, View>, key: string) {
+    this.#of = of;
+    this.#what = whatOf(of.config, of.range.start, of.range.end);
+    this.#waiting = waiting;
+    this.#key = key;
+    this.#handle = of.client.then((client) =>
+      of.connection.cache(client, of.config),
+    );
+    this.#reads = this.#follow();
+    this.newest = this.#read();
+  }
+
+  /** Whether it is the view of `what` through `client`. */
+  is(client: Promise<TscacheClient>, what: string): boolean {
+    return this.#of.client === client && this.#what === what;
+  }
+
+  /** The key of a move from this view to `what`: this view's alone. */
+  moveTo(what: string): string {
+    return `${what} from ${this.#id}`;
+  }
+
+  /** Calls `listener` when `newest` changes; for useSyncExternalStore. */
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  };
+
+  /**
+   * A mounted component shows the view, from an effect: it is the
+   * component's now, and reads the changes that waited. Returns the
+   * release.
+   *
+   * The first time, it also reads the cache alone once. The view has
+   * followed its cache since before its first read, so this read shows
+   * nothing a change's read would not; it is kept because a new range's
+   * commit has read the cache once more since pre-review 1 (PR-4), and
+   * that is pinned by a test. It takes the place of a waiting cache-only
+   * read, so a commit costs one such read either way.
+   */
+  show(): () => void {
+    const first = !this.#committed;
+    this.#committed = true;
+    if (this.#waiting.get(this.#key) === this) this.#waiting.delete(this.#key);
+    this.#shown++;
+    clearTimeout(this.#expiry);
+    if (this.#closed) {
+      this.#closed = false;
+      this.#reads = this.#follow();
+      this.#reread();
+    } else if (first) {
+      this.#reread("cache");
+    }
+    const parked = this.#parked;
+    this.#parked = undefined;
+    parked?.();
+    return () => {
+      this.#shown--;
+      this.#expire();
+    };
+  }
+
+  #follow(): ViewReads {
+    return new ViewReads({
+      shown: () => this.#of.range,
+      interval: this.#of.config.interval,
+      alignmentOffset: this.#of.config.alignmentOffset ?? 0,
+      reread: () => this.#reread(),
+      frame: this.#frame,
+    });
+  }
+
+  /**
+   * The next frame at which a mounted component shows the view: a frame
+   * that finds it shown by nobody waits for `show`.
+   */
+  readonly #frame: Frame = (callback) => {
+    let cancel = () => {};
+    const start = () => {
+      cancel = nextFrame(() => {
+        if (this.#shown > 0) callback();
+        else park();
+      });
+    };
+    const park = () => {
+      this.#parked = start;
+      cancel = () => {
+        this.#parked = undefined;
+      };
+    };
+    if (this.#shown > 0) start();
+    else park();
+    return () => cancel();
+  };
+
+  #reread(mode?: ReadMode): void {
+    this.newest = this.#read(mode);
+    for (const listener of this.#listeners) listener();
+  }
+
+  #read(mode?: ReadMode): Promise<GetResult> {
+    const { client, range } = this.#of;
+    const read = this.#reads.read(this.#handle, range, client, mode);
+    const answer = this.#answer(read.answer);
+    const settled = () => this.#expire();
+    answer.then(settled, settled);
+    return answer;
+  }
+
+  async #answer(read: Promise<GetResult>): Promise<GetResult> {
+    const { connection, client, config, range } = this.#of;
+    try {
+      return await read;
+    } catch (error) {
+      // Rejects when the connection failed: there is no next client to ask.
+      const awaited = await client;
+      const { state } = connection;
+      if (state.status === "connected" && state.client === awaited) throw error;
+      // The worker was lost: the client rejected what was pending, and the
+      // connection is replacing it. The next client's view answers instead:
+      // the one the component's own render finds there, which is a move
+      // from this view once a component has committed with it.
+      const key = this.#committed ? this.moveTo(this.#what) : this.#key;
+      const next = clientOf(connection);
+      return viewOf(connection, next, config, range.start, range.end, key)
+        .newest;
+    }
+  }
+
+  /** Stops following KEEP_MS from now, unless a component shows the view. */
+  #expire(): void {
+    if (this.#shown > 0) return;
+    clearTimeout(this.#expiry);
+    this.#expiry = setTimeout(() => {
+      if (this.#waiting.get(this.#key) === this)
+        this.#waiting.delete(this.#key);
+      this.#reads.dispose();
+      this.#closed = true;
+    }, KEEP_MS);
   }
 }
 

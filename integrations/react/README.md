@@ -35,12 +35,17 @@ only.
   React drops a background render that a newer range overtook, so an
   overtaken answer never shows. Only a first answer shows the fallback.
 - `use()` needs the same promise on every render of a read, a suspended
-  render's retry included. Reads are cached per client, config and range,
-  and none is dropped during a render: a pending or shown read stays, any
-  other goes 30 s after it settled or was last shown (like TanStack
-  Query's `gcTime`). A read made while connecting belongs to the client it
-  awaited. A config conflicting with another of its id fails its own
-  reads with `ConfigError`.
+  render's retry included, and a first mount that suspends keeps no state.
+  So each client, config and range a component reads is a view, made while
+  rendering and found again by every retry. A view follows its cache from
+  before its first read, which fetches (`shared/changes.ts`). Once a
+  component commits with a view, the view is that component's alone: a
+  later mount, or a move back to the same range, makes a new view, whose
+  first read fetches. A view no component shows reads nothing and is
+  dropped 30 s after its newest read settled or it was last shown; shown,
+  it reads what changed meanwhile. A view made while connecting belongs to
+  the client it awaited. A config conflicting with another of its id fails
+  its own reads with `ConfigError`.
 - A read rejected because the worker was lost is asked again of the client
   replacing it, so it never reaches an error boundary. A failed connection,
   or a read that failed on a live client, throws to the nearest one.
@@ -53,14 +58,21 @@ only.
 
 ## Known limits
 
-- An answer is cached for its range: the hook does not read that range
-  again, so misses (`fetch-failed`, `auth-pending`) and a provisional tail
-  stay as they were until the range or the client changes. After
-  `updateAuth`, change the range to read again. For `authInvalid` and Web
-  Locks, see `examples/react-lwcharts/src/auth-refresh.ts`.
-- Memory holds every range read in the last 30 s; a boundary waiting over
-  30 s on one read may read its other ranges again. A failed read is kept
-  as long, so an error boundary's retry within that time repeats it.
+- While the range stays on screen, the hook reads it again only when the
+  cache changes over it, so misses (`fetch-failed`, `auth-pending`) and a
+  provisional tail otherwise stay as they were until the range or the
+  client changes. After `updateAuth`, change the range to read again. For
+  `authInvalid` and Web Locks, see `examples/react-lwcharts/src/auth-refresh.ts`.
+- A view no component shows stays in memory, following its cache, for
+  30 s after its newest read settled or it was last shown: every range a
+  background render started and React abandoned, and every range the chart
+  left. A boundary waiting over 30 s on one read may read its other ranges
+  again. A read that failed before its component mounted is kept as long,
+  so an error boundary's retry within that time repeats it.
+- A first mount finds its view by client, config and range alone. Within
+  those 30 s it therefore takes over a view that a mount React abandoned
+  left behind, instead of fetching again; that view has followed its cache
+  since its read, so it reads whatever changed.
 - The hook has no pending flag. To show one, set the range in
   `startTransition` from `useTransition` and read `isPending`.
 - The server reads one range per cache id and matches it by id alone, so

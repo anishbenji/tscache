@@ -28,6 +28,7 @@ import {
   type StateKey,
   signal,
   TransferState,
+  untracked,
 } from "@angular/core";
 import type {
   CacheConfig,
@@ -36,6 +37,7 @@ import type {
   Range,
   TscacheClient,
 } from "@anishbenji/tscache";
+import { ViewReads } from "../shared/changes";
 import {
   type Connection,
   type ConnectionState,
@@ -147,16 +149,31 @@ export class Tscache {
   }
 }
 
+/** A cache-only answer, and the snapshot of the resource it was read after. */
+interface Fresh<T> {
+  after: ResourceSnapshot<T>;
+  snapshot: ResourceSnapshot<T>;
+}
+
 /**
  * `source`, except that while it loads it goes on showing its last value,
  * or `initial` before it has one: Angular's withPreviousValue recipe
  * (angular.dev/guide/signals/resource, "Resource composition with
- * snapshots").
+ * snapshots"). `fresh` goes over the source's snapshot it was read after,
+ * and lapses when the source moves on.
  */
-function withPreviousValue<T>(source: Resource<T>, initial: T): Resource<T> {
-  const snapshot = linkedSignal<ResourceSnapshot<T>, ResourceSnapshot<T>>({
-    source: source.snapshot,
-    computation: (next, previous) => {
+function withPreviousValue<T>(
+  source: Resource<T>,
+  initial: T,
+  fresh: Signal<Fresh<T> | undefined>,
+): Resource<T> {
+  const snapshot = linkedSignal<
+    { next: ResourceSnapshot<T>; over: Fresh<T> | undefined },
+    ResourceSnapshot<T>
+  >({
+    source: () => ({ next: source.snapshot(), over: fresh() }),
+    computation: ({ next, over }, previous) => {
+      if (over?.after === next) return over.snapshot;
       if (next.status !== "loading") return next;
       if (previous === undefined) return { status: "loading", value: initial };
       if (previous.value.status === "error") return next;
@@ -174,7 +191,12 @@ function withPreviousValue<T>(source: Resource<T>, initial: T): Resource<T> {
  *
  * A read rejected because the worker was lost is not an error: the
  * connection's next client reads again. A connection that failed, or a read
- * that fails on a live client, is: `error()`.
+ * that fails on a live client, is: `error()`. A change to the cache over
+ * the range, from any tab, reads it again, at most once per frame: from the
+ * cache alone, or with a fetch after a change that wrote nothing
+ * (architecture §2.7, shared/changes.ts). Only a read that may fetch is
+ * "loading": a read from the cache alone, after a live bar say, replaces
+ * the value while the status stays "resolved".
  */
 export function cacheResource(
   config: CacheConfig,
@@ -189,6 +211,58 @@ export function cacheResource(
     });
   }
   const tscache = inject(Tscache);
+  const changed = signal(0);
+  const fresh = signal<Fresh<GetResult | undefined> | undefined>(undefined);
+  // What the resource last read: a change's cache-only read is for that
+  // view only. After a move the resource reads the new range itself.
+  let loaded: { client: TscacheClient; range: Range } | undefined;
+  // Holds a change during a fetching read, keeps failure labels, and
+  // releases after the answer landed (shared/changes.ts).
+  const views = new ViewReads({
+    shown: () => untracked(range),
+    interval: config.interval,
+    alignmentOffset: config.alignmentOffset ?? 0,
+    reread: (how) => {
+      // A read that may fetch goes through the resource, and shows as
+      // loading. One from the cache alone is read here, so the resource
+      // never loads for it, and its answer goes over the one shown.
+      if (how === "fetch") return changed.update((n) => n + 1);
+      const state = untracked(tscache.state);
+      const asked = untracked(range);
+      if (state.status !== "connected" || asked === undefined) return;
+      // The view moved since the change (round 4 pre-review): the resource
+      // is about to read where it moved to, so read nothing here.
+      if (
+        loaded === undefined ||
+        loaded.client !== state.client ||
+        loaded.range.start !== asked.start ||
+        loaded.range.end !== asked.end
+      ) {
+        return;
+      }
+      const after = untracked(live.snapshot);
+      const read = views.read(
+        tscache.cache(state.client, config),
+        asked,
+        state.client,
+      );
+      // Not from the cache alone after all: the view moved since the
+      // change, and the resource is about to read where it moved to.
+      if (!read.cacheOnly) return;
+      read.answer.then(
+        (value) =>
+          fresh.set({ after, snapshot: { status: "resolved", value } }),
+        (failure: unknown) => {
+          // Only a failure on a live client counts, as in the loader.
+          if (untracked(tscache.state) !== state) return;
+          const error =
+            failure instanceof Error ? failure : new Error(String(failure));
+          fresh.set({ after, snapshot: { status: "error", error } });
+        },
+      );
+    },
+  });
+  inject(DestroyRef).onDestroy(() => views.dispose());
   const live = resource({
     params: () => {
       const asked = range();
@@ -196,13 +270,19 @@ export function cacheResource(
       const state = tscache.state();
       if (state.status === "connecting") throw ResourceParamsStatus.LOADING;
       if (state.status === "failed") throw state.error;
-      return { client: state.client, range: asked };
+      return { client: state.client, range: asked, changed: changed() };
     },
     // A lost worker's client emits workerLost before this get's rejection is
     // handled, so by then the state, hence the params, have changed, and
     // resource() drops the rejection with the request it belongs to.
-    loader: async ({ params }) =>
-      (await tscache.cache(params.client, config)).get(params.range),
+    loader: ({ params }) => {
+      loaded = { client: params.client, range: params.range };
+      return views.read(
+        tscache.cache(params.client, config),
+        params.range,
+        params.client,
+      ).answer;
+    },
   });
-  return withPreviousValue(live, tscache.takeServerRead(config)?.result);
+  return withPreviousValue(live, tscache.takeServerRead(config)?.result, fresh);
 }
