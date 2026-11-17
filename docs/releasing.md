@@ -110,6 +110,9 @@ that each protection on the path from `main` to npm is still in place.
    - set `LIB_VERSION` in `packages/tscache/src/rpc/protocol.ts` to the same `X.Y.Z`. Every hosting
      reports it to the page in `hello.lib`, and `packages/tscache/test/version.test.ts` fails while
      it differs from the package version;
+   - run `bun install`, so that `bun.lock` records the workspace package at the same `X.Y.Z`, and
+     check that `bun install --frozen-lockfile` still exits 0. The version, `LIB_VERSION` and the
+     lockfile are the three places that name it;
    - add the new release to the changelog with `bun run changelog --tag vX.Y.Z`. It runs git-cliff
      with `--unreleased --prepend`, so only the commits since the last tag become the `X.Y.Z` section,
      above the older ones, which stay as they are with their hand-written summaries. Do not run
