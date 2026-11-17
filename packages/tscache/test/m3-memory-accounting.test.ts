@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cacheInternals, type ReaderChange } from "../src/engine/cache";
-import { cacheStateOf, Engine, observeCaches } from "../src/engine/engine";
+import {
+  cacheStateOf,
+  Engine,
+  engineMemoryInternals,
+  observeCaches,
+} from "../src/engine/engine";
 import type { Segment } from "../src/segment/types";
 import { rng } from "./cache-model";
 import {
@@ -17,6 +22,55 @@ import { recordsOf } from "./persist-test-helpers";
 function walked(engine: Engine, cacheId: string): number {
   const { store } = cacheInternals(cacheStateOf(engine, cacheId));
   return store.segments.reduce((sum, s: Segment) => sum + s.bytes, 0);
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+/**
+ * The allocator seam of m7-change-failures.test.ts: the first sized
+ * Uint8Array allocated once the point at `slot` holds `value` throws, so a
+ * put fails after landing that prefix (N70).
+ */
+function failAfterPoint(
+  engine: Engine,
+  cacheId: string,
+  slot: number,
+  value: number,
+  action: () => void,
+): void {
+  const fault = new RangeError("M3 injected allocation failure");
+  const NativeUint8Array = Uint8Array;
+  let armed = true;
+  let caught: unknown;
+  vi.stubGlobal(
+    "Uint8Array",
+    new Proxy(NativeUint8Array, {
+      construct(target, args, newTarget) {
+        if (armed && typeof args[0] === "number" && args[0] > 0) {
+          // Read the store, not get(): a get is a use, which would put the
+          // prefix's page in the use order by itself.
+          const { store } = cacheInternals(cacheStateOf(engine, cacheId));
+          const landed = store.segments.some(
+            (segment) => segment.lookup(slot)?.value === value,
+          );
+          if (landed) {
+            armed = false;
+            throw fault;
+          }
+        }
+        return Reflect.construct(target, args, newTarget);
+      },
+    }),
+  );
+  try {
+    action();
+  } catch (error) {
+    caught = error;
+  } finally {
+    vi.unstubAllGlobals();
+  }
+  expect(armed, "the write must reach the injected failure").toBe(false);
+  expect(caught).toBe(fault);
 }
 
 describe("M3 accounting with a budget (implementer's tests)", () => {
@@ -104,5 +158,53 @@ describe("M3 accounting with a budget (implementer's tests)", () => {
         { written: [], removed: [], cleared: false, evicted: [span(40, 43)] },
       ],
     ]);
+  });
+
+  it("a failed put under a budget: written over its slots, nothing removed, the total exact and its landed prefix in the use order", () => {
+    const engine = new Engine({ memoryBudget: PAGE_BYTES });
+    const reports: [string, ReaderChange][] = [];
+    observeCaches(engine, {
+      onChange: () => {},
+      onMutate: () => {},
+      hasReaders: () => true,
+      onReaderChange: (cacheId, change) => reports.push([cacheId, change]),
+    });
+    engine.cache(config());
+    engine.put("a", batch([0]), { range: span(0, 3) });
+    // Evicts page 0: [0, 3] goes to the evicted-coverage index.
+    engine.put("a", batch([4]), { range: span(4, 7) });
+    expect(engineMemoryInternals(engine).evictedIndex("a")?.ranges()).toEqual([
+      span(0, 3),
+    ]);
+    reports.length = 0;
+    // Two write runs (gapSplitK 1): the first lands point 0, the second fails.
+    failAfterPoint(engine, "a", 0, 7, () =>
+      engine.put("a", batch([0, 3], [7, 8])),
+    );
+    // The put dropped [0, 3] from the index before writing, so its failure
+    // withdraws nothing; the enforcement then evicts the older page [4, 7]
+    // for the landed prefix (N102).
+    expect(reports).toEqual([
+      [
+        "a",
+        {
+          written: [span(0, 3)],
+          removed: [],
+          cleared: false,
+          evicted: [span(4, 7)],
+        },
+      ],
+    ]);
+    expect(engineMemoryInternals(engine).evictedIndex("a")?.ranges()).toEqual([
+      span(4, 7),
+    ]);
+    const stats = engine.memoryStats();
+    expect(stats.bytes).toBe(walked(engine, "a"));
+    expect(stats.bytes).toBe(PAGE_BYTES);
+    expect(engineMemoryInternals(engine).orderSize).toBe(1);
+    expect([...engine.get("a", span(0, 7)).timestamps]).toEqual([0]);
+    // The prefix's page is in the order: the next write evicts it.
+    engine.put("a", batch([8]));
+    expect([...engine.get("a", span(0, 11)).timestamps]).toEqual([8]);
   });
 });
