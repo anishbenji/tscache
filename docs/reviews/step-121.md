@@ -176,3 +176,9 @@ Run on head `efb5d87`, focused on the write-use redesign. No P0 or P1: fuzzing t
 | ----- | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | PR2-1 | P2  | No test pins that a replace over a gap inside a segment uses no page (`merge.ts`, the carve's size check); a mutant making it always true survived                                                       | accepted | Test "a replace over a gap inside a segment removes nothing and uses no page" (`m3-memory-engine.test.ts`). Checked: it fails on that mutant and passes on the real code; the mutant was reverted and never committed    |
 | PR2-2 | P2  | No test pins that a call's pages are used lowest first when its carve reports a higher page before the insert reports a lower one (`memory.ts`, the sort in `wrote`); a mutant without the sort survived | accepted | Test "a call's pages are used lowest first, also when its replace reports a higher page first" (`m3-memory-engine.test.ts`). Checked the same way: fails on the mutant, passes on the real code; the mutant was reverted |
+
+## Round 4 (Codex) — reviewer verdict: merge
+
+Run on head `6463192`. No findings; the reviewer confirmed every accepted finding from the earlier rounds fixed and ran
+the type check and `git diff --check`. The round's `bun run ci` exited 0. Raw output: `.reviews/step-121/round-4.md`.
+The review has settled.
