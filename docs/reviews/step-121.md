@@ -48,6 +48,7 @@ No contract test looked wrong against the spec.
 
 - `packages/tscache/test/rpc.test.ts`, "hello names the server's lifetime lock": the exact expected hello now lists `features: ['cacheChanged', 'memoryBudget']` (N101). Still an exact `toEqual`.
 - `packages/tscache/test/m7-change-rpc.test.ts`, "the first listener subscribes…": the exact expected `client.features` gains `'memoryBudget'`. Still an exact `toEqual`.
+- `integrations/test/helpers.ts` (`lossy()`) and `integrations/test/react.test.ts` (`losable()`): the client facades gain the new `memoryStats` member, delegating like their other calls (`TscacheClient` requires it). Found by the first `bun run ci`, in `check:integrations`; `bun run typecheck` does not cover the integrations.
 
 ## New tests
 
@@ -68,7 +69,7 @@ No contract test looked wrong against the spec.
 
 ## Verification
 
-At `1ce6b10` unless noted; the final `bun run ci` runs on the head that adds this file and is reported to the director.
+At `1ce6b10` unless noted; the final `bun run ci` runs on the head that adds this file and is reported to the director. A first `bun run ci` at `c6e8bc7` passed every Vitest test (156 files, 3,046 passed, 1 todo) and failed in `check:integrations` on the two facades above, fixed in the next commit.
 
 | Command                                                                                                                    | Result                                                                                                                                                                                                                                                                                                                         |
 | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
