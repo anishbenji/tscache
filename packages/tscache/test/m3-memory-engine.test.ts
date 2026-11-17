@@ -625,3 +625,38 @@ describe("M3 engine contracts (design §5 tests 1–12)", () => {
     expect(e.coverage("a", span(0, 39))).toEqual([span(0, 39)]);
   });
 });
+
+// Implementer regression tests (step 121, Codex round 2, R2-1): a write's
+// uses are the pages it wrote points to (architecture §2.9, N92), not every
+// page inside its batch's span.
+describe("M3 write uses are the pages written (round 2)", () => {
+  it("a sparse upsert does not refresh a page between its points", () => {
+    const e = new MemoryEngine({ memoryBudget: 4 * PAGE_BYTES });
+    e.cache(config());
+    e.cache(config({ id: "b" }));
+    e.put("a", batch([4]));
+    e.put("b", batch([0]));
+    e.put("a", batch([0]));
+    e.put("a", batch([12]));
+    // Writes pages 0 and 3 of `a`, never page 1 (slot 4).
+    e.put("a", batch([0, 12], [1, 2]));
+    e.put("b", batch([4]));
+    // Page 1 of `a` is the least recently used page: it goes, `b:[0]` stays.
+    expect([...e.get("a", whole).timestamps]).toEqual([0, 12]);
+    expect([...e.get("b", whole).timestamps]).toEqual([0, 4]);
+  });
+
+  it("an authoritative put still refreshes every page of its range that holds points", () => {
+    const e = new MemoryEngine({ memoryBudget: 3 * PAGE_BYTES });
+    e.cache(config());
+    e.cache(config({ id: "b" }));
+    e.put("a", batch([3]));
+    e.put("b", batch([0]));
+    e.put("a", batch([4]));
+    // Its authority [2, 3] reaches page 0, whose point 3 it replaces.
+    e.put("a", batch([3], [9]), { range: span(2, 3) });
+    e.put("b", batch([8]));
+    expect([...e.get("a", whole).timestamps]).toEqual([3, 4]);
+    expect([...e.get("b", whole).timestamps]).toEqual([8]);
+  });
+});

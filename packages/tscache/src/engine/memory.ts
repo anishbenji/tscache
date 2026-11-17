@@ -21,6 +21,18 @@ interface Pin {
   readonly last: number;
 }
 
+/** The first index from `from` on whose slot is above `slot` (ascending slots). */
+function firstAbove(slots: Float64Array, from: number, slot: number): number {
+  let lo = from;
+  let hi = slots.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if ((slots[mid] as number) <= slot) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 export class MemoryBudget implements CacheMemory {
   /** The budget in bytes: a positive safe integer. */
   readonly budget: number;
@@ -100,6 +112,19 @@ export class MemoryBudget implements CacheMemory {
       return;
     }
     for (const [page, entry] of pages) if (emptied(page)) this.#drop(entry);
+  }
+
+  usePoints(state: CacheState, slots: Float64Array): void {
+    const cap = state.config.segmentSlotCap;
+    let i = 0;
+    while (i < slots.length) {
+      const page = pageOf(slots[i] as number, cap);
+      const range = pageRange(page, cap);
+      // A failed write may not have reached this page: only a page that
+      // holds points enters the order.
+      state.forEachPage(range, (held) => this.#touch(state, held));
+      i = firstAbove(slots, i, range.end);
+    }
   }
 
   useAll(state: CacheState): void {

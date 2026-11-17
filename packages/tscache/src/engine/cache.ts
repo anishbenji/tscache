@@ -196,10 +196,16 @@ export interface CacheMemory {
   /** The store's running total of bytes changed by `delta`. */
   counted(delta: number): void;
   /**
-   * A read (`wrote` false) or a write used the pages that overlap `slots`
-   * and hold points; a write's pages that hold none leave the use order.
+   * A read (`wrote` false), or a write with an authority over `slots`, used
+   * the pages that overlap `slots` and hold points; a written page that
+   * holds none leaves the use order.
    */
   use(state: CacheState, slots: SlotRange, wrote: boolean): void;
+  /**
+   * A write without an authority used the pages its points (ascending)
+   * fall on that hold points now (N92): never a page between them.
+   */
+  usePoints(state: CacheState, slots: Float64Array): void;
   /** A restore wrote every page that holds points. */
   useAll(state: CacheState): void;
   /** The cache dropped every point. */
@@ -807,8 +813,11 @@ export class CacheState {
       }
       throw error;
     } finally {
-      // A use of the pages written, also of a failed write's prefix (M3).
-      if (touched !== undefined) this.#memory?.use(this, touched, true);
+      // A use of the pages written, also of a failed write's prefix (N92):
+      // an authority's pages, or without one only the pages of its points,
+      // never a page of the batch's span that it did not write to.
+      if (authority !== undefined) this.#memory?.use(this, authority, true);
+      else this.#memory?.usePoints(this, points.slots);
     }
   }
 
