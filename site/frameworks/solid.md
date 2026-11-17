@@ -13,9 +13,12 @@ The Solid snippet targets Solid 2.0 (release candidate 14) with `@solidjs/web`. 
 
 <<< ../../integrations/solid/series.ts{ts}
 
-The series is one `createMemo` over the range and the connection's state. Solid's async memo does
+The series is one async memo over the range and the connection's state. Solid's async memo does
 latest-wins: a new range drops the run in flight, and after the first answer the previous one stays on
 screen with `isPending(answer)` true. A memo, unlike a store, neither proxies nor copies the typed arrays.
+The memo is a derived signal (`createSignal(fn)`, a memo that can also be written): when the cache
+changes over the range, a read from the cache alone is written over the answer on screen, so
+`isPending(answer)` stays false, and only a read that may fetch is pending.
 A lost worker moves the connection to `connecting`, which runs the memo again, and the replacement client
 reads.
 

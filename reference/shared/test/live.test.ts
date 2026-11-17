@@ -1,4 +1,9 @@
-import type { GetResult, Range, TscacheClient } from "@anishbenji/tscache";
+import type {
+  ClientEvents,
+  GetResult,
+  Range,
+  TscacheClient,
+} from "@anishbenji/tscache";
 import type { Connection } from "@tscache/integrations/shared/connection";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type Holder, liveFeed, polling, socketAddress } from "../src/live";
@@ -42,6 +47,7 @@ describe("liveFeed on a cache of its own", () => {
     const connection = {
       state: { status: "connected", client },
       cache: async () => ({ get }),
+      subscribe: () => () => {},
     } as unknown as Connection;
     return { connection, reads };
   }
@@ -84,6 +90,118 @@ describe("liveFeed on a cache of its own", () => {
     await vi.waitFor(() => expect(reads).toHaveLength(3));
     expect(reads[2]).toEqual({ start: 63_000, end: 65_000 });
     expect(drawn.at(-1)).toEqual({ start: 63_000, end: 65_000 });
+  });
+});
+
+describe("liveFeed on a SharedWorker's cache", () => {
+  const stops: (() => void)[] = [];
+  afterEach(() => {
+    for (const stop of stops.splice(0)) stop();
+  });
+
+  it("redraws from cacheChanged, not from the holder's messages", async () => {
+    let listener: ((event: ClientEvents["cacheChanged"]) => void) | undefined;
+    const put = vi.fn();
+    const cache = {
+      put,
+      get: vi.fn(),
+      on: (_event: string, fn: typeof listener) => {
+        listener = fn;
+        return () => {
+          listener = undefined;
+        };
+      },
+    };
+    const client = {
+      mode: "shared",
+      features: new Set(["cacheChanged"]),
+    } as unknown as TscacheClient;
+    const connection = {
+      state: { status: "connected", client },
+      cache: async () => cache,
+      subscribe: () => () => {},
+    } as unknown as Connection;
+    const drawn: Range[] = [];
+    const stop = liveFeed({
+      connection,
+      config: market,
+      source: () => () => {},
+      onBatch: (span) => drawn.push(span),
+      onOpened: () => {},
+    });
+    stops.push(stop);
+    await vi.waitFor(() => expect(listener).toBeDefined());
+    // The holder's batch, as it passes it on: one cache, nothing to apply.
+    const holder = new BroadcastChannel(`tscache-reference:feed:${market.id}`);
+    stops.push(() => holder.close());
+    holder.postMessage({
+      kind: "batch",
+      batch: { timestamps: [60_000], fields: {} },
+    });
+    // Its write reaches every tab as cacheChanged.
+    listener?.({
+      cacheId: market.id,
+      written: [
+        { start: 60_000, end: 60_000 },
+        { start: 120_000, end: 180_000 },
+      ],
+      removed: [],
+      cleared: false,
+    });
+    listener?.({
+      cacheId: market.id,
+      written: [],
+      removed: [{ start: 0, end: 60_000 }],
+      cleared: false,
+    });
+    await vi.waitFor(() => expect(drawn).toHaveLength(1));
+    expect(drawn).toEqual([{ start: 60_000, end: 180_000 }]);
+    expect(put).not.toHaveBeenCalled();
+    stop();
+    expect(listener).toBeUndefined();
+  });
+});
+
+describe("liveFeed on a SharedWorker without cacheChanged (PR-5)", () => {
+  const stops: (() => void)[] = [];
+  afterEach(() => {
+    for (const stop of stops.splice(0)) stop();
+  });
+
+  it("redraws from the holder's messages, as before change events", async () => {
+    const on = vi.fn(() => () => {});
+    const put = vi.fn();
+    // A worker script from before change events: no features (N80).
+    const client = {
+      mode: "shared",
+      features: new Set(),
+    } as unknown as TscacheClient;
+    const connection = {
+      state: { status: "connected", client },
+      cache: async () => ({ put, get: vi.fn(), on }),
+      subscribe: () => () => {},
+    } as unknown as Connection;
+    const drawn: Range[] = [];
+    stops.push(
+      liveFeed({
+        connection,
+        config: market,
+        source: () => () => {},
+        onBatch: (span) => drawn.push(span),
+        onOpened: () => {},
+      }),
+    );
+    const holder = new BroadcastChannel(`tscache-reference:feed:${market.id}`);
+    stops.push(() => holder.close());
+    holder.postMessage({
+      kind: "batch",
+      batch: { timestamps: [60_000, 120_000], fields: {} },
+    });
+    await vi.waitFor(() => expect(drawn).toHaveLength(1));
+    expect(drawn).toEqual([{ start: 60_000, end: 120_000 }]);
+    // One cache: the holder's put already went in; nothing listens for events.
+    expect(put).not.toHaveBeenCalled();
+    expect(on).not.toHaveBeenCalled();
   });
 });
 

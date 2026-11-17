@@ -65,12 +65,15 @@ export class ClearOnlyPersistence implements Persistence {
   /**
    * Empties every cache in this call (N22), then the disk; answers once the
    * clear settled, at most `timeoutMs` after the call. A listener error of
-   * the engine's clear is rethrown then.
+   * the engine's clear is rethrown then. `clearMemory` empties the caches
+   * (default `Engine.clearAll`).
    */
-  clearAll(): Promise<void> {
+  clearAll(
+    clearMemory: () => void = () => this.#engine.clearAll(),
+  ): Promise<void> {
     let failure: { error: unknown } | undefined;
     try {
-      this.#engine.clearAll();
+      clearMemory();
     } catch (error) {
       // Every cache was cleared anyway (N22); the disk must follow.
       failure = { error };

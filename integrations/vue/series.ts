@@ -4,7 +4,9 @@
 // which Vue never calls on the server (a server render never unmounts, so a
 // subscription made in setup would outlive it). A server render therefore
 // subscribes to nothing, and a hydration render changes no ref, so it
-// shows what the server rendered.
+// shows what the server rendered. A change to the cache over the range on
+// screen, from any tab, reads it again, at most once per frame
+// (shared/changes.ts).
 
 import type {
   CacheConfig,
@@ -27,6 +29,7 @@ import {
   toValue,
   watch,
 } from "vue";
+import { ViewReads } from "../shared/changes";
 import { type Connection, connect, type Seed } from "../shared/connection";
 
 /** The cache's answer for a range. */
@@ -71,8 +74,10 @@ export interface Series {
 }
 
 /**
- * The cache's answer for `range`, read again when the range changes and
- * when a new client replaces one whose worker was lost. Only the answer for
+ * The cache's answer for `range`, read again when the range changes, when
+ * a new client replaces one whose worker was lost, and when the cache
+ * changes over the range (from the cache alone, or with a fetch after a
+ * change that wrote nothing; architecture §2.7). Only the answer for
  * the latest range lands. Move the range by giving a new object (a
  * shallowRef suits it): a range changed in place is not seen.
  *
@@ -102,41 +107,59 @@ export function useSeries(
         state.value = connection.state;
       }),
     );
+    const changed = shallowRef(0);
+    // Holds a change during a fetching read, keeps failure labels, and
+    // releases after the answer landed (shared/changes.ts).
+    const views = new ViewReads({
+      shown: () => toRaw(toValue(range)),
+      interval: config.interval,
+      alignmentOffset: config.alignmentOffset ?? 0,
+      reread: () => {
+        changed.value++;
+      },
+    });
+    onScopeDispose(() => views.dispose());
     watch(
-      [state, () => toValue(range)],
+      [state, () => toValue(range), changed],
       ([current, asked]) => {
         if (current.status === "failed") {
           error.value = current.error;
           pending.value = false;
           return;
         }
-        pending.value = true;
-        if (current.status === "connecting") return;
+        if (current.status === "connecting") {
+          pending.value = true;
+          return;
+        }
         let latest = true;
         onWatcherCleanup(() => {
           latest = false;
         });
         // A worker cannot be posted a reactive proxy, as ref() makes one.
         const plain = toRaw(asked);
-        connection
-          .cache(current.client, config)
-          .then((cache) => cache.get(plain))
-          .then(
-            (result) => {
-              if (!latest) return;
-              answer.value = { range: plain, result };
-              error.value = undefined;
-              pending.value = false;
-            },
-            (failure: unknown) => {
-              // A lost worker rejects what was pending; the connection's
-              // next client reads again, so only a failure on a live client
-              // counts.
-              if (!latest || connection.state !== current) return;
-              error.value = failure;
-              pending.value = false;
-            },
-          );
+        const read = views.read(
+          connection.cache(current.client, config),
+          plain,
+          current,
+        );
+        // A read after a change keeps the answer it replaces as current.
+        if (!read.cacheOnly) pending.value = true;
+        read.answer.then(
+          (result) => {
+            if (!latest) return;
+            answer.value = { range: plain, result };
+            error.value = undefined;
+            pending.value = false;
+          },
+          (failure: unknown) => {
+            // A lost worker rejects what was pending; the connection's
+            // next client reads again, so only a failure on a live client
+            // counts.
+            if (!latest || connection.state !== current) return;
+            error.value = failure;
+            pending.value = false;
+          },
+        );
       },
       { immediate: true },
     );
