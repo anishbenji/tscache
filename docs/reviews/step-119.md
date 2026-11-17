@@ -37,3 +37,13 @@ Machine load was not sampled during the run, so the 81-minute run time (68 minut
 ## Contract-test changes
 
 None.
+
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `7af81c8`. No findings. The reviewer checked the scores, counts, source commit and cited survivors
+against the Stryker report; the round's `bun run ci` exited 0. Raw output: `.reviews/step-119/round-1.md`. The review
+has settled.
+
+## Decision concerns
+
+None.
