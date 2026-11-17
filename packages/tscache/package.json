@@ -1,6 +1,6 @@
 {
   "name": "@anishbenji/tscache",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Browser time-series cache: SharedWorker multi-tab sharing, worker-side fetch orchestration, coverage tracking with real-gap awareness",
   "license": "MIT",
   "repository": {

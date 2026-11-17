@@ -24,7 +24,7 @@ export const PROTOCOL_VERSION = 1;
  * The package version, which every hosting's server reports in `hello.lib`
  * (§4.7). test/version.test.ts keeps it equal to package.json's.
  */
-export const LIB_VERSION = "0.1.0";
+export const LIB_VERSION = "0.2.0";
 
 export type Op =
   | "cache"

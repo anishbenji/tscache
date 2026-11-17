@@ -4,6 +4,204 @@ All notable changes to `@anishbenji/tscache`. The package follows semantic
 versioning within 0.x: a minor release may break the API, a patch release never
 does.
 
+## [0.2.0] - 2026-11-17
+
+Change events: a view can follow its cache, in every tab, instead of reading
+again on a timer.
+
+- **Change events.** `cacheChanged` reports, once per call that changed a
+  cache and before that call resolves, the ranges a put, a fetch or a hydrate
+  wrote (`written`), the coverage an `invalidate` or a watermark moved back
+  withdrew (`removed`), whether a clear, a `clearAll` or a new dataset version
+  emptied the cache (`cleared`), and the call that caused it (`requestId`).
+  It carries ranges, never data. With a SharedWorker every listening tab
+  hears every tab's change. `client.on('cacheChanged', fn)` hears every
+  cache, `cache.on('cacheChanged', fn)` one; the first listener subscribes
+  the client in the worker (architecture N71–N84).
+- **Read rule.** After an event that wrote something a view reads again from
+  the cache alone; after one that wrote nothing but cleared or withdrew
+  coverage over its range, with a fetch. No event a fetch caused starts a
+  fetch, so a live tail followed in two tabs does not fetch in a loop.
+- **Worker features.** The worker's hello lists the optional features it
+  offers, exposed as `client.features` (type `WorkerFeature`). Against a
+  worker script from before change events, `cacheChanged` listeners are never
+  called and a development build warns once. The protocol stays at version 1
+  (architecture N79).
+- **Compatibility.** `TscacheClient` gains `features`, so code that
+  implements it itself must add the member. `hydrate` now sends
+  `cacheChanged` for what it applied, and still no other event
+  (architecture N77).
+- **Integrations and reference clients.** The framework integrations follow
+  their cache from `cacheChanged`, with at most one read per animation frame;
+  the reference clients redraw from it in the SharedWorker hosting.
+- **Documentation.** The guides describe a deploy that changes only the
+  fetcher: the hashed worker URL stays, new tabs join the old SharedWorker,
+  and `createClient` rejects with a `ConfigError` until the old tabs close.
+  The known limits now cover change events across hostings; memory is still
+  neither bounded nor reported, and deploy skew still has no recovery path.
+- **Tooling.** Mutation testing of the engine with Stryker, a Fallow health
+  floor of 95 in CI and pre-push, a size measurement that ignores chunk
+  hashes, and fixes to the demo recorder and the end-to-end benchmark;
+  nothing the package ships changed through them.
+
+The commits since 0.1.0 follow.
+
+### 🚀 Features
+
+- _(engine)_ Report each mutating call's reader change
+- _(client)_ CacheChanged events over the port
+- _(integrations)_ Follow cacheChanged, one read per frame
+- _(reference)_ Redraw from cacheChanged in the sharedworker hosting
+
+### 🐛 Bug Fixes
+
+- _(demo)_ Accept an app only once its own server says it listens
+- _(demo)_ Copy each app server's stderr to the launcher's as it arrives
+- _(demo)_ Send nothing to the backend once the recorder's demo has exited
+- _(demo)_ Stop sending to the backend once the launcher starts stopping
+- _(demo)_ Print the stopping line on a line of its own
+- _(demo)_ Narrow the install promise and wait for stdout in the capture test
+- _(bench)_ Judge reload-first-read by each revision's persistence
+- _(bench)_ Test the e2e failure isolation; a browser context per side
+- _(scripts)_ Review scripts accept step numbers of three digits
+- _(scripts)_ Reject zero-padded steps and isolate the review-watch test
+- _(bench)_ Test the one-line failure item and correct the header
+- _(demo)_ Let the recorder wait for the launcher's whole stop
+- _(demo)_ Test the sigkill after a custom grace and say when it is sent
+- _(integrations)_ Change re-reads keep fetch results and subscriptions
+- _(reference)_ Redraw through the channel without cacheChanged
+- _(engine)_ Collect a reader change's ranges in o(log n) each
+- _(integrations)_ Judge "the same view" by value, client and cache
+- _(integrations)_ Make each react view follow its cache through ViewReads
+- _(integrations)_ Keep cache-only change reads out of the loading state
+- _(integrations)_ Judge a change against the range as read
+- _(integrations)_ Require the grid when judging a change
+- _(integrations)_ A view that shows nothing records no change decision
+- _(integrations)_ Angular reads a change from the cache only for the view it loaded
+- _(integrations)_ A change decision applies to the range it was made for
+
+### 🚜 Refactor
+
+- _(rpc)_ Split the handshake of PortClient.connect
+- _(client)_ Create the SharedWorker in its own function
+- _(integrations)_ Build the seeding of a connection in its own function
+- _(scripts)_ Split the demo benchmark's document and main
+- _(bench)_ Build the benchmark cases in groups
+- _(vite)_ Split fetcherUrl's hooks into module functions
+- _(scripts)_ Split the demo recorder's record and main
+- _(integrations)_ One place owns a view's change re-reads
+- _(integrations)_ One shared change hold for every adapter
+
+### 📚 Documentation
+
+- Report the engine's mutation scores
+- Correct the mutation report after the pre-review
+- Keep only the in-repo stryker recipe
+- The deadline-timer survivor's diagnosis
+- Bring the release docs up to date after 0.1.0
+- Fix the pre-review findings on the release docs
+- The health floor's score, after the pre-review
+- _(checklist)_ Add a persistence section
+- _(checklist)_ Keep section 12 to what A§4.10 says
+- _(checklist)_ The chunk import before the removal deadlines
+- Say how to re-record the demo media
+- Propose the change-notification design for finding m7
+- Correct the m7 proposal's cleared semantics
+- Answer the step 92 pre-review
+- _(bench)_ Describe reload-first-read; step 97 pre-review triage
+- Propose the memory-budget design for finding m3
+- Answer the step 98 pre-review
+- Answer the step 98 round 1
+- Propose the deploy-skew design for finding m5
+- Answer the step 100 pre-review
+- Answer the step 100 round 1
+- _(index)_ Stop counting and sizing the reviews row
+- Step 91 pre-review fixes
+- Step 91 codex round and merge with main
+- Answer the step 100 round 2
+- A fetcher-only deploy keeps the hashed worker url
+- Answer the step 101 pre-review
+- Answer the step 100 round 3
+- Name the health floor and mutation runs in agents
+- Answer the step 100 round 4
+- _(merge)_ Describe write runs in n70's terms
+- Fix the step 96 pre-review findings
+- _(architecture)_ Specify m7 change events (n71-n84)
+- Change events in the guides, and 0.2.0 release notes
+- _(rpc)_ Say which events reach every port
+- _(architecture)_ Eviction and removals under an m3 memory budget
+- _(benchmarks)_ Add a dated mutation history with a step 113 run
+- _(reference)_ Put hullOf's doc comment on hullOf
+- The range a view checks a change against is the range as read
+- Propose the calendar-grid design for finding m4
+- Answer the step 118 pre-review
+- Answer the step 118 second pre-review
+- Answer the step 118 round 1
+- Answer the step 118 third pre-review
+- Redesign the step 118 zone-data rule
+- Tighten the step 118 redesign wording
+- Answer the step 118 fourth pre-review
+- Answer the step 118 round 3
+- Answer the step 118 fifth pre-review
+- Recommend the simple zone-data check for step 118
+- Answer the step 118 sixth pre-review
+- Answer the step 118 round 4
+- Answer the step 118 seventh pre-review
+- Answer the step 118 round 5
+- Known limits of 0.2.0
+- Release docs and sizes for 0.2.0
+- _(decisions)_ N85, effect is not adopted
+- _(decisions)_ N85 pre-review fixes, date the closed test gap
+- 0.2.0 wording left from pre-review 1
+
+### ⚡ Performance
+
+- _(bench)_ Budget change events: messages per put and sizes
+
+### 🧪 Testing
+
+- _(demo)_ Time out the recorder's requests in one tested helper
+- _(demo)_ End the port-taking build stand-in with its directory
+- _(demo)_ Pass on a fetch's own failure before the request deadline
+- _(demo)_ Show that a stopping launcher prints no hub line
+- _(demo)_ Wait for the orphaned child to be reaped
+- _(engine)_ Kill hydrate and restore mutation survivors
+- _(orchestrator)_ Kill fence fencepost and auth waiter survivors
+- _(persist)_ Kill dirty-range and clear deadline survivors
+- Kill the report's further engine and orchestrator survivors
+- _(persist)_ Kill job order, failed-flush join and close survivors
+- Fix the step 94 pre-review findings on the survivor tests
+- _(demo)_ Give the reap polls the neighbouring five seconds
+- _(demo)_ End the outliving child when the test chooses, not after 1 s
+- _(e2e)_ Order the reference specs' reads by construction, not by load
+- _(examples)_ Count the series requests the mock backend failed
+- _(e2e)_ Retry a failed history fetch only once every failure is back
+- _(examples)_ Hold the mock backend's series answers on request
+- _(e2e)_ Hold the drag's last read so R1-3 cannot retry too soon
+- _(e2e)_ Wait for R1-3's reads by reach, holding only the drag's end
+- _(persist)_ Pin that a late retry timer starts no clear after the deadline
+- _(vite)_ Pin each hook of fetcherUrl before it is split
+- _(vite)_ Pin fetcherUrl's messages, name, resolve call and fetchers
+- _(size)_ Check that a code change moves only its own row
+- _(e2e)_ CacheChanged across tabs and the loop guard
+- _(integrations)_ Dispose views before their connection
+- _(integrations)_ Wait for the answered read, not for another render
+
+### ⚙️ Miscellaneous Tasks
+
+- Configure stryker mutation testing of the engine
+- _(ci)_ Gate the fallow health score at 90 in ci and pre-push
+- _(demo)_ Bring the demo recorder back from step 65
+- Add the mutation script and the in-repo re-run recipe
+- _(bench)_ Raise the index (lazy) size budget to 12,976 B
+- _(fallow)_ Ignore every test tree in the health score
+- _(bench)_ Keep the passing e2e timings when one fails
+- _(fallow)_ Raise the health floor from 90 to 95
+- Prepare release 0.2.0
+- Merge main into docs/115-effect-decision
+- Merge main after step 115
+- Record 0.2.0 in bun.lock
+
 ## [0.1.0] - 2026-11-13
 
 The first release. A browser cache for timestamp-aligned time series, built

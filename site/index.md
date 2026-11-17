@@ -42,11 +42,12 @@ once.
 ## What it leaves out
 
 Version 1 has no aggregation or resampling (a series at one minute and at one hour are two caches), no
-eviction or memory limit, and no irregular timestamps; change subscriptions (`cacheChanged`) arrive in 0.2.0. The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
+eviction or memory limit, and no irregular timestamps. Change events (`cacheChanged`) arrived in 0.2.0
+([Change events](/concepts/events#change-events)). The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
 
 ### Known limits
 
-Three limits of 0.1.0 that an application has to design around:
+The limits of 0.2.0 that an application has to design around:
 
 - **Memory is neither bounded nor reported.** A cache keeps everything it was asked for until its worker
   ends, and a SharedWorker runs while any tab of the origin uses it. A year of one-minute OHLCV bars is
@@ -57,14 +58,16 @@ Three limits of 0.1.0 that an application has to design around:
   `createClient` in a new tab rejects with `ConfigError` until the old tabs close; so does a new fetcher
   with a fixed worker URL, and a protocol change there rejects with `ProtocolMismatchError`.
   [Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy) has the details.
-- **Readers are not told when data changes.** A view that must redraw reads again.
-  [Redrawing when the cache changes](/guides/live-feeds#redrawing-when-the-cache-changes) shows how.
-  The next release, 0.2.0, adds the `cacheChanged` event ([Change events](/concepts/events#change-events)).
+- **Change events reach other tabs only through a SharedWorker.** Since 0.2.0 `cacheChanged` tells a
+  view where a read's result may have changed ([Change events](/concepts/events#change-events)). With a
+  dedicated worker or in-process, each tab has a cache of its own and hears only its own changes:
+  another tab's data must still be sent to it
+  ([Redrawing when the cache changes](/guides/live-feeds#redrawing-when-the-cache-changes)).
 
 ## Status
 
 tscache is at 0.x and follows semantic versioning within it: a minor release may break the API, a
-patch release never does. Pin a minor range (`~0.1.0`) to take fixes without breaking changes. The
+patch release never does. Pin a minor range (`~0.2.0`) to take fixes without breaking changes. The
 design is recorded in the
 [architecture document](https://github.com/anishbenji/tscache/blob/main/docs/architecture.md); [Architecture for contributors](/contributing)
 summarises it.

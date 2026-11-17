@@ -47,7 +47,7 @@ check that nothing strips the `/* webpackIgnore: true */` comment from tscache's
 
 The fetcher module's `import()` has not settled: its server accepted the request and never answered, or
 a top-level `await` in the module, or in code it imports, never resolves. `handshakeTimeoutMs` bounds only
-the wait for the worker's hello, and in 0.1.0 nothing bounds the load after it. Check the module's
+the wait for the worker's hello, and in 0.2.0 nothing bounds the load after it. Check the module's
 request in the network panel of the worker's devtools, and move long work out of the module's top level.
 
 ## A fetch fails with `ReferenceError: document is not defined`
