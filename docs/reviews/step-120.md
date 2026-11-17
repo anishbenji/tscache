@@ -82,6 +82,13 @@ The director merged `main` (step 115, N85) into the branch as `276eb3c`; the pre
 
 The changelog list was generated at `780eeb7`. It covers every commit since `v0.1.0` up to that head, except the ones `cliff.toml` skips (review files, merges, size budgets, dependency bumps). The regeneration commit itself, this review commit and any merge of `main` made after it are not in the list; a later merge that brings user-visible commits needs the list regenerated again.
 
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `0121013`. No findings; the reviewer confirmed the four pre-review fixes, the version consistency
+(`package.json`, `LIB_VERSION`, `bun.lock`) and that the 0.1.0 changelog section is unchanged. The round's `bun run ci`
+exited 0. Raw output: `.reviews/step-120/round-1.md`. The review has settled. The security lane (run 1) reported no
+findings.
+
 ## Contract-test changes
 
 None.
