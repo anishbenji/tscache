@@ -48,6 +48,8 @@ export class DenseSegment implements Segment {
   readonly #slotCap: number;
   readonly #columns: Column[];
   readonly #names: string[];
+  /** Bytes of one slot across every field array (M3, §3.1). */
+  readonly #rowBytes: number;
   #mask: Uint8Array = new Uint8Array(0);
   /** Slot stored at buffer index 0. */
   #base = 0;
@@ -70,6 +72,11 @@ export class DenseSegment implements Segment {
       return { name, dtype, ctor, data: new ctor(0) };
     });
     this.#names = this.#columns.map((column) => column.name);
+    let rowBytes = 0;
+    for (const column of this.#columns) {
+      rowBytes += column.ctor.BYTES_PER_ELEMENT;
+    }
+    this.#rowBytes = rowBytes;
   }
 
   get extent(): SlotRange | undefined {
@@ -78,6 +85,15 @@ export class DenseSegment implements Segment {
 
   get size(): number {
     return this.#size;
+  }
+
+  /**
+   * Bytes the buffers have allocated (M3, §3.1): capacity times the bytes
+   * of one slot across the fields, plus the presence mask. Spare capacity
+   * counts; a merge that empties the segment frees nothing.
+   */
+  get bytes(): number {
+    return this.#capacity * this.#rowBytes + this.#mask.length;
   }
 
   /** Whether a slot inside the buffers has its presence bit set. */

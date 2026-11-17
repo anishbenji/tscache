@@ -277,6 +277,26 @@ export interface ClientOptions {
   };
 }
 
+/**
+ * What the worker's caches hold now (§2.9), from `client.memoryStats()` or
+ * `engine.memoryStats()`. Bytes are those the cached points' typed arrays
+ * have allocated, spare capacity included; object overhead and transient
+ * copies (read results, a load's records) are not counted, so the figure
+ * is a floor of the worker's memory.
+ */
+export interface MemoryStats {
+  /** The budget in force, in bytes; absent when there is none. */
+  budget?: number;
+  /** Bytes the segments of every cache hold. */
+  bytes: number;
+  /** Of those, bytes in pages pinned now (a pending get, a provisional point); 0 without a budget. */
+  pinnedBytes: number;
+  /** Pages evicted since the budget took effect; 0 without a budget. */
+  evictedPages: number;
+  /** One entry per cache, ascending by id: its bytes and the pages that hold points. */
+  caches: { cacheId: string; bytes: number; pages: number }[];
+}
+
 /** `'<clientId>:<seq>'`, unique across tabs (N5). */
 export type RequestId = string;
 
@@ -284,7 +304,7 @@ export type RequestId = string;
  * An optional feature a worker may offer, listed in its hello (N79) and
  * exposed as `TscacheClient.features`.
  */
-export type WorkerFeature = "cacheChanged";
+export type WorkerFeature = "cacheChanged" | "memoryBudget";
 
 /** Three scopes, one channel (N5, §2.7). */
 export interface ClientEvents {
@@ -359,6 +379,13 @@ export interface ClientEvents {
     removed: Range[];
     /** Every point and all coverage went (clear, clearAll, version mismatch). */
     cleared: boolean;
+    /**
+     * Coverage the memory budget evicted here (§2.9): the data did not
+     * change, so a view's copy is still right and nothing needs re-reading;
+     * a later read of the range fetches it again. Absent when the call
+     * evicted nothing, and always without a budget.
+     */
+    evicted?: Range[];
     /**
      * The call that made the change: a put, invalidate, clear, clearAll,
      * hydrate or setFinalizedUntil, or for a fetch the get that issued it.

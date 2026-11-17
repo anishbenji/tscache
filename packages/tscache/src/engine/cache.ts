@@ -28,7 +28,7 @@ import type {
   Snapshot,
 } from "../types";
 import { validateBatch } from "./batch";
-import { SegmentStore } from "./merge";
+import { pageRange, SegmentStore } from "./merge";
 import type { SlotWarning } from "./overlap";
 import { collect, read } from "./read";
 import { takeSnapshot, type ValidSnapshot, validateSnapshot } from "./snapshot";
@@ -136,6 +136,11 @@ export interface ReaderChange {
   removed: SlotRange[];
   /** Every point and all coverage the cache held before the call went. */
   cleared: boolean;
+  /**
+   * The coverage the call's memory enforcement evicted (M3, §3.7): the data
+   * did not change, and nothing needs re-reading. Absent when none was.
+   */
+  evicted?: SlotRange[];
 }
 
 /** A reader change that changed nothing yet. */
@@ -146,7 +151,10 @@ function unchanged(): ReaderChange {
 /** Whether a reader change changed what a read returns. */
 function changed(change: ReaderChange): boolean {
   return (
-    change.cleared || change.written.length > 0 || change.removed.length > 0
+    change.cleared ||
+    change.written.length > 0 ||
+    change.removed.length > 0 ||
+    (change.evicted?.length ?? 0) > 0
   );
 }
 
@@ -178,6 +186,26 @@ export function includeRange(list: SlotRange[], range: SlotRange): void {
     end = Math.max(end, existing.end);
   }
   list.splice(first, next - first, { start, end });
+}
+
+/**
+ * The engine's memory budget, as a cache sees it (M3, §3.3): only an
+ * engine with a budget passes one, so without it no page is tracked.
+ */
+export interface CacheMemory {
+  /** The store's running total of bytes changed by `delta`. */
+  counted(delta: number): void;
+  /**
+   * A read (`wrote` false) or a write used the pages that overlap `slots`
+   * and hold points; a write's pages that hold none leave the use order.
+   */
+  use(state: CacheState, slots: SlotRange, wrote: boolean): void;
+  /** A restore wrote every page that holds points. */
+  useAll(state: CacheState): void;
+  /** The cache dropped every point. */
+  cleared(state: CacheState): void;
+  /** The end of a call that may have written points or released a pin. */
+  settle(): void;
 }
 
 /** Hooks the owner may pass; each is optional. */
@@ -216,6 +244,17 @@ export interface CacheStateHooks {
    * `restore`.
    */
   onReaderChange?: (change: ReaderChange) => void;
+  /**
+   * The engine's memory budget (M3); absent without one. With it the store
+   * counts its bytes, every read and write is a use, every call ends in
+   * enforcement, and the cache keeps the coverage it evicted.
+   */
+  memory?: CacheMemory;
+  /**
+   * Called once per evicted page with the coverage the eviction withdrew,
+   * in slots (M3, §3.5); never `onChange` or `onMutate`.
+   */
+  onEvict?: (covered: SlotRange[]) => void;
 }
 
 /** What `restore` applied (§4.10.5). */
@@ -256,10 +295,20 @@ export interface CacheInternals {
 
 /** Set by CacheState's static block. */
 let internalsOf: (state: CacheState) => CacheInternals;
+let evictedOf: (state: CacheState) => CoverageIndex | undefined;
 
 /** A cache's internals, for the persistence code only (§4.10.5). */
 export function cacheInternals(state: CacheState): CacheInternals {
   return internalsOf(state);
+}
+
+/**
+ * The coverage a cache evicted and no later write, removal or clear has
+ * accounted for (M3, E21); undefined without a memory budget. For the
+ * engine's memory internals only.
+ */
+export function evictedCoverage(state: CacheState): CoverageIndex | undefined {
+  return evictedOf(state);
 }
 
 type Restore = (state: CacheState, stored: StoredRecords) => RestoreResult;
@@ -287,11 +336,23 @@ export class CacheState {
   #volatileFrom: number | undefined;
   /** The running mutating call's reader change, while a reader listens. */
   #reader: ReaderChange | undefined;
+  /** The engine's memory budget; undefined without one (M3). */
+  readonly #memory: CacheMemory | undefined;
+  /** The coverage this cache evicted, with a budget only (M3, E21). */
+  readonly #evicted: CoverageIndex | undefined;
+  /** Evicted coverage outside a reader's call, until the enforcement ends. */
+  #pendingEvicted: SlotRange[] = [];
 
   constructor(config: ResolvedCacheConfig, hooks: CacheStateHooks = {}) {
     this.config = config;
     this.#hooks = hooks;
     this.#store = new SegmentStore(config);
+    const memory = hooks.memory;
+    this.#memory = memory;
+    if (memory !== undefined) {
+      this.#store.count((delta) => memory.counted(delta));
+      this.#evicted = new CoverageIndex();
+    }
     this.#version = config.version;
     if (config.finalizedUntil !== undefined) {
       try {
@@ -319,6 +380,7 @@ export class CacheState {
       },
       report: (change) => state.#hooks.onChange?.(change),
     });
+    evictedOf = (state) => state.#evicted;
   }
 
   /** The dataset version in force: config.version, then whatever puts report. */
@@ -359,6 +421,9 @@ export class CacheState {
     try {
       return call();
     } finally {
+      // Enforcement at the end of the call (M3, §3.3): never between its
+      // write and its coverage, and inside its reader change (§3.7).
+      this.#memory?.settle();
       const change = this.#reader;
       // A listener's own mutation of this cache, inside the call, has its own.
       this.#reader = outer;
@@ -386,11 +451,20 @@ export class CacheState {
    */
   #withdraw(slots: SlotRange): void {
     const reader = this.#reader;
+    const evicted = this.#evicted;
     if (reader !== undefined && !reader.cleared) {
       for (const range of this.#coverage.covered(slots)) {
         includeRange(reader.removed, range);
       }
+      // With a budget, also the part of the range this cache evicted, so a
+      // view still showing it hears the removal (M3, E21).
+      if (evicted !== undefined) {
+        for (const range of evicted.covered(slots)) {
+          includeRange(reader.removed, range);
+        }
+      }
     }
+    evicted?.subtract(slots);
     this.#coverage.subtract(slots);
   }
 
@@ -404,6 +478,8 @@ export class CacheState {
     const touched = authority ?? spanOf(points);
     // Unclipped, and before the write: a failed write's prefix may be read.
     this.#wrote(touched);
+    // `written` reports these slots: the evicted index forgets them (E21).
+    if (touched !== undefined) this.#evicted?.subtract(touched);
     const claim = claimOf(touched, wm?.slot);
     const slotWarnings = this.#writeOrWithdraw(
       points,
@@ -464,12 +540,16 @@ export class CacheState {
       this.config.fields,
     );
     if (options?.snapshot === true) result.snapshot = this.#snapshot(request);
+    this.#memory?.use(this, request, false);
     return result;
   }
 
   /** What this cache knows about the range, snapped outward (§2.8, N34). */
   snapshot(range: Range): Snapshot {
-    return this.#snapshot(snapOut(range, this.config));
+    const request = snapOut(range, this.config);
+    const snapshot = this.#snapshot(request);
+    this.#memory?.use(this, request, false);
+    return snapshot;
   }
 
   /**
@@ -511,12 +591,15 @@ export class CacheState {
    */
   #apply(valid: ValidSnapshot, part: SlotRange): void {
     const points = collect(valid.segments, part, this.config.fields);
+    this.#evicted?.subtract(part);
     try {
       this.#store.put(points, part);
     } catch (error) {
       this.#withdraw(part);
       this.#hooks.onChange?.({ kind: "remove", slots: part });
       throw error;
+    } finally {
+      this.#memory?.use(this, part, true);
     }
     this.#coverage.add(part);
   }
@@ -544,7 +627,81 @@ export class CacheState {
     if (restoreImpl === undefined) {
       throw new TscacheError("restore: not installed (engine/restore.ts)");
     }
-    return restoreImpl(this, stored);
+    const memory = this.#memory;
+    if (memory === undefined) return restoreImpl(this, stored);
+    try {
+      return restoreImpl(this, stored);
+    } finally {
+      // The cache knew nothing, so every page it holds now is restored: a
+      // use, ascending; then enforcement trims the oldest (M3, E7, E19).
+      memory.useAll(this);
+      memory.settle();
+    }
+  }
+
+  /**
+   * Evicts page `page` (M3, §3.5), in one synchronous step: drops its
+   * segments and withdraws its whole slot range from coverage, keeping
+   * what was covered in the evicted index (E21). Reports through `onEvict`
+   * and the running reader change, never `onChange` or `onMutate`; the
+   * version and the watermark stay. Returns the bytes freed.
+   */
+  evict(page: number): number {
+    const slots = pageRange(page, this.config.segmentSlotCap);
+    const freed = this.#store.evictPage(page);
+    const covered = this.#coverage.covered(slots);
+    this.#coverage.subtract(slots);
+    const reader = this.#reader;
+    if (reader !== undefined && covered.length > 0) reader.evicted ??= [];
+    for (const range of covered) {
+      this.#evicted?.add(range);
+      if (reader?.evicted === undefined) this.#pendingEvicted.push(range);
+      else includeRange(reader.evicted, range);
+    }
+    this.#hooks.onEvict?.(covered);
+    return freed;
+  }
+
+  /**
+   * Reports the coverage evicted outside this cache's own running reader
+   * change, as one reader change of its own, while a reader listens; the
+   * engine calls it once its enforcement ended, so each cache hears one
+   * report per call (M3, §3.7).
+   */
+  flushEvicted(): void {
+    const pending = this.#pendingEvicted;
+    if (pending.length === 0) return;
+    this.#pendingEvicted = [];
+    if (this.#hooks.hasReaders?.() !== true) return;
+    const evicted: SlotRange[] = [];
+    for (const range of pending) includeRange(evicted, range);
+    this.#hooks.onReaderChange?.({ ...unchanged(), evicted });
+  }
+
+  /** The bytes this cache's segments hold (M3, §3.1). */
+  get bytes(): number {
+    return this.#store.bytes;
+  }
+
+  /** The bytes of the segments on `page` (M3). */
+  pageBytes(page: number): number {
+    return this.#store.pageBytes(page);
+  }
+
+  /**
+   * Calls `fn` once per page that holds points and overlaps `slots`,
+   * ascending; every such page when `slots` is undefined (M3).
+   */
+  forEachPage(slots: SlotRange | undefined, fn: (page: number) => void): void {
+    this.#store.forEachPage(slots, fn);
+  }
+
+  /** Whether `page` holds a provisional point (M3, E8: it is pinned). */
+  holdsProvisional(page: number): boolean {
+    const from = this.#volatileFrom;
+    if (from === undefined) return false;
+    const last = this.#store.lastSlotOn(page);
+    return last !== undefined && last >= from;
   }
 
   /** The parts of `ranges` this cache neither covers nor holds as provisional. */
@@ -592,6 +749,8 @@ export class CacheState {
   #clear(): void {
     this.#store.clear();
     this.#coverage.clear();
+    this.#evicted?.clear();
+    this.#memory?.cleared(this);
     const reader = this.#reader;
     if (reader !== undefined) {
       // Nothing written before the clear survives it.
@@ -638,6 +797,9 @@ export class CacheState {
         }
       }
       throw error;
+    } finally {
+      // A use of the pages written, also of a failed write's prefix (M3).
+      if (touched !== undefined) this.#memory?.use(this, touched, true);
     }
   }
 

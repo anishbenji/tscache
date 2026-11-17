@@ -39,6 +39,8 @@ export interface Segment {
   readonly extent: SlotRange | undefined;
   /** Number of present points. */
   readonly size: number;
+  /** Bytes the segment's buffers have allocated, spare capacity included (M3). */
+  readonly bytes: number;
 
   /**
    * The point at `slot` as a fresh object holding exactly the schema's

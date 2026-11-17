@@ -7,7 +7,11 @@
  */
 
 import type { ReaderChange } from "../engine/cache";
-import { type Engine, observeCaches } from "../engine/engine";
+import {
+  applyMemoryBudget,
+  type Engine,
+  observeCaches,
+} from "../engine/engine";
 import { ProtocolMismatchError, show, TscacheError } from "../errors";
 import { toMs } from "../grid";
 import { Orchestrator } from "../orchestrator/orchestrator";
@@ -60,6 +64,7 @@ interface Params {
   context?: unknown;
   snapshot?: Snapshot;
   all?: unknown;
+  bytes?: unknown;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -411,6 +416,13 @@ export class RpcServer {
     unsubscribe: (c, _r, p) => this.#subscribe(c, p, false),
     // Acknowledged first; #request detaches the port afterwards.
     dispose: () => undefined,
+    // M3 (§3.2); additive, announced in hello.features. The answer is the
+    // budget in force: the first the engine took, or none (E3, E20).
+    memoryBudget: (_c, _r, p) => {
+      const budget = applyMemoryBudget(this.#engine, p.bytes);
+      return budget === undefined ? {} : { budget };
+    },
+    memoryStats: () => this.#engine.memoryStats(),
   };
 
   /**
@@ -497,6 +509,9 @@ export class RpcServer {
       removed: change.removed.map((range) => toMs(range, grid)),
       cleared: change.cleared,
     };
+    if (change.evicted !== undefined && change.evicted.length > 0) {
+      payload.evicted = change.evicted.map((range) => toMs(range, grid));
+    }
     if (this.#cause !== undefined) payload.requestId = this.#cause;
     const evt: Evt = {
       t: "evt",

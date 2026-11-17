@@ -4,11 +4,14 @@
  * tests) and what the RPC server drives. No DOM, worker or timer use.
  */
 
-import { ConfigError, UnknownCacheError } from "../errors";
+import type { CoverageIndex } from "../coverage";
+import { ConfigError, show, UnknownCacheError } from "../errors";
+import type { SlotRange } from "../grid";
 import type {
   CacheConfig,
   GetResult,
   HydrateResult,
+  MemoryStats,
   PutBatch,
   PutOptions,
   PutResult,
@@ -16,9 +19,37 @@ import type {
   ResolvedCacheConfig,
   Snapshot,
 } from "../types";
-import { type CacheChange, CacheState, type ReaderChange } from "./cache";
+import {
+  type CacheChange,
+  CacheState,
+  evictedCoverage,
+  type ReaderChange,
+} from "./cache";
 import { Emitter } from "./emitter";
+import { MemoryBudget } from "./memory";
 import { resolveCacheConfig } from "./validate";
+
+/** Options of `new Engine` (§2.9). */
+export interface EngineOptions {
+  /**
+   * Upper bound, in bytes, on what the segments of every cache of this
+   * engine hold (§2.9): a positive safe integer. Above it the least
+   * recently used pages that nothing pins are evicted, with their
+   * coverage, so a later read fetches them again. Default: none, and
+   * nothing is evicted.
+   */
+  memoryBudget?: number;
+}
+
+/** A budget as `EngineOptions.memoryBudget` and the `memoryBudget` op take it. */
+function validBudget(bytes: unknown): number {
+  if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 1) {
+    throw new ConfigError(
+      `memoryBudget must be a positive safe integer of bytes, got ${show(bytes)}`,
+    );
+  }
+  return bytes;
+}
 
 export interface EngineEvents {
   /** Cache-scoped (N5). */
@@ -87,11 +118,19 @@ export interface CacheObserver {
    * after its `cacheCleared` (§3.3).
    */
   onReaderChange?(cacheId: string, change: ReaderChange): void;
+  /**
+   * A page of the cache was evicted (M3, §3.5), with the coverage that went,
+   * in slots; never reported as a change or a mutation. The persister marks
+   * the page, so its next flush deletes the record (E11 b).
+   */
+  onEvict?(cacheId: string, covered: SlotRange[]): void;
 }
 
 /** Internal access for the persister (§4.10.4); set by Engine's static block. */
 let stateOf: (engine: Engine, cacheId: string) => CacheState;
 let addObserver: (engine: Engine, observer: CacheObserver) => void;
+let memoryOf: (engine: Engine) => MemoryBudget | undefined;
+let budgetFor: (engine: Engine, bytes: unknown) => number | undefined;
 
 /**
  * A cache's state, for the persister only (§4.10.4): no package entry
@@ -110,16 +149,81 @@ export function observeCaches(engine: Engine, observer: CacheObserver): void {
   addObserver(engine, observer);
 }
 
+/** What `engineMemoryInternals` reads (tests and diagnostics). */
+export interface EngineMemoryInternals {
+  /** Pages in the use order; 0 without a budget. */
+  readonly orderSize: number;
+  /** Pages in the use order that are pinned now; 0 without a budget. */
+  readonly pinnedPages: number;
+  /** A cache's evicted-coverage index (E21); undefined without a budget. */
+  evictedIndex(cacheId: string): CoverageIndex | undefined;
+}
+
+/** The engine's memory bookkeeping (M3), for tests: no package entry exports it. */
+export function engineMemoryInternals(engine: Engine): EngineMemoryInternals {
+  const memory = memoryOf(engine);
+  return {
+    orderSize: memory?.orderSize ?? 0,
+    pinnedPages: memory?.pinnedPages() ?? 0,
+    evictedIndex: (cacheId) => evictedCoverage(stateOf(engine, cacheId)),
+  };
+}
+
+/**
+ * Applies a budget that arrives after construction, by the `memoryBudget`
+ * op (M3, E3, E20), and returns the budget in force: the first an engine
+ * receives holds for its life, and an engine that already holds a cache
+ * takes none. Throws ConfigError for a value that is not a positive safe
+ * integer. For the RPC server only: no package entry exports it.
+ */
+export function applyMemoryBudget(
+  engine: Engine,
+  bytes: unknown,
+): number | undefined {
+  return budgetFor(engine, bytes);
+}
+
+/**
+ * Pins the pages of `slots` in a cache while an orchestrated get is pending
+ * (M3, E9); undefined, at the cost of a field read, without a budget. The
+ * release is idempotent and ends in enforcement. For the orchestrator only.
+ */
+export function pinPages(
+  engine: Engine,
+  cacheId: string,
+  slots: SlotRange,
+): (() => void) | undefined {
+  const memory = memoryOf(engine);
+  return memory?.pin(stateOf(engine, cacheId), slots);
+}
+
 export class Engine {
   readonly #caches = new Map<string, CacheState>();
   readonly #events = new Emitter<EngineEvents>();
   readonly #observers: CacheObserver[] = [];
+  /** The memory budget (M3); undefined without one. */
+  #memory: MemoryBudget | undefined;
 
   static {
     stateOf = (engine, cacheId) => engine.#state(cacheId);
     addObserver = (engine, observer) => {
       engine.#observers.push(observer);
     };
+    memoryOf = (engine) => engine.#memory;
+    budgetFor = (engine, bytes) => {
+      const budget = validBudget(bytes);
+      if (engine.#memory === undefined && engine.#caches.size === 0) {
+        engine.#memory = new MemoryBudget(budget);
+      }
+      return engine.#memory?.budget;
+    };
+  }
+
+  /** Throws ConfigError for a `memoryBudget` that is not a positive safe integer. */
+  constructor(options?: EngineOptions) {
+    const budget = options?.memoryBudget;
+    if (budget !== undefined)
+      this.#memory = new MemoryBudget(validBudget(budget));
   }
 
   /**
@@ -148,6 +252,10 @@ export class Engine {
       onReaderChange: (change) => {
         for (const observer of observers) observer.onReaderChange?.(id, change);
       },
+      onEvict: (covered) => {
+        for (const observer of observers) observer.onEvict?.(id, covered);
+      },
+      ...(this.#memory === undefined ? {} : { memory: this.#memory }),
     });
     this.#caches.set(resolved.id, created);
     return created.config;
@@ -246,6 +354,38 @@ export class Engine {
    */
   setFinalizedUntil(cacheId: string, t: number): void {
     this.#state(cacheId).setFinalizedUntil(t);
+  }
+
+  /**
+   * What the caches hold now (§2.9): the bytes of every cache's segments,
+   * as the budget counts them, the pinned part, the pages evicted so far,
+   * and one entry per cache, ascending by id. Not a use. Without a budget
+   * it walks every cache's segments, which only this call pays for.
+   */
+  memoryStats(): MemoryStats {
+    const memory = this.#memory;
+    const ids = [...this.#caches.keys()].sort((a, b) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    let bytes = 0;
+    const caches = ids.map((cacheId) => {
+      const state = this.#caches.get(cacheId) as CacheState;
+      let pages = 0;
+      state.forEachPage(undefined, () => {
+        pages++;
+      });
+      const cacheBytes = state.bytes;
+      bytes += cacheBytes;
+      return { cacheId, bytes: cacheBytes, pages };
+    });
+    const stats: MemoryStats = {
+      bytes,
+      pinnedBytes: memory?.pinnedBytes() ?? 0,
+      evictedPages: memory?.evictedPages ?? 0,
+      caches,
+    };
+    if (memory !== undefined) stats.budget = memory.budget;
+    return stats;
   }
 
   on<E extends keyof EngineEvents>(
