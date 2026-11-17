@@ -9,7 +9,7 @@ Staging uses npm trusted publishing: GitHub mints a short-lived OIDC token for t
 exchanges it for a token that may only stage this package, and the same OIDC identity signs the
 provenance statement. No npm token is ever created or stored, and the workflow reads no secret.
 
-## Current state (13 November 2026)
+## Current state (17 November 2026)
 
 - The npm account `anishbenji` exists, with two-factor authentication through a security key.
 - `@anishbenji/tscache@0.1.0` is live on npm as `latest`, released on 13 November 2026 through the
@@ -26,6 +26,10 @@ provenance statement. No npm token is ever created or stored, and the workflow r
 - Since 13 November 2026 the `npm-publish` environment has the maintainer as required reviewer, so
   the `stage` job waits for an approval on GitHub before it runs. With the 2FA approval of the staged
   version on npm, a release has two human approvals.
+- From the merge of the 0.2.0 release preparation (step 120), `main` carries version 0.2.0, with its
+  changelog section and `docs/releases/0.2.0.md`. That version is not on npm until the maintainer
+  tags the merge commit and approves the staged version (steps 3 to 11 of
+  [Cutting a release](#cutting-a-release)); until then `latest` is still 0.1.0.
 
 Before every release, check that nothing is left in the staging area for the version you are about
 to release: staged and published versions share one version index, so a pending stage of a version
@@ -103,6 +107,12 @@ that each protection on the path from `main` to npm is still in place.
    - set `version` in `packages/tscache/package.json` to the new `X.Y.Z` (0.x semver: a minor release
      may break the API, a patch release never does). It must be above every version already on npm;
      the `plan` job checks this;
+   - set `LIB_VERSION` in `packages/tscache/src/rpc/protocol.ts` to the same `X.Y.Z`. Every hosting
+     reports it to the page in `hello.lib`, and `packages/tscache/test/version.test.ts` fails while
+     it differs from the package version;
+   - run `bun install`, so that `bun.lock` records the workspace package at the same `X.Y.Z`, and
+     check that `bun install --frozen-lockfile` still exits 0. The version, `LIB_VERSION` and the
+     lockfile are the three places that name it;
    - add the new release to the changelog with `bun run changelog --tag vX.Y.Z`. It runs git-cliff
      with `--unreleased --prepend`, so only the commits since the last tag become the `X.Y.Z` section,
      above the older ones, which stay as they are with their hand-written summaries. Do not run
@@ -172,13 +182,16 @@ gh run watch
 The `stage-dry-run` job runs `npm stage publish --dry-run --force`, which prints the tarball's file
 list and size and changes nothing on the registry. `--force` skips only npm's client-side version
 checks, which would otherwise fail every dry run whose version is not above the registry's, such as
-`main` between two releases (today `main` says `0.1.0`, the same version as `latest` on npm). The
-`plan` job makes the same check against `npm view @anishbenji/tscache versions` instead, ignoring
+`main` between two releases, when it says the version that is already `latest` on npm. The `plan`
+job makes the same check against `npm view @anishbenji/tscache versions` instead, ignoring
 prereleases: a dry run reports a version that is not above the highest published one as a warning,
-and a tag run fails on it before CI. So a dry run on `main` passes with that warning until the next
-release bumps the version. A dry run also warns, but does not fail, when `docs/releases/<version>.md`
-is missing, and when the commit is not on `main`. Staged versions are not public, so neither check
-sees a pending stage; `npm stage list` does (see [Current state](#current-state-13-november-2026)).
+and a tag run fails on it before CI. So between two releases a dry run on `main` passes with that
+warning until the next release preparation bumps the version. Today `main` says `0.2.0` and `latest`
+is still `0.1.0`, so a dry run on `main` passes without it, as step 3 of [Cutting a
+release](#cutting-a-release) expects. A dry run also warns, but does not fail, when
+`docs/releases/<version>.md` is missing, and when the commit is not on `main`. Staged versions are
+not public, so neither check sees a pending stage; `npm stage list` does (see [Current
+state](#current-state-17-november-2026)).
 
 ## Retrying a failed stage
 

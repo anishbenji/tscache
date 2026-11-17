@@ -25,7 +25,7 @@ incompatibility.
 `fetcher` module, and that load is not bounded by the timeout: a slow import delays `createClient`
 but does not step down. A fetcher module that fails to load rejects `createClient` with a
 `TscacheError` (`init-err`) naming the module, without falling back. A load that never settles leaves
-`createClient` pending: tscache 0.1.0 has no timeout on it ([Writing a fetcher](/guides/fetcher)).
+`createClient` pending: tscache 0.2.0 has no timeout on it ([Writing a fetcher](/guides/fetcher)).
 
 ::: info Browsers without SharedWorker
 Samsung Internet and Opera Mobile have no `SharedWorker`, nor had Chrome for Android before version 148.
@@ -142,7 +142,7 @@ page fixes it once the old tabs are closed and the old worker has stopped: in Ch
 lingers about 30 seconds after its last tab, so a reload within that window can still reach it.
 
 ::: warning Known limit: deploy skew has no recovery path
-tscache 0.1.0 detects skew only when the worker refuses a connection, for a protocol mismatch or a
+tscache 0.2.0 detects skew only when the worker refuses a connection, for a protocol mismatch or a
 second fetcher module, and offers nothing beyond the error: no retry, and no event that tells an old tab
 a newer worker exists. An application cannot close a user's other tabs. What happens depends on how the
 worker is served, and on what the deploy changed.
