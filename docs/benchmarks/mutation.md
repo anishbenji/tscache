@@ -16,8 +16,14 @@ A row is added after each merged step that touches engine logic (`grid.ts`, `cov
 | ---------- | --------- | ------- | ----- | ------- | ----------- | -------- | ------- | ------------- | -------- |
 | 2026-11-13 | `b2e1f06` | 10.1.1  | 89.17 | 93.10   | 98.08       | 95.91    | 91.36   | 86.63         | 82.87    |
 | 2026-11-16 | `7acab39` | 10.1.1  | 92.33 | 93.97   | 98.08       | 96.70    | 95.06   | 90.02         | 86.81    |
+| 2026-11-17 | `8cbb162` | 10.1.1  | 92.54 | 93.97   | 98.08       | 96.70    | 95.05   | 90.46         | 87.21    |
 
 The first row is the step 84 measurement (six per-area runs, Results below). The second (step 113) is one run of `bun run mutation` over the same 4,459 mutants: 3,895 killed, 222 timed out, 308 survived and 34 without coverage, in 68 minutes. The load average reached 127 during that run, which slowed it and may have turned some kills into timeouts; a timeout counts as killed, so a mutant that only timed out under load can raise the score. Of the twenty survivors listed below, 11 are now killed (4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 18), 5 in part (8: `:403` still survives; 13: four of five still survive; 16: four survive, none without coverage; 17: `:338`; 20: `:81`), and 1, 2, 3 and 19 still survive.
+
+The third row (step 119, after step 114, M7 change events) is one run of `bun run mutation` on `main` at `8cbb162`: 4,559 mutants (100 more than before: 96 in `engine/`, 2 each in `orchestrator/` and `persist/`), of which 4,026 were killed, 193 timed out, 306 survived and 34 had no coverage, in 81 minutes. Changes against the step 113 row:
+
+- No area fell by more than a point. `engine/` is 0.01 lower (95.05 against 95.06), with 5 more survivors among 96 more mutants; `orchestrator/` rose 0.44 and `persist/` 0.40. Timeouts fell from 222 to 193, and the run took 81 minutes against 68; the machine load was not sampled this time.
+- Step 114 added no file under `engine/` or `persist/`; it changed `engine/cache.ts`, `engine/engine.ts`, `persist/clear-only.ts` and `persist/hosted.ts` (its one new source file, `client/changes.ts`, is outside the measured scope). `engine/cache.ts` has 13 survivors and 2 without coverage, 96.71 in all. Three survivors sit on lines step 114 added or changed: `engine/cache.ts:370` and `engine/engine.ts:149` (the `?.` on the new `onReaderChange` hook calls: replacing it with a plain call survives, so no test runs those paths with the hook unset) and `engine/cache.ts:517` (the `#withdraw(part)` call on the failed-put path, which no test notices missing). `persist/clear-only.ts` has one survivor (`:79`, a `{}` on an unchanged line), and the `hosted.ts` lines step 114 changed (`:124`, `:127`, `:131`) have none.
 
 ## Results
 
