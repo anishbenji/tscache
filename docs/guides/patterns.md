@@ -174,6 +174,8 @@ designs follow after the release.
   `createClient` rejects with `ConfigError` until the old tabs close. A fixed worker URL keeps one
   worker but needs a fixed fetcher URL too, for the same reason (`site/guides/workers.md`, Stale
   scripts after a deploy). The deploy-skew proposal (finding M5) designs the recovery.
-- **No change notifications.** Apart from the opt-in `mergeWarning`, readers hear only `cacheCleared`; a
-  view that must redraw calls `get` again, with `cacheOnly: true` after another tab's signal when the tabs
-  share a SharedWorker (`site/guides/live-feeds.md`; roadmap: subscriptions).
+- **Change notifications reach one cache's readers only.** `cacheChanged` (architecture §2.7, N71–N84,
+  step 114) tells every listening tab of a SharedWorker where the cache changed, and a view re-reads by
+  the read rule (N84). With a dedicated worker or in-process, each tab has a cache of its own and hears
+  only its own changes, so another tab's data must still be sent (`site/guides/live-feeds.md`). A worker
+  script from before the event sends none (`client.features`).

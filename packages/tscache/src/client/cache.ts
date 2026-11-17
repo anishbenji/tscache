@@ -16,21 +16,33 @@ import type {
   Range,
   Snapshot,
 } from "../types";
+import type { ChangeSubscriptions } from "./changes";
 import { warnMerges } from "./dev";
 import type { ClientEmitter } from "./events";
 
 /** The cache-scoped and request-scoped events, filterable by cacheId. */
-export type CacheEvent = "cacheCleared" | "mergeWarning" | "persistStopped";
+export type CacheEvent =
+  | "cacheCleared"
+  | "mergeWarning"
+  | "persistStopped"
+  | "cacheChanged";
 
 export class CacheHandle {
   readonly id: string;
   readonly #port: PortClient;
   readonly #events: ClientEmitter;
+  readonly #changes: ChangeSubscriptions;
 
-  constructor(id: string, port: PortClient, events: ClientEmitter) {
+  constructor(
+    id: string,
+    port: PortClient,
+    events: ClientEmitter,
+    changes: ChangeSubscriptions,
+  ) {
     this.id = id;
     this.#port = port;
     this.#events = events;
+    this.#changes = changes;
   }
 
   /**
@@ -96,13 +108,23 @@ export class CacheHandle {
     }) as Promise<void>;
   }
 
-  /** `client.on` filtered to this cache; returns the unsubscribe. */
+  /**
+   * `client.on` filtered to this cache; returns the unsubscribe. The first
+   * `cacheChanged` listener of this cache on the client subscribes the
+   * connection to it, and the last one's unsubscribe ends that (§2.7).
+   */
   on<E extends CacheEvent>(
     event: E,
     fn: (payload: ClientEvents[E]) => void,
   ): () => void {
-    return this.#events.on(event, (payload) => {
+    const off = this.#events.on(event, (payload) => {
       if (payload.cacheId === this.id) fn(payload);
     });
+    if (event !== "cacheChanged") return off;
+    const release = this.#changes.hold({ cacheId: this.id });
+    return () => {
+      off();
+      release();
+    };
   }
 }

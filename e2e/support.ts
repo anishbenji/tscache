@@ -79,6 +79,28 @@ interface E2EWindow {
   updates?: number;
   /** Errors the refresh snippet ended the session with. */
   sessionLost?: string[];
+  /** Views that follow a cache with cacheChanged, by key (`follow`). */
+  followers?: Map<string, Follower>;
+}
+
+/** A view following a cache by the read rule (architecture §2.7, N84). */
+interface Follower {
+  events: ClientEvents["cacheChanged"][];
+  fetching: number;
+  cacheOnly: number;
+  /** Every read it started, settled or not. */
+  reads: Promise<unknown>[];
+  last?: Got;
+}
+
+/** What `followed` reports of a follower once its reads settled. */
+export interface Followed {
+  events: ClientEvents["cacheChanged"][];
+  /** Reads it made with a fetching get, and with cacheOnly. */
+  fetching: number;
+  cacheOnly: number;
+  /** Its last read's result. */
+  last?: Got;
 }
 
 /** What pages/refresh-harness.js records in a scenario. */
@@ -266,6 +288,97 @@ export async function read(
   const key = crypto.randomUUID();
   await start(page, key, config, range, options);
   return settle(page, key);
+}
+
+/**
+ * Makes the page a view of `range` that follows the cache as the
+ * integrations do (§2.7, N84): it subscribes, then reads (`initial` says
+ * how), and on each overlapping cacheChanged reads again, with cacheOnly
+ * when the event wrote something and with a fetching get when it wrote
+ * nothing and cleared or removed. One read per event; no frame coalescing,
+ * so every reaction is counted.
+ */
+export async function follow(
+  page: Page,
+  key: string,
+  config: CacheConfig,
+  range: Range,
+  initial: "cacheOnly" | "fetching",
+): Promise<void> {
+  await page.evaluate(
+    async ({ key, cfg, range, initial }) => {
+      const w = window as unknown as E2EWindow;
+      const cache = await w.client.cache(cfg);
+      const follower: Follower = {
+        events: [],
+        fetching: 0,
+        cacheOnly: 0,
+        reads: [],
+      };
+      w.followers ??= new Map();
+      w.followers.set(key, follower);
+      const read = (fetching: boolean) => {
+        if (fetching) follower.fetching++;
+        else follower.cacheOnly++;
+        const promise = cache
+          .get(range, fetching ? {} : { cacheOnly: true })
+          .then((got) => {
+            follower.last = {
+              timestamps: Array.from(got.timestamps),
+              volume: Array.from(got.fields.volume ?? []),
+              coverage: got.coverage,
+              misses: got.misses,
+            };
+          });
+        follower.reads.push(promise);
+        return promise;
+      };
+      const overlaps = (r: Range) =>
+        r.start <= range.end && range.start <= r.end;
+      // Subscribe, then read: both go out on one port, in this order.
+      cache.on("cacheChanged", (event) => {
+        follower.events.push(event);
+        if (event.written.length > 0) {
+          const shown =
+            event.cleared ||
+            [...event.written, ...event.removed].some(overlaps);
+          if (shown) void read(false);
+        } else if (event.cleared || event.removed.some(overlaps)) {
+          void read(true);
+        }
+      });
+      await read(initial === "fetching");
+    },
+    { key, cfg: config, range, initial },
+  );
+}
+
+/**
+ * A follower's events and reads, after a round trip to the worker (every
+ * event sent before it has arrived) and once every read it started, also
+ * in reaction to those events, has settled.
+ */
+export function followed(
+  page: Page,
+  key: string,
+  config: CacheConfig,
+): Promise<Followed> {
+  return page.evaluate(
+    async ({ key, cfg }) => {
+      const w = window as unknown as E2EWindow;
+      const follower = w.followers?.get(key);
+      if (follower === undefined) throw new Error(`no follower ${key}`);
+      await w.client.cache(cfg);
+      let started: number;
+      do {
+        started = follower.reads.length;
+        await Promise.all(follower.reads);
+      } while (started !== follower.reads.length);
+      const { events, fetching, cacheOnly, last } = follower;
+      return { events, fetching, cacheOnly, ...(last ? { last } : {}) };
+    },
+    { key, cfg: config },
+  );
 }
 
 /** Empties every cache and the disk (N54, N66). */

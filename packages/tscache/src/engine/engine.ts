@@ -16,7 +16,7 @@ import type {
   ResolvedCacheConfig,
   Snapshot,
 } from "../types";
-import { type CacheChange, CacheState } from "./cache";
+import { type CacheChange, CacheState, type ReaderChange } from "./cache";
 import { Emitter } from "./emitter";
 import { resolveCacheConfig } from "./validate";
 
@@ -69,12 +69,24 @@ function assertCompatible(
 }
 
 /**
- * Observes what every cache's mutations change (§4.10.4): the persister's
- * view of the engine. Called synchronously inside the mutating call.
+ * Observes what every cache's mutations change: the persister's view of the
+ * engine (§4.10.4), and the RPC server's reader report (M7, §4.6). Called
+ * synchronously inside the mutating call.
  */
 export interface CacheObserver {
   onChange(cacheId: string, change: CacheChange): void;
   onMutate(cacheId: string): void;
+  /**
+   * Whether this observer has a reader of the cache; asked at the start of
+   * each mutating call. Without any observer answering true, no reader
+   * change is collected (§3.6).
+   */
+  hasReaders?(cacheId: string): boolean;
+  /**
+   * One mutating call's reader change, in slots, once the call ended:
+   * after its `cacheCleared` (§3.3).
+   */
+  onReaderChange?(cacheId: string, change: ReaderChange): void;
 }
 
 /** Internal access for the persister (§4.10.4); set by Engine's static block. */
@@ -131,6 +143,11 @@ export class Engine {
       onMutate: () => {
         for (const observer of observers) observer.onMutate(id);
       },
+      hasReaders: () =>
+        observers.some((observer) => observer.hasReaders?.(id) === true),
+      onReaderChange: (change) => {
+        for (const observer of observers) observer.onReaderChange?.(id, change);
+      },
     });
     this.#caches.set(resolved.id, created);
     return created.config;
@@ -168,7 +185,7 @@ export class Engine {
   /**
    * Applies a snapshot where the cache knows nothing (§2.8, N35). One
    * synchronous call, so no other write interleaves; emits no event, since
-   * it never clears.
+   * it never clears (its reader change goes to the internal observers).
    */
   hydrate(cacheId: string, snapshot: Snapshot): HydrateResult {
     return this.#state(cacheId).hydrate(snapshot);
@@ -196,8 +213,7 @@ export class Engine {
 
   /** Drops the cache's data and coverage; emits `cacheCleared 'manual'`. */
   clear(cacheId: string): void {
-    this.#state(cacheId).clear();
-    this.#cleared(cacheId, "manual");
+    this.#state(cacheId).clear(() => this.#cleared(cacheId, "manual"));
   }
 
   /**
@@ -208,12 +224,13 @@ export class Engine {
   clearAll(): void {
     let failure: { error: unknown } | undefined;
     for (const [cacheId, state] of this.#caches) {
-      state.clear();
-      try {
-        this.#cleared(cacheId, "clear-all");
-      } catch (error) {
-        failure ??= { error };
-      }
+      state.clear(() => {
+        try {
+          this.#cleared(cacheId, "clear-all");
+        } catch (error) {
+          failure ??= { error };
+        }
+      });
     }
     if (failure !== undefined) throw failure.error;
   }

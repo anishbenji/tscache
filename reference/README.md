@@ -55,8 +55,10 @@ depends on nothing but the server's read, so the browser's hydration render matc
     provisional end, the bar forming now and the one that closed since.
 
   One tab per browser holds the feed, elected with a Web Lock, and brings each new bar into the
-  cache; the other tabs hear of it on a BroadcastChannel and read it back from the cache alone,
-  without a fetch (`shared/src/live.ts`). When that tab closes, another takes the feed over. Each
+  cache. With a SharedWorker every tab hears of it from the cache's `cacheChanged` event and reads it
+  back from the cache alone, without a fetch; a tab with a cache of its own (a dedicated worker, or
+  in-process) hears of it on a BroadcastChannel and puts it into its own cache
+  (`shared/src/live.ts`). When that tab closes, another takes the feed over. Each
   time the feed opens again, after an outage or under another tab, a tab that follows the market
   reads its newest bars with a fetch, which mends what the feed missed: whole bars, or the final
   values of the bar that was forming when it broke.

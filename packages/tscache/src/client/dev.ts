@@ -4,7 +4,7 @@
  * once per put, in addition to the put result and the mergeWarning event.
  */
 
-import type { MergeWarning } from "../types";
+import type { MergeWarning, WorkerFeature } from "../types";
 
 // Bundlers replace the exact text `process.env.NODE_ENV` at build time (Vite
 // in development and production, webpack, Bun with --production), so it is
@@ -36,5 +36,20 @@ export function warnMerges(
   const subject = source === "put" ? "a put to" : "a fetch for";
   console.warn(
     `tscache: ${subject} cache "${cacheId}" overwrote cached values that differed: ${ranges}. Reported because warnOnOverlapDiff is on, also as mergeWarning events; printed in development builds only.`,
+  );
+}
+
+/**
+ * Prints one console.warn that the worker lacks a feature a listener needs
+ * (N80), unless the build is a production one.
+ */
+export function warnMissingFeature(feature: WorkerFeature): void {
+  try {
+    if (process.env.NODE_ENV === "production") return;
+  } catch {
+    return;
+  }
+  console.warn(
+    `tscache: this client's worker does not offer ${feature} (an older worker script?), so ${feature} listeners will not be called. Check client.features.has("${feature}") and poll instead; printed in development builds only.`,
   );
 }
