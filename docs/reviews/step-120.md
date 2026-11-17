@@ -50,17 +50,24 @@ Every row is within its budget. The 0.1.0 figures predate step 108, which replac
 | `bun run build`, then `bun run size`                                 | exit 0; every entry within budget (table above)        |
 | `npm pack --dry-run` (in `packages/tscache`)                         | 27 files, 81.6 kB packed, 271.4 kB unpacked            |
 | `bun run docs:check`                                                 | exit 0; `doc-anchors: 246 anchors in 42 pages resolve` |
-| `~/code/tscache-reports/bin/heavy-run.sh "120 child: ci" bun run ci` | see the director's report for the final head           |
+| `~/code/tscache-reports/bin/heavy-run.sh "120 child: ci" bun run ci` | exit 0 on `b9dc547`: 2957 Vitest, 191 Playwright tests |
 
 Not run: the supply-chain checklist (npm account and repository settings, the maintainer's step before step 1), the GitHub dry-run workflow (step 3, after the merge), and anything after step 1.
 
-## Left for later steps
+## Follow-ups (director, after the first report)
 
-These documents still describe 0.1.0 but sit outside this step's file list: `docs/releasing.md` ("Current state", and the dry-run paragraph's "today `main` says `0.1.0`"), and `site/guides/workers.md` ("tscache 0.1.0 detects skew only …"). `docs/benchmarking.md` quotes `worker` 13.97 kB and `vite` 1.20 kB for step 114, where this head measures 13.98 kB and 1.24 kB.
+The director accepted the `LIB_VERSION` bump and asked for the documents that still described 0.1.0 to be fixed on this branch, in one more commit (`docs: release docs and sizes for 0.2.0`):
+
+- `docs/releasing.md`: step 1 of "Cutting a release" gains a bullet that `LIB_VERSION` in `packages/tscache/src/rpc/protocol.ts` must equal the new version, which `test/version.test.ts` checks. "Current state" is dated 17 November 2026 and gains a bullet: from this branch's merge `main` carries 0.2.0, which is not on npm until the maintainer tags and approves it, and `latest` is still 0.1.0. The 0.1.0 facts stay as they were. The dry-run paragraph no longer says "today `main` says `0.1.0`": between two releases a dry run warns about the version, and today, with `main` at 0.2.0 above `latest`, it does not. The anchor `#current-state-17-november-2026` replaces the old one in the same file; nothing else links to it (`git grep current-state-13`).
+- `site/guides/workers.md`: "tscache 0.1.0 detects skew only …" reads 0.2.0; M5 is not built, so the substance is unchanged. The same page's "tscache 0.1.0 has no timeout on it", for the fetcher import, reads 0.2.0 too: `git diff v0.1.0..HEAD` adds no timeout to the orchestrator's import.
+- `docs/benchmarking.md`: the entry sizes quoted for step 114 were stale in four rows against this head's `bun run size`: `index (lazy)` 12.71 → 12.72, `worker` 13.97 → 13.98, `engine` 10.10 → 10.11 and `vite` 1.20 → 1.24 kB. The cell now quotes this head's figures, dated step 120; the budgets are unchanged.
+- `docs/INDEX.md`: `docs/releasing.md` re-measured, 17,146 bytes → 17.1 KB (was 16.4 KB). `docs/benchmarking.md` (61,973 bytes, 62.0 KB) and `site/` (266,846 bytes, 266.8 KB) keep their figures, since the edits kept their byte counts.
+
+Checks on the new head: `bun run docs:check` (exit 0, 246 anchors in 42 pages resolve), `bunx biome check` on the four files (no fixes), and `bun run ci` through the heavy-job wrapper; its result is in the director's report.
 
 ## Outside the brief
 
-The brief forbids changes under `packages/tscache/src/`, but the first `bun run ci` on this branch failed on `packages/tscache/test/version.test.ts`, which requires `LIB_VERSION` in `src/rpc/protocol.ts`, the version every hosting reports in `hello.lib` (§4.7), to equal `package.json`'s version. The test exists to stop a release that bumps `package.json` alone. Weakening it is not allowed, and a 0.2.0 whose worker reports 0.1.0 would be wrong, so the constant is bumped in the same commit as the version, keeping every commit green. It is the only change under `src/`. Step 1 of "Cutting a release" in `docs/releasing.md` does not mention the constant; adding it there is left to a later step, since that file is outside this step's list. The bump moved the `worker` row from 14.04 kB to 13.98 kB (Brotli of one changed string) and the unpacked tarball from 271.3 kB to 271.4 kB; the figures above are after it.
+The brief forbids changes under `packages/tscache/src/`, but the first `bun run ci` on this branch failed on `packages/tscache/test/version.test.ts`, which requires `LIB_VERSION` in `src/rpc/protocol.ts`, the version every hosting reports in `hello.lib` (§4.7), to equal `package.json`'s version. The test exists to stop a release that bumps `package.json` alone. Weakening it is not allowed, and a 0.2.0 whose worker reports 0.1.0 would be wrong, so the constant is bumped in the same commit as the version, keeping every commit green. It is the only change under `src/`. Step 1 of "Cutting a release" in `docs/releasing.md` did not mention the constant; the follow-up commit adds it. The bump moved the `worker` row from 14.04 kB to 13.98 kB (Brotli of one changed string) and the unpacked tarball from 271.3 kB to 271.4 kB; the figures above are after it.
 
 ## Contract-test changes
 
