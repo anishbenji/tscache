@@ -389,7 +389,7 @@ export class Persister {
   }
 
   /**
-   * A page was evicted (M3, E11 b): its covered slots are marked as a write
+   * A page was evicted (N95): its covered slots are marked as a write
    * marks them, so the next flush deletes the page's record, relaxed. Not a
    * removal: nothing is counted and no call waits for it (N58). A page
    * without coverage has no record to delete; the change that withdrew its

@@ -103,7 +103,7 @@ export class SegmentStore {
   }
 
   /**
-   * The bytes the segments have allocated (M3, §3.1): the running total
+   * The bytes the segments have allocated (§2.9, N90): the running total
    * once `count` switched it on, otherwise the sum over the segments.
    */
   get bytes(): number {
@@ -242,7 +242,7 @@ export class SegmentStore {
   }
 
   /**
-   * Drops every segment on `page` (M3, §3.5): they are contiguous, and
+   * Drops every segment on `page` (§4.3, N91): they are contiguous, and
    * none reaches another page (N15). Returns the bytes freed.
    */
   evictPage(page: number): number {

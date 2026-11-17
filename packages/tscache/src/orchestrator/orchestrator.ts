@@ -421,7 +421,7 @@ export class Orchestrator {
     const grid = this.#engine.configOf(cacheId);
     const request = snapOut(range, grid);
     // With a memory budget, the request and its one-slot flanks (the
-    // round's probe) are pinned from the first round to the read (M3, E9),
+    // round's probe) are pinned from the first round to the read (N94),
     // so no fetch landing meanwhile evicts what this get fetched. The
     // release ends in enforcement, whose evictions this get caused.
     const pinned = pinPages(this.#engine, cacheId, probeOf(request, grid));

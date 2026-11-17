@@ -41,7 +41,7 @@ export type Op =
   /** §2.7 (N74); additive, announced in `hello.features` (N79). */
   | "subscribe"
   | "unsubscribe"
-  /** §3.2 (M3); additive, announced in `hello.features` as 'memoryBudget'. */
+  /** §2.9, §3.2 (N101); additive, announced in `hello.features`. */
   | "memoryBudget"
   | "memoryStats";
 

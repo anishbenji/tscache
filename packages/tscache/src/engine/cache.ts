@@ -137,7 +137,7 @@ export interface ReaderChange {
   /** Every point and all coverage the cache held before the call went. */
   cleared: boolean;
   /**
-   * The coverage the call's memory enforcement evicted (M3, §3.7): the data
+   * The coverage the call's memory enforcement evicted (§2.7, N99): the data
    * did not change, and nothing needs re-reading. Absent when none was.
    */
   evicted?: SlotRange[];
@@ -189,7 +189,7 @@ export function includeRange(list: SlotRange[], range: SlotRange): void {
 }
 
 /**
- * The engine's memory budget, as a cache sees it (M3, §3.3): only an
+ * The engine's memory budget, as a cache sees it (§2.9): only an
  * engine with a budget passes one, so without it no page is tracked.
  */
 export interface CacheMemory {
@@ -252,7 +252,7 @@ export interface CacheStateHooks {
   memory?: CacheMemory;
   /**
    * Called once per evicted page with the coverage the eviction withdrew,
-   * in slots (M3, §3.5); never `onChange` or `onMutate`.
+   * in slots (§4.5, N96); never `onChange` or `onMutate`.
    */
   onEvict?: (covered: SlotRange[]) => void;
 }
@@ -304,7 +304,7 @@ export function cacheInternals(state: CacheState): CacheInternals {
 
 /**
  * The coverage a cache evicted and no later write, removal or clear has
- * accounted for (M3, E21); undefined without a memory budget. For the
+ * accounted for (N104); undefined without a memory budget. For the
  * engine's memory internals only.
  */
 export function evictedCoverage(state: CacheState): CoverageIndex | undefined {
@@ -338,7 +338,7 @@ export class CacheState {
   #reader: ReaderChange | undefined;
   /** The engine's memory budget; undefined without one (M3). */
   readonly #memory: CacheMemory | undefined;
-  /** The coverage this cache evicted, with a budget only (M3, E21). */
+  /** The coverage this cache evicted, with a budget only (N104). */
   readonly #evicted: CoverageIndex | undefined;
   /** Evicted coverage outside a reader's call, until the enforcement ends. */
   #pendingEvicted: SlotRange[] = [];
@@ -423,8 +423,8 @@ export class CacheState {
     try {
       return call();
     } finally {
-      // Enforcement at the end of the call (M3, §3.3): never between its
-      // write and its coverage, and inside its reader change (§3.7).
+      // Enforcement at the end of the call (§2.9): never between its write
+      // and its coverage, and inside its reader change (§2.7, N99).
       this.#memory?.settle();
       const change = this.#reader;
       // A listener's own mutation of this cache, inside the call, has its own.
@@ -459,7 +459,7 @@ export class CacheState {
         includeRange(reader.removed, range);
       }
       // With a budget, also the part of the range this cache evicted, so a
-      // view still showing it hears the removal (M3, E21).
+      // view still showing it hears the removal (N104).
       if (evicted !== undefined) {
         for (const range of evicted.covered(slots)) {
           includeRange(reader.removed, range);
@@ -480,7 +480,7 @@ export class CacheState {
     const touched = authority ?? spanOf(points);
     // Unclipped, and before the write: a failed write's prefix may be read.
     this.#wrote(touched);
-    // `written` reports these slots: the evicted index forgets them (E21).
+    // `written` reports these slots: the evicted index forgets them (N104).
     if (touched !== undefined) this.#evicted?.subtract(touched);
     const claim = claimOf(touched, wm?.slot);
     const slotWarnings = this.#writeOrWithdraw(
@@ -636,7 +636,7 @@ export class CacheState {
       return restoreImpl(this, stored);
     } finally {
       // The cache knew nothing, so every page it holds now is restored: a
-      // use, ascending; then enforcement trims the oldest (M3, E7, E19).
+      // use, ascending; then enforcement trims the oldest (N92, N102).
       // Its own trimmed pages are not reported: no reader has seen them,
       // and a load sends nothing (§2.7). Other caches' evictions are.
       try {
@@ -649,9 +649,9 @@ export class CacheState {
   }
 
   /**
-   * Evicts page `page` (M3, §3.5), in one synchronous step: drops its
+   * Evicts page `page` (§2.9, §4.5; N96), in one synchronous step: drops its
    * segments and withdraws its whole slot range from coverage, keeping
-   * what was covered in the evicted index (E21). Reports through `onEvict`
+   * what was covered in the evicted index (N104). Reports through `onEvict`
    * and the running reader change, never `onChange` or `onMutate`; the
    * version and the watermark stay. Returns the bytes freed.
    */
@@ -675,7 +675,7 @@ export class CacheState {
    * Reports the coverage evicted outside this cache's own running reader
    * change, as one reader change of its own, while a reader listens; the
    * engine calls it once its enforcement ended, so each cache hears one
-   * report per call (M3, §3.7).
+   * report per call (§2.7, N99).
    */
   flushEvicted(): void {
     const pending = this.#pendingEvicted;
@@ -687,7 +687,7 @@ export class CacheState {
     this.#hooks.onReaderChange?.({ ...unchanged(), evicted });
   }
 
-  /** The bytes this cache's segments hold (M3, §3.1). */
+  /** The bytes this cache's segments hold (§2.9, N90). */
   get bytes(): number {
     return this.#store.bytes;
   }
@@ -705,7 +705,7 @@ export class CacheState {
     this.#store.forEachPage(slots, fn);
   }
 
-  /** Whether `page` holds a provisional point (M3, E8: it is pinned). */
+  /** Whether `page` holds a provisional point (N93: it is pinned). */
   holdsProvisional(page: number): boolean {
     const from = this.#volatileFrom;
     if (from === undefined) return false;

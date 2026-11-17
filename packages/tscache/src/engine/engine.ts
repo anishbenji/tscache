@@ -119,9 +119,9 @@ export interface CacheObserver {
    */
   onReaderChange?(cacheId: string, change: ReaderChange): void;
   /**
-   * A page of the cache was evicted (M3, §3.5), with the coverage that went,
+   * A page of the cache was evicted (§4.5), with the coverage that went,
    * in slots; never reported as a change or a mutation. The persister marks
-   * the page, so its next flush deletes the record (E11 b).
+   * the page, so its next flush deletes the record (N95).
    */
   onEvict?(cacheId: string, covered: SlotRange[]): void;
 }
@@ -155,7 +155,7 @@ export interface EngineMemoryInternals {
   readonly orderSize: number;
   /** Pages in the use order that are pinned now; 0 without a budget. */
   readonly pinnedPages: number;
-  /** A cache's evicted-coverage index (E21); undefined without a budget. */
+  /** A cache's evicted-coverage index (N104); undefined without a budget. */
   evictedIndex(cacheId: string): CoverageIndex | undefined;
 }
 
@@ -171,7 +171,7 @@ export function engineMemoryInternals(engine: Engine): EngineMemoryInternals {
 
 /**
  * Applies a budget that arrives after construction, by the `memoryBudget`
- * op (M3, E3, E20), and returns the budget in force: the first an engine
+ * op (N88, N103), and returns the budget in force: the first an engine
  * receives holds for its life, and an engine that already holds a cache
  * takes none. Throws ConfigError for a value that is not a positive safe
  * integer. For the RPC server only: no package entry exports it.
@@ -185,7 +185,7 @@ export function applyMemoryBudget(
 
 /**
  * Pins the pages of `slots` in a cache while an orchestrated get is pending
- * (M3, E9); undefined, at the cost of a field read, without a budget. The
+ * (N94); undefined, at the cost of a field read, without a budget. The
  * release is idempotent and ends in enforcement. For the orchestrator only.
  */
 export function pinPages(

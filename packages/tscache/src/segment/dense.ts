@@ -48,7 +48,7 @@ export class DenseSegment implements Segment {
   readonly #slotCap: number;
   readonly #columns: Column[];
   readonly #names: string[];
-  /** Bytes of one slot across every field array (M3, §3.1). */
+  /** Bytes of one slot across every field array (N90). */
   readonly #rowBytes: number;
   #mask: Uint8Array = new Uint8Array(0);
   /** Slot stored at buffer index 0. */
@@ -88,7 +88,7 @@ export class DenseSegment implements Segment {
   }
 
   /**
-   * Bytes the buffers have allocated (M3, §3.1): capacity times the bytes
+   * Bytes the buffers have allocated (N90): capacity times the bytes
    * of one slot across the fields, plus the presence mask. Spare capacity
    * counts; a merge that empties the segment frees nothing.
    */

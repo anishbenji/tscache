@@ -2,8 +2,7 @@
  * The engine's memory budget (docs/architecture.md §2.9, §4.6; N86–N105): one
  * byte budget shared by every cache of an engine, enforced by evicting the
  * least recently used unpinned pages. Only an engine with a budget creates
- * one; without it no page is tracked, counted or pinned (§3.9 of the
- * design). No timer: the use order is insertion order, not a clock.
+ * one; without it no page is tracked, counted or pinned (§2.9, cost). No timer: the use order is insertion order, not a clock.
  */
 
 import type { SlotRange } from "../grid";
@@ -16,7 +15,7 @@ interface PageEntry {
   readonly page: number;
 }
 
-/** A pending orchestrated get's pin: its pages, first to last (E9). */
+/** A pending orchestrated get's pin: its pages, first to last (N94). */
 interface Pin {
   readonly first: number;
   readonly last: number;
@@ -25,16 +24,16 @@ interface Pin {
 export class MemoryBudget implements CacheMemory {
   /** The budget in bytes: a positive safe integer. */
   readonly budget: number;
-  /** The bytes every cache's segments hold (§3.1), kept by the stores. */
+  /** The bytes every cache's segments hold (N90), kept by the stores. */
   #bytes = 0;
   /**
    * Every page that holds points, least recently used first: a Set keeps
-   * insertion order, and a use deletes and re-adds its entry (E7).
+   * insertion order, and a use deletes and re-adds its entry (N92).
    */
   readonly #order = new Set<PageEntry>();
   /** Per cache, its entries by page. */
   readonly #pages = new Map<CacheState, Map<number, PageEntry>>();
-  /** Per cache, the pins of its pending orchestrated gets (E9). */
+  /** Per cache, the pins of its pending orchestrated gets (N94). */
   readonly #pins = new Map<CacheState, Pin[]>();
   #evictedPages = 0;
   /** Set while enforcement runs: an eviction's listener cannot nest one. */
@@ -116,7 +115,7 @@ export class MemoryBudget implements CacheMemory {
 
   /**
    * Pins the pages of `slots` in `state` until the returned release runs
-   * (a pending orchestrated get, E9). The release is idempotent and ends in
+   * (a pending orchestrated get, N94). The release is idempotent and ends in
    * enforcement, so what the pin held over the budget goes then.
    */
   pin(state: CacheState, slots: SlotRange): () => void {
@@ -141,7 +140,7 @@ export class MemoryBudget implements CacheMemory {
 
   /**
    * Evicts the least recently used unpinned pages until the bytes are at
-   * or below the budget or nothing evictable is left (§3.3). Each cache it
+   * or below the budget or nothing evictable is left (§2.9). Each cache it
    * evicted from outside its own running call then reports once.
    */
   settle(): void {
@@ -154,7 +153,7 @@ export class MemoryBudget implements CacheMemory {
         if (this.#pinned(entry)) continue;
         this.#drop(entry);
         const { state, page } = entry;
-        // Defensive: a page without points is never evicted (E22).
+        // Defensive: a page without points is never evicted (N105).
         if (state.pageBytes(page) === 0) continue;
         state.evict(page);
         this.#evictedPages++;
@@ -166,14 +165,14 @@ export class MemoryBudget implements CacheMemory {
     }
   }
 
-  /** Pages in the order that are pinned now (§3.4). */
+  /** Pages in the order that are pinned now (N93, N94). */
   pinnedPages(): number {
     let n = 0;
     for (const entry of this.#order) if (this.#pinned(entry)) n++;
     return n;
   }
 
-  /** Bytes of the pages pinned now (§3.7). */
+  /** Bytes of the pages pinned now (`MemoryStats.pinnedBytes`). */
   pinnedBytes(): number {
     let bytes = 0;
     for (const entry of this.#order) {
@@ -208,7 +207,7 @@ export class MemoryBudget implements CacheMemory {
     if (pages?.size === 0) this.#pages.delete(entry.state);
   }
 
-  /** A provisional point (E8) or a pending get's pin (E9) holds the page. */
+  /** A provisional point (N93) or a pending get's pin (N94) holds the page. */
   #pinned({ state, page }: PageEntry): boolean {
     if (state.holdsProvisional(page)) return true;
     for (const pin of this.#pins.get(state) ?? []) {

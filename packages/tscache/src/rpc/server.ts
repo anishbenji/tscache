@@ -416,8 +416,8 @@ export class RpcServer {
     unsubscribe: (c, _r, p) => this.#subscribe(c, p, false),
     // Acknowledged first; #request detaches the port afterwards.
     dispose: () => undefined,
-    // M3 (§3.2); additive, announced in hello.features. The answer is the
-    // budget in force: the first the engine took, or none (E3, E20).
+    // §2.9, §3.2 (N101); additive, announced in hello.features. The answer
+    // is the budget in force: the first the engine took, or none (N88, N103).
     memoryBudget: (_c, _r, p) => {
       const budget = applyMemoryBudget(this.#engine, p.bytes);
       return budget === undefined ? {} : { budget };
