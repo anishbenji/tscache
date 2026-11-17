@@ -21,18 +21,6 @@ interface Pin {
   readonly last: number;
 }
 
-/** The first index from `from` on whose slot is above `slot` (ascending slots). */
-function firstAbove(slots: Float64Array, from: number, slot: number): number {
-  let lo = from;
-  let hi = slots.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1;
-    if ((slots[mid] as number) <= slot) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
-}
-
 export class MemoryBudget implements CacheMemory {
   /** The budget in bytes: a positive safe integer. */
   readonly budget: number;
@@ -69,66 +57,32 @@ export class MemoryBudget implements CacheMemory {
     this.#bytes += delta;
   }
 
-  use(state: CacheState, slots: SlotRange, wrote: boolean): void {
+  read(state: CacheState, slots: SlotRange): void {
     const cap = state.config.segmentSlotCap;
-    const first = pageOf(slots.start, cap);
-    const last = pageOf(slots.end, cap);
     const window = {
-      start: pageRange(first, cap).start,
-      end: pageRange(last, cap).end,
+      start: pageRange(pageOf(slots.start, cap), cap).start,
+      end: pageRange(pageOf(slots.end, cap), cap).end,
     };
-    if (!wrote) {
-      state.forEachPage(window, (page) => this.#touch(state, page));
-      return;
-    }
-    const held = new Set<number>();
-    state.forEachPage(window, (page) => {
-      held.add(page);
-      this.#touch(state, page);
-    });
-    this.#dropEmptied(state, first, last, held);
+    state.forEachPage(window, (page) => this.#touch(state, page));
   }
 
-  /**
-   * Takes out of the order the pages from `first` to `last` that a write
-   * emptied (an authority over them): every page there not in `held`.
-   * Visits the fewer of the range's pages and the cache's entries.
-   */
-  #dropEmptied(
-    state: CacheState,
-    first: number,
-    last: number,
-    held: ReadonlySet<number>,
-  ): void {
-    const pages = this.#pages.get(state);
-    if (pages === undefined || pages.size === held.size) return;
-    const emptied = (page: number) =>
-      page >= first && page <= last && !held.has(page);
-    if (last - first + 1 <= pages.size) {
-      for (let page = first; page <= last; page++) {
-        const entry = pages.get(page);
-        if (entry !== undefined && emptied(page)) this.#drop(entry);
-      }
-      return;
-    }
-    for (const [page, entry] of pages) if (emptied(page)) this.#drop(entry);
-  }
-
-  usePoints(state: CacheState, slots: Float64Array): void {
+  wrote(state: CacheState, pages: readonly number[]): void {
     const cap = state.config.segmentSlotCap;
-    let i = 0;
-    while (i < slots.length) {
-      const page = pageOf(slots[i] as number, cap);
-      const range = pageRange(page, cap);
-      // A failed write may not have reached this page: only a page that
-      // holds points enters the order.
-      state.forEachPage(range, (held) => this.#touch(state, held));
-      i = firstAbove(slots, i, range.end);
+    // Ascending, each once: a call's lowest page is its oldest (N102).
+    const sorted =
+      pages.length === 1 ? pages : [...new Set(pages)].sort((x, y) => x - y);
+    for (const page of sorted) {
+      let held = false;
+      state.forEachPage(pageRange(page, cap), (p) => {
+        held = true;
+        this.#touch(state, p);
+      });
+      // A replace that emptied the page wrote it; it leaves the order.
+      if (!held) {
+        const entry = this.#pages.get(state)?.get(page);
+        if (entry !== undefined) this.#drop(entry);
+      }
     }
-  }
-
-  useAll(state: CacheState): void {
-    state.forEachPage(undefined, (page) => this.#touch(state, page));
   }
 
   cleared(state: CacheState): void {

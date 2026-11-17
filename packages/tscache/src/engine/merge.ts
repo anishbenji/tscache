@@ -72,6 +72,11 @@ export class SegmentStore {
   #total: number | undefined;
   /** Told every change of the running total. */
   #onBytes: ((delta: number) => void) | undefined;
+  /**
+   * Told each page a write stored or replaced points in, once the change
+   * landed (M3, N92): only pages written to, never pages a batch spans.
+   */
+  #onWrite: ((page: number) => void) | undefined;
 
   constructor(config: ResolvedCacheConfig) {
     this.#options = {
@@ -112,12 +117,17 @@ export class SegmentStore {
 
   /**
    * Keeps a running total of the segments' bytes from now on, and reports
-   * each change of it to `onBytes` (M3: only an engine with a budget pays
-   * for it). Called once, on a store that holds nothing.
+   * each change of it to `onBytes` and each page a write changes to
+   * `onWrite` (M3: only an engine with a budget pays for either). Called
+   * once, on a store that holds nothing.
    */
-  count(onBytes: (delta: number) => void): void {
+  count(
+    onBytes: (delta: number) => void,
+    onWrite?: (page: number) => void,
+  ): void {
     this.#total = this.#bytesIn(undefined);
     this.#onBytes = onBytes;
+    this.#onWrite = onWrite;
   }
 
   /** Adds `delta` to the running total, if one is kept. */
@@ -369,7 +379,10 @@ export class SegmentStore {
       if (extent.start < authority.start && extent.end > authority.end) {
         interior = segment;
       }
+      const size = segment.size;
       segment.mergeFrom(this.#nothing, authority);
+      // A replace that removed points wrote the page, emptied or not.
+      if (segment.size !== size) this.#onWrite?.(this.#page(extent.start));
       if (segment.extent === undefined) this.#segments.splice(i, 1);
       else i++;
     }
@@ -406,6 +419,8 @@ export class SegmentStore {
     } else {
       this.#join(at, end, chunk);
     }
+    // Reached only once the run landed: a failed allocation changed nothing.
+    this.#onWrite?.(this.#page(first));
   }
 
   /**

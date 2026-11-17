@@ -659,4 +659,52 @@ describe("M3 write uses are the pages written (round 2)", () => {
     expect([...e.get("a", whole).timestamps]).toEqual([3, 4]);
     expect([...e.get("b", whole).timestamps]).toEqual([8]);
   });
+
+  // Round 3 (R3-1, R3-2) and the redesign: a page is used exactly when the
+  // call wrote to it, that is stored or replaced points in it. A replace
+  // that empties a page wrote it too; it counts as used if it still holds
+  // points, and otherwise it leaves the order.
+  it("a watermark-clipped authoritative put does not refresh a page above its replace", () => {
+    const e = new MemoryEngine({ memoryBudget: 3 * PAGE_BYTES });
+    e.cache(config({ finalizedUntil: 100 }));
+    e.cache(config({ id: "b" }));
+    e.put("a", batch([4]));
+    e.put("b", batch([0]));
+    // The replace stops below 4 (N19): page 1 (slot 4) is never written;
+    // 12 is upserted on page 3.
+    e.put("a", batch([0, 12], [0, 12], { finalizedUntil: 4 }), {
+      range: span(0, 15),
+    });
+    expect([...e.get("a", whole).timestamps]).toEqual([0, 12]);
+    expect([...e.get("b", whole).timestamps]).toEqual([0]);
+  });
+
+  it("a replace that removes points from a page the batch does not reach uses that page", () => {
+    const e = new MemoryEngine({ memoryBudget: 3 * PAGE_BYTES });
+    e.cache(config());
+    e.cache(config({ id: "b" }));
+    e.put("a", batch([4, 6]));
+    e.put("b", batch([0]));
+    e.put("a", batch([0]));
+    // Its authority [0, 5] removes 4 from page 1, where 6 stays.
+    e.put("a", batch([0], [5]), { range: span(0, 5) });
+    e.put("b", batch([8]));
+    expect([...e.get("a", whole).timestamps]).toEqual([0, 6]);
+    expect([...e.get("b", whole).timestamps]).toEqual([8]);
+  });
+
+  it("a replace that empties a page takes it out of the use order", () => {
+    const e = new MemoryEngine({ memoryBudget: 3 * PAGE_BYTES });
+    e.cache(config());
+    e.cache(config({ id: "b" }));
+    e.put("a", batch([4, 6]));
+    e.put("b", batch([0]));
+    e.put("a", batch([0]));
+    e.put("a", batch([0], [5]), { range: span(0, 7) });
+    expect(engineMemoryInternals(e).orderSize).toBe(2);
+    e.put("b", batch([8]));
+    expect(e.memoryStats().evictedPages).toBe(0);
+    expect([...e.get("a", whole).timestamps]).toEqual([0]);
+    expect([...e.get("b", whole).timestamps]).toEqual([0, 8]);
+  });
 });

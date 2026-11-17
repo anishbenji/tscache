@@ -195,19 +195,14 @@ export function includeRange(list: SlotRange[], range: SlotRange): void {
 export interface CacheMemory {
   /** The store's running total of bytes changed by `delta`. */
   counted(delta: number): void;
+  /** A read used the pages that overlap `slots` and hold points (N92). */
+  read(state: CacheState, slots: SlotRange): void;
   /**
-   * A read (`wrote` false), or a write with an authority over `slots`, used
-   * the pages that overlap `slots` and hold points; a written page that
-   * holds none leaves the use order.
+   * A write stored or replaced points in these pages, as the store reported
+   * them (N92): each is used if it still holds points and otherwise leaves
+   * the use order. Nothing else a write spans is used.
    */
-  use(state: CacheState, slots: SlotRange, wrote: boolean): void;
-  /**
-   * A write without an authority used the pages its points (ascending)
-   * fall on that hold points now (N92): never a page between them.
-   */
-  usePoints(state: CacheState, slots: Float64Array): void;
-  /** A restore wrote every page that holds points. */
-  useAll(state: CacheState): void;
+  wrote(state: CacheState, pages: readonly number[]): void;
   /** The cache dropped every point. */
   cleared(state: CacheState): void;
   /** The end of a call that may have written points or released a pin. */
@@ -350,6 +345,8 @@ export class CacheState {
   #pendingEvicted: SlotRange[] = [];
   /** Set during `restore`: a load sends no reader change (§2.7). */
   #restoring = false;
+  /** The pages the running write changed, as the store reports them (N92). */
+  #written: number[] = [];
 
   constructor(config: ResolvedCacheConfig, hooks: CacheStateHooks = {}) {
     this.config = config;
@@ -358,7 +355,10 @@ export class CacheState {
     const memory = hooks.memory;
     this.#memory = memory;
     if (memory !== undefined) {
-      this.#store.count((delta) => memory.counted(delta));
+      this.#store.count(
+        (delta) => memory.counted(delta),
+        (page) => this.#written.push(page),
+      );
       this.#evicted = new CoverageIndex();
     }
     this.#version = config.version;
@@ -548,7 +548,7 @@ export class CacheState {
       this.config.fields,
     );
     if (options?.snapshot === true) result.snapshot = this.#snapshot(request);
-    this.#memory?.use(this, request, false);
+    this.#memory?.read(this, request);
     return result;
   }
 
@@ -556,7 +556,7 @@ export class CacheState {
   snapshot(range: Range): Snapshot {
     const request = snapOut(range, this.config);
     const snapshot = this.#snapshot(request);
-    this.#memory?.use(this, request, false);
+    this.#memory?.read(this, request);
     return snapshot;
   }
 
@@ -607,7 +607,7 @@ export class CacheState {
       this.#hooks.onChange?.({ kind: "remove", slots: part });
       throw error;
     } finally {
-      this.#memory?.use(this, part, true);
+      this.#usedWritten();
     }
     this.#coverage.add(part);
   }
@@ -641,12 +641,12 @@ export class CacheState {
     try {
       return restoreImpl(this, stored);
     } finally {
-      // The cache knew nothing, so every page it holds now is restored: a
-      // use, ascending; then enforcement trims the oldest (N92, N102).
-      // Its own trimmed pages are not reported: no reader has seen them,
-      // and a load sends nothing (§2.7). Other caches' evictions are.
+      // Every page the load wrote is a use, ascending; then enforcement
+      // trims the oldest (N92, N102). Its own trimmed pages are not
+      // reported: no reader has seen them, and a load sends nothing (§2.7).
+      // Other caches' evictions are.
       try {
-        memory.useAll(this);
+        this.#usedWritten();
         memory.settle();
       } finally {
         this.#restoring = false;
@@ -813,12 +813,19 @@ export class CacheState {
       }
       throw error;
     } finally {
-      // A use of the pages written, also of a failed write's prefix (N92):
-      // an authority's pages, or without one only the pages of its points,
-      // never a page of the batch's span that it did not write to.
-      if (authority !== undefined) this.#memory?.use(this, authority, true);
-      else this.#memory?.usePoints(this, points.slots);
+      // The pages the write changed are its uses, a failed write's landed
+      // prefix included (N92): never a page it only spans.
+      this.#usedWritten();
     }
+  }
+
+  /** Reports the pages the store changed since the last report as uses. */
+  #usedWritten(): void {
+    const memory = this.#memory;
+    if (memory === undefined || this.#written.length === 0) return;
+    const pages = this.#written;
+    this.#written = [];
+    memory.wrote(this, pages);
   }
 
   /**

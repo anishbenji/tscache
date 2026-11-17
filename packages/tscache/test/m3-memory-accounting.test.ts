@@ -207,4 +207,22 @@ describe("M3 accounting with a budget (implementer's tests)", () => {
     engine.put("a", batch([8]));
     expect([...engine.get("a", span(0, 11)).timestamps]).toEqual([8]);
   });
+
+  it("a failed sparse upsert uses only the pages its landed prefix wrote (round 3, R3-2)", () => {
+    const engine = new Engine({ memoryBudget: 4 * PAGE_BYTES });
+    engine.cache(config());
+    engine.cache(config({ id: "b" }));
+    engine.put("a", batch([12]));
+    engine.put("b", batch([0]));
+    engine.put("a", batch([0]));
+    engine.put("a", batch([4]));
+    // Slot 0 lands in its existing segment; slot 8 needs a new one, whose
+    // allocation fails, so the write never reaches slot 12's page.
+    failAfterPoint(engine, "a", 0, 7, () =>
+      engine.put("a", batch([0, 8, 12], [7, 8, 9])),
+    );
+    engine.put("b", batch([4]));
+    expect([...engine.get("a", span(0, 15)).timestamps]).toEqual([0, 4]);
+    expect([...engine.get("b", span(0, 15)).timestamps]).toEqual([0, 4]);
+  });
 });
