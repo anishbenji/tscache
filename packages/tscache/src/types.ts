@@ -280,6 +280,12 @@ export interface ClientOptions {
 /** `'<clientId>:<seq>'`, unique across tabs (N5). */
 export type RequestId = string;
 
+/**
+ * An optional feature a worker may offer, listed in its hello (N79) and
+ * exposed as `TscacheClient.features`.
+ */
+export type WorkerFeature = "cacheChanged";
+
 /** Three scopes, one channel (N5, §2.7). */
 export interface ClientEvents {
   /**
@@ -324,6 +330,40 @@ export interface ClientEvents {
     reason: "quota-exceeded" | "unavailable" | "error";
     /** The underlying failure, when there is one. */
     error?: { name: string; message: string };
+  };
+  /**
+   * What a reader of this cache sees may have changed (§2.7, N71–N84).
+   * Notify-only: it carries ranges, never data. Sent once per mutating
+   * call that changed the cache, to every client that listens (the
+   * writer's own included), before that call resolves. Ranges are in ms
+   * on the grid, ascending, disjoint and not adjacent.
+   *
+   * To stay current, read the range you show again: with
+   * `{ cacheOnly: true }` when `written` is not empty and a written or
+   * removed range overlaps it, or `cleared` is set; with a fetching `get`
+   * when nothing was written and `cleared` is set or a removed range
+   * overlaps it; otherwise not at all. A fetching read after every event
+   * would loop over a volatile tail. "The range you show" is that range
+   * as read: snapped outward to the grid, as `get` snaps it, so a change
+   * at a grid point just outside an unaligned range counts. Coalesce
+   * bursts, for example to one read per animation frame.
+   *
+   * Needs a worker that offers it (`client.features.has('cacheChanged')`):
+   * against an older worker the listener is never called.
+   */
+  cacheChanged: {
+    cacheId: string;
+    /** Points or coverage were written here: a put, a fetch, a hydrate. */
+    written: Range[];
+    /** Coverage was withdrawn here; the points may still be present. */
+    removed: Range[];
+    /** Every point and all coverage went (clear, clearAll, version mismatch). */
+    cleared: boolean;
+    /**
+     * The call that made the change: a put, invalidate, clear, clearAll,
+     * hydrate or setFinalizedUntil, or for a fetch the get that issued it.
+     */
+    requestId?: RequestId;
   };
 }
 

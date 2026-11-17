@@ -24,6 +24,17 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
 - `server.ts`: `serverReader(options)` reads through one in-process client per server process, shared
   by every render. Every visitor reads the same cache: public data only.
 - `candles.ts`: the dataset every snippet shows, and the one line of text that stands in for a chart.
+- `changes.ts`: `ChangeWatch` follows a cache's `cacheChanged` events for one view and reads the range
+  it shows again, at most once per animation frame, by the read rule of architecture §2.7 (N84): from
+  the cache alone when the frame's events wrote something, with a fetch when one wrote nothing and
+  cleared or withdrew coverage over the view. Each adapter subscribes before it reads, so no change
+  is missed. `ViewReads` owns a view's reads in the
+  order no adapter may change: a cache-only change waits while the view's fetching read is in
+  flight, comes back through the frame only after that read's answer landed, and its answer keeps
+  the failure labels (`fetch-failed`, `auth-pending`) of the answer before it (`keepFailures`).
+  Adapters only call `read` from their reactivity and apply latest-wins. In React, whose reads start
+  while rendering, each client, cache and range a component shows is a view with a `ViewReads` of its
+  own, which reads again only while the component shows it (`react/series.tsx`).
 
 ## The frameworks
 
@@ -31,7 +42,7 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
 | ---------- | ----------------------------------- | --------------------------------------------------------- | ------------------------------------ |
 | `vanilla/` | `series(connection, options)`       | a request counter: latest wins                            | a JSON script element                |
 | `react/`   | `TscacheProvider`, `useSeries`      | `use()` under Suspense, inputs through `useDeferredValue` | a JSON script element                |
-| `solid/`   | `createConnection`, `createSeries`  | an async `createMemo` (Solid 2.0 RC)                      | a JSON script element                |
+| `solid/`   | `createConnection`, `createSeries`  | an async derived signal (Solid 2.0 RC)                    | a JSON script element                |
 | `vue/`     | `createTscache` plugin, `useSeries` | `watch` with `onWatcherCleanup` into `shallowRef`s        | a JSON script element                |
 | `svelte/`  | `tscacheContext`, `Series`          | `$effect` into `$state.raw`, `createSubscriber`           | a JSON script element, then props    |
 | `angular/` | `provideTscache`, `cacheResource`   | `resource()`                                              | `TransferState`                      |
@@ -49,6 +60,8 @@ overtaken), `client-only.ts`, and `ssr-server.ts` with `ssr-browser.ts`.
 - A read rejected because the worker was lost is not an error; the next client reads again. A
   connection that failed, or a read that failed on a live client, is surfaced the framework's way.
 - Typed arrays are never made deeply reactive or copied.
+- A view follows its cache: a change over its range, from this tab or another tab of a SharedWorker,
+  reads the range again (`shared/changes.ts`), at most once per frame and never in a loop.
 - A server-rendered page's hydration render shows the server's read, so it matches the server's markup;
   the live answer then replaces it. The server half and the browser half are separate files, so no
   server code reaches the browser bundle. Without the browser half, a page is rendered on the server
@@ -56,8 +69,11 @@ overtaken), `client-only.ts`, and `ssr-server.ts` with `ssr-browser.ts`.
 
 ## Checks and limits
 
-The shared core and the vanilla snippet run under Vitest (`integrations/test/`). The framework
-snippets are type-checked only in CI; during step ⑭ each was also run in throwaway probes (the server
+The shared core and the vanilla snippet run under Vitest (`integrations/test/`), and so do the Vue,
+Solid and React series adapters, without a DOM: Vue through its custom renderer, Solid's browser
+build (its reactive core needs no DOM), React through `react-dom/client` on a stub container (step
+114). The other framework snippets are type-checked only in CI; during step ⑭ each was also run in
+throwaway probes (the server
 half under Node or Bun, the browser half in Chromium) whose results are recorded in
 `docs/reviews/step-14.md`. Svelte and Angular templates, and the Svelte component in its README, are
 not type-checked.
@@ -74,5 +90,6 @@ Limits every variant shares:
 - Reading a range again (after `updateAuth`, say) means asking for it again: the vanilla series reads
   on each `show`, and its `refresh` reads from the cache alone (after a put of pushed data, say); the
   Solid, Vue, Svelte and Angular adapters read again when given a new range object. React's
-  `useSeries` caches answers by range value, so it reads again only for a new range or a new client.
+  `useSeries` compares the range by value, so it reads again only when the range, the cache or the
+  client changes; going back to an earlier range is such a change.
   The reference clients (`reference/`) add the credential refresh and pushed data.

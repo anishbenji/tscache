@@ -1,0 +1,7 @@
+# N73: When changes are reported
+
+Row N73 of the decision table in `docs/architecture.md` §8, whose introduction says how its rows were taken. Recorded in step 114 from the M7 design proposal (`docs/design/m7-change-events.md`). Decisions are locked (`AGENTS.md`); the architecture section lists every decision with a one-line summary.
+
+## Resolution
+
+**Once per mutating call, synchronously, before the call's response.** The engine collects a cache's changes while one mutating call runs and reports them once when the call ends, returned or thrown; the RPC server posts one `evt scope:'cache'` per subscribed connection at once. For one call the order is `cacheCleared` (when the call cleared), `cacheChanged`, the call's `mergeWarning` events, then its response. No timer is involved, so the order is deterministic, tests need no clock, and each event has one origin, so `requestId` is exact (N75). Bursts are the consumer's to coalesce: each integration schedules at most one read per animation frame. Rejected: per cache and macrotask in the worker (the roadmap sketch: each message and fetch completion already runs in its own task, so it rarely merges anything, needs a timer, and an event may follow the response or not); a fixed window such as 16 ms (adds latency to every event and a timer to every test). User decision 65, row D3 option (a) with per-frame coalescing in the integrations, 2026-11-16 (§2.7, §4.7, step 114)

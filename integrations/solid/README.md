@@ -28,12 +28,16 @@ function Chart() {
 
 ## Why these idioms
 
-- The series is one `createMemo` over the range and the connection's state,
+- The series is one async memo over the range and the connection's state,
   a signal fed by `connection.subscribe` and released with `onCleanup`.
   Solid's async memo does latest-wins. A new range drops the run in flight,
   so an overtaken answer never lands. After the first answer, the previous
   answer stays on screen with `isPending(answer)` true, and no fallback shows.
   A memo, unlike a store, neither proxies nor copies the typed arrays.
+- The memo is a derived signal, `createSignal(fn)`: a memo that can also be
+  written. When the cache changes over the range, a read from the cache
+  alone (after a live bar, say) is written over the answer on screen, so
+  `isPending(answer)` stays false; only a read that may fetch is pending.
 - A lost worker is not an error. Its loss moves the connection to
   `connecting`, which runs the memo again; a read the lost client rejected
   then stays pending, so Solid drops it as overtaken whatever order the

@@ -46,5 +46,6 @@ export type {
   Range,
   RequestId,
   Snapshot,
+  WorkerFeature,
 } from "../types";
 export { DTYPES } from "../types";

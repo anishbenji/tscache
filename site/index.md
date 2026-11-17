@@ -42,7 +42,7 @@ once.
 ## What it leaves out
 
 Version 1 has no aggregation or resampling (a series at one minute and at one hour are two caches), no
-eviction or memory limit, no subscriptions, and no irregular timestamps. The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
+eviction or memory limit, and no irregular timestamps; change subscriptions (`cacheChanged`) arrive in 0.2.0. The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
 
 ### Known limits
 
@@ -59,6 +59,7 @@ Three limits of 0.1.0 that an application has to design around:
   [Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy) has the details.
 - **Readers are not told when data changes.** A view that must redraw reads again.
   [Redrawing when the cache changes](/guides/live-feeds#redrawing-when-the-cache-changes) shows how.
+  The next release, 0.2.0, adds the `cacheChanged` event ([Change events](/concepts/events#change-events)).
 
 ## Status
 

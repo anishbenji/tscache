@@ -2,11 +2,14 @@
  * Worker-side RPC shell (docs/architecture.md §3, §4.7): one Engine, any
  * number of ports. Each port gets a hello with its clientId, must answer
  * with a matching init, and from then on its requests are dispatched to the
- * engine while events fan out to every ready port.
+ * engine while events fan out to every ready port, except cacheChanged,
+ * which goes only to the ports subscribed to its cache (N74).
  */
 
-import type { Engine } from "../engine/engine";
+import type { ReaderChange } from "../engine/cache";
+import { type Engine, observeCaches } from "../engine/engine";
 import { ProtocolMismatchError, show, TscacheError } from "../errors";
+import { toMs } from "../grid";
 import { Orchestrator } from "../orchestrator/orchestrator";
 import type {
   CacheConfig,
@@ -36,6 +39,7 @@ import {
   toWireError,
   transferablesOf,
   type WireError,
+  WORKER_FEATURES,
 } from "./protocol";
 
 interface Connection {
@@ -55,10 +59,29 @@ interface Params {
   t?: number;
   context?: unknown;
   snapshot?: Snapshot;
+  all?: unknown;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+/**
+ * What a subscribe or unsubscribe names (N74): a cache id, or undefined
+ * for every cache. Anything but `{ cacheId: string }` or `{ all: true }`
+ * throws TscacheError.
+ */
+function subscriptionOf(p: Params, op: string): string | undefined {
+  if (p.all === true && p.cacheId === undefined) return undefined;
+  if (typeof p.cacheId === "string" && p.all === undefined) return p.cacheId;
+  throw new TscacheError(
+    `${op}: params must be { cacheId: string } or { all: true }`,
+  );
+}
+
+/** The public RequestId of a connection's request (§2.7). */
+function idOf(connection: Connection, req: Req): string {
+  return `${connection.clientId}:${req.id}`;
 }
 
 /**
@@ -82,8 +105,10 @@ export interface Persistence {
    * Empties every cache and the disk in one synchronous step (N54);
    * answers once the disk is empty or the clear failed (in the SharedWorker,
    * every persisted cache has then stopped; N66 for the other hostings).
+   * `clearMemory` empties the caches (default `Engine.clearAll`): the
+   * server passes its own, so a deferred clear still names its request.
    */
-  clearAll(): unknown;
+  clearAll(clearMemory?: () => void): unknown;
   /** The last connection went: writes what the debounce still holds. */
   flush(): void;
 }
@@ -96,6 +121,12 @@ export class RpcServer {
   readonly #persistence: Persistence | undefined;
   readonly #connections = new Set<Connection>();
   #nextClient = 0;
+  /** Per cache, the connections subscribed to its cacheChanged (N74). */
+  readonly #readers = new Map<string, Set<Connection>>();
+  /** The connections subscribed to every cache's cacheChanged. */
+  readonly #allReaders = new Set<Connection>();
+  /** The request whose engine call is running: what caused a change (N75). */
+  #cause: string | undefined;
 
   /**
    * `lock`: the Web Lock the worker holds for its lifetime, sent in hello
@@ -115,9 +146,18 @@ export class RpcServer {
     this.#lib = lib;
     this.#lock = lock;
     this.#persistence = persistence;
-    this.#orchestrator = new Orchestrator(engine, (evt) =>
-      this.#broadcast(evt),
+    this.#orchestrator = new Orchestrator(
+      engine,
+      (evt) => this.#broadcast(evt),
+      (requestId, call) => this.#caused(requestId, call),
     );
+    observeCaches(engine, {
+      onChange: () => {},
+      onMutate: () => {},
+      hasReaders: (cacheId) =>
+        this.#allReaders.size > 0 || this.#readers.has(cacheId),
+      onReaderChange: (cacheId, change) => this.#changed(cacheId, change),
+    });
     engine.on("cacheCleared", (payload) => {
       this.#broadcast({
         t: "evt",
@@ -148,6 +188,7 @@ export class RpcServer {
       protocol: PROTOCOL_VERSION,
       lib: this.#lib,
       clientId: connection.clientId,
+      features: [...WORKER_FEATURES],
     };
     if (this.#lock !== undefined) hello.lock = this.#lock;
     this.#send(connection, hello);
@@ -185,6 +226,7 @@ export class RpcServer {
    */
   #drop(connection: Connection, notify = true): void {
     if (!this.#connections.delete(connection)) return;
+    this.#unsubscribeAll(connection);
     if (notify) {
       try {
         connection.port.postMessage({ t: "bye" } satisfies Bye);
@@ -334,24 +376,39 @@ export class RpcServer {
       ),
     put: (c, req, p) =>
       this.#durably(p.cacheId, () =>
-        this.#put(c, req.id, p.cacheId as string, p),
+        this.#caused(idOf(c, req), () =>
+          this.#put(c, req.id, p.cacheId as string, p),
+        ),
       ),
-    invalidate: (_c, _r, p) =>
+    invalidate: (c, req, p) =>
       this.#durably(p.cacheId, () =>
-        this.#orchestrator.invalidate(p.cacheId as string, p.range as Range),
+        this.#caused(idOf(c, req), () =>
+          this.#orchestrator.invalidate(p.cacheId as string, p.range as Range),
+        ),
       ),
-    clear: (_c, _r, p) =>
-      this.#durably(p.cacheId, () => this.#engine.clear(p.cacheId as string)),
-    clearAll: () => this.#clearAll(),
-    setFinalizedUntil: (_c, _r, p) =>
+    clear: (c, req, p) =>
       this.#durably(p.cacheId, () =>
-        this.#engine.setFinalizedUntil(p.cacheId as string, p.t as number),
+        this.#caused(idOf(c, req), () =>
+          this.#engine.clear(p.cacheId as string),
+        ),
       ),
-    hydrate: (_c, _r, p) =>
+    clearAll: (c, req) => this.#clearAll(idOf(c, req)),
+    setFinalizedUntil: (c, req, p) =>
       this.#durably(p.cacheId, () =>
-        this.#engine.hydrate(p.cacheId as string, p.snapshot as Snapshot),
+        this.#caused(idOf(c, req), () =>
+          this.#engine.setFinalizedUntil(p.cacheId as string, p.t as number),
+        ),
+      ),
+    hydrate: (c, req, p) =>
+      this.#durably(p.cacheId, () =>
+        this.#caused(idOf(c, req), () =>
+          this.#engine.hydrate(p.cacheId as string, p.snapshot as Snapshot),
+        ),
       ),
     updateAuth: (_c, _r, p) => this.#orchestrator.updateAuth(p.context),
+    // They touch no data, so they never wait for the persistence.
+    subscribe: (c, _r, p) => this.#subscribe(c, p, true),
+    unsubscribe: (c, _r, p) => this.#subscribe(c, p, false),
     // Acknowledged first; #request detaches the port afterwards.
     dispose: () => undefined,
   };
@@ -375,12 +432,86 @@ export class RpcServer {
     return persistence.durably(cacheId, op);
   }
 
-  /** Empties every cache, and with persistence the disk (N54). */
-  #clearAll(): unknown {
+  /**
+   * Empties every cache, and with persistence the disk (N54). The memory
+   * clear runs under the request's id, also when the persistence defers it.
+   */
+  #clearAll(requestId: string): unknown {
+    const clearMemory = () =>
+      this.#caused(requestId, () => this.#engine.clearAll());
     const persistence = this.#persistence;
     return persistence === undefined
-      ? this.#engine.clearAll()
-      : persistence.clearAll();
+      ? clearMemory()
+      : persistence.clearAll(clearMemory);
+  }
+
+  /** Runs an engine call with `requestId` as the cause of its changes. */
+  #caused<T>(requestId: string | undefined, call: () => T): T {
+    const outer = this.#cause;
+    this.#cause = requestId;
+    try {
+      return call();
+    } finally {
+      this.#cause = outer;
+    }
+  }
+
+  /**
+   * subscribe / unsubscribe (N74): `{ cacheId }` or `{ all: true }`.
+   * Idempotent; a connection holds each subscription at most once.
+   */
+  #subscribe(connection: Connection, p: Params, on: boolean): undefined {
+    const cacheId = subscriptionOf(p, on ? "subscribe" : "unsubscribe");
+    if (cacheId === undefined) {
+      if (on) this.#allReaders.add(connection);
+      else this.#allReaders.delete(connection);
+      return undefined;
+    }
+    const readers = this.#readers.get(cacheId) ?? new Set<Connection>();
+    if (on) readers.add(connection);
+    else readers.delete(connection);
+    if (readers.size === 0) this.#readers.delete(cacheId);
+    else this.#readers.set(cacheId, readers);
+    return undefined;
+  }
+
+  /** A dropped connection's subscriptions go with it. */
+  #unsubscribeAll(connection: Connection): void {
+    this.#allReaders.delete(connection);
+    for (const [cacheId, readers] of this.#readers) {
+      if (readers.delete(connection) && readers.size === 0) {
+        this.#readers.delete(cacheId);
+      }
+    }
+  }
+
+  /**
+   * One mutating call's reader change → one cacheChanged, in ms, to each
+   * subscribed ready connection, once even if it holds both subscriptions.
+   */
+  #changed(cacheId: string, change: ReaderChange): void {
+    const grid = this.#engine.configOf(cacheId);
+    const payload: ClientEvents["cacheChanged"] = {
+      cacheId,
+      written: change.written.map((range) => toMs(range, grid)),
+      removed: change.removed.map((range) => toMs(range, grid)),
+      cleared: change.cleared,
+    };
+    if (this.#cause !== undefined) payload.requestId = this.#cause;
+    const evt: Evt = {
+      t: "evt",
+      scope: "cache",
+      cacheId,
+      event: "cacheChanged",
+      payload,
+    };
+    const targets = new Set(this.#allReaders);
+    for (const connection of this.#readers.get(cacheId) ?? []) {
+      targets.add(connection);
+    }
+    for (const connection of targets) {
+      if (connection.ready) this.#send(connection, evt);
+    }
   }
 
   /** put, then the request-scoped mergeWarning events (N21). */

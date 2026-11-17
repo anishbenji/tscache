@@ -121,14 +121,14 @@ export class HostedPersistence implements Persistence {
     return this.#later(() => this.durably(cacheId, op));
   }
 
-  clearAll(): unknown {
+  clearAll(clearMemory: () => void = () => this.#engine.clearAll()): unknown {
     if (this.#state === "loading" && this.#held > 0) {
       this.#held++;
-      return this.#later(() => this.clearAll());
+      return this.#later(() => this.clearAll(clearMemory));
     }
     let failure: { error: unknown } | undefined;
     try {
-      this.#engine.clearAll();
+      clearMemory();
     } catch (error) {
       // Every cache was cleared anyway (N22); the disk must follow.
       failure = { error };
