@@ -44,9 +44,20 @@ function around(centre: number): Range {
   return { start: centre - 1.5 * SCREEN, end: centre + 1.5 * SCREEN - MINUTE };
 }
 
+/**
+ * A memory budget no case reaches (architecture §2.9): the bookkeeping
+ * runs on every call and nothing is evicted. A base from before budgets
+ * ignores the option, so its cases with a budget time the same calls
+ * without one: the comparison is the budget's cost.
+ */
+const LARGE_BUDGET = 1_000_000_000;
+
 /** A filled engine: `s` put day by day, authoritative for each day. */
-function filled(impl: Impl, s: Series, id: string) {
-  const engine = new impl.Engine();
+function filled(impl: Impl, s: Series, id: string, memoryBudget?: number) {
+  const engine =
+    memoryBudget === undefined
+      ? new impl.Engine()
+      : new impl.Engine({ memoryBudget });
   engine.cache(candleConfig(id));
   for (const { batch, range } of pages(s, 1)) engine.put(id, batch, { range });
   return engine;
@@ -156,6 +167,15 @@ function readCases({
       },
     },
     {
+      name: "read-viewport-budget",
+      what: "read-viewport with a memory budget set (report only)",
+      expect: expectRead(allDay, viewport),
+      prepare(impl) {
+        const engine = filled(impl, allDay, "a", LARGE_BUDGET);
+        return () => fold(engine.get("a", viewport));
+      },
+    },
+    {
       name: "read-year",
       what: "get a whole year of 24/7 bars (525,600)",
       expect: expectRead(allDay, allDay.range),
@@ -184,6 +204,17 @@ function putCases({
       expect: expectRead(allDay, pageEnd),
       prepare(impl) {
         const engine = filled(impl, allDay, "a");
+        return () =>
+          engine.put("a", pageBatch, { range: page }).warnings.length +
+          fold(engine.get("a", pageEnd));
+      },
+    },
+    {
+      name: "put-page-budget",
+      what: "put-page with a memory budget set (report only)",
+      expect: expectRead(allDay, pageEnd),
+      prepare(impl) {
+        const engine = filled(impl, allDay, "a", LARGE_BUDGET);
         return () =>
           engine.put("a", pageBatch, { range: page }).warnings.length +
           fold(engine.get("a", pageEnd));
