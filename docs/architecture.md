@@ -64,10 +64,17 @@ interface ClientOptions {
     /** Structured-cloneable config/auth material passed to the fetcher. */
     context?: unknown;
   };
+  /**
+   * Upper bound on the bytes the worker's caches hold (§2.9), shared by
+   * every cache and, in a SharedWorker, every tab. Least recently used
+   * pages are evicted above it. A positive safe integer, or ConfigError.
+   * Default: none, nothing is evicted (N86–N89).
+   */
+  memoryBudget?: number;
 }
 
 /** An optional worker feature a client learns of from `hello.features` (N79). */
-type WorkerFeature = "cacheChanged";
+type WorkerFeature = "cacheChanged" | "memoryBudget";
 
 /** Resolves after transport is established and the protocol handshake passed. */
 declare function createClient(options?: ClientOptions): Promise<TscacheClient>;
@@ -88,6 +95,9 @@ interface TscacheClient {
   /** Deliver new auth material to the fetcher; the next get fetches again
       (nothing is paused or retried, §4.9). */
   updateAuth(context: unknown): Promise<void>;
+  /** What the worker's caches hold now (§2.9, N98); rejects with
+      TscacheError against a worker without the 'memoryBudget' feature. */
+  memoryStats(): Promise<MemoryStats>;
   on<E extends keyof ClientEvents>(
     event: E,
     fn: (e: ClientEvents[E]) => void,
@@ -367,6 +377,9 @@ interface ClientEvents {
     removed: Range[];
     /** Every point and all coverage went (clear, clearAll, version mismatch). */
     cleared: boolean;
+    /** Coverage the memory budget evicted (§2.9, N99): the data did not
+        change, nothing needs re-reading. Absent when the call evicted nothing. */
+    evicted?: Range[];
     /** The call that made the change, when there is one. */
     requestId?: RequestId;
   };
@@ -393,12 +406,12 @@ The initiating call additionally receives request-scoped results directly — `p
 **Change events (N71–N84, step 114).** `cacheChanged` tells a reader that what a `get` over some range returns (its points, its coverage or its misses) may have changed. It answers finding M7; the alternatives are recorded in `docs/design/m7-change-events.md`.
 
 - _Payload (N71, N72)._ Ranges, never values. `written` lists the slots the call touched: a put's authority (N13) or without one its batch's span (N3), a hydrate's applied parts, provisional slots included (N76), whether or not values differed, and also when the write failed part-way (an ascending prefix may have landed, N70). `removed` lists the coverage the call actually withdrew, never slots that were not covered (N82). `cleared` says everything the cache held before the call went; `removed` is then empty and `written` lists what the same call wrote after the clear. A range may be in both lists.
-- _What sends one._ At most one event per cache per mutating call, and only when it touched, withdrew or cleared something: a `put` with points or a range (an orchestrated fetch's put included), a version-mismatch put (`cleared`, after `cacheCleared 'version-mismatch'`), a failed put (its touched slots, the coverage withdrawn, `cleared` when its version had cleared), an empty put whose `meta.finalizedUntil` sets a first watermark over covered slots, `hydrate` (N77), `invalidate`, `setFinalizedUntil` moved back or set for the first time, `clear`, and each cache of `clearAll` (N78). Nothing is sent for a put rejected by validation, an empty put without a range whose `meta` changes no read (no `meta`, the cache's own version, a first version adopted, N18, or a `finalizedUntil` on a cache that already has a watermark), a watermark moved forward (it promotes nothing, §4.5), a persistence load (`cache()` resolves only after it, §4.10.5), a fetch that fails, is dropped by the version fence (N29) or is not issued while auth is invalid, nor for `get`, `cacheOnly` reads, `snapshot`, `coverage` or `updateAuth`. Eviction is reported once finding M3's memory budget exists (below).
-- _Eviction and memory budgets (user decision 67, 2026-11-16; M3-conditional)._ Both rules apply only to a cache with a memory budget, which does not exist until finding M3 is built (`docs/design/m3-memory.md`); every cache today has none, and nothing below is built in step 114. (1) Eviction will be reported on `cacheChanged` as a separate `evicted` list of ranges, which needs no re-read (M3 row E16, option a); M3 adds it to the payload and the wire as an optional field, which is additive, so today's types and messages carry no `evicted`. (2) A cache with a memory budget keeps an index of the coverage it evicted, and a removal then also lists in `removed` the part of its range that is in that index, so a later `invalidate` or watermark withdrawal reaches views still showing evicted data (M3 row E21, option a). Without a budget, `removed` is the coverage actually withdrawn, as N82 says.
+- _What sends one._ At most one event per cache per mutating call, and only when it touched, withdrew or cleared something: a `put` with points or a range (an orchestrated fetch's put included), a version-mismatch put (`cleared`, after `cacheCleared 'version-mismatch'`), a failed put (its touched slots, the coverage withdrawn, `cleared` when its version had cleared), an empty put whose `meta.finalizedUntil` sets a first watermark over covered slots, `hydrate` (N77), `invalidate`, `setFinalizedUntil` moved back or set for the first time, `clear`, and each cache of `clearAll` (N78). Nothing is sent for a put rejected by validation, an empty put without a range whose `meta` changes no read (no `meta`, the cache's own version, a first version adopted, N18, or a `finalizedUntil` on a cache that already has a watermark), a watermark moved forward (it promotes nothing, §4.5), a persistence load (`cache()` resolves only after it, §4.10.5), a fetch that fails, is dropped by the version fence (N29) or is not issued while auth is invalid, nor for `get`, `cacheOnly` reads, `snapshot`, `coverage`, `updateAuth` or `memoryStats`. With a memory budget an eviction is reported too (below).
+- _Eviction and memory budgets (N99, N104; user decision 67, 2026-11-16; built in step 121)._ Both rules apply only to an engine with a memory budget (§2.9); without one the payload carries no `evicted` and `removed` is the coverage actually withdrawn, as N82 says. (1) An eviction is reported in a separate `evicted` list, the coverage the eviction actually withdrew, which needs no re-read: the data did not change and the view's copy is still right; a later read of the range fetches it as any miss. Evicting a page that holds points but no coverage (an invalidated page) sends nothing. An eviction belongs to the report of the call whose enforcement ran it, one event per cache per call (N73): a put that evicts pages of its own cache sends that cache one event with its `written` and its `evicted`, and pages of another cache evicted by the same call go into that cache's one event for the call, with `evicted` only, under the same `requestId`; an enforcement at a pending get's pin release (§4.9) reports in one event per cache under that get's `requestId`. The field is absent when the call evicted nothing. (2) Each cache keeps the coverage it evicted in a second coverage index, also while nobody subscribes: a removal (`invalidate`, a watermark moved back or set for the first time, the withdrawal after a failed write) lists in `removed` what it withdrew plus the part of its range that is in that index, and drops that part from the index; a write drops what it wrote, and a clear (`clear`, `clearAll`, a version mismatch) empties it. A later `invalidate` or watermark withdrawal therefore reaches views still showing evicted data, and no event names a range that was never cached.
 - _Subscription (N74, N80)._ `client.on('cacheChanged', fn)` hears every cache's changes; `cache.on('cacheChanged', fn)` only its own. The first listener for a cache on a client (or the first `client.on` listener) sends `subscribe`, the last one's removal `unsubscribe`; `on` stays synchronous and returns the unsubscribe. Against a worker whose hello lists no `'cacheChanged'` feature (N79) the listener is never called, nothing is posted, `client.features` is empty and a development build warns once per client.
 - _Delivery (N73, N75)._ Once per mutating call, synchronously, posted when the call ends: for one call `cacheCleared` (when it cleared), then `cacheChanged`, then its `mergeWarning` events, then its response. No timer is involved. Every subscriber hears it, the writer's own tab included, with `requestId` naming the call (for a fetch, the `get` that issued it; joined gets are not named). A put's event arrives before the put resolves, and a fetch's before the issuing `get` resolves. A call through persistence (N58) whose answer waits for the disk still sends its event when memory changed. Messages on one port arrive in order, so a read sent after hearing an event sees that change or a later state: subscribe, then read, and no change is lost. In the SharedWorker hosting a change by any tab reaches every subscribed tab; a dedicated worker or in-process client has its own engine, so its events reach that tab only, and a page that needs another tab's data there must still send it. A connection's subscriptions go with it (dispose, `pagehide`, `bye`); after `workerLost` no event arrives.
-- _Reading after an event (N84)._ When `written` is not empty, read the shown range with `get(range, { cacheOnly: true })` if a written or removed range overlaps it (the shown range as read, snapped outward to the grid as `get` snaps it, so a change at a grid point just outside an unaligned range counts) or `cleared` is set; when `written` is empty and `cleared` is set or a `removed` range overlaps the shown range, read it with a fetching `get`; otherwise do nothing. Every event a fetch causes has a non-empty `written`, so no event caused by a fetch causes a fetch, and one application call that writes nothing costs at most one fetching read per subscribed view. The cost: after a fetch's response clears the cache for a new version, other tabs show misses outside the fetched range until their next ordinary read. Bursts are the consumer's to coalesce: the integrations schedule at most one read per animation frame, and the library ships no view helper (N83).
-- _Cost._ With nobody subscribed to a cache, a change posts nothing, allocates nothing and computes no withdrawn coverage. With a subscriber, a call that changed the cache costs a few slot ranges it already computes, one `covered` lookup per withdrawal, and one small structured-cloned message per subscribed connection; no point data moves.
+- _Reading after an event (N84)._ An `evicted` range needs no read, whatever else the event lists (N99). When `written` is not empty, read the shown range with `get(range, { cacheOnly: true })` if a written or removed range overlaps it (the shown range as read, snapped outward to the grid as `get` snaps it, so a change at a grid point just outside an unaligned range counts) or `cleared` is set; when `written` is empty and `cleared` is set or a `removed` range overlaps the shown range, read it with a fetching `get`; otherwise do nothing. Every event a fetch causes has a non-empty `written`, so no event caused by a fetch causes a fetch, and one application call that writes nothing costs at most one fetching read per subscribed view. The cost: after a fetch's response clears the cache for a new version, other tabs show misses outside the fetched range until their next ordinary read. Bursts are the consumer's to coalesce: the integrations schedule at most one read per animation frame, and the library ships no view helper (N83).
+- _Cost._ With nobody subscribed to a cache, a change posts nothing, allocates nothing and computes no withdrawn coverage (with a budget, the evicted-coverage index is still kept). With a subscriber, a call that changed the cache costs a few slot ranges it already computes, one `covered` lookup per withdrawal, and one small structured-cloned message per subscribed connection; no point data moves.
 - _Interactions._ `cacheCleared` and `mergeWarning` are unchanged (N5, decision #8). Auth pending writes nothing, so it sends nothing. The persistence hook is untouched (§4.10.4): the reader report is separate, so a live tail still costs no disk write.
 
 ### 2.8 Snapshots (N34–N39, approved 2026-10-23)
@@ -484,6 +497,51 @@ function decodeSnapshot(encoded: EncodedSnapshot): Snapshot;
 
 **Server rendering.** The server reads with an in-process client, `get(range, { snapshot: true })`. The page carries two forms of the answer: the result's columns, so the server's render and the browser's hydration render agree before any client exists, and the encoded snapshot, for the cache. The browser decodes the snapshot and calls `hydrate` before its first live read; that read then fetches only what the snapshot did not cover, typically the provisional tail. A page's snapshot is as old as the page. With a versioned dataset a stale snapshot is refused; a cache created without a version adopts the snapshot's, and the first response reporting a newer version clears it and is applied, with fetches then in flight re-issued once (N29). Without a version a seed is no staler than the server's render was. The helpers of the examples and integrations (`putSeeds`, `putCovered` and their encodings) are replaced by this API in the step that adds it (N39). A public reader that derives `GetResult` columns from a snapshot can be added later without changing the format (N38).
 
+### 2.9 Memory budget and stats (N86–N105, step 121)
+
+Nothing bounded the memory a cache held: a SharedWorker holds every tab's caches and outlives its last tab, and a server's long-lived `Engine` holds its caches for the life of the process. An application may now set a byte budget, which the engine enforces by evicting the least recently used pages that nothing pins, and read what the caches hold. It answers finding M3; the alternatives are recorded in `docs/design/m3-memory.md`.
+
+```ts
+interface ClientOptions {
+  // …§2.1, plus:
+  memoryBudget?: number;
+}
+interface TscacheClient {
+  // …§2.1, plus:
+  memoryStats(): Promise<MemoryStats>;
+}
+// ./engine
+interface EngineOptions {
+  memoryBudget?: number;
+}
+new Engine(options?: EngineOptions);
+engine.memoryStats(): MemoryStats;
+
+interface MemoryStats {
+  /** The budget in force, in bytes; absent when none. */
+  budget?: number;
+  /** Bytes the segments of every cache hold, as counted below. */
+  bytes: number;
+  /** Of those, bytes in pages pinned now; 0 without a budget. */
+  pinnedBytes: number;
+  /** Pages evicted since the budget took effect; 0 without a budget. */
+  evictedPages: number;
+  /** One entry per cache, ascending by id: its bytes and the pages that hold points. */
+  caches: { cacheId: string; bytes: number; pages: number }[];
+}
+```
+
+- _What is counted (N90)._ The bytes the engine's segments have allocated: for each segment, its capacity times the bytes of one slot across its fields, plus its presence mask of `ceil(capacity / 8)` bytes. Spare capacity counts, so a sparse page pays each segment's 64-slot minimum. Coverage ranges, merge warnings, read results and snapshots, put batches and the other transient copies of a call, a flush's or a load's records, and object overhead are not counted: the figure is a floor of the worker's memory, and a budget bounds cached points, not the process. A load holds one cache's records twice for one step, and a get over a long range holds its result once more until it is transferred. The count is close to, not equal to, the ArrayBuffer bytes the performance suite gates, which leave out typed arrays V8 keeps on its heap.
+- _Scope and configuration (N87–N89, N100, N103)._ One budget per engine, shared by every cache of it: in a SharedWorker every tab of the origin that reaches the same worker URL, in a dedicated worker one tab, in-process one `createClient`, on a server one `Engine`. A positive safe integer, or `ConfigError` from `createClient` and the `Engine` constructor. There is no default: without a budget nothing is evicted, nothing is counted and nothing is pinned. The first budget an engine receives holds for its life; a later client's other value is ignored, a development build warns naming both, and `memoryStats()` reports the budget in force. Only an engine that holds no cache takes a budget: the SharedWorker's engine is created before any tab connects, so its budget arrives by op (§3.2), which `createClient` sends after `init-ok` and before it resolves; a budget that reaches an engine already holding a cache, even an empty one, is ignored in the same way. A tab of an older deploy without the option that opened a cache first keeps the worker unbudgeted until it restarts (finding M5).
+- _Eviction (N91, N92, N102)._ The unit is the page, a cache's `segmentSlotCap` slots from a multiple of it (N15). Every page that holds points has a place in one engine-wide use order. A use is a read of points (`get`, orchestrated or `cacheOnly`, and a snapshot), for every page the request overlaps that holds points, and a write of points (`put`, an orchestrated fetch's put, `hydrate`, and a persistence load's `restore`), for every page the call wrote; `coverage()`, `invalidate`, `setFinalizedUntil`, `memoryStats()` and the orchestrator's coverage probes are not. The order is a counter, not a clock. Enforcement runs synchronously at the end of every mutating call and of `restore`, and whenever a pin is released, never between a call's write and its coverage: it evicts the least recently used unpinned pages until the counted bytes are at or below the budget, or nothing evictable is left. A call's own writes are the most recent pages, so they go last, within the same call when nothing else is left; a `put`, `hydrate` or `restore` larger than the budget keeps only its newest part. In a SharedWorker every tab's reads and writes are uses of the one order, so a page any tab reads stays; a tab's copy of an evicted range (its `GetResult`) is unaffected, and its next read of the range fetches it again.
+- _Pins (N93, N94, N97)._ A page is skipped while it holds a provisional point (at or after the watermark), or while a pending orchestrated `get` needs it: its request plus one slot on each side, from its first round until its read (§4.9). Nothing else is pinned. The budget is soft: pinned pages may hold the engine above it, a single read larger than the budget among them; `pinnedBytes` reports it, and the enforcement at the pins' release evicts the excess.
+- _The safety rule (N96)._ Evicting a page drops every segment on it and withdraws the page's whole slot range from coverage in the same synchronous step, so no read can mistake an evicted page for a confirmed gap: a `get` over it returns no point there and an `uncached` miss for the page's part of the request, so an orchestrated read fetches it again and a `cacheOnly` read says it is missing. The confirmed gaps on the page are forgotten with it. Eviction changes nothing else: not the version, not the watermark, not another page's coverage, and it is not a mutating call. Visible effects that follow from N16: an invalidated page that is evicted stops showing its stale points, and a refetch of an evicted page is compared with nothing stored, so `warnOnOverlapDiff` cannot report a restatement there.
+- _Persistence (N95, N105)._ The disk follows memory: the next flush deletes an evicted page's record, relaxed and not as a removal (§4.10.9). Evicted history is therefore fetched again from the network, in this session and the next. Pages that hold coverage and no point (confirmed gaps) count 0 bytes, are never evicted and keep their small records.
+- _Reporting (N98, N99)._ `memoryStats()` reports the engine behind the client, in a SharedWorker every tab's caches; it is a call, not an event, so an application that watches memory polls it on its own clock. Without a budget it walks every cache's segments, which only its caller pays. Readers hear evictions through `cacheChanged`'s `evicted` list (§2.7).
+- _Interactions._ `cacheOnly` reads are uses; over an evicted range they return `uncached` misses, which a reader that only reads `cacheOnly` must fetch itself. `hydrate` refills an evicted range of the same version as it would fill a fresh cache (N35), and its applied pages are uses. A version-mismatch clear, `clear` and `clearAll` drop the cache's pages from the order and the count. Auth pending writes nothing and pins nothing beyond the get's own life.
+- _Cost._ Without a budget, nothing per operation: no order is kept, nothing is counted, no pin is registered and no evicted coverage is kept; the orchestrator's check is a field read. With a budget, a read moves each page it overlaps in the order, a write also re-counts the bytes of the pages it touched, an orchestrated get registers and releases one pin, and an eviction costs a binary search, the removal of the page's segments, one coverage subtraction and one `covered` lookup, paid for by the memory it frees.
+- _Old workers (N101)._ Against a worker whose hello lists no `'memoryBudget'` feature (a worker script from before it) the client sends nothing, a development build warns once, `createClient` resolves without a budget, and `memoryStats()` rejects with `TscacheError`.
+
 ## 3. RPC protocol
 
 ### 3.1 Handshake (locked)
@@ -497,9 +555,10 @@ const PROTOCOL_VERSION = 1;
 // worker per connection (N23) and prefixes the client's request ids (§2.7).
 // lock names the Web Lock a SharedWorker holds for its lifetime (N32);
 // absent where there is none. features lists the optional features the
-// worker offers (N79, amended 2026-11-16); absent from older workers:
+// worker offers (N79, amended 2026-11-16; 'memoryBudget' since N101);
+// absent from older workers:
 { t: 'hello', protocol: 1, lib: '0.1.0', clientId: 'c1', lock?: 'tscache-worker:<uuid>',
-  features?: ['cacheChanged'] }
+  features?: ['cacheChanged', 'memoryBudget'] }
 // client → worker (also carries fetcher config so the worker can import it):
 { t: 'init', protocol: 1, fetcher?: { module: string, context?: unknown } }
 // worker → client:
@@ -530,14 +589,21 @@ type WireError = { name: string; message: string; code?: string; data?: unknown 
 type Op = 'cache' | 'get' | 'put' | 'invalidate' | 'clear' | 'clearAll'
         | 'setFinalizedUntil' | 'updateAuth' | 'dispose'
         | 'hydrate'        // §2.8 (N36); additive, so the protocol stays 1 (N37)
-        | 'subscribe' | 'unsubscribe';   // §2.7 (N74); additive (N79)
+        | 'subscribe' | 'unsubscribe'    // §2.7 (N74); additive (N79)
+        | 'memoryBudget' | 'memoryStats'; // §2.9 (N101); additive, in hello.features
 
 // subscribe / unsubscribe params: one cache, or every cache:
 { cacheId: string } | { all: true }
 
+// memoryBudget: sent once after init-ok when the option is set, before
+// createClient resolves; the answer is the budget in force (N88, N103):
+params { bytes: number }          result { budget?: number }
+// memoryStats: params {}; result MemoryStats (§2.9)
+
 // the change event, cache-scoped, to subscribed connections only (N74):
 { t: 'evt', scope: 'cache', cacheId, event: 'cacheChanged',
-  payload: { cacheId, written: Range[], removed: Range[], cleared: boolean, requestId?: string } }
+  payload: { cacheId, written: Range[], removed: Range[], cleared: boolean,
+             evicted?: Range[], requestId?: string } }
 ```
 
 SharedWorker: one RPC server, N ports; `evt` fans out to all ports, except `cacheChanged`, which goes only to the connections subscribed to its cache or to every cache. Dedicated worker / in-process: same protocol over one port (in-process uses a direct in-memory port pair — the RPC layer is exercised even without a worker, and unit tests run against the engine beneath it).
@@ -888,6 +954,28 @@ Rules for `SegmentStore`:
 
 Out of step ⑤ by design: coverage recording, the watermark and version handling (step ⑦); converting warnings to ms and emitting `mergeWarning` (step ⑧).
 
+**Memory accounting (N90, N91; step 121).** Every segment reports `bytes`: its capacity times the bytes of one slot across its fields, plus its mask of `ceil(capacity / 8)` bytes; a merge that empties a segment frees nothing until the store drops it. `SegmentStore` adds:
+
+```ts
+class SegmentStore {
+  /** The segments' bytes: the running total once `count` switched it on,
+   *  otherwise their sum, walked on demand. */
+  readonly bytes: number;
+  /** Keeps a running total from now on and reports each change of it
+   *  (only an engine with a budget calls it, on an empty store). */
+  count(onBytes: (delta: number) => void): void;
+  /** Drops every segment on the page (they are contiguous, N15); returns
+   *  the bytes freed. */
+  evictPage(page: number): number;
+  pageBytes(page: number): number;
+  lastSlotOn(page: number): number | undefined;
+  /** Each page that holds points and overlaps `range`, ascending. */
+  forEachPage(range: SlotRange | undefined, fn: (page: number) => void): void;
+}
+```
+
+With the running total on, a `put` sums the bytes of the pages it may change (from the first to the last slot of its points and authority) before and after the write, also when the write fails, so the total follows every create, growth, join, split and drop; `clear` sets it to 0. Without it nothing is counted per call (§2.9, cost).
+
 ### 4.4 Internal contracts — read path (N16, approved 2026-10-06)
 
 Internal module: not exported from any package entry. Contract tests (step ⑥) pin this surface. Input is in slot terms; the result is the consumer's `GetResult` (§2.3), so this is where slots become milliseconds again, through `grid.ts`.
@@ -986,6 +1074,8 @@ Rules:
 
 Out of step ⑦ by design: the caches map, `clearAll`, config conflicts (N4) and event emission (step ⑧); orchestration (step ⑪).
 
+**Eviction (N92, N96, N99, N104; step 121).** With a memory budget the engine passes each `CacheState` a `memory` hook (`CacheStateHooks.memory`); without it none of the following runs. The state then switches on its store's running total, keeps a second `CoverageIndex` of the coverage it evicted, reports every read (`get`, `snapshot`) and write (`put`, its failed prefix included, each applied part of `hydrate`, and all of `restore`) as a use, and calls the hook's enforcement at the end of every mutating call, inside the call's reader change, and at the end of `restore`. `evict(page)` runs §2.9's safety rule in one synchronous step: drops the page's segments, records the page's covered ranges, subtracts the page's whole slot range from coverage, adds the recorded ranges to the evicted index, and reports them through a hook of its own, `onEvict(covered)`, never `onChange` or `onMutate`; it returns the bytes freed. While the cache's own mutating call collects a reader change, the ranges join its `evicted` list; otherwise they wait for `flushEvicted()`, which the engine calls once its enforcement ended and which reports them as one reader change of their own, when a reader listens. `#withdraw` also lists the part of its slots in the evicted index and drops it from the index; a put drops its touched slots from the index before it writes, `hydrate` each part it applies, and a clear empties it. `holdsProvisional(page)` answers whether the page holds a point at or after the volatile region's start.
+
 ### 4.6 Internal contracts — engine assembly (N20–N22, approved 2026-10-07; N34–N36 approved 2026-10-23)
 
 `Engine` is the `./engine` export surface (SSR/Node, tests) and what the RPC server (step ⑨) drives. Contract tests (step ⑧) pin this surface. It is a map of `CacheState` (§4.5) keyed by cache id, with the cache-scoped events; it speaks milliseconds and consumer types only. Zero DOM/worker imports at module top level (locked, §2.1).
@@ -1014,6 +1104,8 @@ interface EngineEvents {
 }
 
 class Engine {
+  /** §2.9 (N100): ConfigError unless memoryBudget is a positive safe integer. */
+  constructor(options?: EngineOptions);
   /** Get-or-create (N4, N20). Returns the resolved config in force. */
   cache(config: CacheConfig): ResolvedCacheConfig;
   has(cacheId: string): boolean;
@@ -1033,6 +1125,8 @@ class Engine {
   clear(cacheId: string): void;
   clearAll(): void;
   setFinalizedUntil(cacheId: string, t: number): void;
+  /** §2.9 (N98): computed on demand; not a use. */
+  memoryStats(): MemoryStats;
   on<E extends keyof EngineEvents>(
     event: E,
     fn: (e: EngineEvents[E]) => void,
@@ -1052,6 +1146,7 @@ Rules:
 - **`clearAll` (N22).** Clears every cache's data and coverage and emits `cacheCleared` with `reason: 'clear-all'` for each, in creation order; the caches themselves, their configs, versions and watermarks stay, so handles in every tab remain valid. An engine with no caches emits nothing.
 - **Events (N21).** The engine emits only cache-scoped events. Request-scoped `mergeWarning` (requestId `clientId:seq`, §2.7) is emitted by the RPC server from `put`'s return value (step ⑨); the engine never carries request identity. Listeners run synchronously inside the emitting call, after the state change they describe.
 - **Reader report (N73, N76, N81, N82; step 114).** `cacheChanged` is not an `Engine` event: the engine reports each mutating call's change to its internal observers (`observeCaches`, the persister's seam, which no package entry exports), and the RPC server builds the event. An observer may answer `hasReaders(cacheId)`, asked once at the start of every mutating call (`put`, `hydrate`, `invalidate`, `clear`, each cache of `clearAll`, `setFinalizedUntil`) that passed validation; only when one answers true does the `CacheState` collect the call's `ReaderChange` (`written`, `removed` in slots, `cleared`), compute the withdrawn coverage with `CoverageIndex.covered` before each subtraction, and call `onReaderChange(cacheId, change)` once when the call ends, returned or thrown, if the change is not empty: after the call's `onMutate`, and after its `cacheCleared` (a version mismatch emits it inside the put; `clear` and `clearAll` emit it from a callback the state runs before the report). The lists are ascending, disjoint and not adjacent; `written` is unclipped and recorded before the write, so a failed write reports it; a clear empties both lists and sets `cleared`, and nothing withdrawn after it is listed. `restore` reports nothing. The persistence hooks (`onChange`, `onMutate`, §4.10.4) are unchanged and separate.
+- **Memory budget (N86–N105; step 121).** `new Engine({ memoryBudget })` validates the budget (`ConfigError` unless a positive safe integer) and creates the engine's `MemoryBudget` (`engine/memory.ts`); a budget arriving later through `applyMemoryBudget(engine, bytes)`, the RPC server's `memoryBudget` op, is taken only when the engine has none and holds no cache, and the call answers the budget in force. The budget keeps the counted total (from the stores' running totals), one use order of every page that holds points (a `Set` of page entries in insertion order, where a use deletes and re-adds its entry; a write that emptied a page takes it out), the pins of pending gets, and the count of pages evicted. Enforcement walks the order from the least recently used end, skips pinned pages (a provisional point, or a pending get's pages), evicts each other page through its state's `evict` until the total is at or below the budget, then calls `flushEvicted` on every state it evicted from; an eviction's listener cannot start a nested enforcement. `pinPages(engine, cacheId, slots)` registers a pending get's pin and returns its idempotent release, which ends in enforcement; without a budget it returns undefined at the cost of a field read. `observeCaches` observers gain `onEvict(cacheId, covered)`, through which the persister marks the evicted page (§4.10.4). `memoryStats()` computes its figures on demand: the per-cache bytes and pages from the stores, `pinnedBytes` and `evictedPages` from the budget (0 without one), the caches ascending by id. `engineMemoryInternals(engine)` reads the order's size, the pinned pages and a cache's evicted index, for tests only. None of these internals is exported from a package entry; `./engine` gains only the option, `memoryStats()` and the `EngineOptions` and `MemoryStats` types.
 - **Snapshots (N34–N36).** `get` passes `options.snapshot` through; `snapshot` and `hydrate` delegate to the `CacheState` and keep its errors and results, after the id check (`UnknownCacheError`). `hydrate` emits no event: it never clears (its reader report goes to the observers, N77). All three are synchronous, so under the RPC server's one-call-per-message dispatch a `hydrate` cannot interleave with another tab's write (step ⑭ R2-2): the atomicity the public API lacked. `encodeSnapshot`, `decodeSnapshot` and the types `Snapshot`, `EncodedSnapshot`, `EncodedSegmentPayload`, `HydrateResult` and `DenseSegmentPayload` are exported from `./engine` as from `.`.
 - **No DOM, no worker, no timers** at module top level or in any method: the module is importable and usable in Node.
 
@@ -1216,6 +1311,7 @@ Rules:
 - **Auth (design b/y, locked).** `AuthInvalidError` (detected by `code === 'tscache:auth-invalid'`, never `instanceof`) from a fetch flips the state to `'invalid'` and broadcasts `authInvalid { error, context }` to every port once per flip, where `context` is the context the refused fetch was issued with (N33). Only a failure under the current auth generation flips the state, so this is the context in place when the event is sent. Every tab of the origin receives it; those tabs supplied it. That is the SharedWorker hosting: a dedicated worker serves one tab, and the in-process hosting has no worker but one engine per client (N27); in both, `authInvalid` reaches only that tab and `updateAuth` restores only that tab's worker or that client's engine. The failed range comes back `'auth-pending'`, and while invalid no fetch is issued (every miss resolves `'auth-pending'` at once). `updateAuth(context)` from any tab is applied in call order, one at a time: the fetcher's `updateAuth` hook runs, then the context and the auth generation switch together and the state flips to `'valid'`; the next `get` fetches again. While the fetcher's hook is running (a credential transition, machine-speed), no fetch starts: the module's own state and the orchestrator's stamp could disagree, so uncached ranges come back `'auth-pending'` at once and the consumer re-gets after the switch. A fetch that was already out carries the generation it started under, and an auth failure from a superseded generation is ignored. A `get` waiting on several fetches is released the moment one of them invalidates auth: the ranges still out come back `'auth-pending'` while their fetches finish in the background. The fetcher receives a copy of the range; the orchestrator's own range object decides the authoritative write. Likewise the fetcher and its `updateAuth` hook receive copies of the context, so what later fetches carry and what `authInvalid` names cannot be changed by fetcher code. Nothing is retried on behalf of a `get` that already returned: a `get` never waits for a human.
 - **Failure of the fetcher itself.** A fetch that rejects with anything else is `'fetch-failed'` for the gets that awaited it (§4.9.1 rule 7) and for no later one; nothing is cached about the failure and the next `get` tries again. A response that fails engine validation (`PutError`) is likewise `'fetch-failed'` with the error's name and message.
 - **Events.** `authInvalid` is client-scoped (§2.7). Fetch lifecycle events are roadmap.
+- **A get's pin (N94; step 121).** With a memory budget an orchestrated `get` pins its request plus one slot on each side (the rounds' probe) through `pinPages` before its first round, and releases the pin in the step of its read, right after the engine read copied the result, under the get's `requestId` (`caused`), so the enforcement at the release reports its evictions as caused by that get (§2.7); a `finally` releases it on every other path. A get that stops waiting on `authInvalid` reads and releases at once; its fetches' later puts are budgeted like any write. Joined gets hold independent pins. `cacheOnly` reads and reads without a fetcher take no pin.
 
 #### 4.9.1 In-flight subtraction (N31, N62–N65, 2026-10-30; rule 5 amended, 2026-10-31)
 
@@ -1560,6 +1656,8 @@ The persister maps slots to pages (`floor(slot / segmentSlotCap)`, computed exac
 
 The persister reaches a cache's `CacheState` and its change hook through an internal accessor of `engine/engine.ts` that no package entry exports; the surface of `./engine` does not change.
 
+**Eviction (N95; step 121).** An eviction is not a `CacheChange`: the engine reports it to the observers' `onEvict(cacheId, covered)` (§4.6). The persister marks the pages of the covered ranges dirty as a `write` marks them and schedules the cache's debounced flush, which deletes the page's range and puts what memory holds there, which is nothing. It counts no removal, so the flush is relaxed and `durable` waits for nothing (N58). An evicted page without coverage has no record: the change that withdrew its coverage already marked it. Eviction never reaches a loading cache, which holds nothing; the enforcement after `restore` runs once the cache is running, so the pages it trims are marked like any running cache's.
+
 #### 4.10.5 Loading: memory is canonical (N56, N57)
 
 A load reads a cache's records in one read-only transaction (every page, at open: N46) and applies them in one synchronous call, `CacheState.restore`, into a cache that knows nothing yet. The disk is never merged with live memory:
@@ -1819,11 +1917,11 @@ With a bundler that inlines dynamic imports (Vite's default worker format, `'iif
 | `hydrate`                                                                  | The applied parts at the next flush: a seeded range is persisted like a fetched one                                                                                                                                                                                |
 | Server rendering                                                           | The server runs in Node and persists nothing. In the browser the load runs inside `cache()`, before the app's `hydrate`, which then fills only what the disk did not cover                                                                                         |
 | Quota exceeded                                                             | The cache stops (`persistStopped`, `'quota-exceeded'`) and its records are deleted                                                                                                                                                                                 |
-| Eviction (roadmap)                                                         | Must neither mark a page dirty nor count as a removal: the record stays and is loaded again on demand, which needs lazy loading first; and a full rewrite must then keep the records of evicted pages                                                              |
+| Eviction (memory budget, §2.9)                                             | Marks the page dirty as a write does, and is not a removal: the next flush deletes its record, relaxed, and no call waits for it (N95). Keeping evicted pages on disk needs lazy loading and a disk budget (M3, E11)                                               |
 
 #### 4.10.10 Later
 
-Not in these slices: persistence in the dedicated-worker and in-process hostings, which needs several engines to share one database (designed as slice (b) and retired on 2026-10-31 after four review rounds without converging, N52 and `docs/reviews/step-38.md`; Chrome for Android before version 148 and pinned dedicated modes are the hostings it would serve); lazy loading of pages on first read (needed by eviction; `read(id, pages)` and the page keys already serve it, but an asynchronous step inside `get` needs its own atomicity design, and the abandon rule of §4.10.5 does not carry over to a cache that already holds data); a byte budget for the eager load; compression; and encryption at rest.
+Not in these slices: persistence in the dedicated-worker and in-process hostings, which needs several engines to share one database (designed as slice (b) and retired on 2026-10-31 after four review rounds without converging, N52 and `docs/reviews/step-38.md`; Chrome for Android before version 148 and pinned dedicated modes are the hostings it would serve); lazy loading of pages on first read (it would let an evicted page cost a disk read instead of a fetch, with a disk budget, N95; `read(id, pages)` and the page keys already serve it, but an asynchronous step inside `get` needs its own atomicity design, and the abandon rule of §4.10.5 does not carry over to a cache that already holds data); a byte budget for the eager load; compression; and encryption at rest.
 
 ## 5. Testing hooks (how this layout maps to the locked strategy)
 
@@ -1868,9 +1966,9 @@ One line per decision: the number links to the decision's file under `docs/decis
 | [7](decisions/07-examples-mapping.md)   | Examples mapping       | starter §7 table confirmed                                                 |
 | [8](decisions/08-overlap-warning.md)    | Overlap warning        | emitted `mergeWarning` event + `console.warn` in dev builds                |
 
-## 8. New decision points — RESOLVED (N1–N8 user-confirmed 2026-06-11; later rows dated in each row, to N84 on 2026-11-16)
+## 8. New decision points — RESOLVED (N1–N8 user-confirmed 2026-06-11; later rows dated in each row, to N105 on 2026-11-16)
 
-These emerged while making the API concrete (N9–N33 later, at steps ③–⑫; N34–N44 at the post-build architecture review, `docs/architecture-review.md`, 2026-10-23; N62–N65 with in-flight subtraction at step 44, 2026-10-30, numbered after N45–N61) (working process §2.3: alternatives presented, user decided). N45–N61 cover IndexedDB persistence (§4.10, step 38, 2026-10-30) and were taken while the user was away, under the user's grant of 2026-10-30: N45–N54 are the performance plan's decision points P1–P10, settled by the director with the recommended options; N55–N60 were taken by the step 38 design with its recommended options and confirmed by the user on 2026-10-30 (`docs/reviews/step-38.md`). After design review round 2 the concurrency core was redesigned (`docs/reviews/step-38.md`, convergence check): N52, N55, N57, N58 and N59 changed in substance, N60 was amended, and N61 was added; the user was told of those changes and did not veto them (decision #7, an FYI with a veto window, 2026-10-30), then on 2026-10-31 chose to build the redesigned design's SharedWorker slice (decision #8, option A, below). On 2026-10-31 the user narrowed persistence to the SharedWorker hosting (decision #8): N52 changed, the parts of N54, N60 and N61 that served several engines were retired, and N45 widened to the hostings that no longer persist. On 2026-11-02 the user chose option (b) of decision #11 (1): those hostings' `clearAll` empties the disk too (N66, step 52), and N45, N52 and N54 say so. N68 and N69 came from the November 2026 review: the user decided them on 2026-11-10 (decisions 29 and 30; decision 38 settled N68's integer rule), and step 75 specifies them (`docs/reviews/step-75.md`). N70 records what a put that fails part-way may leave behind, the reading the library already implements; the user decided it on 2026-11-13 (decision 42, option A), and step 80 records it (`docs/reviews/step-80.md`). N71–N84 specify change events (finding M7): the user decided the design proposal's rows D1–D13 and accepted its read rule on 2026-11-16 (decision 65), including the amendments to §2.8 (N77) and to the locked §3.1 handshake (N79), and step 114 records and builds them (`docs/reviews/step-114.md`).
+These emerged while making the API concrete (N9–N33 later, at steps ③–⑫; N34–N44 at the post-build architecture review, `docs/architecture-review.md`, 2026-10-23; N62–N65 with in-flight subtraction at step 44, 2026-10-30, numbered after N45–N61) (working process §2.3: alternatives presented, user decided). N45–N61 cover IndexedDB persistence (§4.10, step 38, 2026-10-30) and were taken while the user was away, under the user's grant of 2026-10-30: N45–N54 are the performance plan's decision points P1–P10, settled by the director with the recommended options; N55–N60 were taken by the step 38 design with its recommended options and confirmed by the user on 2026-10-30 (`docs/reviews/step-38.md`). After design review round 2 the concurrency core was redesigned (`docs/reviews/step-38.md`, convergence check): N52, N55, N57, N58 and N59 changed in substance, N60 was amended, and N61 was added; the user was told of those changes and did not veto them (decision #7, an FYI with a veto window, 2026-10-30), then on 2026-10-31 chose to build the redesigned design's SharedWorker slice (decision #8, option A, below). On 2026-10-31 the user narrowed persistence to the SharedWorker hosting (decision #8): N52 changed, the parts of N54, N60 and N61 that served several engines were retired, and N45 widened to the hostings that no longer persist. On 2026-11-02 the user chose option (b) of decision #11 (1): those hostings' `clearAll` empties the disk too (N66, step 52), and N45, N52 and N54 say so. N68 and N69 came from the November 2026 review: the user decided them on 2026-11-10 (decisions 29 and 30; decision 38 settled N68's integer rule), and step 75 specifies them (`docs/reviews/step-75.md`). N70 records what a put that fails part-way may leave behind, the reading the library already implements; the user decided it on 2026-11-13 (decision 42, option A), and step 80 records it (`docs/reviews/step-80.md`). N71–N84 specify change events (finding M7): the user decided the design proposal's rows D1–D13 and accepted its read rule on 2026-11-16 (decision 65), including the amendments to §2.8 (N77) and to the locked §3.1 handshake (N79), and step 114 records and builds them (`docs/reviews/step-114.md`). N86–N105 specify memory bounds and reporting (finding M3): the user decided the design proposal's rows E1–E22 on 2026-11-16 (decision 67), each as recommended (E10 and E12 moot under E11 (b)), including E11 (b)'s amendment of the §4.10.9 eviction row and the qualification of N82 by E21; step 121 records and builds them (`docs/reviews/step-121.md`). N85 is reserved by step 115.
 
 One line per decision: the number links to the decision's file under `docs/decisions/`, which holds its full text; the summary is the resolution's first clause.
 
@@ -1960,6 +2058,26 @@ One line per decision: the number links to the decision's file under `docs/decis
 | [N82](decisions/N82-removed-is-withdrawn-coverage.md) | What a removed range reports                                         | The coverage actually withdrawn, never slots that were not covered                                                                        |
 | [N83](decisions/N83-no-view-helper.md)                | Whether the library ships a view helper                              | No: the library ships the event and the read rule; the integrations own the view logic                                                    |
 | [N84](decisions/N84-reading-after-a-change.md)        | Reading after a change event                                         | Written something: re-read with `cacheOnly`; wrote nothing and cleared or removed overlapping coverage: fetching `get`; otherwise nothing |
+| [N86](decisions/N86-memory-budget.md)                 | Whether tscache bounds the memory its caches hold                    | A byte budget with eviction, and a stats call                                                                                             |
+| [N87](decisions/N87-budget-per-engine.md)             | What a memory budget bounds                                          | One budget per engine, shared by every cache of it                                                                                        |
+| [N88](decisions/N88-first-budget-wins.md)             | Which budget holds when clients disagree                             | The first budget an engine receives holds for its life                                                                                    |
+| [N89](decisions/N89-no-default-budget.md)             | Whether there is a default memory budget                             | None: nothing is evicted unless a budget is set; the guide recommends one                                                                 |
+| [N90](decisions/N90-counted-bytes.md)                 | What the budget counts                                               | The bytes the segments' typed arrays have allocated, spare capacity included                                                              |
+| [N91](decisions/N91-page-eviction-unit.md)            | What is evicted                                                      | A page: every segment on it, never part of a segment                                                                                      |
+| [N92](decisions/N92-least-recently-used.md)           | Which pages go first, and what counts as a use                       | Least recently used; reads and writes of points are uses, `restore` included                                                              |
+| [N93](decisions/N93-volatile-pages-pinned.md)         | Whether the volatile region can be evicted                           | No: a page holding a provisional point is pinned                                                                                          |
+| [N94](decisions/N94-pending-get-pinned.md)            | Whether a pending orchestrated get's pages can be evicted            | No: its request and one slot on each side are pinned from its first round to its read                                                     |
+| [N95](decisions/N95-eviction-deletes-record.md)       | What eviction does to a persisted page's record                      | The next flush deletes it, relaxed; it is not a removal                                                                                   |
+| [N96](decisions/N96-whole-page-coverage.md)           | How much coverage an eviction withdraws                              | The page's whole slot range                                                                                                               |
+| [N97](decisions/N97-soft-budget.md)                   | Whether the budget may be exceeded                                   | Soft: pinned pages may hold the engine above it; reported, and evicted at their release                                                   |
+| [N98](decisions/N98-memory-stats-call.md)             | How memory is reported                                               | A `memoryStats()` call, no event                                                                                                          |
+| [N99](decisions/N99-evicted-list.md)                  | How `cacheChanged` reports an eviction                               | A separate `evicted` list that needs no re-read                                                                                           |
+| [N100](decisions/N100-engine-budget.md)               | Whether `./engine` takes a budget too                                | Yes: `new Engine({ memoryBudget })` and `engine.memoryStats()`                                                                            |
+| [N101](decisions/N101-budget-ops.md)                  | How the protocol carries the budget and the stats                    | Two additive ops; `PROTOCOL_VERSION` stays 1; announced in `hello.features`                                                               |
+| [N102](decisions/N102-own-writes-unprotected.md)      | Whether a call's own writes are protected from its own enforcement   | No: they are the most recent, so they go last, within the same call                                                                       |
+| [N103](decisions/N103-budget-before-caches.md)        | A budget for an engine that already holds a cache                    | Nothing: only an engine that holds no cache takes a budget                                                                                |
+| [N104](decisions/N104-evicted-coverage-index.md)      | How a later removal over an evicted range reaches a view             | With a budget, each cache keeps the coverage it evicted, and a removal reports its part of it                                             |
+| [N105](decisions/N105-coverage-only-pages.md)         | Whether pages that hold coverage and no point are bounded            | Not now: they count 0 bytes, are never evicted, and keep their small records                                                              |
 
 ## 9. What happens after sign-off
 

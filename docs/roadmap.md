@@ -130,12 +130,14 @@ and an integration's series would subscribe for live charts across tabs without 
 
 ## Design sketch: eviction and memory limits
 
-**Proposed in detail in [`docs/design/m3-memory.md`](design/m3-memory.md) (step 98, finding M3),
-with its open choices as decision rows for the user.** It keeps this sketch's engine-wide byte budget,
-page granularity, least-recently-used order and coverage subtraction, and adds three things: pages a
-pending `get` or the volatile region needs are never evicted; until lazy loading and a disk budget
-exist, an evicted page leaves the disk too, so the disk and the next load stay bounded by the budget
-in segment bytes; and an eviction is reported apart from a removal, so readers do not refetch what they already show.
+**Specified in `docs/architecture.md` §2.9 (decisions N86–N105, user decision 67 of 2026-11-16) and
+built in step 121; where this sketch and the architecture differ, the architecture governs.** The
+proposal [`docs/design/m3-memory.md`](design/m3-memory.md) (step 98, finding M3) records the
+alternatives. It keeps this sketch's engine-wide byte budget, page granularity, least-recently-used
+order and coverage subtraction, and adds three things: pages a pending `get` or the volatile region
+needs are never evicted; until lazy loading and a disk budget exist, an evicted page leaves the disk
+too, so the disk and the next load stay bounded by the budget in segment bytes; and an eviction is
+reported apart from a removal, so readers do not refetch what they already show.
 
 A byte budget per worker, enforced by evicting least-recently-read pages. The invariant that makes it
 safe: evicting a page subtracts the page's extent from coverage. Otherwise its points would read as a
