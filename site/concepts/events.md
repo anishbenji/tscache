@@ -29,8 +29,10 @@ grid, ascending and disjoint:
 - `cleared`: everything the cache held went (`clear`, `clearAll`, a new dataset version). `removed` is
   then empty, and `written` lists what the same call wrote after the clear.
 - `evicted`: with a [memory budget](/guides/patterns#memory), coverage the worker evicted to free
-  memory. The data did not change, so a view's copy is still right and needs no read; a later read of
-  the range fetches it again. Absent when the call evicted nothing. With a budget, a later `invalidate`
+  memory. The data did not change, so a view's copy is still right and needs no read. That copy lasts
+  until the view's next re-read: a later read from the cache, the `cacheOnly` read after a write
+  included, shows the evicted part as `uncached` misses, which the application fetches if it wants
+  them; a fetching read fetches it again. Absent when the call evicted nothing. With a budget, a later `invalidate`
   or watermark moved back over an evicted range still lists it in `removed`, so a view that shows it
   hears the change.
 - `requestId`: the call that made the change, or for a fetch the `get` that started it.

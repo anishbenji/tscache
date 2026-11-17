@@ -76,9 +76,13 @@ about 22.8 days of one-minute bars by default) of any of its caches, and their c
 later `get` over an evicted range fetches it again; it never reads as a confirmed gap. Reads and writes
 keep a page recent, in every tab. The pages a pending `get` is reading, and those holding a provisional
 bar (at or after the watermark), are never evicted: the budget may be exceeded while they are held, and
-the excess goes when they are released. A view that already shows an evicted range keeps its copy; the
-`cacheChanged` event lists the range under `evicted`, which needs no re-read
-([Change events](/concepts/events#change-events)).
+the excess goes when they are released. A fetch that never settles keeps its `get`'s pages pinned, so
+the engine can stay over the budget until it settles: bound each request in the fetcher, for example with
+`AbortSignal.timeout()` ([Writing a fetcher](/guides/fetcher)). A view that already shows an evicted
+range keeps its copy, and the `cacheChanged` event lists the range under `evicted`, which needs no
+re-read ([Change events](/concepts/events#change-events)). That copy lasts until the view's next
+re-read: a later read from the cache, such as the `cacheOnly` read after another write, shows the
+evicted part as `uncached` misses, which the application fetches if it wants them.
 
 The budget counts the bytes the cached points' arrays have allocated, so the worker's real footprint is
 somewhat larger: object overhead, a read's result until it reaches the page, and a load's records while
