@@ -373,7 +373,10 @@ async function applyBudget(port: PortClient, bytes: number): Promise<void> {
 
 /**
  * §2.1. Resolves once a hosting completed the handshake and, with a
- * `memoryBudget`, once the worker answered it (§2.9).
+ * `memoryBudget`, once the worker answered it (§2.9). The budget goes out
+ * on the port before the client exists: the client queues the fallback
+ * steps on a timer when it is built, which must run after the caller holds
+ * it. A failed budget op releases the port and the hosting, and rethrows.
  */
 export async function createClient(
   options: ClientOptions = {},
@@ -381,14 +384,14 @@ export async function createClient(
   const r = resolve(options);
   const fallbacks: ClientEvents["modeFallback"][] = [];
   const hosting = await connect(r, fallbacks);
-  const client = new Client(hosting, fallbacks);
   if (r.memoryBudget !== undefined) {
     try {
       await applyBudget(hosting.client, r.memoryBudget);
     } catch (error) {
-      await client.dispose();
+      hosting.client.dispose();
+      hosting.terminate();
       throw error;
     }
   }
-  return client;
+  return new Client(hosting, fallbacks);
 }

@@ -40,19 +40,32 @@ async function client(
 
 /**
  * A server-side port that records the requests it receives and can hold
- * the answer to one op until the test releases it.
+ * the answer to one op until the test releases it, or answer `fail` with
+ * an error instead of the server's answer.
  */
-function watched(port: MessagePort, hold?: Req["op"]) {
+function watched(port: MessagePort, hold?: Req["op"], fail?: Req["op"]) {
   const received: Req[] = [];
   const arrived = deferred<void>();
   const held: (() => void)[] = [];
   let holding = hold !== undefined;
   const ids = new Set<number>();
+  const failing = new Set<number>();
   const wrapped: MessagePortLike = {
     postMessage: (m: unknown, t?: Transferable[]) => {
       const send = () => port.postMessage(m, t ?? []);
       const message = m as { t?: string; id?: number };
-      if (holding && message.t === "res" && ids.has(message.id as number)) {
+      if (message.t === "res" && failing.has(message.id as number)) {
+        port.postMessage({
+          t: "res",
+          id: message.id,
+          ok: false,
+          error: { name: "TscacheError", message: "budget refused" },
+        });
+      } else if (
+        holding &&
+        message.t === "res" &&
+        ids.has(message.id as number)
+      ) {
         held.push(send);
       } else send();
     },
@@ -65,6 +78,7 @@ function watched(port: MessagePort, hold?: Req["op"]) {
             ids.add(message.id);
             arrived.resolve();
           }
+          if (message.op === fail) failing.add(message.id);
         }
         (fn as EventListener)(event);
       }),
@@ -109,15 +123,27 @@ function installSharedWorker(server: RpcServer, hold?: Req["op"]) {
 
 /** A dedicated worker per client, each with an engine of its own. */
 function installDedicatedWorkers(): Engine[] {
+  return installWatchedDedicatedWorkers().engines;
+}
+
+/**
+ * Dedicated workers as above, whose server ports are watched (`hold` and
+ * `fail` as in `watched`), counting how often a worker is terminated.
+ */
+function installWatchedDedicatedWorkers(hold?: Req["op"], fail?: Req["op"]) {
   const engines: Engine[] = [];
+  const watches: ReturnType<typeof watched>[] = [];
+  const first = deferred<ReturnType<typeof watched>>();
+  const counts = { terminated: 0 };
   vi.stubGlobal("SharedWorker", undefined);
   vi.stubGlobal("Worker", function FakeWorker() {
     const channel = new MessageChannel();
     const engine = new Engine();
     engines.push(engine);
-    new RpcServer(engine, "0.0.0").attach(
-      channel.port1 as unknown as MessagePortLike,
-    );
+    const watch = watched(channel.port1, hold, fail);
+    watches.push(watch);
+    first.resolve(watch);
+    new RpcServer(engine, "0.0.0").attach(watch.wrapped);
     const port = channel.port2;
     return {
       postMessage: (m: unknown, t?: Transferable[]) =>
@@ -130,10 +156,13 @@ function installDedicatedWorkers(): Engine[] {
       },
       start: () => port.start(),
       close: () => port.close(),
-      terminate: () => port.close(),
+      terminate: () => {
+        counts.terminated++;
+        port.close();
+      },
     };
   });
-  return engines;
+  return { engines, watches, first: first.promise, counts };
 }
 
 /**
@@ -277,6 +306,63 @@ describe("M3 client and ops (design §5 test 16)", () => {
       evictedPages: 0,
       caches: [{ cacheId: "x", bytes: 0, pages: 0 }],
     });
+  });
+});
+
+describe("M3 client: budget and the client's own start (pre-review 1)", () => {
+  it("modeFallback still reaches a listener attached after createClient resolves, with the budget's answer held past a macrotask", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { first } = installWatchedDedicatedWorkers("memoryBudget");
+      const pending = tracked(
+        createClient({ workerUrl: url, memoryBudget: 4096 }).then((c) => {
+          open.push(c);
+        }),
+      );
+      const watch = await first;
+      await watch.arrived;
+      // A macrotask while the answer is held: a fallback timer queued
+      // before the caller holds the client would fire into no listener.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pending.done).toBe(false);
+      watch.release();
+      await pending.promise;
+      const c = open.at(-1) as TscacheClient;
+      expect(c.mode).toBe("dedicated");
+      const seen: unknown[] = [];
+      c.on("modeFallback", (e) => seen.push(e));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(seen).toEqual([
+        expect.objectContaining({ from: "shared", to: "dedicated" }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a worker that answers memoryBudget with an error rejects createClient, which releases the port and the worker", async () => {
+    const { first, counts } = installWatchedDedicatedWorkers(
+      undefined,
+      "memoryBudget",
+    );
+    const error = await createClient({
+      workerUrl: url,
+      memoryBudget: 4096,
+    }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(TscacheError);
+    expect(String((error as Error).message)).toMatch(/budget refused/);
+    expect(counts.terminated).toBe(1);
+    // The port told the worker it went (a dedicated worker cannot see it).
+    const watch = await first;
+    await vi.waitFor(() =>
+      expect(watch.received.map((r) => r.op)).toEqual([
+        "memoryBudget",
+        "dispose",
+      ]),
+    );
   });
 });
 
