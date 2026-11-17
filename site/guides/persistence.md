@@ -44,7 +44,14 @@ resolves, to the listeners attached by then. Check `client.mode` if persistence 
 `cache()` of a persisted cache resolves once its records are loaded and applied, so the first `get`
 through the handle sees them; on a stalled disk it waits at most five seconds. A second tab opening the
 same cache waits for the same load. A range the records do not cover, an evicted one included, reads as
-uncached and is fetched; it never reads as a confirmed gap. Records written under another structure or
+uncached and is fetched; it never reads as a confirmed gap.
+
+With a memory budget ([Memory](/guides/patterns#memory)), a page the worker evicts leaves the disk too:
+the next write-behind flush deletes its record, so the stored records never hold more than memory did,
+and the next session's load stays within what the budget let the worker hold. An evicted range is
+therefore fetched again from the backend, in this session and the next. A load larger than the budget
+keeps only its newest pages. Ranges that are covered but hold no bar (confirmed gaps) cost no memory, are
+never evicted and keep their small records. Records written under another structure or
 another `version` are not loaded, and the cache writes its own over them.
 
 ## Failures

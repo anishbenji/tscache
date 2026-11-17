@@ -49,21 +49,47 @@ clearing](/concepts/invalidation)). For one view's housekeeping, `invalidate` in
 
 ## Memory
 
-Nothing bounds the memory a cache holds, and nothing reports it. Version 1 has no eviction, no byte
-budget and no call that returns a cache's size: a cache grows with what it is asked for and lives until
-its worker ends. A SharedWorker ends only when the last tab of the origin that uses it closes (in
-Chromium about 30 seconds later), so it outlives the tab that opened it for as long as any other tab
+Without a budget nothing bounds the memory a cache holds: a cache grows with what it is asked for and
+lives until its worker ends. A SharedWorker ends only when the last tab of the origin that uses it closes
+(in Chromium about 30 seconds later), so it outlives the tab that opened it for as long as any other tab
 stays open, and so does everything it holds.
 
 A bar costs the bytes of its fields plus one presence bit; timestamps are implicit
 ([Performance](/performance)). One year of one-minute OHLCV bars with five `f64` fields is
 365 × 1,440 = 525,600 bars of 40 bytes and one bit each, about 21 MB per series, before the copies a
-page keeps of what it read. A cache with `persist: true` loads all its stored records into the worker's
+page keeps of what it read. A cache with `persist: true` loads its stored records into the worker's
 memory when it opens ([Persistence](/guides/persistence)), so persistence does not reduce this.
 
-To keep memory in check today: pick the smallest dtype that holds each field (`f32` halves a field), and
-call `clear()` on a cache the application no longer shows; it frees the cache's points for every tab
+**Set a memory budget** in every application that lets a user browse many series or a long history:
+
+```ts
+const client = await createClient({
+  workerUrl,
+  fetcher: { module: fetcherUrl },
+  // 200 MB for every cache of the worker; in a SharedWorker, for every tab.
+  memoryBudget: 200_000_000,
+});
+```
+
+Above the budget the worker evicts the least recently used pages (a cache's `segmentSlotCap` slots,
+about 22.8 days of one-minute bars by default) of any of its caches, and their coverage with them, so a
+later `get` over an evicted range fetches it again; it never reads as a confirmed gap. Reads and writes
+keep a page recent, in every tab. The pages a pending `get` is reading, and those holding a provisional
+bar (at or after the watermark), are never evicted: the budget may be exceeded while they are held, and
+the excess goes when they are released. A view that already shows an evicted range keeps its copy; the
+`cacheChanged` event lists the range under `evicted`, which needs no re-read
+([Change events](/concepts/events#change-events)).
+
+The budget counts the bytes the cached points' arrays have allocated, so the worker's real footprint is
+somewhat larger: object overhead, a read's result until it reaches the page, and a load's records while
+they are applied are not counted. `client.memoryStats()` reports the budget in force, the bytes held, the
+part pinned now, the pages evicted so far and one row per cache; it is a call, so poll it on your own
+clock if you want to watch memory. In a SharedWorker the first budget the worker receives holds until
+it restarts: a tab with another value (an older or newer deploy) joins without error and is told, in a
+development build, which budget is in force. A budget set after a cache already exists in the worker is
+not applied. Each dedicated worker or in-process client has its own engine and its own budget.
+
+Without a budget, pick the smallest dtype that holds each field (`f32` halves a field), and call
+`clear()` on a cache the application no longer shows; it frees the cache's points for every tab
 ([A clear reaches every tab](#a-clear-reaches-every-tab)) and, for a persisted cache, deletes its stored
-records too. `invalidate` keeps the points and frees
-nothing. Eviction under a byte budget is sketched on the
-[roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md#design-sketch-eviction-and-memory-limits).
+records too. `invalidate` keeps the points and frees nothing.
