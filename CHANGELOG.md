@@ -148,6 +148,11 @@ The commits since 0.1.0 follow.
 - Answer the step 118 round 4
 - Answer the step 118 seventh pre-review
 - Answer the step 118 round 5
+- Known limits of 0.2.0
+- Release docs and sizes for 0.2.0
+- _(decisions)_ N85, effect is not adopted
+- _(decisions)_ N85 pre-review fixes, date the closed test gap
+- 0.2.0 wording left from pre-review 1
 
 ### ⚡ Performance
 
@@ -192,6 +197,10 @@ The commits since 0.1.0 follow.
 - _(fallow)_ Ignore every test tree in the health score
 - _(bench)_ Keep the passing e2e timings when one fails
 - _(fallow)_ Raise the health floor from 90 to 95
+- Prepare release 0.2.0
+- Merge main into docs/115-effect-decision
+- Merge main after step 115
+- Record 0.2.0 in bun.lock
 
 ## [0.1.0] - 2026-11-13
 
