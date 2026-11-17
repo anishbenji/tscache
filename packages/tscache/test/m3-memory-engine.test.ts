@@ -707,4 +707,32 @@ describe("M3 write uses are the pages written (round 2)", () => {
     expect([...e.get("a", whole).timestamps]).toEqual([0]);
     expect([...e.get("b", whole).timestamps]).toEqual([0, 8]);
   });
+
+  // Pre-review 2: two mutants of the redesign survived without these.
+  it("a replace over a gap inside a segment removes nothing and uses no page", () => {
+    const e = new MemoryEngine({ memoryBudget: 3 * PAGE_BYTES });
+    e.cache(config());
+    e.cache(config({ id: "b" }));
+    e.put("a", batch([4, 6]));
+    e.put("b", batch([0]));
+    e.put("a", batch([0]));
+    // Slot 5 is a gap of page 1's one segment: the replace writes nothing.
+    e.put("a", batch([]), { range: span(5) });
+    e.put("b", batch([4]));
+    expect([...e.get("a", whole).timestamps]).toEqual([0]);
+    expect([...e.get("b", whole).timestamps]).toEqual([0, 4]);
+  });
+
+  it("a call's pages are used lowest first, also when its replace reports a higher page first", () => {
+    const e = new MemoryEngine({ memoryBudget: 3 * PAGE_BYTES });
+    e.cache(config());
+    e.cache(config({ id: "b" }));
+    e.put("a", batch([8, 10]));
+    // The carve removes 8 from page 2 before the insert writes page 0, so
+    // the store reports [2, 0]; page 0 is still the call's oldest use.
+    e.put("a", batch([0]), { range: span(0, 8) });
+    e.put("b", batch([0]));
+    e.put("b", batch([4]));
+    expect([...e.get("a", whole).timestamps]).toEqual([10]);
+  });
 });
