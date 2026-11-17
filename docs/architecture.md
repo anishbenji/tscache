@@ -823,6 +823,9 @@ interface Segment {
   readonly extent: SlotRange | undefined;
   /** Number of present points. */
   readonly size: number;
+  /** Bytes the buffers have allocated: capacity × the bytes of one slot
+   *  across the fields, plus the mask; spare capacity included (N90, step 121). */
+  readonly bytes: number;
 
   /** The point at slot as a fresh { field name → value } object holding
    *  exactly the schema's fields, or undefined if no point is present there
