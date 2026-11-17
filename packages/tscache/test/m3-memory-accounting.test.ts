@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { cacheInternals } from "../src/engine/cache";
-import { cacheStateOf, Engine } from "../src/engine/engine";
+import { cacheInternals, type ReaderChange } from "../src/engine/cache";
+import { cacheStateOf, Engine, observeCaches } from "../src/engine/engine";
 import type { Segment } from "../src/segment/types";
 import { rng } from "./cache-model";
-import { batch, config, span, times } from "./m3-memory-helpers";
+import {
+  batch,
+  config,
+  PAGE_BYTES,
+  restore,
+  span,
+  times,
+} from "./m3-memory-helpers";
+import { recordsOf } from "./persist-test-helpers";
 
 /** What the segments hold, summed segment by segment (the walked figure). */
 function walked(engine: Engine, cacheId: string): number {
@@ -70,5 +78,31 @@ describe("M3 accounting with a budget (implementer's tests)", () => {
     late.cache(config());
     expect(applyMemoryBudget(late, 100)).toBeUndefined();
     expect(late.memoryStats()).not.toHaveProperty("budget");
+  });
+
+  it("a restore that trims its own pages reports nothing for that cache, and another cache's evictions once", () => {
+    const engine = new Engine({ memoryBudget: 2 * PAGE_BYTES });
+    const reports: [string, ReaderChange][] = [];
+    observeCaches(engine, {
+      onChange: () => {},
+      onMutate: () => {},
+      hasReaders: () => true,
+      onReaderChange: (cacheId, change) => reports.push([cacheId, change]),
+    });
+    engine.cache(config({ id: "old" }));
+    engine.cache(config());
+    engine.put("old", batch([40]), { range: span(40, 43) });
+    reports.length = 0;
+    const donor = new Engine();
+    donor.cache(config());
+    donor.put("a", batch([0, 4, 8]), { range: span(0, 11) });
+    restore(engine, "a", recordsOf(donor, "a"));
+    expect(engine.memoryStats()).toMatchObject({ evictedPages: 2 });
+    expect(reports).toEqual([
+      [
+        "old",
+        { written: [], removed: [], cleared: false, evicted: [span(40, 43)] },
+      ],
+    ]);
   });
 });

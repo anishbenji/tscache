@@ -342,6 +342,8 @@ export class CacheState {
   readonly #evicted: CoverageIndex | undefined;
   /** Evicted coverage outside a reader's call, until the enforcement ends. */
   #pendingEvicted: SlotRange[] = [];
+  /** Set during `restore`: a load sends no reader change (§2.7). */
+  #restoring = false;
 
   constructor(config: ResolvedCacheConfig, hooks: CacheStateHooks = {}) {
     this.config = config;
@@ -629,13 +631,20 @@ export class CacheState {
     }
     const memory = this.#memory;
     if (memory === undefined) return restoreImpl(this, stored);
+    this.#restoring = true;
     try {
       return restoreImpl(this, stored);
     } finally {
       // The cache knew nothing, so every page it holds now is restored: a
       // use, ascending; then enforcement trims the oldest (M3, E7, E19).
-      memory.useAll(this);
-      memory.settle();
+      // Its own trimmed pages are not reported: no reader has seen them,
+      // and a load sends nothing (§2.7). Other caches' evictions are.
+      try {
+        memory.useAll(this);
+        memory.settle();
+      } finally {
+        this.#restoring = false;
+      }
     }
   }
 
@@ -655,8 +664,8 @@ export class CacheState {
     if (reader !== undefined && covered.length > 0) reader.evicted ??= [];
     for (const range of covered) {
       this.#evicted?.add(range);
-      if (reader?.evicted === undefined) this.#pendingEvicted.push(range);
-      else includeRange(reader.evicted, range);
+      if (reader?.evicted !== undefined) includeRange(reader.evicted, range);
+      else if (!this.#restoring) this.#pendingEvicted.push(range);
     }
     this.#hooks.onEvict?.(covered);
     return freed;
