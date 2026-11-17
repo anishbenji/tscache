@@ -73,7 +73,7 @@ const client = await createClient({
 
 Above the budget the worker evicts the least recently used pages (a cache's `segmentSlotCap` slots,
 about 22.8 days of one-minute bars by default) of any of its caches, and their coverage with them, so a
-later `get` over an evicted range fetches it again; it never reads as a confirmed gap. Reads and writes
+later `get` over an evicted range fetches it again; it never reads as a confirmed gap. This assumes a backend that answers consistently: if it contradicts itself, for example a later response without a range omits a bar an earlier one had sent, a budgeted cache shows what the latest response says, where an unbudgeted one could still hold the older bar. Reads and writes
 keep a page recent, in every tab. The pages a pending `get` is reading, and those holding a provisional
 bar (at or after the watermark), are never evicted: the budget may be exceeded while they are held, and
 the excess goes when they are released. A fetch that never settles keeps its `get`'s pages pinned, so

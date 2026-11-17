@@ -459,13 +459,36 @@ describe("M3 engine contracts (design §5 tests 1–12)", () => {
     },
   );
 
-  // A2, open spec ambiguity: truth originally contains point 1; after its
-  // page is evicted, an inconsistent implicit-range upsert [0, 2] omits it.
-  // An unbudgeted engine retains point 1; a budgeted engine cannot recover
-  // it. The user must decide what, if anything, M3 promises in that case.
-  it.todo(
-    "5/A2: inconsistent upsert [0, 2] after eviction of point 1 has no decided contract",
-  );
+  // A2: truth originally contains point 1; after its page is evicted, an
+  // inconsistent implicit-range upsert [0, 2] omits it. An unbudgeted
+  // engine retains point 1; a budgeted engine cannot recover it. Decided by
+  // the user on 2026-11-17 (pending decision #85, option a; N96): with an
+  // inconsistent backend a budgeted cache reflects the latest put, and the
+  // subset property of test 5 holds for consistent backends only.
+  it("5/A2: inconsistent upsert [0, 2] after eviction of point 1 answers what the latest put wrote", () => {
+    const bounded = new MemoryEngine({ memoryBudget: PAGE_BYTES });
+    const reference = new Engine();
+    for (const e of [bounded, reference]) {
+      e.cache(config());
+      e.put("a", batch([0, 1, 2]));
+      e.put("a", batch([4]));
+    }
+    // Page 0 was the least recently used: point 1 went with its coverage.
+    expect(bounded.coverage("a", span(0, 3))).toEqual([]);
+    expect(bounded.memoryStats().evictedPages).toBe(1);
+    for (const e of [bounded, reference]) e.put("a", batch([0, 2]));
+    expect(bounded.get("a", span(0, 2))).toMatchObject({
+      timestamps: new Float64Array([0, 2]),
+      coverage: [span(0, 2)],
+      misses: [],
+    });
+    // The unbudgeted engine keeps its older point 1 inside the same
+    // coverage: the two differ only because the backend contradicted itself.
+    expect(reference.get("a", span(0, 2))).toMatchObject({
+      timestamps: new Float64Array([0, 1, 2]),
+      coverage: [span(0, 2)],
+    });
+  });
 
   it("6: whole-page coverage is withdrawn, including gaps, with neighbours and dataset metadata intact", () => {
     const e = new MemoryEngine({ memoryBudget: 2 * PAGE_BYTES });
