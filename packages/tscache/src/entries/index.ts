@@ -37,6 +37,7 @@ export type {
   GetResult,
   HostingMode,
   HydrateResult,
+  MemoryStats,
   MergeWarning,
   Miss,
   MissReason,

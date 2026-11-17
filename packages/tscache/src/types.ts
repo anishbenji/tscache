@@ -275,6 +275,16 @@ export interface ClientOptions {
     /** Structured-cloneable config/auth material passed to the fetcher. */
     context?: unknown;
   };
+  /**
+   * Upper bound, in bytes, on what the worker's caches hold (§2.9): a
+   * positive safe integer, shared by every cache and, in a SharedWorker, by
+   * every tab. Above it the least recently used pages that nothing pins
+   * are evicted, with their coverage, so a later read fetches them again.
+   * Default: none, and nothing is evicted. The first budget a worker
+   * receives holds for its life, and a worker that already holds a cache
+   * takes none; `memoryStats()` reports the budget in force.
+   */
+  memoryBudget?: number;
 }
 
 /**

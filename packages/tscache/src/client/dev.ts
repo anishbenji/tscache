@@ -53,3 +53,33 @@ export function warnMissingFeature(feature: WorkerFeature): void {
     `tscache: this client's worker does not offer ${feature} (an older worker script?), so ${feature} listeners will not be called. Check client.features.has("${feature}") and poll instead; printed in development builds only.`,
   );
 }
+
+/** Whether this is a development build; see `warnMerges`. */
+function development(): boolean {
+  try {
+    return process.env.NODE_ENV !== "production";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Prints one console.warn that the client's `memoryBudget` is not in force
+ * (§2.9, N88, N101, N103): the worker kept an earlier budget, already held
+ * a cache, or does not offer budgets at all. Development builds only.
+ */
+export function warnBudget(
+  requested: number,
+  inForce: number | undefined | "unsupported",
+): void {
+  if (!development()) return;
+  const why =
+    inForce === "unsupported"
+      ? "this client's worker does not offer memory budgets (an older worker script?), so no budget applies and memoryStats() rejects"
+      : inForce === undefined
+        ? "the worker already held a cache when the budget arrived, so it runs without one until it restarts"
+        : `the worker keeps the first budget it received, ${inForce} bytes, until it restarts`;
+  console.warn(
+    `tscache: memoryBudget ${requested} is not in force: ${why}. client.memoryStats() reports the budget in force; printed in development builds only.`,
+  );
+}
