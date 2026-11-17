@@ -139,3 +139,10 @@ Brotli, measured with `bun scripts/size.ts` on `main` (`8cbb162`) and on this br
 | `read-transfer`          |         0.979 |              0.993 |
 
 The base ignores `memoryBudget`, so the two `-budget` rows measure what a budget costs: about 5 % (Bun) and 2 % (Chromium) on a viewport read, 1–2 % on a 5,000-bar put. The unbudgeted rows are within noise of `main`. The two new cases report only; gating them needs the calibration of `bench-calibrate.yml`.
+
+## Round 1 (GPT-6.1 Sol, high) — reviewer verdict: merge
+
+Run on head `0154fa7`. No findings; the reviewer confirmed every accepted pre-review resolution and ran the type check,
+`bun scripts/test-clocks.ts` and `git diff --check`. The round's `bun run ci` exited 0. Raw output:
+`.reviews/step-121/round-1.md`. The review has settled. The two decision concerns above go to the user (the director's
+pending decisions #85 and #86); the code follows the recommended options, which need no code.
