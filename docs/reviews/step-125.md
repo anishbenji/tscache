@@ -28,11 +28,13 @@ Facts are from the director's brief (from the parent thread, 2026-11-20). Those 
 
 ## Verification
 
-| Command                                                              | Result                                      |
-| -------------------------------------------------------------------- | ------------------------------------------- |
-| `bunx biome check docs/releasing.md`                                 | no fixes                                    |
-| `bun run docs:check`                                                 | see the director's report for the final run |
-| `~/code/tscache-reports/bin/heavy-run.sh "125 child: ci" bun run ci` | see the director's report for the final run |
+| Command                                                              | Result                                                 |
+| -------------------------------------------------------------------- | ------------------------------------------------------ |
+| `bunx biome check docs/releasing.md`                                 | no fixes                                               |
+| `bun run build`, then `bun run docs:check`                           | exit 0; `doc-anchors: 246 anchors in 42 pages resolve` |
+| `~/code/tscache-reports/bin/heavy-run.sh "125 child: ci" bun run ci` | not completed: see below                               |
+
+The full CI run waited about two hours for the heavy-job lock and was stopped about a minute after it took the lock, when the tool's two-hour background limit ran out. By then it had passed the steps up to the site build. It has to be run again on the final head.
 
 Not run: the release itself, any npm command, and the GitHub dry-run workflow.
 
