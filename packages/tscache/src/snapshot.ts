@@ -33,10 +33,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function encodePayload(p: DenseSegmentPayload): EncodedSegmentPayload {
-  const rest = {
-    layout: p.layout,
-    start: p.start,
-    count: p.count,
+  const { layout, start, count } = p;
+  // Last in both formats, as the payload has them: the key order is the
+  // text a page carries (§3.4).
+  const binary = {
     mask: toBase64(p.mask),
     fields: p.fields.map(({ name, dtype, data }) => ({
       name,
@@ -45,12 +45,23 @@ function encodePayload(p: DenseSegmentPayload): EncodedSegmentPayload {
     })),
   };
   return p.format === 2
-    ? { format: 2, ...rest, grid: { ...p.grid }, startSlot: p.startSlot }
+    ? {
+        format: 2,
+        layout,
+        start,
+        count,
+        grid: { ...p.grid },
+        startSlot: p.startSlot,
+        ...binary,
+      }
     : {
         format: 1,
-        ...rest,
+        layout,
+        start,
+        count,
         interval: p.interval,
         alignmentOffset: p.alignmentOffset,
+        ...binary,
       };
 }
 
@@ -149,30 +160,35 @@ function decodePayload(value: unknown, i: number): DenseSegmentPayload {
       data: fromBase64(entry.data, `${at}.data`).buffer,
     };
   });
-  const rest = {
-    layout: "dense" as const,
-    start: checkNumber(value.start, `${what}.start`),
-    count: checkNumber(value.count, `${what}.count`),
+  const layout = "dense" as const;
+  const start = checkNumber(value.start, `${what}.start`);
+  const count = checkNumber(value.count, `${what}.count`);
+  // Each payload is rebuilt in its own format, in the payload's key order.
+  if (format === 2) {
+    return {
+      format,
+      layout,
+      start,
+      count,
+      grid: checkGrid(value.grid, `${what}.grid`),
+      startSlot: checkNumber(value.startSlot, `${what}.startSlot`),
+      mask: fromBase64(value.mask, `${what}.mask`),
+      fields,
+    };
+  }
+  return {
+    format,
+    layout,
+    start,
+    count,
+    interval: checkNumber(value.interval, `${what}.interval`),
+    alignmentOffset: checkNumber(
+      value.alignmentOffset,
+      `${what}.alignmentOffset`,
+    ),
     mask: fromBase64(value.mask, `${what}.mask`),
     fields,
   };
-  // Each payload is rebuilt in its own format.
-  return format === 2
-    ? {
-        format,
-        ...rest,
-        grid: checkGrid(value.grid, `${what}.grid`),
-        startSlot: checkNumber(value.startSlot, `${what}.startSlot`),
-      }
-    : {
-        format,
-        ...rest,
-        interval: checkNumber(value.interval, `${what}.interval`),
-        alignmentOffset: checkNumber(
-          value.alignmentOffset,
-          `${what}.alignmentOffset`,
-        ),
-      };
 }
 
 /**
