@@ -153,28 +153,62 @@ Recommendation: **(B)**. It loses nothing to a transient fault, matches the clea
 
 ## Documentation changes
 
-Each statement was checked against the code at `6716b4d`, then confirmed with a scratch test under fake timers (deleted after the run; four cases, all passed):
+Each statement was checked against the code at `6716b4d`, then confirmed with a scratch test under fake timers (four cases, all passed). After pre-review 1 those checks became committed regression tests (below).
 
 - **An open failure stops every tracked cache.** `#openFailed` stops every tracked cache, not only the one opening, with `'unavailable'` and no cleanup (`persister.ts`, lines 577–584). §4.10.6 Open said "this cache and every persisted cache opened later"; it now says every tracked cache, names the running caches that includes, and says no cleanup follows. The guide's Failures paragraph says such a stop covers every persisted cache and deletes nothing.
-- **`flush(id)` waits for a job that is already running.** With nothing dirty and the cache's flush job running, `#flushOne` returns that job's settling (lines 267–274). §4.10.6 Scheduling said it "resolves … at once when nothing is dirty"; it now says it waits for the running job, and that `flush()` does so for every running cache.
-- **A repeated `close()` waits for the first one.** `close()` returns the first call's promise (`this.#closing ??= …`, lines 325–342). §4.10.6 Close said "later calls resolve at once"; it now says they resolve when the first one does.
+- **`flush(id)` waits for a job that is already running.** With nothing dirty and the cache's flush job running, `#flushOne` returns that job's settling (lines 267–274). §4.10.6 Scheduling said it "resolves … at once when nothing is dirty"; it now says it waits for the running job, and that `flush()` does so for every running cache. The `flush` interface comment in §4.10.6 and the TSDoc of `Persister.flush` say the same (pre-review 1, P2).
+- **A repeated `close()` waits for the first one.** `close()` returns the first call's promise (`this.#closing ??= …`, lines 325–342). §4.10.6 Close said "later calls resolve at once"; it now says they resolve when the first one does, and keeps the rule that the old sentence also carried: once `close()` has settled, `open`, `flush` and `clearAll` resolve at once and write nothing (lines 226, 255 and 302), and changes are no longer recorded (`#live`).
 - **The `cacheId` check on the cache record.** `acceptRecord` rejects a record whose `cacheId` is not the cache's (`engine/restore.ts`, line 177), as `acceptPage` does for pages. §4.10.5 step 2 listed every other check of the cache record; it now lists this one too.
-- **A lost connection reports `'error'`.** After the browser closes the connection or the store closes itself on `versionchange`, every store call rejects with `InvalidStateError` (`idb-store.ts`, `#database()`), and the persister never opens the store again. A load stops with `'error'`, a flush is retried until its deadline and stops with `'error'`, and the cleanup fails, so the records stay. A new bullet in §4.10.6 Failures says so, and the guide's Failures paragraph says it in one sentence.
+- **A lost connection reports `'error'`.** After the browser closes the connection or the store closes itself on `versionchange`, every store call rejects with `InvalidStateError` (`idb-store.ts`, `#database()` and the `onclose` handler, lines 115–117), and the persister never opens the store again. A load stops with `'error'`, a flush is retried until its deadline and stops with `'error'`, and the cleanup fails, so the records stay. A new bullet in §4.10.6 Failures says so, §4.10.3 Close now names the browser's `close` event beside `close()` and `versionchange` (pre-review 1, P2), and the guide's Failures paragraph says it in one sentence.
 
-`docs/INDEX.md`: `docs/architecture.md` re-measured at 284.1 KB (was 283.1 KB); `site/` at 272.0 KB of Markdown over its 42 tracked pages (`git ls-files 'site/*.md'` without `site/api/`, `wc -c`; was 271.8 KB).
+`docs/INDEX.md`: `docs/architecture.md` re-measured at 284.5 KB (was 283.1 KB at `6716b4d`); `site/` at 272.0 KB of Markdown over its 42 tracked pages (`git ls-files 'site/*.md'` without `site/api/`, `wc -c`; was 271.8 KB).
+
+## Regression tests
+
+`packages/tscache/test/persister-documented.test.ts`, added after pre-review 1. They pin current, documented behaviour rather than a change, so they are implementer tests, not contract tests (`AGENTS.md`, Roles: the contract-test author writes the failing tests for engine-logic changes; nothing here changes the engine):
+
+- "flush(id) with nothing dirty waits for the cache's running flush job";
+- "a repeated close() resolves when the first one does";
+- "a failed store opening stops a running cache too, without a cleanup": a cache opened during a `clearAll` that found no database is running; its flush opens the store, the opening rejects, and the stop carries the opening's error before any job's deadline;
+- "restore rejects a cache record whose cacheId is another cache's".
+
+Each was checked by hand against the mutant pre-review 1 found surviving all persistence tests. The mutant was applied with the Edit tool, the file run, and the mutant undone with the Edit tool (`git status` then showed no change under `src/`):
+
+| Mutant                                                                                               | Result                                   |
+| ---------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `close()`: `if (this.#closing !== undefined) return Promise.resolve();` before `this.#closing ??= …` | "a repeated close()…" failed             |
+| `#flushOne`: `const job = cache.queued;` (without `?? cache.running`)                                | "flush(id) with nothing dirty…" failed   |
+| `#openFailed`: `if (cache.status !== "loading") continue;` inside the loop                           | "a failed store opening…" failed         |
+| `acceptRecord`: the `record.cacheId !== state.config.id` line removed                                | "restore rejects a cache record…" failed |
+
+In each case the other three tests passed.
+
+The conformance case "a connection the browser closes makes read/write/clearAll reject InvalidStateError" (`persist-store-conformance.test.ts`) takes the adapter's connection from its open request, closes it with fake-indexeddb's `forceCloseDatabase`, waits for the `close` event and checks the three calls. It pins the store contract, not the adapter's handler: with the `onclose` handler removed it still passes, because fake-indexeddb's `transaction()` on a closed connection throws `InvalidStateError` by itself. The handler only makes the adapter fail before reaching IndexedDB. fake-indexeddb 6.2.7 types `forceCloseDatabase`'s parameter as the class (`typeof FDBDatabase`) where it takes an instance, so the test casts the connection; a first `bun run ci` at `5d32fc87` failed `tsc` on that line, and the commit was rebuilt with the cast before anything was pushed.
 
 ## Contract-test changes
 
-None. Two `it.todo` entries were added to `persister-load.test.ts`; no test or assertion was changed or removed.
+None changed or removed. Added: two `it.todo` entries in `persister-load.test.ts` and one case in `persist-store-conformance.test.ts` (requested by the director after pre-review 1). The implementer's regression tests live in their own file.
+
+## Pre-review (Claude), not the gate
+
+Pre-review 1, by Fable, at `57b2e722`; the director relayed its findings. All four were valid and fixed.
+
+| #     | Sev | Finding                                                                                                                                                           | Decision | Resolution                                                                                                 |
+| ----- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| PR1-1 | P1  | The four behaviours newly written into the spec had no committed test; the reviewer's mutants of each survived all 344 persistence tests                          | accepted | `d51e6dbd`: `persister-documented.test.ts`, each test checked against its mutant (Regression tests, above) |
+| PR1-2 | P2  | §4.10.6 Close no longer stated that once `close()` settles, `open`, `flush` and `clearAll` resolve at once and write nothing (`persister.ts:226`, `:255`, `:302`) | accepted | `24d90c2d`: both rules stated                                                                              |
+| PR1-3 | P2  | The `flush` interface comment in §4.10.6 and the TSDoc at `persister.ts:249-253` still said "every running cache with dirty state", against the Scheduling bullet | accepted | `24d90c2d`: both now say it waits for a running flush job; comment-only `src/` edit                        |
+| PR1-4 | P2  | "A lost connection" cited §4.10.3, whose Close rule named only `close()` and `versionchange`                                                                      | accepted | `9b14b418`: §4.10.3 Close names the browser's `close` event; a conformance case uses `forceCloseDatabase`  |
 
 ## Verification
 
-At the step's final head:
+At the step's final head unless noted:
 
-| Command                                                               | Result                                                                                                     |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `bunx vitest run` on the scratch reproduction (since deleted)         | 2 failed, as expected: the store held `{"pages":[]}` after each stop, and the next session loaded 0 points |
-| `bunx vitest run` on the scratch documentation checks (since deleted) | 4 passed                                                                                                   |
-| `bunx vitest run packages/tscache/test/persister-load.test.ts`        | 9 passed, 2 todo                                                                                           |
-| `bun scripts/test-clocks.ts`                                          | `test-clocks: 195 files clean`                                                                             |
-| `~/code/tscache-reports/bin/heavy-run.sh "132 child: ci" bun run ci`  | runs on the head that adds this file; its result is reported to the director                               |
+| Command                                                                               | Result                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bunx vitest run` on the scratch reproduction (since deleted)                         | 2 failed, as expected: the store held `{"pages":[]}` after each stop, and the next session loaded 0 points                                                                                        |
+| `bunx vitest run packages/tscache/test/persister-documented.test.ts`, once per mutant | 1 failed, 3 passed for each of the four mutants; 4 passed with none                                                                                                                               |
+| `bunx vitest run packages/tscache/test/persist-store-conformance.test.ts`             | 23 passed                                                                                                                                                                                         |
+| `bunx vitest run packages/tscache/test/persister-load.test.ts`                        | 9 passed, 2 todo                                                                                                                                                                                  |
+| `bun scripts/test-clocks.ts`                                                          | `test-clocks: 196 files clean`                                                                                                                                                                    |
+| `~/code/tscache-reports/bin/heavy-run.sh "132 child: ci" bun run ci`                  | at `57b2e722`: exit 0 (Vitest 156 files, 3058 passed, 2 todo; Playwright 193 passed; bench smoke ok). On the head that adds this triage it runs again, and its result is reported to the director |
