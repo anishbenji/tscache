@@ -42,7 +42,7 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
 | ---------- | ----------------------------------- | --------------------------------------------------------- | ------------------------------------ |
 | `vanilla/` | `series(connection, options)`       | a request counter: latest wins                            | a JSON script element                |
 | `react/`   | `TscacheProvider`, `useSeries`      | `use()` under Suspense, inputs through `useDeferredValue` | a JSON script element                |
-| `solid/`   | `createConnection`, `createSeries`  | an async derived signal (Solid 2.0 RC)                    | a JSON script element                |
+| `solid/`   | `createConnection`, `createSeries`  | an async derived signal (Solid 2.0)                       | a JSON script element                |
 | `vue/`     | `createTscache` plugin, `useSeries` | `watch` with `onWatcherCleanup` into `shallowRef`s        | a JSON script element                |
 | `svelte/`  | `tscacheContext`, `Series`          | `$effect` into `$state.raw`, `createSubscriber`           | a JSON script element, then props    |
 | `angular/` | `provideTscache`, `cacheResource`   | `resource()`                                              | `TransferState`                      |

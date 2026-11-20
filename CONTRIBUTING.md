@@ -26,7 +26,7 @@ bunx playwright install chromium   # once, for the browser tests
 ```sh
 bun run test       # Vitest, under Node
 bun run typecheck  # tsc on every project
-bun run check      # Biome lint and format
+bun run check      # Biome lint and format (after `bun run build`: the promise rules read the package's types from dist/)
 bun run ci         # the full gate that GitHub Actions runs
 ```
 

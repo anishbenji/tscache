@@ -44,7 +44,6 @@ if [ "$(git rev-parse "$base")" != "$(git rev-parse HEAD)" ]; then
   gitleaks git --log-opts="-m ${base}..HEAD" --redact --no-banner .
   bunx commitlint --from "$base" --to HEAD
 fi
-bunx biome ci .
 # Tests read no wall clock, time nothing and sleep for nothing, and
 # Playwright never retries (docs/testing.md).
 bun scripts/test-clocks.ts
@@ -52,6 +51,11 @@ bun run typecheck
 # Built before Knip: the examples' Vite configs import @anishbenji/tscache/vite from
 # dist/, and Knip loads them; a fresh checkout has no dist/ yet.
 bun run --filter @anishbenji/tscache build   # includes publint + attw (esm-only profile)
+# Linted after the build: the type-aware promise rules read @anishbenji/tscache's
+# types from dist/, so before the build they miss its promises in the examples,
+# reference clients and snippets (step 116 PR-1). dist/ is gitignored, and Biome
+# honours .gitignore (biome.json, vcs.useIgnoreFile), so it is not linted.
+bunx biome ci .
 # Generated before Fallow and the site's type check: the site's config imports
 # TypeDoc's sidebar, site/api/ is gitignored, and a fresh checkout has none.
 bun run --cwd site api

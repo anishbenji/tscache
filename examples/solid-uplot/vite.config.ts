@@ -1,7 +1,7 @@
 import { fetcherUrl } from "@anishbenji/tscache/vite";
 import { mockBackend } from "@examples/mock-backend/vite";
+import solid from "@solidjs/vite-plugin";
 import { defineConfig } from "vite";
-import solid from "vite-plugin-solid";
 
 export default defineConfig({
   // An ES worker can code-split: the persistence code the worker loads with

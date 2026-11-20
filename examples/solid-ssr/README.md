@@ -131,7 +131,6 @@ format, encoded as JSON.
   stays outside coverage (§2.4); and its miss, which abuts the coverage, is
   extended one interval into it (§2.5), so the last covered minute is
   fetched again too.
-- Solid is pinned to 2.0.0-rc.14, a release candidate, until 2.0 ships.
 
 ## What else is in here
 
