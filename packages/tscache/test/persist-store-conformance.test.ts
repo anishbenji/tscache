@@ -294,6 +294,48 @@ describe("IndexedDB layout and lifecycle (§4.10.2–3)", () => {
       store?.close();
     }
   });
+  it("a connection the browser closes makes read/write/clearAll reject InvalidStateError", async () => {
+    const { forceCloseDatabase } = await import("fake-indexeddb");
+    const factory = await idbFactory();
+    // The adapter keeps its connection private: take it from the open request.
+    let db: IDBDatabase | undefined;
+    const open = factory.open.bind(factory);
+    factory.open = (name: string, version?: number) => {
+      const request = open(name, version);
+      request.addEventListener("success", () => {
+        db = request.result;
+      });
+      return request;
+    };
+    const store = await openIdbStore(factory);
+    if (store === undefined || db === undefined) {
+      throw new Error("normal open must return store and connection");
+    }
+    const connection = db;
+    const closed = new Promise<void>((resolve) => {
+      connection.addEventListener("close", () => resolve());
+    });
+    // fake-indexeddb 6.2.7 types the parameter as the class (`typeof
+    // FDBDatabase`); at run time it takes the connection, an instance.
+    forceCloseDatabase(
+      connection as unknown as Parameters<typeof forceCloseDatabase>[0],
+    );
+    await closed;
+    await expect(store.read("persist")).rejects.toMatchObject({
+      name: "InvalidStateError",
+    });
+    await expect(
+      store.write("persist", {
+        deletePages: [],
+        putPages: [],
+        putCache: null,
+        strict: true,
+      }),
+    ).rejects.toMatchObject({ name: "InvalidStateError" });
+    await expect(store.clearAll()).rejects.toMatchObject({
+      name: "InvalidStateError",
+    });
+  });
 });
 
 describe("IndexedDB request failures (§4.10.3)", () => {
