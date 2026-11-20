@@ -66,12 +66,12 @@ Asked for by the director in the same message:
 
 ## Verification
 
-| Command                                                         | Result                                                                                                        |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `wc -c docs/review-checklist.md docs/architecture.md`           | 17,037 and 283,502 bytes, the 17.0 KB and 283.5 KB in `docs/INDEX.md`                                         |
-| `bun run docs:check` (after `bun run build`)                    | Exit 0 on `f94455c` plus this file; `doc-anchors: 246 anchors in 42 pages resolve`                            |
-| `heavy-run.sh "122 child: ci" bun run ci` (before pre-review 1) | Exit 0 on `fd0992c` and on `30dd3bd`: Vitest 156 files, 3,058 passed; Playwright 193 passed; bench smoke `ok` |
-| `heavy-run.sh "122 child: ci" bun run ci` (final)               | PENDING                                                                                                       |
+| Command                                                         | Result                                                                                                                                                                  |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wc -c docs/review-checklist.md docs/architecture.md`           | 17,037 and 283,502 bytes, the 17.0 KB and 283.5 KB in `docs/INDEX.md`                                                                                                   |
+| `bun run docs:check` (after `bun run build`)                    | Exit 0 on `f94455c` plus this file; `doc-anchors: 246 anchors in 42 pages resolve`                                                                                      |
+| `heavy-run.sh "122 child: ci" bun run ci` (before pre-review 1) | Exit 0 on `fd0992c` and on `30dd3bd`: Vitest 156 files, 3,058 passed; Playwright 193 passed; bench smoke `ok`                                                           |
+| `heavy-run.sh "122 child: ci" bun run ci` (final)               | Exit 0 on `b1fda15`, every change of the step in place: Vitest 156 files, 3,058 passed; Playwright 193 passed; bench smoke `ok`. The commit after it adds only this row |
 
 ## Contract-test changes
 
