@@ -7,6 +7,7 @@ Branch: `chore/130-e2e-lint-and-dependabot-cooldown` · Status: built, awaiting 
 - `biome.json`: a new `overrides` entry turns `lint/performance/useDomNodeTextContent` off for `e2e/**`. The rule stays on, from the `recommended` preset, everywhere else. Nothing else in the file changed.
 - `.github/dependabot.yml`: the `bun` entry gains `cooldown` with `default-days: 3` and `semver-major-days: 7`, and a comment saying why. The `github-actions` entry is unchanged. Nothing else in the file changed.
 - `docs/supply-chain.md`: one checklist line under "Workflows" saying that Dependabot waits for the cooldown. Its `docs/INDEX.md` row is re-measured: 10.3 KB becomes 10.7 KB (`wc -c`: 10,656 bytes).
+- `scripts/ci.sh`: a fact fix from step 128, added to this step by the director. The comment above the size and bench smoke commands said the bench job "reports and does not gate yet", which has been false since chore 43. It now says the job "gates the cases in packages/tscache/bench/gated.json and reports the rest", matching `.github/workflows/ci.yml` (the bench job's comment). `gated.json` lists eight Bun cases and no Chromium case. Only the comment changed; `bash -n scripts/ci.sh` passes.
 
 No source, test or published package changed. No dependency was added.
 
