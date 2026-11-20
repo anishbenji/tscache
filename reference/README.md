@@ -88,7 +88,7 @@ Open `/` for the client-only page and `/ssr` for the server-rendered one. The mo
 
 Take the client's folder, `shared/`, and the parts of `integrations/shared/` it imports
 (`connection.ts`, `hydration.ts`, `server.ts`), with `integrations/vanilla/series.ts`, which the
-session reads through.
+session reads through, and `integrations/shared/changes.ts`, which `series.ts` imports.
 Then replace what belongs to the demo:
 
 - the fetcher (`examples/mock-backend/src/fetcher.ts`) with one for your backend
@@ -96,7 +96,15 @@ Then replace what belongs to the demo:
 - `shared/src/market.ts` with your series' cache config, and the live feed's URLs;
 - `shared/src/auth.ts` with your sign-in and refresh endpoints, or drop it if your backend uses
   cookies, which reach the worker's fetches by themselves;
-- the server's credential (`shared/src/server.ts`) with one from the server's environment.
+- the server's credential (`shared/src/server.ts`) with one from the server's environment;
+- the dev server's mock backend and server rendering (`mockBackend` and `ssrPage` from
+  `@examples/mock-backend/vite`, in the client's `vite.config.ts` and the types its
+  `entry-server` imports) with your backend and your own server;
+- the demo's insights with nothing, since an application has no counterpart: the `read-insights`
+  instrumentation in `shared/src/session.ts` (`createInsights`, `insights.instrument`), each
+  client's panel and draw reports (`Insights.tsx` in `react/` and `solid/`, `mountInsights` in
+  `vanilla/src/page.ts`, the `insights.drawn` calls), `pageContext` in `shared/src/auth.ts`, and
+  the `@import "@examples/mock-backend/insights.css"` at the top of `shared/src/style.css`.
 
 ## Limits
 
