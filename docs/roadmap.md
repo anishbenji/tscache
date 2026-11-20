@@ -160,8 +160,9 @@ database (architecture §4.10.7, N52).
 
 ## Design sketch: calendar grid
 
-**Proposed in detail in [`docs/design/calendar-grid.md`](design/calendar-grid.md) (step 118, finding
-M4), with its open choices as decision rows for the user.** It adds built-in calendar intervals to the
+**Specified in `docs/architecture.md` (§2.2, §2.8, §2.10, §4.1; decisions N106–N124) and built in step
+129, from the proposal [`docs/design/calendar-grid.md`](design/calendar-grid.md) (step 118, finding
+M4), whose rows the user decided on 2026-11-21 (decision 83).** It adds built-in calendar intervals to the
 config: one slot per day, week, month, quarter or year, starting at a local time in an IANA zone, with
 the zone rules taken from the runtime's `Intl` and nothing bundled. Inside the engine the range
 arithmetic changes in `grid.ts` alone, since coverage, segments and pages run on slot indices; the
@@ -170,9 +171,9 @@ where they name the grid. Snapshots, payloads and records of a calendar cache ga
 while those of a fixed cache stay byte for byte as they are.
 
 Zone data differs between runtimes, so a record written under one can be read under another. In the
-recommended design a record stores the slot index of each instant that names a slot, and a reader whose
-zone data places one elsewhere refuses the record and fetches again; an exact check of every slot is
-specified as an option for applications that need it (row G8 of the proposal).
+design as decided a record stores the slot index of each instant that names a slot, and a reader whose
+zone data places one elsewhere refuses the record and fetches again (N113); an exact check of every slot
+stays specified in the proposal, unbuilt, for a later decision if an application needs it (row G8).
 
 Today the grid is fixed milliseconds (N9), so daily bars stamped at a session open in a daylight-saving
 zone are rejected as `'misaligned'` for half the year, and weekly and monthly bars rely on the recipes
