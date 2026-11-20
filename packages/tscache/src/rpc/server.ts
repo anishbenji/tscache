@@ -9,6 +9,7 @@
 import type { ReaderChange } from "../engine/cache";
 import {
   applyMemoryBudget,
+  cacheGridOf,
   type Engine,
   observeCaches,
 } from "../engine/engine";
@@ -502,7 +503,7 @@ export class RpcServer {
    * subscribed ready connection, once even if it holds both subscriptions.
    */
   #changed(cacheId: string, change: ReaderChange): void {
-    const grid = this.#engine.configOf(cacheId);
+    const grid = cacheGridOf(this.#engine, cacheId);
     const payload: ClientEvents["cacheChanged"] = {
       cacheId,
       written: change.written.map((range) => toMs(range, grid)),

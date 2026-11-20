@@ -169,7 +169,7 @@ function conformance(label: string, make: () => Promise<PersistStore>): void {
           strict: false,
         };
         const pending = s.write("persist", plan);
-        requireCache(data).config.interval = 17;
+        (requireCache(data).config as { interval: number }).interval = 17;
         requirePage(data).snapshot.coverage.length = 0;
         await pending;
         expect(await s.read("persist")).toEqual(expected);
@@ -193,7 +193,7 @@ function conformance(label: string, make: () => Promise<PersistStore>): void {
           putCache: cache,
           strict: true,
         });
-        cache.config.interval = 17;
+        (cache.config as { interval: number }).interval = 17;
         replacement.snapshot.coverage.length = 0;
         replacement.snapshot.segments[0]?.mask?.fill(0);
         await replacing;

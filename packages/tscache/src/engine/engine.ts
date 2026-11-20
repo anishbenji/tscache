@@ -6,7 +6,14 @@
 
 import type { CoverageIndex } from "../coverage";
 import { ConfigError, show, UnknownCacheError } from "../errors";
-import type { SlotRange } from "../grid";
+import {
+  type CalendarGridContext,
+  createCalendarGridContext,
+  type Grid,
+  gridOf,
+  type SlotRange,
+  sameCalendar,
+} from "../grid";
 import type {
   CacheConfig,
   GetResult,
@@ -81,6 +88,20 @@ function sameFields(
   );
 }
 
+/**
+ * Whether two resolved intervals name one grid, by value: two numbers when
+ * equal, two calendar intervals field by field, and a number never equals a
+ * calendar interval (§2.2).
+ */
+function sameInterval(
+  a: ResolvedCacheConfig["interval"],
+  b: ResolvedCacheConfig["interval"],
+): boolean {
+  return typeof a === "number" || typeof b === "number"
+    ? a === b
+    : sameCalendar(a, b);
+}
+
 /** Throws ConfigError naming the first structural field that differs. */
 function assertCompatible(
   live: ResolvedCacheConfig,
@@ -90,7 +111,9 @@ function assertCompatible(
     const same =
       field === "fields"
         ? sameFields(live.fields, wanted.fields)
-        : live[field] === wanted[field];
+        : field === "interval"
+          ? sameInterval(live.interval, wanted.interval)
+          : live[field] === wanted[field];
     if (!same) {
       throw new ConfigError(
         `cache "${live.id}" exists with a different ${field}; a cache's structure cannot change`,
@@ -131,6 +154,7 @@ let stateOf: (engine: Engine, cacheId: string) => CacheState;
 let addObserver: (engine: Engine, observer: CacheObserver) => void;
 let memoryOf: (engine: Engine) => MemoryBudget | undefined;
 let budgetFor: (engine: Engine, bytes: unknown) => number | undefined;
+let calendarFor: (engine: Engine, context: CalendarGridContext) => void;
 
 /**
  * A cache's state, for the persister only (§4.10.4): no package entry
@@ -138,6 +162,15 @@ let budgetFor: (engine: Engine, bytes: unknown) => number | undefined;
  */
 export function cacheStateOf(engine: Engine, cacheId: string): CacheState {
   return stateOf(engine, cacheId);
+}
+
+/**
+ * A cache's grid, for the orchestrator and the RPC server, which convert
+ * slots themselves (§4.1): no package entry exports this. Throws
+ * UnknownCacheError for an unknown id.
+ */
+export function cacheGridOf(engine: Engine, cacheId: string): Grid {
+  return stateOf(engine, cacheId).grid;
 }
 
 /**
@@ -167,6 +200,19 @@ export function engineMemoryInternals(engine: Engine): EngineMemoryInternals {
     pinnedPages: memory?.pinnedPages() ?? 0,
     evictedIndex: (cacheId) => evictedCoverage(stateOf(engine, cacheId)),
   };
+}
+
+/**
+ * Gives an engine the context its calendar grids share (§4.1): the zone
+ * rules, the tables of slot starts and the lookup budget. For tests, which
+ * inject zone rules and limits through it before the engine's first
+ * calendar cache: no package entry exports it.
+ */
+export function useCalendarGridContext(
+  engine: Engine,
+  context: CalendarGridContext,
+): void {
+  calendarFor(engine, context);
 }
 
 /**
@@ -203,8 +249,13 @@ export class Engine {
   readonly #observers: CacheObserver[] = [];
   /** The memory budget (M3); undefined without one. */
   #memory: MemoryBudget | undefined;
+  /** What the engine's calendar grids share (§4.1); made with the first one. */
+  #calendar: CalendarGridContext | undefined;
 
   static {
+    calendarFor = (engine, context) => {
+      engine.#calendar = context;
+    };
     stateOf = (engine, cacheId) => engine.#state(cacheId);
     addObserver = (engine, observer) => {
       engine.#observers.push(observer);
@@ -239,7 +290,11 @@ export class Engine {
     }
     const id = resolved.id;
     const observers = this.#observers;
+    if (typeof resolved.interval !== "number") {
+      this.#calendar ??= createCalendarGridContext();
+    }
     const created = new CacheState(resolved, {
+      grid: gridOf(resolved, this.#calendar),
       onVersionClear: () => this.#cleared(id, "version-mismatch"),
       onChange: (change) => {
         for (const observer of observers) observer.onChange(id, change);

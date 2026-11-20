@@ -5,8 +5,8 @@
  */
 
 import { show, TscacheError } from "../errors";
-import { isAligned, msOf, slotOf } from "../grid";
-import type { FieldArray } from "../types";
+import { inDomain, sameCalendar, slotOf } from "../grid";
+import type { FieldArray, ResolvedCalendarInterval } from "../types";
 import { DenseSegment } from "./dense";
 import { FIELD_ARRAYS } from "./dtype";
 import { setOwn } from "./own";
@@ -21,26 +21,77 @@ function fail(message: string): never {
   throw new TscacheError(`invalid segment payload: ${message}`);
 }
 
-/** The payload must describe the cache's own grid, in a known format. */
-function checkGrid(p: DenseSegmentPayload, options: SegmentOptions): void {
-  const { grid } = options;
-  if (p.format !== 1) fail(`unsupported format ${show(p.format)}`);
-  if (p.layout !== "dense") fail(`unsupported layout ${show(p.layout)}`);
-  if (p.interval !== grid.interval) {
-    fail(`interval ${show(p.interval)} differs from the cache grid`);
-  }
-  if (p.alignmentOffset !== grid.alignmentOffset) {
-    fail(
-      `alignmentOffset ${show(p.alignmentOffset)} differs from the cache grid`,
-    );
-  }
+/**
+ * Whether a stored `grid` is an object naming exactly the calendar interval
+ * `own` (§2.8): field by field, zones as written.
+ */
+function namesCalendar(value: unknown, own: ResolvedCalendarInterval): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === Object.keys(own).length &&
+    sameCalendar(value as ResolvedCalendarInterval, own)
+  );
 }
 
-/** Checks start and count; returns the slot of the payload's first entry. */
+/**
+ * Why a stored envelope, payload or record does not describe a cache's
+ * grid, or undefined when it does (§2.8, §3.4): it must be in the grid's
+ * format, 1 for a fixed interval with equal `interval` and
+ * `alignmentOffset`, 2 for a calendar interval with an equal `grid`.
+ */
+export function gridMismatch(
+  stored: {
+    format?: unknown;
+    interval?: unknown;
+    alignmentOffset?: unknown;
+    grid?: unknown;
+  },
+  own: {
+    interval: number | ResolvedCalendarInterval;
+    alignmentOffset: number;
+  },
+): string | undefined {
+  const { format } = stored;
+  const calendar = typeof own.interval !== "number";
+  if (format !== 1 && format !== 2) return `unsupported format ${show(format)}`;
+  if (format !== (calendar ? 2 : 1)) {
+    return `format ${format} names another kind of grid than the cache's`;
+  }
+  if (calendar) {
+    return namesCalendar(stored.grid, own.interval as ResolvedCalendarInterval)
+      ? undefined
+      : "grid differs from the cache grid";
+  }
+  if (stored.interval !== own.interval) {
+    return `interval ${show(stored.interval)} differs from the cache grid`;
+  }
+  return stored.alignmentOffset === own.alignmentOffset
+    ? undefined
+    : `alignmentOffset ${show(stored.alignmentOffset)} differs from the cache grid`;
+}
+
+/** The payload must describe the cache's own grid, in the grid's format. */
+function checkGrid(p: DenseSegmentPayload, options: SegmentOptions): void {
+  const mismatch = gridMismatch(p, options.grid);
+  if (mismatch !== undefined) fail(mismatch);
+  if (p.layout !== "dense") fail(`unsupported layout ${show(p.layout)}`);
+}
+
+/**
+ * Checks start and count; returns the slot of the payload's first entry.
+ * `start` is converted once: an anchor costs one conversion (N113).
+ */
 function checkSpan(p: DenseSegmentPayload, options: SegmentOptions): number {
   const { grid, slotCap } = options;
-  if (!isAligned(p.start, grid)) {
-    fail(`start ${show(p.start)} is not an aligned safe-integer timestamp`);
+  let first: number;
+  try {
+    first = slotOf(p.start, grid);
+  } catch {
+    return fail(
+      `start ${show(p.start)} is not an aligned safe-integer timestamp`,
+    );
   }
   if (!Number.isSafeInteger(p.count) || p.count < 1) {
     fail(`count must be a positive integer, got ${show(p.count)}`);
@@ -48,11 +99,21 @@ function checkSpan(p: DenseSegmentPayload, options: SegmentOptions): number {
   if (p.count > slotCap) {
     fail(`count ${p.count} exceeds the slot cap ${slotCap}`);
   }
-  const first = slotOf(p.start, grid);
+  // A format 2 payload also says which slot its writer gave `start`: zone
+  // data that places the instant in another slot refuses it (§4.5).
+  if (p.format === 2 && p.startSlot !== first) {
+    fail(
+      `startSlot ${show(p.startSlot)} is not the slot of start ${p.start} here`,
+    );
+  }
   // (count - 1) first: `first + count` can round before the subtraction.
   const last = first + (p.count - 1);
-  if (!Number.isSafeInteger(last) || !Number.isSafeInteger(msOf(last, grid))) {
-    fail("count extends beyond the last safe-integer timestamp");
+  if (!inDomain(last, grid)) {
+    fail(
+      grid.calendar === undefined
+        ? "count extends beyond the last safe-integer timestamp"
+        : "count extends beyond the calendar's domain",
+    );
   }
   return first;
 }

@@ -1,4 +1,5 @@
 import { ConfigError, show } from "../errors";
+import { resolveGridFields } from "../grid";
 import { MAX_SLOT_CAP } from "../segment/types";
 import {
   type CacheConfig,
@@ -26,24 +27,6 @@ function validateId(id: unknown): string {
     fail(`id must be a non-empty string, got ${show(id)}`);
   }
   return id;
-}
-
-/**
- * Any integer offset is accepted (architecture §2.2 only requires
- * `(t - alignmentOffset) % interval === 0`) and normalized into
- * [0, interval): the grid is unchanged, and configs naming the same grid
- * resolve identically. Integers only, because timestamps are integers.
- */
-function validateAlignmentOffset(offset: unknown, interval: number): number {
-  if (offset === undefined) return 0;
-  if (typeof offset !== "number" || !Number.isSafeInteger(offset)) {
-    fail(`alignmentOffset must be an integer, got ${show(offset)}`);
-  }
-  // Add interval only to a negative remainder: `r + interval` then stays below
-  // interval, so the result is exact even when interval nears 2^53.
-  // Math.abs turns a -0 remainder into 0.
-  const r = offset % interval;
-  return r < 0 ? r + interval : Math.abs(r);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -115,13 +98,12 @@ export function resolveCacheConfig(config: CacheConfig): ResolvedCacheConfig {
     fail(`config must be an object, got ${show(config)}`);
   }
   const id = validateId(config.id);
-  const interval = requirePositiveSafeInteger(config.interval, "interval");
+  const grid = resolveGridFields(config.interval, config.alignmentOffset);
   const version = validateVersion(config.version);
   const finalizedUntil = validateFinalizedUntil(config.finalizedUntil);
   const resolved: ResolvedCacheConfig = {
     id,
-    interval,
-    alignmentOffset: validateAlignmentOffset(config.alignmentOffset, interval),
+    ...grid,
     fields: validateFields(config.fields),
     gapSplitK:
       config.gapSplitK === undefined

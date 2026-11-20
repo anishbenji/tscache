@@ -9,4 +9,11 @@
  * @module @anishbenji/tscache/fetcher
  */
 export { AUTH_INVALID_CODE, AuthInvalidError } from "../errors";
-export type { Fetcher, FetchRequest, FetchResponse, Range } from "../types";
+export type {
+  CalendarInterval,
+  Fetcher,
+  FetchRequest,
+  FetchResponse,
+  Range,
+  ResolvedCalendarInterval,
+} from "../types";

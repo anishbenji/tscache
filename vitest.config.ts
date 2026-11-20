@@ -20,6 +20,7 @@ export default defineConfig({
         find: /^@anishbenji\/tscache\/fetcher$/,
         replacement: entry("fetcher"),
       },
+      { find: /^@anishbenji\/tscache\/grid$/, replacement: entry("grid") },
     ],
   },
   test: {

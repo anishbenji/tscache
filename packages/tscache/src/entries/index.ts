@@ -26,6 +26,9 @@ export {
 export { decodeSnapshot, encodeSnapshot } from "../snapshot";
 export type {
   CacheConfig,
+  CalendarInterval,
+  CalendarSegmentPayload,
+  CalendarSnapshot,
   ClientEvents,
   ClientOptions,
   DenseSegmentPayload,
@@ -33,6 +36,8 @@ export type {
   EncodedSegmentPayload,
   EncodedSnapshot,
   FieldArray,
+  FixedSegmentPayload,
+  FixedSnapshot,
   GetOptions,
   GetResult,
   HostingMode,
@@ -46,6 +51,7 @@ export type {
   PutResult,
   Range,
   RequestId,
+  ResolvedCalendarInterval,
   Snapshot,
   WorkerFeature,
 } from "../types";

@@ -15,6 +15,7 @@ export default defineConfig([
       worker: "src/entries/worker.ts",
       engine: "src/entries/engine.ts",
       fetcher: "src/entries/fetcher.ts",
+      grid: "src/entries/grid.ts",
     },
     platform: "browser",
     // Rolldown replaces process.env.NODE_ENV on the browser platform; the

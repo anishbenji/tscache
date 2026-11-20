@@ -412,15 +412,28 @@ export class DenseSegment implements Segment {
         data: data.buffer as ArrayBuffer,
       };
     });
-    return {
-      format: 1,
-      layout: "dense",
-      start: msOf(extent.start, this.#grid),
+    const grid = this.#grid;
+    const rest = {
+      layout: "dense" as const,
+      start: msOf(extent.start, grid),
       count,
-      interval: this.#grid.interval,
-      alignmentOffset: this.#grid.alignmentOffset,
       mask,
       fields,
     };
+    // A calendar grid writes format 2 (§3.4): its descriptor in place of
+    // `interval` and `alignmentOffset`, and the slot index of `start`.
+    return grid.calendar === undefined
+      ? {
+          format: 1,
+          ...rest,
+          interval: grid.interval,
+          alignmentOffset: grid.alignmentOffset,
+        }
+      : {
+          format: 2,
+          ...rest,
+          grid: { ...grid.interval },
+          startSlot: extent.start,
+        };
   }
 }

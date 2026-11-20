@@ -11,7 +11,7 @@
  * function of which points are present, whatever order they arrived in.
  */
 
-import type { SlotRange } from "../grid";
+import { type Grid, gridOf, type SlotRange } from "../grid";
 import { assertPoints } from "../segment/assert";
 import { DenseSegment } from "../segment/dense";
 import { FIELD_ARRAYS, type FieldArrayConstructor } from "../segment/dtype";
@@ -78,12 +78,9 @@ export class SegmentStore {
    */
   #onWrite: ((page: number) => void) | undefined;
 
-  constructor(config: ResolvedCacheConfig) {
+  constructor(config: ResolvedCacheConfig, grid: Grid = gridOf(config)) {
     this.#options = {
-      grid: {
-        interval: config.interval,
-        alignmentOffset: config.alignmentOffset,
-      },
+      grid,
       fields: config.fields,
       slotCap: config.segmentSlotCap,
     };

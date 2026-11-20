@@ -40,12 +40,69 @@ export interface Range {
   end: number;
 }
 
+/**
+ * A calendar interval (docs/architecture.md §2.2, N106): one slot per
+ * calendar unit in a time zone. Every calendar day is a slot, weekends and
+ * holidays included; a day without a session is an empty slot that a fetch
+ * confirms as a gap (N110). Slots are numbered from the unit that contains
+ * the local date 1970-01-01, and the supported domain is the units whose
+ * first local date lies in the years 1 to 9999 (N117).
+ *
+ * @example
+ * // Daily bars of a New York session, stamped at the open, all year.
+ * const interval: CalendarInterval = {
+ *   unit: "day",
+ *   zone: "America/New_York",
+ *   at: "09:30",
+ * };
+ */
+export interface CalendarInterval {
+  /** The calendar unit one slot spans (N107). */
+  unit: "day" | "week" | "month" | "quarter" | "year";
+  /**
+   * An IANA time zone the runtime resolves, compared as written: two aliases
+   * of one zone name two grids, so use canonical names (N112). Default
+   * `"UTC"`. Zone rules come from the runtime's `Intl` (N108).
+   */
+  zone?: string;
+  /**
+   * The local wall-clock time each slot starts at, `"HH:MM"` in 24-hour
+   * form from `"00:00"` to `"23:59"`. Default `"00:00"`. A local time a
+   * transition skips starts after the shift (02:30 becomes 03:30), and one
+   * that occurs twice starts at the earlier instant (N111).
+   */
+  at?: string;
+  /**
+   * For `unit: "week"` only: the first day of the week, 1 = Monday to
+   * 7 = Sunday (ISO 8601). Default 1.
+   */
+  weekStart?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+}
+
+/**
+ * A {@link CalendarInterval} with its defaults applied, frozen: `zone` and
+ * `at` are always present, `weekStart` only for weeks. It is what a resolved
+ * config, a fetch request and a format 2 snapshot carry.
+ */
+export type ResolvedCalendarInterval = Readonly<
+  Required<Pick<CalendarInterval, "unit" | "zone" | "at">> &
+    Pick<CalendarInterval, "weekStart">
+>;
+
 /** Consumer-facing cache configuration. See docs/architecture.md §2.2. */
 export interface CacheConfig {
   id: string;
-  /** Interval in ms. Required — no default (resolved decision #2). */
-  interval: number;
-  /** Timestamps satisfy (t - alignmentOffset) % interval === 0. Default 0. */
+  /**
+   * The grid's step: a fixed interval in ms, or a calendar interval
+   * (N109). Required, with no default (resolved decision #2). Narrow it
+   * before doing arithmetic: `typeof interval === "number"`.
+   */
+  interval: number | CalendarInterval;
+  /**
+   * Fixed intervals only: timestamps satisfy
+   * (t - alignmentOffset) % interval === 0. Default 0. Must be absent or 0
+   * with a calendar interval, whose `at` and `zone` place the slots.
+   */
   alignmentOffset?: number;
   /**
    * Field name → dtype. At least one field. Presence is per point, not per
@@ -86,8 +143,12 @@ export interface CacheConfig {
 /** {@link CacheConfig} with defaults applied; frozen. Internal currency. */
 export interface ResolvedCacheConfig {
   id: string;
-  interval: number;
-  /** Normalized into [0, interval); names the same grid as the input. */
+  /** A fixed interval in ms, or the calendar interval with its defaults, frozen. */
+  interval: number | ResolvedCalendarInterval;
+  /**
+   * Normalized into [0, interval); names the same grid as the input. 0 for a
+   * calendar interval.
+   */
   alignmentOffset: number;
   fields: Readonly<Record<string, Dtype>>;
   gapSplitK: number;
@@ -134,20 +195,43 @@ export interface GetOptions {
  * three uses: RPC message, IndexedDB value and SSR hydration payload, so it
  * must stay a plain structured-cloneable object.
  */
-export interface DenseSegmentPayload {
-  /** Payload schema version. */
-  format: 1;
+export type DenseSegmentPayload = FixedSegmentPayload | CalendarSegmentPayload;
+
+/** What both payload formats share. */
+interface SegmentPayloadBase {
   layout: "dense";
   /** Timestamp of the first slot. */
   start: number;
-  /** Slot count; slot i is at start + i * interval. */
+  /** Slot count. */
   count: number;
-  interval: number;
-  alignmentOffset: number;
   /** ceil(count / 8) bytes; slot i is bit (i & 7) of byte (i >> 3). */
   mask: Uint8Array;
   /** Schema declaration order; little-endian; absent slots hold zero. */
   fields: { name: string; dtype: Dtype; data: ArrayBuffer }[];
+}
+
+/** The payload of a cache on a fixed grid: slot i is at start + i * interval. */
+export interface FixedSegmentPayload extends SegmentPayloadBase {
+  /** Payload schema version. */
+  format: 1;
+  interval: number;
+  alignmentOffset: number;
+}
+
+/**
+ * The payload of a cache on a calendar grid (N114): slot i is the i-th slot
+ * after the slot of `start`.
+ */
+export interface CalendarSegmentPayload extends SegmentPayloadBase {
+  /** Payload schema version. */
+  format: 2;
+  /** The calendar interval of the cache it was taken from. */
+  grid: ResolvedCalendarInterval;
+  /**
+   * The slot index the writer gave `start` (N113): a reader whose zone data
+   * places `start` in another slot refuses the payload.
+   */
+  startSlot: number;
 }
 
 /**
@@ -157,12 +241,11 @@ export interface DenseSegmentPayload {
  * and the covered sub-ranges. Take one with `get(range, { snapshot: true })`;
  * apply one with `CacheHandle.hydrate`.
  */
-export interface Snapshot {
-  /** The envelope's schema version; each payload carries its own `format`. */
-  format: 1;
-  /** The grid and schema of the cache it was taken from; hydrate refuses any other. */
-  interval: number;
-  alignmentOffset: number;
+export type Snapshot = FixedSnapshot | CalendarSnapshot;
+
+/** What both snapshot formats share. */
+interface SnapshotBase {
+  /** The schema of the cache it was taken from; hydrate refuses any other. */
   fields: Record<string, Dtype>;
   /** The request it answers, snapped outward (N1), in ms. */
   range: Range;
@@ -175,9 +258,36 @@ export interface Snapshot {
   /**
    * The present points inside `range`, covered or not (N16): one payload per
    * segment with a point inside the range, holding exactly those points;
-   * ascending and disjoint; fresh buffers.
+   * ascending and disjoint; fresh buffers. Each is in the envelope's
+   * format: `hydrate` refuses a payload of the other one.
    */
   segments: DenseSegmentPayload[];
+}
+
+/** The snapshot of a cache on a fixed grid. */
+export interface FixedSnapshot extends SnapshotBase {
+  /** The envelope's schema version; each payload carries its own `format`. */
+  format: 1;
+  /** The grid of the cache it was taken from; hydrate refuses any other. */
+  interval: number;
+  alignmentOffset: number;
+}
+
+/**
+ * The snapshot of a cache on a calendar grid (N114). Beside each instant
+ * that names a slot it stores the slot index the writer gave it (N113), so
+ * a reader whose time-zone data places an instant in another slot refuses
+ * the snapshot instead of misplacing its points.
+ */
+export interface CalendarSnapshot extends SnapshotBase {
+  /** The envelope's schema version; each payload carries its own `format`. */
+  format: 2;
+  /** The calendar interval of the cache it was taken from; hydrate refuses any other. */
+  grid: ResolvedCalendarInterval;
+  /** The slot indices of `range.start` and `range.end`. */
+  rangeSlots: [number, number];
+  /** One pair for each range of `coverage`, in order: the slot indices of its two ends. */
+  coverageSlots: [number, number][];
 }
 
 /** What `hydrate` did (§2.8, N35). */
@@ -191,23 +301,30 @@ export interface HydrateResult {
   skipped?: "version-mismatch";
 }
 
-/** A {@link DenseSegmentPayload} with its binary parts as base64 text (N38). */
-export interface EncodedSegmentPayload
-  extends Omit<DenseSegmentPayload, "mask" | "fields"> {
+/**
+ * A {@link DenseSegmentPayload} with its binary parts as base64 text (N38),
+ * in the format of its payload.
+ */
+export type EncodedSegmentPayload = (
+  | Omit<FixedSegmentPayload, "mask" | "fields">
+  | Omit<CalendarSegmentPayload, "mask" | "fields">
+) & {
   /** Base64 of the mask bytes. */
   mask: string;
   /** Each field's data as base64 of its little-endian bytes. */
   fields: { name: string; dtype: Dtype; data: string }[];
-}
+};
 
 /**
  * A {@link Snapshot} as a plain JSON value (N38): `encodeSnapshot` makes one,
  * `decodeSnapshot` restores the snapshot. `NaN` survives, as JSON numbers
- * would not.
+ * would not. A calendar cache's snapshot keeps `format: 2`, its `grid` and
+ * its slot indices as plain JSON.
  */
-export interface EncodedSnapshot extends Omit<Snapshot, "segments"> {
-  segments: EncodedSegmentPayload[];
-}
+export type EncodedSnapshot = (
+  | Omit<FixedSnapshot, "segments">
+  | Omit<CalendarSnapshot, "segments">
+) & { segments: EncodedSegmentPayload[] };
 
 export interface PutBatch {
   /** Sorted ascending, aligned, no duplicates — else the whole batch rejects. */
@@ -314,7 +431,7 @@ export type RequestId = string;
  * An optional feature a worker may offer, listed in its hello (N79) and
  * exposed as `TscacheClient.features`.
  */
-export type WorkerFeature = "cacheChanged" | "memoryBudget";
+export type WorkerFeature = "cacheChanged" | "memoryBudget" | "calendar-grid";
 
 /** Three scopes, one channel (N5, §2.7). */
 export interface ClientEvents {
@@ -407,9 +524,20 @@ export interface ClientEvents {
 /** What the worker asks a fetcher for (§2.5): one coalesced miss range. */
 export interface FetchRequest {
   cacheId: string;
-  /** Inclusive ms range, already coalesced (flanks extended by one interval). */
+  /**
+   * Inclusive ms range, aligned to slot starts and already coalesced: a miss
+   * that abuts covered slots is extended one slot into them, and a flank
+   * with no coverage next to it is not.
+   */
   range: Range;
-  interval: number;
+  /**
+   * The cache's interval, as its config resolved it: ms, or a calendar
+   * interval with its defaults applied. Narrow it before doing arithmetic
+   * or building a query string: `String(interval)` of a calendar interval
+   * is `"[object Object]"`.
+   */
+  interval: number | ResolvedCalendarInterval;
+  /** 0 for a calendar interval. */
   alignmentOffset: number;
   /** The latest context given to createClient or updateAuth. */
   context: unknown;
