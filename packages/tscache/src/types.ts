@@ -146,7 +146,11 @@ export interface DenseSegmentPayload {
   alignmentOffset: number;
   /** ceil(count / 8) bytes; slot i is bit (i & 7) of byte (i >> 3). */
   mask: Uint8Array;
-  /** Schema key order (`Object.entries`); little-endian; absent slots hold zero. */
+  /**
+   * Schema key order (`Object.entries`): canonical array-index names (`"0"`,
+   * `"12"`) first, ascending, then the others in insertion order;
+   * little-endian; absent slots hold zero.
+   */
   fields: { name: string; dtype: Dtype; data: ArrayBuffer }[];
 }
 
