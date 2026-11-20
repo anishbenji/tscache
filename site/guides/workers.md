@@ -86,7 +86,9 @@ The worker loads its persistence code with `import()`, only once a cache with `p
 downloaded but not run; with `worker: { format: "es" }` in `vite.config.ts` it is a chunk of its own,
 which an app that persists nothing never downloads ([the Vite plugin](/guides/vite) warns in
 `vite build` when the format is `'iife'`). Pass the URL as Vite gives it: the chunks import the
-worker file by that URL, so a query added to it would load the worker twice.
+worker file by that URL, so a query added to it would load the worker twice. Benchmarks and tests add
+a query on purpose, because a SharedWorker is one per script URL and a fresh URL gives each run a fresh
+worker; an application does not need that.
 
 ### webpack 5 and Rspack
 
