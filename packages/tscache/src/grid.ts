@@ -117,36 +117,55 @@ export interface CalendarGridContext {
   readonly tableCount: number;
 }
 
+/**
+ * The runtime's offset formatters, by the name the runtime itself gives a
+ * zone: every spelling of one zone shares one, so the map is bounded by the
+ * zones the runtime knows, whatever a page sends.
+ */
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
-/** The runtime's formatter of a zone's offset; throws RangeError for an unknown zone. */
-function formatterOf(zone: string): Intl.DateTimeFormat {
-  let format = formatters.get(zone);
-  if (format === undefined) {
-    format = new Intl.DateTimeFormat("en-US", {
-      timeZone: zone,
-      timeZoneName: "longOffset",
-    });
-    formatters.set(zone, format);
-  }
-  return format;
+/** A formatter of a zone's offset; throws RangeError for a zone the runtime does not know. */
+function newFormatter(zone: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: zone,
+    timeZoneName: "longOffset",
+  });
 }
 
-// The sign may be an ASCII hyphen or U+2212, as the runtime's locale data has it.
-const OFFSET = /GMT(?:([+\-\u2212])(\d+)(?::(\d+))?(?::(\d+))?)?$/;
+const OFFSET = /GMT(?:([+-])(\d+)(?::(\d+))?(?::(\d+))?)?$/;
 
-/** The zone's UTC offset in ms at `instant`, from the runtime's zone data (N108). */
-function intlOffset(zone: string, instant: number): number {
-  // "…, GMT-04:56:02", "…, GMT+05:45" or "…, GMT".
-  const match = OFFSET.exec(formatterOf(zone).format(instant));
-  if (match === null) throw new RangeError(`no offset for ${zone}`);
-  const [, sign = "+", h = "0", m = "0", s = "0"] = match;
+/**
+ * The offset in ms a formatted instant ends with: "…, GMT-04:56:02",
+ * "…, GMT+05:45" or "…, GMT". The en-US locale writes the sign as an ASCII
+ * hyphen in every runtime the library runs in.
+ */
+function parseOffset(text: string): number {
+  const match = OFFSET.exec(text);
+  if (match === null) throw new RangeError(`no zone offset in "${text}"`);
+  const [, sign, h = "0", m = "0", s = "0"] = match;
   const ms = (+h * 3600 + +m * 60 + +s) * 1000;
-  return sign === "+" ? ms : -ms;
+  return sign === "-" ? -ms : ms;
+}
+
+/**
+ * A zone's UTC offset in ms at an instant, from the runtime's zone data
+ * (N108). The formatter is the one kept for the zone's own name.
+ */
+function intlOffsetOf(zone: string): (instant: number) => number {
+  const made = newFormatter(zone);
+  const name = made.resolvedOptions().timeZone;
+  const format = formatters.get(name) ?? made;
+  formatters.set(name, format);
+  return (instant) => parseOffset(format.format(instant));
+}
+
+/** What `calendarGridInternals` reads (tests): no package entry exports it. */
+export function calendarGridInternals(): { formatters: number } {
+  return { formatters: formatters.size };
 }
 
 class Context implements CalendarGridContext {
-  readonly offsetAt: (zone: string, instant: number) => number;
+  readonly #offsetAt: ((zone: string, instant: number) => number) | undefined;
   readonly onFloorStep: ((direction: -1 | 1) => void) | undefined;
   readonly lookupBudget: number;
   readonly #capacity: number;
@@ -154,9 +173,11 @@ class Context implements CalendarGridContext {
   readonly grids: Map<string, CalendarGrid> = new Map();
   /** Every table held, least recently used first, with its owner and block. */
   readonly #order = new Map<Float64Array, { owner: Calendar; block: number }>();
+  /** The table used last: using it again changes nothing in the order. */
+  #recent: Float64Array | undefined;
 
   constructor(options: CalendarGridOptions) {
-    this.offsetAt = options.offsetAt ?? intlOffset;
+    this.#offsetAt = options.offsetAt;
     this.onFloorStep = options.onFloorStep;
     this.lookupBudget = options.lookupBudget ?? LOOKUP_BUDGET;
     this.#capacity = options.tableCapacity ?? TABLE_CAPACITY;
@@ -166,23 +187,38 @@ class Context implements CalendarGridContext {
     return this.#order.size;
   }
 
-  /** Marks a held table as the most recently used. */
+  /** A zone's offset function: the injected rules, or the runtime's. */
+  offsetOf(zone: string): (instant: number) => number {
+    const injected = this.#offsetAt;
+    return injected === undefined
+      ? intlOffsetOf(zone)
+      : (instant) => injected(zone, instant);
+  }
+
+  /**
+   * Marks a held table as the most recently used. Called for every use,
+   * so the common case, the table used last, is one comparison.
+   */
   touch(table: Float64Array): void {
+    if (table === this.#recent) return;
     const entry = this.#order.get(table);
     if (entry === undefined) return;
     this.#order.delete(table);
     this.#order.set(table, entry);
+    this.#recent = table;
   }
 
   /** Holds a new table, dropping the least recently used ones above the capacity. */
   hold(table: Float64Array, owner: Calendar, block: number): void {
     this.#order.set(table, { owner, block });
+    this.#recent = table;
     while (this.#order.size > this.#capacity) {
       const [oldest, entry] = this.#order.entries().next().value as [
         Float64Array,
         { owner: Calendar; block: number },
       ];
       this.#order.delete(oldest);
+      if (oldest === this.#recent) this.#recent = undefined;
       entry.owner.drop(entry.block);
     }
   }
@@ -241,12 +277,16 @@ function validWeekStart(unit: Unit, weekStart: unknown): WeekDay | undefined {
   return first as WeekDay;
 }
 
-/** A zone the runtime knows; `"UTC"` needs no zone data. */
+/**
+ * A zone the runtime knows and whose offset it can report; `"UTC"` needs no
+ * zone data. The formatter it tries is thrown away: nothing is kept for a
+ * config that may still be rejected, or for a spelling (S1.1).
+ */
 function validZone(zone: unknown): string {
   let known = typeof zone === "string" && zone.length > 0;
   if (known && zone !== "UTC") {
     try {
-      formatterOf(zone as string);
+      parseOffset(newFormatter(zone as string).format(0));
     } catch {
       known = false;
     }
@@ -265,6 +305,18 @@ function validZone(zone: unknown): string {
  * naming the offending field.
  */
 function resolveCalendarInterval(input: unknown): ResolvedCalendarInterval {
+  return withZone(calendarFields(input));
+}
+
+/** A calendar interval's fields with their defaults, the zone not yet checked. */
+interface CalendarFields {
+  unit: Unit;
+  at: string;
+  weekStart: WeekDay | undefined;
+  zone: unknown;
+}
+
+function calendarFields(input: unknown): CalendarFields {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     failConfig(
       `interval must be a positive integer of ms or a calendar interval, got ${show(input)}`,
@@ -274,10 +326,15 @@ function resolveCalendarInterval(input: unknown): ResolvedCalendarInterval {
   const unit = validUnit(raw.unit);
   const at = validAt(raw.at ?? "00:00");
   const weekStart = validWeekStart(unit, raw.weekStart);
-  const zone = validZone(raw.zone ?? "UTC");
+  return { unit, at, weekStart, zone: raw.zone ?? "UTC" };
+}
+
+/** The resolved interval of validated fields, once the zone is checked too. */
+function withZone(fields: CalendarFields): ResolvedCalendarInterval {
+  const { unit, at, weekStart } = fields;
   return Object.freeze({
     unit,
-    zone,
+    zone: validZone(fields.zone),
     at,
     ...(weekStart === undefined ? {} : { weekStart }),
   });
@@ -350,13 +407,15 @@ export function createCalendarGrid(
 ): CalendarGrid {
   defaultContext ??= new Context({});
   const owner = (context as Context | undefined) ?? defaultContext;
-  const resolved = resolveCalendarInterval(descriptor);
-  const key = `${resolved.unit}|${resolved.zone}|${resolved.at}|${resolved.weekStart}`;
-  let grid = owner.grids.get(key);
-  if (grid === undefined) {
-    grid = new Calendar(resolved, owner).grid;
-    owner.grids.set(key, grid);
-  }
+  const fields = calendarFields(descriptor);
+  // A grid the context holds was made from a checked zone: only a new one
+  // pays for the check.
+  const { zone } = fields;
+  const key = `${fields.unit}|${fields.at}|${fields.weekStart}|${show(zone)}`;
+  const held = typeof zone === "string" ? owner.grids.get(key) : undefined;
+  if (held !== undefined) return held;
+  const { grid } = new Calendar(withZone(fields), owner);
+  owner.grids.set(key, grid);
   return grid;
 }
 
@@ -392,6 +451,8 @@ class Calendar {
   readonly #context: Context;
   readonly #zone: string;
   readonly #utc: boolean;
+  /** The zone's offset at an instant; undefined in UTC, where nothing is looked up. */
+  readonly #offset: ((instant: number) => number) | undefined;
   /** `at` in ms after local midnight. */
   readonly #at: number;
   /** Months per slot; 0 for days and weeks. */
@@ -421,6 +482,7 @@ class Calendar {
     this.#context = context;
     this.#zone = zone;
     this.#utc = zone === "UTC";
+    this.#offset = this.#utc ? undefined : context.offsetOf(zone);
     this.#at = (+at.slice(0, 2) * 60 + +at.slice(3)) * 60_000;
     this.#months = MONTHS[unit] ?? 0;
     this.#days = unit === "week" ? 7 : 1;
@@ -469,14 +531,14 @@ class Calendar {
    * and one that occurs twice to the earlier instant.
    */
   resolve(nominal: number): number {
-    if (this.#utc) return nominal;
-    const offsetAt = this.#context.offsetAt;
-    const before = offsetAt(this.#zone, nominal - DAY);
+    const offset = this.#offset;
+    if (offset === undefined) return nominal;
+    const before = offset(nominal - DAY);
     const first = nominal - before;
-    const at = offsetAt(this.#zone, first);
+    const at = offset(first);
     if (at === before) return first;
     const second = nominal - at;
-    return offsetAt(this.#zone, second) === at ? second : first;
+    return offset(second) === at ? second : first;
   }
 
   /**
@@ -492,13 +554,16 @@ class Calendar {
 
   /** The held table of a block, marked as used; undefined when none is held. */
   #table(block: number): Float64Array | undefined {
-    if (block === this.#lastBlock) return this.#lastTable;
-    const table = this.#tables.get(block);
-    if (table !== undefined) {
-      this.#context.touch(table);
+    let table = this.#lastTable;
+    if (block !== this.#lastBlock) {
+      table = this.#tables.get(block);
+      if (table === undefined) return undefined;
       this.#lastBlock = block;
       this.#lastTable = table;
     }
+    // Every use counts in the context's order, this grid's last table
+    // included: another grid may have used a table since (N124).
+    if (table !== undefined) this.#context.touch(table);
     return table;
   }
 
