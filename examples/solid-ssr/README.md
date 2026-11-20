@@ -62,10 +62,13 @@ Reload the page and the figure covers all but the newest minute. This suits
 public data only: the sensor's readings are the same for every visitor, so
 a cache shared across requests leaks nothing. Data that differs per user
 needs a client per user, or no server cache at all. A shared cache also
-keeps everything it was ever asked for, since tscache v1 has no eviction:
-this page adds one reading a minute, but a server that reads many series
-over long ranges should clear its caches on its own clock (`clear`,
-`invalidate`, §2.4). If creating the client fails, the next render tries
+keeps everything it was ever asked for unless the client has a memory
+budget: tscache sets none by default, and with `memoryBudget` it evicts the
+least recently used pages above the budget, which a later read fetches
+again (§2.9). This page adds one reading a minute and sets no budget, but a
+server that reads many series over long ranges should set one, as the
+[Memory guide](../../site/guides/patterns.md#memory) recommends, or clear its
+caches on its own clock (`clear`, `invalidate`, §2.4). If creating the client fails, the next render tries
 again; in dev, the client is disposed before the dev server evaluates the
 server entry again after a change.
 
@@ -126,6 +129,10 @@ format, encoded as JSON.
 - The snapshot carries the dataset version the mock backend reports, so
   `hydrate` refuses a snapshot of another version (§2.8). A backend that
   reports no version gets no such check.
+- A seed that fails, for any reason but a worker without `hydrate`, fails
+  the cache memo: the page says the browser's cache failed and keeps the
+  server's figures. It tries again only when a lost worker brings a new
+  client, or on a reload.
 - Every `get` up to now fetches again. A `get` snaps its end outward to the
   minute after now, which the backend's watermark keeps provisional, so it
   stays outside coverage (§2.4); and its miss, which abuts the coverage, is
