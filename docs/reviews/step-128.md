@@ -152,14 +152,14 @@ Run 1, on `6fab944`: one finding, accepted.
 
 ## Verification
 
-| Command                                    | Result                                                                                                                |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `bunx attw --pack .` in `packages/tscache` | The table above: `node10` "Resolution failed" on all five entries                                                     |
-| `bun scripts/size.ts`                      | Every entry `ok`; sizes as in decision 5                                                                              |
-| `bunx biome ci .`                          | One warning (decision 1), no error                                                                                    |
-| `bunx knip`                                | Exit 0; two configuration hints (decision 2)                                                                          |
-| `bun run docs:check`                       | Pending on the final head                                                                                             |
-| `heavy-run.sh "128 child: ci" bun run ci`  | Exit 0 on `c2a7e21`: Vitest 3,058 passed in 156 files; Playwright, bench smoke and e2e smoke `ok`; final head pending |
+| Command                                    | Result                                                                                                                                                             |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bunx attw --pack .` in `packages/tscache` | The table above: `node10` "Resolution failed" on all five entries                                                                                                  |
+| `bun scripts/size.ts`                      | Every entry `ok`; sizes as in decision 5                                                                                                                           |
+| `bunx biome ci .`                          | One warning (decision 1), no error                                                                                                                                 |
+| `bunx knip`                                | Exit 0; two configuration hints (decision 2)                                                                                                                       |
+| `bun run docs:check`                       | Exit 0 on `969ff81`; `doc-anchors: 246 anchors in 42 pages resolve`                                                                                                |
+| `heavy-run.sh "128 child: ci" bun run ci`  | Exit 0 on `c2a7e21`, `6fab944` and `969ff81` (after the pre-review fixes): Vitest 3,058 passed in 156 files, Playwright 193 passed, bench smoke and e2e smoke `ok` |
 
 ## Contract-test changes
 
