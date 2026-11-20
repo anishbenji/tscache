@@ -1,6 +1,6 @@
 # Solid
 
-The Solid snippet targets Solid 2.0 (release candidate 14) with `@solidjs/web`. Solid 2 removed
+The Solid snippet targets Solid 2.0 (2.0.3) with `@solidjs/web`. Solid 2 removed
 `createResource`, so a series is an async memo.
 
 ## The adapter
