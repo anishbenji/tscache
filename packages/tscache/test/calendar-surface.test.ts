@@ -98,6 +98,32 @@ describe("the grid entry (test 18)", () => {
     expect(() => snapRange({ start: 10, end: 0 }, 10)).toThrow(
       InvalidRangeError,
     );
+    // An instant is checked as a range's end is, on both kinds of grid
+    // (§2.10): not a finite number within ±(2^53 − 1), no slot.
+    const max = Number.MAX_SAFE_INTEGER;
+    for (const interval of [10, { unit: "day" }] as const) {
+      for (const t of [Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, "5"]) {
+        expect(() => slotStart(t as number, interval)).toThrow(
+          InvalidRangeError,
+        );
+        expect(() => nextSlotStart(t as number, interval)).toThrow(
+          InvalidRangeError,
+        );
+      }
+    }
+    // A fixed grid's slot whose start, or whose next start, is no safe
+    // integer has none to return.
+    expect(() => slotStart(-max, 10)).toThrow(InvalidRangeError);
+    expect(() => nextSlotStart(-max, 10)).toThrow(InvalidRangeError);
+    expect(() => nextSlotStart(max - 1, 10)).toThrow(InvalidRangeError);
+    expect(slotStart(max - 1, 10)).toBe(max - 1);
+    expect(slotStart(max, 10)).toBe(max - 1);
+    expect(nextSlotStart(max - 12, 10)).toBe(max - 11);
+    expect(slotStart(-max + 1, 10)).toBe(-max + 1);
+    // A calendar's last slot has a next start, the end of the domain.
+    expect(nextSlotStart(Date.UTC(9999, 11, 31, 12), { unit: "day" })).toBe(
+      Date.UTC(9999, 11, 31) + 86_400_000,
+    );
     // Outside a calendar's domain, the years 1 to 9999.
     expect(() => slotStart(Date.UTC(12_000, 0, 1), { unit: "day" })).toThrow(
       InvalidRangeError,

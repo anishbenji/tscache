@@ -1063,6 +1063,37 @@ export function slotAtOrAfter(t: number, g: Grid): number {
 }
 
 /**
+ * The slot that contains `t`, for a caller outside the engine (the grid
+ * entry, §2.10): `t` is checked as a watermark is, and the slot must have
+ * a start to return. Throws InvalidRangeError otherwise.
+ */
+export function slotContaining(t: number, g: Grid): number {
+  assertTimestamp(t, "timestamp");
+  const slot = floorSlot(t, g);
+  if (!inDomain(slot, g)) {
+    throw new InvalidRangeError(
+      `the grid point at or before ${t} lies beyond ±(2^53 - 1)`,
+    );
+  }
+  return slot;
+}
+
+/**
+ * The start of the slot after `slot`, a slot of the domain: the end of the
+ * domain itself on a calendar grid's last slot. Throws InvalidRangeError
+ * when a fixed grid's next point is no safe integer.
+ */
+export function startAfter(slot: number, g: Grid): number {
+  const next = startOf(slot + 1, g);
+  if (!Number.isSafeInteger(next)) {
+    throw new InvalidRangeError(
+      `the grid point after slot ${slot} lies beyond ±(2^53 - 1)`,
+    );
+  }
+  return next;
+}
+
+/**
  * Slot range → inclusive ms Range (GetResult.coverage and misses). On a
  * calendar grid it throws InvalidRangeError for a slot outside the domain.
  */

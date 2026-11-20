@@ -11,11 +11,12 @@
  */
 
 import {
-  floorSlot,
   type Grid,
   gridOf,
   resolveGridFields,
+  slotContaining,
   snapOut,
+  startAfter,
   startOf,
   toMs,
 } from "../grid";
@@ -57,7 +58,9 @@ export function snapRange(
 /**
  * The start of the slot that contains `t`: the grid point at or before it.
  * With `Date.now()` it is the start of the forming bar. Throws
- * `InvalidRangeError` for a `t` outside a calendar's domain.
+ * `InvalidRangeError` for a `t` that is not a finite number within
+ * ±(2^53 − 1), outside a calendar's domain, or whose slot on a fixed grid
+ * starts beyond the safe integers.
  */
 export function slotStart(
   t: number,
@@ -65,13 +68,15 @@ export function slotStart(
   alignmentOffset?: number,
 ): number {
   const grid = gridFor(interval, alignmentOffset);
-  return startOf(floorSlot(t, grid), grid);
+  return startOf(slotContaining(t, grid), grid);
 }
 
 /**
  * The start of the slot after the one that contains `t`: the first grid
  * point after `t`. `nextSlotStart(t) - slotStart(t)` is the length of the
- * slot, which on a calendar grid differs from slot to slot.
+ * slot, which on a calendar grid differs from slot to slot. Throws
+ * `InvalidRangeError` as `slotStart` does, and when a fixed grid's next
+ * point lies beyond the safe integers.
  */
 export function nextSlotStart(
   t: number,
@@ -79,5 +84,5 @@ export function nextSlotStart(
   alignmentOffset?: number,
 ): number {
   const grid = gridFor(interval, alignmentOffset);
-  return startOf(floorSlot(t, grid) + 1, grid);
+  return startAfter(slotContaining(t, grid), grid);
 }
