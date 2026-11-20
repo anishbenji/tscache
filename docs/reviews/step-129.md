@@ -184,16 +184,16 @@ Brotli, bytes as `scripts/size.ts` reports them in kB; before is `main` at `6716
 | Entry                  | Before   | After    | Budget before | Budget after |
 | ---------------------- | -------- | -------- | ------------- | ------------ |
 | `index`                | 5.31 kB  | 5.65 kB  | 5,952 B       | unchanged    |
-| `index` (lazy)         | 14.25 kB | 17.55 kB | 15,104 B      | 18,240 B     |
+| `index` (lazy)         | 14.25 kB | 17.61 kB | 15,104 B      | 18,576 B     |
 | `index` (lazy, nested) | 5.39 kB  | 5.61 kB  | 6,000 B       | unchanged    |
-| `worker`               | 15.50 kB | 18.72 kB | 16,352 B      | 19,488 B     |
+| `worker`               | 15.50 kB | 18.85 kB | 16,352 B      | 19,888 B     |
 | `worker` (lazy)        | 5.39 kB  | 5.61 kB  | 5,824 B       | unchanged    |
-| `engine`               | 11.57 kB | 15.04 kB | 12,352 B      | 15,616 B     |
+| `engine`               | 11.57 kB | 15.14 kB | 12,352 B      | 16,016 B     |
 | `fetcher`              | 0.17 kB  | 0.17 kB  | 656 B         | unchanged    |
-| `grid`                 | —        | 3.53 kB  | —             | 3,728 B      |
+| `grid`                 | —        | 3.64 kB  | —             | 4,240 B      |
 | `vite`                 | 1.24 kB  | 1.24 kB  | 1,488 B       | unchanged    |
 
-A raised budget is the measured size plus max(512 B, 3 %), the repository's rule, measured when the engine landed (`7008d803`); an entry still inside its budget keeps it. The review fixes added 0.02 to 0.38 kB to the entries they touched (the grid entry most: its checks of an instant, and the formatter rules), inside the budgets set then, which are unchanged.
+A raised budget is the measured size plus max(512 B, 3 %), the repository's rule; an entry still inside its earlier budget keeps it. The four budgets this step raises or adds were first set when the engine landed (`7008d803`: `index` (lazy) 18,240 B, `worker` 19,488 B, `engine` 15,616 B, `grid` 3,728 B). The review fixes then grew the entries, the grid entry by 0.5 kB in all (its checks of an instant, the formatter and grid bounds, the fill rule run by run), until the grid entry measured exactly its budget and the engine was 0.1 kB under its own. The four are therefore set again by the same rule from the build after the round 1 fixes, so that the budgets this pull request introduces are those of the code it merges.
 
 ## Bench
 

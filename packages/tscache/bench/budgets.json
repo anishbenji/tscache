@@ -1,13 +1,13 @@
 {
   "brotli": {
     "index": 5952,
-    "index:lazy": 18240,
+    "index:lazy": 18576,
     "index:lazy:nested": 6000,
-    "worker": 19488,
+    "worker": 19888,
     "worker:lazy": 5824,
-    "engine": 15616,
+    "engine": 16016,
     "fetcher": 656,
-    "grid": 3728,
+    "grid": 4240,
     "vite": 1488
   }
 }
