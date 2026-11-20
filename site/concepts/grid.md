@@ -75,7 +75,10 @@ returns, `coverage`, `misses`, watermarks and events. What changes is where the 
   about 89 years.
 - **Units below a day** are not calendar units. A fixed interval covers those that divide an hour.
 
-Zone rules come from the runtime's `Intl`, so the library bundles no time-zone data. Two runtimes can
+Zone rules come from the runtime's `Intl`, so the library bundles no time-zone data. A zone other than
+`"UTC"` needs a runtime whose `Intl.DateTimeFormat` knows the `longOffset` time-zone name (Chrome 95,
+Firefox 91, Safari 15.4, Node 18, or newer); in an older one such a zone is rejected with
+`ConfigError`, as an unknown zone is. Two runtimes can
 hold different rules, for example a server and the browser that hydrates its snapshot; see
 [Server rendering](/guides/ssr#calendar-caches) for what the cache checks then.
 
