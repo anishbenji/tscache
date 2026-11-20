@@ -1756,7 +1756,7 @@ class Persister {
    * against it (§4.10.8).
    */
   open(cacheId: string, startedAt?: number): Promise<void>;
-  /** Makes the flush of one cache, or of every running cache with dirty state, due now; resolves when those jobs settled. */
+  /** Makes the flush of one cache, or of every running cache, due now when it has dirty state; resolves when those jobs settled, a flush job already running included. */
   flush(cacheId?: string): Promise<void>;
   /** How many removals (`remove` and `clear` changes) have been recorded for the cache; 0 when untracked. */
   removals(cacheId: string): number;
@@ -1829,7 +1829,7 @@ Then one `store.write(id, plan)`. The plan comes from memory alone: a flush neve
 - **Failure,** at the job's deadline, or at once when the store fails to open: every tracked cache stops (`'error'` with the last rejection's name and message, or `'unavailable'` when no attempt settled), those opened during the barrier included, without a cleanup of its own. The failed `clearAll` was the cleanup, and a disk that refused it for a deadline would refuse per-cache deletions too. Held requests go with their caches, and the `flush` calls waiting for them resolve. The persister then persists nothing for the rest of its life: every persisted cache opened later stops at once with the same reason, reads nothing and has no cleanup, since the disk still holds what the clear was to delete and a load would serve it back; the failed clear was its cleanup too. A later `clearAll()` still runs a job, which may empty the disk, and stops nothing more. A store call still pending at the deadline is abandoned; should it commit later, it empties the disk then, and nothing this persister writes follows it.
 - `clearAll()` resolves when the job settles: on success, or once the failure's stops are done, when the records of every cache stay. Every call answers within `timeoutMs` of the first call of its barrier. It never rejects.
 
-**Close.** `close()` makes every running cache's flush due, waits for the writer's queue to drain, then closes the store. A later call returns the first call's promise, so it resolves when the first one does.
+**Close.** `close()` makes every running cache's flush due, waits for the writer's queue to drain, then closes the store. A later call returns the first call's promise, so it resolves when the first one does. Once `close()` has settled, `open`, `flush` and `clearAll` resolve at once and write nothing (`open` still rejects for an unknown id), and changes are no longer recorded.
 
 Properties the contract tests pin (one engine per store):
 

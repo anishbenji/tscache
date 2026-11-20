@@ -247,9 +247,10 @@ export class Persister {
   }
 
   /**
-   * Makes the flush of one cache, or of every running cache with dirty
-   * state, due now; resolves when those jobs settled. Acknowledges nothing:
-   * that is durable()'s job.
+   * Makes the flush of one cache, or of every running cache, due now when
+   * it has dirty state; resolves when those jobs settled, a flush job
+   * already running included, even with nothing dirty. Acknowledges
+   * nothing: that is durable()'s job.
    */
   flush(cacheId?: string): Promise<void> {
     if (this.#closed) return Promise.resolve();
