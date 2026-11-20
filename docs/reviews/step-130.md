@@ -1,6 +1,6 @@
 # Step 130 — Biome rule off for e2e, and a Dependabot cooldown
 
-Branch: `chore/130-e2e-lint-and-dependabot-cooldown` · Status: built, awaiting review · Both changed configuration files are protected paths (`biome.json`, `.github/`), so the user merges this step.
+Branch: `chore/130-e2e-lint-and-dependabot-cooldown` · Status: built, awaiting review · It touches two protected paths, `.github/dependabot.yml` and `scripts/ci.sh` (`biome.json` is on the notify list), so the user merges this step.
 
 ## Scope
 
@@ -13,8 +13,8 @@ No source, test or published package changed. No dependency was added.
 
 ## User answers (2026-11-21)
 
-- **Biome `useDomNodeTextContent`: option A.** Turn the rule off for `e2e/**` only. Every hit there is Playwright's `Locator.innerText()`, not the DOM property `HTMLElement.innerText`; steps 73, 116 and 123 recorded the one warning as a false positive. Step 123's "Decision concerns" recommended this override.
-- **Minimum release age: option A.** A Dependabot `cooldown` for the `bun` ecosystem, about 3 days for patch and minor and 7 for major. There is no Bun `minimumReleaseAge`, so an upgrade approved by hand can still take a fresh version. Step 123's security lane raised it: Solid 2.0.3 was one to three days old when it landed.
+- **Biome `useDomNodeTextContent`: option A.** Turn the rule off for `e2e/**` only. Every hit there is Playwright's `Locator.innerText()`, not the DOM property `HTMLElement.innerText`; step 73 recorded the warning, and steps 116 and 123 judged it a false positive. Step 123's "Decision concerns" recommended this override.
+- **Minimum release age: option A.** A Dependabot `cooldown` for the `bun` ecosystem, about 3 days for patch and minor and 7 for major. This step sets no Bun `minimumReleaseAge` (`bunfig.toml`, `[install]`; the user chose against it), so an upgrade approved by hand can still take a fresh version. Step 123's security lane raised it: Solid 2.0.3 was one to three days old when it landed.
 
 ## What was checked
 
@@ -41,7 +41,7 @@ Fetched on 2026-11-21:
 
 ### Cooldown and grouped updates
 
-The options reference does not mention groups. It describes the cooldown per dependency: "If a dependency's new release falls within its cooldown period, Dependabot skips updating the version for that dependency." In dependabot-core the check runs in each ecosystem's update checker (`common/lib/dependabot/update_checkers/cooldown_calculation.rb`), which grouped updates also use, and a grouped update that ignored the cooldown was treated as a bug and fixed ([dependabot-core #15323](https://github.com/dependabot/dependabot-core/issues/15323), fixed by #15346). So the cooldown applies to the `react`, `solid` and `dev-dependencies` groups, member by member.
+The options reference does not mention groups. It describes the cooldown per dependency: "If a dependency's new release falls within its cooldown period, Dependabot skips updating the version for that dependency." In dependabot-core the check runs in each ecosystem's update checker (`common/lib/dependabot/update_checkers/cooldown_calculation.rb`), which grouped updates also use, and the Bun ecosystem's finder filters candidate releases with it (`bun/lib/dependabot/bun/update_checker/latest_version_finder.rb`, `filter_by_cooldown`). [dependabot-core #15323](https://github.com/dependabot/dependabot-core/issues/15323) (fixed by #15346) was a grouped-update bypass for pre-commit, not Bun. So the cooldown applies to the `react`, `solid` and `dev-dependencies` groups, member by member; a member inside its cooldown may also be proposed at an older eligible version rather than left out.
 
 One consequence for the lockstep groups: a member still inside its cooldown is left out of the group's pull request. React and react-dom, and Solid and its `@solidjs/*` packages, are normally published together, so they cool down together. If one member were published a day or more after the others, a group pull request could arrive without it, and it would follow once its own cooldown ends. Such a pull request would fail CI the way the lockstep comment describes, and it is reviewed by hand in any case. This step does not change the groups.
 
@@ -62,3 +62,11 @@ None.
 ## Decision concerns
 
 None.
+
+## Pre-review (Claude), not the gate
+
+Pre-review 1 (Fable, head `18d1ee6`): one P2 and three nits, all in this file, fixed by the director: Bun does have `install.minimumReleaseAge` (not set, by the user's choice); the group evidence now cites the Bun finder; step 73 only recorded the warning; the protected paths are `.github/dependabot.yml` and `scripts/ci.sh`.
+
+## Security lane
+
+Run 1 (Opus, head `18d1ee6`): no findings. Cooldown applies to version updates only, never security updates. Not a finding: the `github-actions` entry keeps GitHub's default 3 days, majors included; a 7-day major cooldown there is a separate user decision.
