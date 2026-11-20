@@ -168,3 +168,7 @@ None.
 ## Decision concerns
 
 None. No locked decision is touched.
+
+## Round 1 (Codex) — reviewer verdict: merge
+
+Head `f016bf1`. No findings; the reviewer confirmed PR-1 to PR-6 and SL-1. `bun run ci` exited 0 on `f016bf1`. The review settles at round 1. The eight user items are the director's #109 (and #92 for item 1).
