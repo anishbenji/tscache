@@ -1,6 +1,6 @@
 # Step 123 — Solid 2.0.3 final upgrade
 
-Branch: `chore/123-solid-2-final` · Status: in review
+Branch: `chore/123-solid-2-final` · Status: settled (Codex round 1, merge)
 
 ## Scope
 
@@ -99,3 +99,9 @@ Pre-review 1 (Fable 5.2, before Codex round 1, head `aba9c70`): three P2 and a n
 ## Security lane
 
 Run 1 (Opus, head `aba9c70`): no findings. It checked every new lockfile entry's integrity against the registry, the build provenance, the maintainers and install scripts, and confirmed that rendered HTML still goes through `jsonScript` and the plugin's diagnostics endpoints stay off. Below the bar: the releases are one to three days old (the repository has no minimum release age; that would be a dependency-policy decision), and the SSR dev manifest endpoint can return stylesheets outside the root, which `main` already has through next.49 and which only local or `--host` access can reach.
+
+## Round 1 (Codex) — reviewer verdict: merge
+
+Head `fe108b3`. No findings: the reviewer confirmed the four pre-review items are addressed and raised nothing new. It checked `tsc -p packages/tscache` and `tsc -p integrations/solid` (pass) and `git diff --check` (pass), and took the host `bun run ci` result as supplied. `bun why` was blocked by its sandbox, so it checked the single copies from the manifests and the lockfile instead; this file's dedupe section has the host result.
+
+The review settles at round 1. The user merges (dependency change; never auto-merge).
