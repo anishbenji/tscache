@@ -162,9 +162,10 @@ has the details.
 tscache follows semantic versioning within 0.x: a minor release (0.3.0) may
 break the API, a patch release (0.2.1) never does. Pin a minor range
 (`~0.2.0`) to take fixes without breaking changes.
-[Known limits](https://anishbenji.github.io/tscache/#known-limits) of 0.2.0:
-unbounded memory, deploy skew, and change events that reach other tabs only
-through a SharedWorker.
+[Known limits](https://anishbenji.github.io/tscache/#known-limits): memory
+bounded only by a budget you set (budgets and `memoryStats()` from 0.3.0, in
+preparation; unbounded in 0.2.0), deploy skew, and change events that reach
+other tabs only through a SharedWorker.
 
 ## Documentation
 
