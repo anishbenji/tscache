@@ -186,8 +186,10 @@ function lengthOf(value: unknown): number {
  * at least the offset lookups of the snapshot's validation, and of its
  * application into a cache that knows nothing of its coverage. A receiver
  * that already covers stretches inside a coverage range applies one part
- * more for each, at 12 lookups a part: that work follows the receiver's
- * own state and is outside the charge (§4.5).
+ * more for each, at 12 lookups a part, and while a reader is subscribed
+ * the RPC server converts each range of the call's `cacheChanged` once
+ * more, at 12 lookups a range: both follow the receiver's own state and
+ * are outside the charge (§4.5).
  */
 export function chargeOf(s: Record<string, unknown>): number {
   return (
