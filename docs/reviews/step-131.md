@@ -121,3 +121,7 @@ The user answered D1 (director queue #96) with option (B) on 2026-11-21: the pag
 - Phase A only: the bench was not run: no engine code changed. The only source edits are the `DenseSegmentPayload.fields` TSDoc in `src/types.ts` and one comment in `src/snapshot.ts`.
 - After the pre-review fixes: `bunx vitest run packages/tscache/test/segment-payload.test.ts packages/tscache/test/cache-snapshot.test.ts` passed 127 tests. On that head (`830d62ba`), `bun scripts/test-clocks.ts` and `~/code/tscache-reports/bin/heavy-run.sh "131 child: ci" bun run ci` both exited 0.
 - Phase B: `bunx vitest run packages/tscache/test/m3-memory-accounting.test.ts` gave 1 failed, 9 passed without the fix, and 10 passed with it; all six `m3-memory-*` files passed 100 tests. `bunx tsc --noEmit -p packages/tscache` exited 0. On the final head, `bun scripts/test-clocks.ts`, `~/code/tscache-reports/bin/heavy-run.sh "131 child: ci" bun run ci` and `~/code/tscache-reports/bin/heavy-run.sh "131 child: bench" bun run bench` all exit 0 with no gated bench case failing.
+
+## Round 1 (Codex) — reviewer verdict: merge
+
+Head `b18fd79`. No findings; the reviewer confirmed PR1-1 to PR1-4 and the decision-96 fix, and found no production failure that would re-raise report (a). `bun run ci` and `bun run bench` exited 0 on `959d0bc`. The review settles at round 1. The user merges (`docs/architecture.md`, `types.ts`).
