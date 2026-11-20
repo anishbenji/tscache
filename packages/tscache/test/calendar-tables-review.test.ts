@@ -1,4 +1,6 @@
 import { expect, it } from "vitest";
+import { snapRange } from "../src/entries/grid";
+import { ConfigError } from "../src/errors";
 import {
   calendarGridInternals,
   createCalendarGrid,
@@ -6,6 +8,7 @@ import {
   msInto,
   startOf,
 } from "../src/grid";
+import type { CalendarInterval } from "../src/types";
 import {
   daySlot,
   engine,
@@ -90,4 +93,28 @@ it("reads an offset with seconds from the runtime's zone data", () => {
   expect(startOf(daySlot("1800-06-02"), grid)).toBe(
     utc("1800-06-02T09:30Z") + (4 * 3600 + 56 * 60 + 2) * 1000,
   );
+});
+
+// Pre-review 2 (PR2-1). The grid entry runs per event and per frame: only the first call for a
+// descriptor may pay for a zone check, which builds an Intl formatter.
+it("18: the grid entry builds no formatter for a descriptor it has a grid for", () => {
+  const range = { start: Date.UTC(2026, 2, 6), end: Date.UTC(2026, 2, 10) };
+  const descriptor = (): CalendarInterval => ({
+    unit: "day",
+    zone: "Europe/Lisbon",
+    at: "08:00",
+  });
+  const first = snapRange(range, descriptor());
+  const built = calendarGridInternals().built;
+  expect(built).toBeGreaterThan(0);
+  for (let i = 0; i < 50; i++) {
+    // An equal descriptor in a fresh object, as a caller passes its config.
+    expect(snapRange(range, descriptor())).toEqual(first);
+    expect(snapRange(range, descriptor(), 0)).toEqual(first);
+  }
+  expect(calendarGridInternals().built).toBe(built);
+  // The offset rule holds on the held grid too, with cache()'s message.
+  expect(() => snapRange(range, descriptor(), 5)).toThrow(ConfigError);
+  expect(() => snapRange(range, descriptor(), 5)).toThrow(/alignmentOffset/);
+  expect(calendarGridInternals().built).toBe(built);
 });

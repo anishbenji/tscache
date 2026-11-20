@@ -12,8 +12,7 @@
 
 import {
   type Grid,
-  gridOf,
-  resolveGridFields,
+  resolveGrid,
   slotContaining,
   snapOut,
   startAfter,
@@ -29,7 +28,7 @@ function gridFor(
   interval: number | CalendarInterval,
   alignmentOffset: number | undefined,
 ): Grid {
-  return gridOf(resolveGridFields(interval, alignmentOffset));
+  return resolveGrid(interval, alignmentOffset);
 }
 
 /**

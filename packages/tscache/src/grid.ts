@@ -124,8 +124,12 @@ export interface CalendarGridContext {
  */
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
+/** Formatters built so far: what a zone check or a new grid costs (tests). */
+let built = 0;
+
 /** A formatter of a zone's offset; throws RangeError for a zone the runtime does not know. */
 function newFormatter(zone: string): Intl.DateTimeFormat {
+  built++;
   return new Intl.DateTimeFormat("en-US", {
     timeZone: zone,
     timeZoneName: "longOffset",
@@ -160,8 +164,13 @@ function intlOffsetOf(zone: string): (instant: number) => number {
 }
 
 /** What `calendarGridInternals` reads (tests): no package entry exports it. */
-export function calendarGridInternals(): { formatters: number } {
-  return { formatters: formatters.size };
+export function calendarGridInternals(): {
+  /** Formatters kept, one per zone the runtime knows that a grid uses. */
+  formatters: number;
+  /** Formatters built so far, the ones a zone check throws away included. */
+  built: number;
+} {
+  return { formatters: formatters.size, built };
 }
 
 class Context implements CalendarGridContext {
@@ -340,6 +349,15 @@ function withZone(fields: CalendarFields): ResolvedCalendarInterval {
   });
 }
 
+/** A calendar interval takes no offset: its `zone` and `at` place the slots (N109). */
+function assertNoOffset(alignmentOffset: unknown): void {
+  if (alignmentOffset !== undefined && alignmentOffset !== 0) {
+    failConfig(
+      `alignmentOffset must be absent or 0 with a calendar interval, got ${show(alignmentOffset)}`,
+    );
+  }
+}
+
 /**
  * The grid of a config (§2.2): a fixed interval, a positive safe integer of
  * ms, with its offset normalised into [0, interval), or a calendar
@@ -352,11 +370,7 @@ export function resolveGridFields(
 ): { interval: number | ResolvedCalendarInterval; alignmentOffset: number } {
   if (typeof interval === "object" && interval !== null) {
     const calendar = resolveCalendarInterval(interval);
-    if (alignmentOffset !== undefined && alignmentOffset !== 0) {
-      failConfig(
-        `alignmentOffset must be absent or 0 with a calendar interval, got ${show(alignmentOffset)}`,
-      );
-    }
+    assertNoOffset(alignmentOffset);
     return { interval: calendar, alignmentOffset: 0 };
   }
   if (
@@ -434,6 +448,22 @@ export function gridOf(
   return typeof interval === "number"
     ? { interval, alignmentOffset }
     : createCalendarGrid(interval, context);
+}
+
+/**
+ * The grid of a config's `interval` and `alignmentOffset`, as given (the
+ * grid entry, §2.10), with `cache()`'s errors in `cache()`'s order. A
+ * calendar grid the shared context already holds is returned without a
+ * zone check, so a caller that asks per event or per frame pays for one
+ * check per descriptor.
+ */
+export function resolveGrid(interval: unknown, alignmentOffset: unknown): Grid {
+  if (typeof interval === "object" && interval !== null) {
+    const grid = createCalendarGrid(interval);
+    assertNoOffset(alignmentOffset);
+    return grid;
+  }
+  return gridOf(resolveGridFields(interval, alignmentOffset));
 }
 
 /**
