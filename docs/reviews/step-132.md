@@ -1,6 +1,6 @@
-# Step 132 — DECISION: a failed or slow load deletes the records it could not read
+# Step 132 — a failed or slow load deleted the records it could not read (user decision 95, B)
 
-Branch: `fix/132-load-timeout-cleanup` · Reviewer: the director's Codex gate · Rounds: 0 (built by a child; no review round run here) · Status: escalated (Decision concerns) · Verdict after triage: merge the documentation; the behaviour waits for the user
+Branch: `fix/132-load-timeout-cleanup` · Reviewer: the director's Codex gate · Rounds: 0 (built by a child; no review round run here) · Status: decided (user decision 95, 2026-11-21) and applied in phase B · Verdict after triage: merge after the director's Codex gate
 
 ## The report
 
@@ -8,7 +8,9 @@ The parent thread's read-only persistence research at `6716b4d` raised a possibl
 
 ## Verdict
 
-**Reproduced, and it is the specified behaviour.** Both paths delete every record of the cache. Decision N59 (locked, user-confirmed 2026-10-30) and architecture §4.10.6 say a stopped cache's records are deleted, and that a load beyond the deadline and a failed read are stops; two existing contract tests assert the deleting write. The code therefore does what the spec says, and the code is unchanged. Whether a stop during a load should delete is a design question for the user (Decision concerns, below). The reproducing tests are kept as `it.todo` entries with no asserted outcome, as step 121 handled its open question.
+**Reproduced, and it is the specified behaviour.** Both paths delete every record of the cache. Decision N59 (locked, user-confirmed 2026-10-30) and architecture §4.10.6 say a stopped cache's records are deleted, and that a load beyond the deadline and a failed read are stops; two existing contract tests assert the deleting write. The code therefore does what the spec says, and the code is unchanged. Whether a stop during a load should delete is a design question for the user (Decision concerns, below). The reproducing tests were kept as `it.todo` entries with no asserted outcome, as step 121 handled its open question.
+
+**Phase B.** The user chose option B (user decision 95, 2026-11-21): a stop that ends the load, at its deadline or on a rejected read, queues no cleanup, and the records stay for a later session. It amends the locked N59 and §4.10.6. The fix is `d821dfe3` (Decision applied, below).
 
 ## The code path
 
@@ -120,13 +122,13 @@ it("read failure: records survive and a later session loads them", async () => {
 
 Observed: after the timeout the store held `{"pages":[]}` (no cache record, no page), and a second persister over the same store loaded 0 points; after the read failure the store held `{"pages":[]}`. Both `expect(…).toEqual(seeded)` failed.
 
-Committed: two `it.todo` entries in `persister-load.test.ts`, "132: records survive a load timeout and a later session loads them (undecided)" and "132: records survive a read rejection and a later session loads them (undecided)", with no asserted outcome. The test above is ready to become their bodies if the user chooses (B), (C) or (D), with the contract tests above changed to match by the contract-test author, and only with the user's explicit OK; this step leaves them as they are.
+Committed: two `it.todo` entries in `persister-load.test.ts`, "132: records survive a load timeout and a later session loads them (undecided)" and "132: records survive a read rejection and a later session loads them (undecided)", with no asserted outcome. The test above is ready to become their bodies if the user chooses (B), (C) or (D), with the contract tests above changed to match by the contract-test author, and only with the user's explicit OK; this step leaves them as they are. In phase B Codex's contract tests replaced both entries (Contract-test changes, below).
 
-## Decision concerns
+## Decision applied (user decision 95, B)
 
-**Should a cache that stops during its load delete its records?** (Escalated; no code changed. Confirmed independently by the director's fact-check at `6716b4d`: the path is real whenever a store is open, which it always is once the read has been issued.)
+**Should a cache that stops during its load delete its records?** Escalated as pending decision #95 with the four options below, after the director's independent fact-check at `6716b4d` confirmed the path is real whenever a store is open, which it always is once the read has been issued. **The user chose (B) on 2026-11-21** (user decision 95). It amends the locked N59 and architecture §4.10.6. The user's answer is also his explicit OK for the two pinned contract tests to change, so that they assert the records are kept (Contract-test changes, below).
 
-Today a load that times out with the store open, or whose read rejects, deletes every record of the cache (N59, §4.10.6). A load that times out while the store is still opening, or while the chunk is importing, deletes nothing. A loading cache has made no change (N57), so the cleanup's stated reason, a removal that never landed, does not apply to it. N46 measured the full load of a year at one minute at 6.8 ms, so a 5 s timeout means a stalled or contended disk far more often than a cache too large to read. Under every option a stopped cache stays stopped for the rest of the worker's life (N59): "retry" below means a later session's load.
+The question as escalated: a load that times out with the store open, or whose read rejects, deleted every record of the cache (N59, §4.10.6). A load that timed out while the store was still opening, or while the chunk was importing, deleted nothing. A loading cache has made no change (N57), so the cleanup's stated reason, a removal that never landed, does not apply to it. N46 measured the full load of a year at one minute at 6.8 ms, so a 5 s timeout means a stalled or contended disk far more often than a cache too large to read. Under every option a stopped cache stays stopped for the rest of the worker's life (N59): "retry" below means a later session's load.
 
 - **(A) Keep the current behaviour: every stop with a store open deletes.**
   - Data loss: a transient stall during the read (a cold start, a busy machine, the chunk import spending most of the 5 s) or a transient rejection (an aborted transaction) wipes the cache's history. The next session refetches all of it, which the primary use (N11: fetch immutable history once per device) exists to avoid.
@@ -150,6 +152,25 @@ Today a load that times out with the store open, or whose read rejects, deletes 
   - Change: as (B), on the timeout path only; only the timeout contract test changes.
 
 Recommendation: **(B)**. It loses nothing to a transient fault, matches the cleanup's own reason (a stop during the load has no withdrawn coverage to protect), and makes the load deadline behave the same wherever it was spent: today, whether the records survive depends on whether the opening or the read was slow. The case it leaves, a cache that cannot load in any session, costs a cold cache, which (A) also gives, plus at most the existing 5 s wait per session, and `clearAll` ends it. (C) buys the self-healing of that case at the price of a format change and a write from a stopped cache; it can follow (B) later if the repeated case is ever observed. (D) still loses data to transient rejections, which cannot be told apart from corruption. The case behind (A)'s self-healing, a cache too large to load in 5 s, belongs to the lazy-loading and byte-budget work of §4.10.10. A stop raised by `restore` throwing (§4.10.5) comes after a read that succeeded, from a cache already running, and keeps its cleanup under every option.
+
+### The fix (phase B)
+
+`d821dfe3`, in `packages/tscache/src/persist/persister.ts`: the two stops that end a load pass `cleanup = false` to `#stop`, which then queues no cleanup job and releases the cache's `durable` calls at once (`#cleaned`). Every other caller of `#stop` is unchanged.
+
+```ts
+// The load deadline (lines 239-245)
+if (cache.status === "loading") {
+  this.#stop(cache, "unavailable", undefined, false);
+}
+// A rejected read (lines 510-513)
+if (cache.status === "loading") {
+  this.#stop(cache, "error", failureOf(error), false);
+}
+```
+
+The stops that keep their cleanup: a flush or cleanup job's deadline (`#expire`), a quota error (`#rejected`), and `restore` throwing after a read that succeeded (`#load`, where the cache is already running). Codex's phase-A tests pin the last as the other load-time stop that still cleans up (`persister-abandon.test.ts`, "restore allocation failure stops with error and runs one cleanup"), and a write's deadline after a successful load (`persister-durable.test.ts`). The stops without a cleanup are unchanged as well: a store that fails to open (no store is open) and a failed `clearAll`, whose stops add no per-cache cleanup because the failed clear was that cleanup (N61; §4.10.6, `clearAll`). The store-opening timeout and the chunk-import timeout already deleted nothing; the new tests pin that too.
+
+Documentation: N59's decision file has a dated amendment for user decision 95 (N95 in this repository is a different decision, eviction). Architecture §4.10.6 Open says both load stops have no cleanup, and its Stopping rule names the exception, its reason and the stops that keep their cleanup; §4.10.1 "When calls wait for the disk" says a load that gave up or whose read failed leaves the records for a later session; the guide's Failures paragraph (`site/guides/persistence.md`) says a failed write deletes the records and a failed or slow read deletes nothing.
 
 ## Documentation changes
 
@@ -187,7 +208,16 @@ The conformance case "a connection the browser closes makes read/write/clearAll 
 
 ## Contract-test changes
 
-None changed or removed. Added: two `it.todo` entries in `persister-load.test.ts` and one case in `persist-store-conformance.test.ts` (requested by the director after pre-review 1). The implementer's regression tests live in their own file.
+Before phase B none was changed or removed. Added then: two `it.todo` entries in `persister-load.test.ts` and one case in `persist-store-conformance.test.ts` (requested by the director after pre-review 1). The implementer's regression tests live in their own file, `persister-documented.test.ts`.
+
+Phase B (`d821dfe3`, the contract tests in the same commit as the fix, `AGENTS.md`). Codex wrote them in phase A from user decision 95; four failed before the fix and pass with it (checked by hand: with the two `false` arguments removed, those four fail and the rest pass):
+
+- **The two pinned tests, changed with the user's explicit OK (user decision 95).** In `persister-load.test.ts`, "read rejection emits error details once and one strict cleanup" became "read rejection emits error details once and writes no cleanup": its assertion of one delete-all write became an assertion of no write. "a gated read times out at 5000ms; a late result is ignored" became "a gated read times out at 5000ms without cleanup and ignores a late result": `writes` has length 0, not 1. Each kept every other assertion (the stop event and its single report; the late result not applied). They changed because they pinned the deletion the user removed; nothing else in them is weaker.
+- **New in `persister-load.test.ts`:** records survive a read timeout, a read rejection and a store-opening timeout, and a later session's persister loads them. The two `it.todo` entries of the first phase are gone, replaced by the first two.
+- **`persist-hosted.test.ts`:** the chunk-import timeout test now also seeds records and asserts they stay and that a later hosting loads them.
+- **`persister-abandon.test.ts`:** the restore-failure test now also asserts the store holds nothing afterwards.
+- **`persister-durable.test.ts`:** the held-write test now starts from a successful load of seeded records rather than its own flush, so a write deadline after a load still cleans up and `durable` waits for it.
+- **`persister-clearall.test.ts`, test j "cleanup queued before the call runs before the first clear attempt" (changed by the implementer, not in Codex's phase A).** It produced its queued cleanup from a rejected read, which no longer cleans up, so it failed with the fix. Only its setup changed; its assertion (`write:persist`, `write:C`, `clearAll`, in that order) is identical. C's cleanup now comes from a `restore` failure, which still cleans up. Because `MemoryStore`, like IndexedDB, delivers a successful read only after earlier write transactions commit, C's read is started (held by a gate) before A's write and released while A's write occupies the writer; a rejected read had returned before that wait, which is why the old setup did not need it. The Codex gate should confirm it still pins N61's rule that cleanups queued before a `clearAll` call keep their place ahead of it.
 
 ## Pre-review (Claude), not the gate
 
@@ -204,11 +234,14 @@ Pre-review 1, by Fable, at `57b2e722`; the director relayed its findings. All fo
 
 At the step's final head unless noted:
 
-| Command                                                                               | Result                                                                                                                                                                                            |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bunx vitest run` on the scratch reproduction (since deleted)                         | 2 failed, as expected: the store held `{"pages":[]}` after each stop, and the next session loaded 0 points                                                                                        |
-| `bunx vitest run packages/tscache/test/persister-documented.test.ts`, once per mutant | 1 failed, 3 passed for each of the four mutants; 4 passed with none                                                                                                                               |
-| `bunx vitest run packages/tscache/test/persist-store-conformance.test.ts`             | 23 passed                                                                                                                                                                                         |
-| `bunx vitest run packages/tscache/test/persister-load.test.ts`                        | 9 passed, 2 todo                                                                                                                                                                                  |
-| `bun scripts/test-clocks.ts`                                                          | `test-clocks: 196 files clean`                                                                                                                                                                    |
-| `~/code/tscache-reports/bin/heavy-run.sh "132 child: ci" bun run ci`                  | at `57b2e722`: exit 0 (Vitest 156 files, 3058 passed, 2 todo; Playwright 193 passed; bench smoke ok). On the head that adds this triage it runs again, and its result is reported to the director |
+| Command                                                                                                                                    | Result                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bunx vitest run` on the scratch reproduction (since deleted)                                                                              | at `6716b4d`: 2 failed, as expected: the store held `{"pages":[]}` after each stop, and the next session loaded 0 points. Its bodies are now Codex's survival tests                                                               |
+| `bunx vitest run packages/tscache/test/persister-documented.test.ts`, once per mutant                                                      | 1 failed, 3 passed for each of the four mutants; 4 passed with none                                                                                                                                                               |
+| `bunx vitest run packages/tscache/test/persist-store-conformance.test.ts`                                                                  | 23 passed                                                                                                                                                                                                                         |
+| The persistence suites (`test/persist*`, `rpc-persist`, `m3-memory-persistence`, `config-persist`) without the fix's two `false` arguments | 4 failed (the two pinned tests and the two survival tests), the rest passed                                                                                                                                                       |
+| The same suites with the fix                                                                                                               | 19 files, 256 passed                                                                                                                                                                                                              |
+| `bun run typecheck`                                                                                                                        | exit 0                                                                                                                                                                                                                            |
+| `bun scripts/test-clocks.ts`                                                                                                               | `test-clocks: 196 files clean`                                                                                                                                                                                                    |
+| `~/code/tscache-reports/bin/heavy-run.sh "132 child: ci" bun run ci`                                                                       | at `57b2e722` and at `0bdcc79f`: exit 0 (at `0bdcc79f`: Vitest 157 files, 3063 passed, 2 todo; Playwright 193 passed; bench smoke ok). On the head that adds this phase it runs again, and its result is reported to the director |
+| `~/code/tscache-reports/bin/heavy-run.sh "132 child: bench" bun run bench`                                                                 | runs on the same head; its result is reported to the director                                                                                                                                                                     |
