@@ -39,6 +39,7 @@ export async function lossy(): Promise<Lossy> {
     cache: (c) => live(() => real.cache(c)),
     clearAll: () => live(() => real.clearAll()),
     updateAuth: (context) => live(() => real.updateAuth(context)),
+    memoryStats: () => live(() => real.memoryStats()),
     on(event, fn) {
       if (event !== "workerLost") return real.on(event, fn);
       const listener = fn as (e: ClientEvents["workerLost"]) => void;

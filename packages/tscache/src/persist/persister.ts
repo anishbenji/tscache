@@ -204,6 +204,7 @@ export class Persister {
     observeCaches(engine, {
       onChange: (cacheId, change) => this.#change(cacheId, change),
       onMutate: (cacheId) => this.#mutate(cacheId),
+      onEvict: (cacheId, covered) => this.#evicted(cacheId, covered),
     });
   }
 
@@ -385,6 +386,20 @@ export class Persister {
     } else {
       this.#quiet(cache);
     }
+  }
+
+  /**
+   * A page was evicted (N95): its covered slots are marked as a write
+   * marks them, so the next flush deletes the page's record, relaxed. Not a
+   * removal: nothing is counted and no call waits for it (N58). A page
+   * without coverage has no record to delete; the change that withdrew its
+   * coverage marked it already.
+   */
+  #evicted(cacheId: string, covered: readonly SlotRange[]): void {
+    const cache = this.#live(cacheId);
+    if (cache === undefined || covered.length === 0) return;
+    for (const slots of covered) this.#mark(cache, slots);
+    this.#quiet(cache);
   }
 
   #mutate(cacheId: string): void {

@@ -40,10 +40,16 @@ export type Op =
   | "hydrate"
   /** §2.7 (N74); additive, announced in `hello.features` (N79). */
   | "subscribe"
-  | "unsubscribe";
+  | "unsubscribe"
+  /** §2.9, §3.2 (N101); additive, announced in `hello.features`. */
+  | "memoryBudget"
+  | "memoryStats";
 
 /** The optional features this package's worker offers, sent in hello (N79). */
-export const WORKER_FEATURES: readonly WorkerFeature[] = ["cacheChanged"];
+export const WORKER_FEATURES: readonly WorkerFeature[] = [
+  "cacheChanged",
+  "memoryBudget",
+];
 
 export interface WireError {
   name: string;

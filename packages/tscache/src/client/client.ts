@@ -12,12 +12,13 @@ import type {
   ClientEvents,
   ClientOptions,
   HostingMode,
+  MemoryStats,
   ResolvedCacheConfig,
   WorkerFeature,
 } from "../types";
 import { CacheHandle } from "./cache";
 import { ChangeSubscriptions } from "./changes";
-import { warnMerges } from "./dev";
+import { warnBudget, warnMerges } from "./dev";
 import { ClientEmitter } from "./events";
 import {
   type Hosting,
@@ -63,6 +64,14 @@ export interface TscacheClient {
   /** Delivers new auth material to the fetcher (step ⑪). */
   updateAuth(context: unknown): Promise<void>;
   /**
+   * What the worker's caches hold now (§2.9): the budget in force, the
+   * bytes the cached points hold, the pinned part, the pages evicted so far
+   * and one entry per cache. In a SharedWorker it covers every tab's
+   * caches. Rejects with TscacheError against a worker that does not offer
+   * memory budgets (`client.features.has('memoryBudget')` is false).
+   */
+  memoryStats(): Promise<MemoryStats>;
+  /**
    * Events, including workerLost (N32): the worker behind this client is
    * gone, every pending and later call rejects, and a new client is needed.
    * A `cacheChanged` listener here hears every cache's changes; the first
@@ -85,6 +94,7 @@ interface Resolved {
   workerUrl: string | URL | undefined;
   timeoutMs: number;
   fetcher: FetcherConfig | undefined;
+  memoryBudget: number | undefined;
 }
 
 function chainFrom(mode: HostingMode | undefined): HostingMode[] {
@@ -112,6 +122,18 @@ function fetcherOf(options: ClientOptions): FetcherConfig | undefined {
   return wire;
 }
 
+/** A positive safe integer, as the engine takes it (§2.9). */
+function budgetOf(options: ClientOptions): number | undefined {
+  const budget = options.memoryBudget;
+  if (budget === undefined) return undefined;
+  if (!Number.isSafeInteger(budget) || budget < 1) {
+    throw new ConfigError(
+      "memoryBudget must be a positive safe integer of bytes",
+    );
+  }
+  return budget;
+}
+
 function resolve(options: ClientOptions): Resolved {
   const chain = chainFrom(options.mode);
   if (chain[0] !== "in-process" && options.workerUrl === undefined) {
@@ -122,6 +144,7 @@ function resolve(options: ClientOptions): Resolved {
     workerUrl: options.workerUrl,
     timeoutMs: timeoutOf(options),
     fetcher: fetcherOf(options),
+    memoryBudget: budgetOf(options),
   };
 }
 
@@ -248,6 +271,16 @@ class Client implements TscacheClient {
     await this.#port.request("updateAuth", { context });
   }
 
+  async memoryStats(): Promise<MemoryStats> {
+    this.#live();
+    if (!this.features.has("memoryBudget")) {
+      throw new TscacheError(
+        "memoryStats: this client's worker does not offer memory budgets (an older worker script?)",
+      );
+    }
+    return (await this.#port.request("memoryStats", {})) as MemoryStats;
+  }
+
   on<E extends keyof ClientEvents>(
     event: E,
     fn: (payload: ClientEvents[E]) => void,
@@ -322,12 +355,43 @@ class Client implements TscacheClient {
   }
 }
 
-/** §2.1. Resolves once a hosting completed the handshake. */
+/**
+ * Sends the budget once after `init-ok` (§2.9, N101): the answer is the
+ * budget in force, and a development build warns when it is not this one.
+ * A worker without the feature is sent nothing.
+ */
+async function applyBudget(port: PortClient, bytes: number): Promise<void> {
+  if (!port.features.has("memoryBudget")) {
+    warnBudget(bytes, "unsupported");
+    return;
+  }
+  const answer = (await port.request("memoryBudget", { bytes })) as {
+    budget?: number;
+  };
+  if (answer?.budget !== bytes) warnBudget(bytes, answer?.budget);
+}
+
+/**
+ * §2.1. Resolves once a hosting completed the handshake and, with a
+ * `memoryBudget`, once the worker answered it (§2.9). The budget goes out
+ * on the port before the client exists: the client queues the fallback
+ * steps on a timer when it is built, which must run after the caller holds
+ * it. A failed budget op releases the port and the hosting, and rethrows.
+ */
 export async function createClient(
   options: ClientOptions = {},
 ): Promise<TscacheClient> {
   const r = resolve(options);
   const fallbacks: ClientEvents["modeFallback"][] = [];
   const hosting = await connect(r, fallbacks);
+  if (r.memoryBudget !== undefined) {
+    try {
+      await applyBudget(hosting.client, r.memoryBudget);
+    } catch (error) {
+      hosting.client.dispose();
+      hosting.terminate();
+      throw error;
+    }
+  }
   return new Client(hosting, fallbacks);
 }

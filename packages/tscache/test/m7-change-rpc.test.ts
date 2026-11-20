@@ -331,7 +331,7 @@ describe("M7 client listeners (test 14)", () => {
         .filter(([op]) => op === "subscribe" || op === "unsubscribe")
         .map(([op, params]) => [op, params]);
     const client = await inProcess();
-    expect(client.features).toEqual(new Set(["cacheChanged"]));
+    expect(client.features).toEqual(new Set(["cacheChanged", "memoryBudget"]));
     const cache = await client.cache(config);
     const heard: string[] = [];
     const first = (c: Changed) => heard.push(`first ${c.cacheId}`);

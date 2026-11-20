@@ -7,7 +7,7 @@
  * edges.
  */
 
-import type { Engine } from "../engine/engine";
+import { type Engine, pinPages } from "../engine/engine";
 import { ConfigError, isAuthInvalidError, show, TscacheError } from "../errors";
 import { type Grid, msOf, type SlotRange, snapOut, toMs } from "../grid";
 import type { Evt, FetcherConfig } from "../rpc/protocol";
@@ -419,16 +419,30 @@ export class Orchestrator {
       return this.#engine.get(cacheId, range, options);
     }
     const grid = this.#engine.configOf(cacheId);
-    return this.#rounds(cacheId, snapOut(range, grid), requestId, (settled) => {
-      // The only read: its result and `options.snapshot` come from one state
-      // (§2.8, N36). #rounds calls it in the step its last round ends, with
-      // no await between the last fetch and it (§4.9.1 rule 4).
-      const result = this.#engine.get(cacheId, range, options);
-      return {
-        ...result,
-        misses: result.misses.flatMap((m) => annotate(m, settled, grid)),
-      };
-    });
+    const request = snapOut(range, grid);
+    // With a memory budget, the request and its one-slot flanks (the
+    // round's probe) are pinned from the first round to the read (N94),
+    // so no fetch landing meanwhile evicts what this get fetched. The
+    // release ends in enforcement, whose evictions this get caused.
+    const pinned = pinPages(this.#engine, cacheId, probeOf(request, grid));
+    const release = () => {
+      if (pinned !== undefined) this.#caused(requestId, pinned);
+    };
+    try {
+      return await this.#rounds(cacheId, request, requestId, (settled) => {
+        // The only read: its result and `options.snapshot` come from one
+        // state (§2.8, N36). #rounds calls it in the step its last round
+        // ends, with no await between the last fetch and it (§4.9.1 rule 4).
+        const result = this.#engine.get(cacheId, range, options);
+        release();
+        return {
+          ...result,
+          misses: result.misses.flatMap((m) => annotate(m, settled, grid)),
+        };
+      });
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -534,14 +548,7 @@ export class Orchestrator {
     requestId: string | undefined,
   ): Inflight[] | { gated: SlotRange[] } {
     const grid = this.#engine.configOf(cacheId);
-    // Coverage one slot beyond the request too: a miss at the edge may abut
-    // covered slots the request itself cannot show. Only safe grid points.
-    const probe: SlotRange = {
-      start: safeSlot(request.start - 1, grid)
-        ? request.start - 1
-        : request.start,
-      end: safeSlot(request.end + 1, grid) ? request.end + 1 : request.end,
-    };
+    const probe = probeOf(request, grid);
     const around = this.#engine
       .coverage(cacheId, toMs(probe, grid))
       .map((r) => snapOut(r, grid));
@@ -707,6 +714,19 @@ export class Orchestrator {
     }
     return { kind: "applied", warnings };
   }
+}
+
+/**
+ * The request and one slot beyond it on each side: a miss at the edge may
+ * abut covered slots the request itself cannot show. Only safe grid points.
+ */
+function probeOf(request: SlotRange, grid: Grid): SlotRange {
+  return {
+    start: safeSlot(request.start - 1, grid)
+      ? request.start - 1
+      : request.start,
+    end: safeSlot(request.end + 1, grid) ? request.end + 1 : request.end,
+  };
 }
 
 /**

@@ -7,13 +7,14 @@ handshake passed. Create one per page, at startup, and keep it for the page's li
 
 ## Options
 
-| Option               | Default    | Meaning                                                                                                                                                    |
-| -------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workerUrl`          | none       | the `@anishbenji/tscache/worker` script as your setup serves it ([Workers](/guides/workers)); required unless `mode` is `'in-process'`, else `ConfigError` |
-| `mode`               | `'shared'` | where the fallback chain starts: `'shared'` → `'dedicated'` → `'in-process'`                                                                               |
-| `handshakeTimeoutMs` | `5000`     | how long a hosting may take to say hello before the chain steps down                                                                                       |
-| `fetcher.module`     | none       | URL of your fetcher module, which the worker `import()`s ([Writing a fetcher](/guides/fetcher))                                                            |
-| `fetcher.context`    | none       | structured-cloneable material handed to every fetch: a token, an origin                                                                                    |
+| Option               | Default    | Meaning                                                                                                                                                                                     |
+| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workerUrl`          | none       | the `@anishbenji/tscache/worker` script as your setup serves it ([Workers](/guides/workers)); required unless `mode` is `'in-process'`, else `ConfigError`                                  |
+| `mode`               | `'shared'` | where the fallback chain starts: `'shared'` → `'dedicated'` → `'in-process'`                                                                                                                |
+| `handshakeTimeoutMs` | `5000`     | how long a hosting may take to say hello before the chain steps down                                                                                                                        |
+| `fetcher.module`     | none       | URL of your fetcher module, which the worker `import()`s ([Writing a fetcher](/guides/fetcher))                                                                                             |
+| `fetcher.context`    | none       | structured-cloneable material handed to every fetch: a token, an origin                                                                                                                     |
+| `memoryBudget`       | none       | upper bound in bytes on what the worker's caches hold, a positive safe integer (else `ConfigError`); above it the least recently used pages are evicted ([Memory](/guides/patterns#memory)) |
 
 Without `fetcher`, the cache holds only what you `put`.
 
@@ -52,6 +53,18 @@ the browser has IndexedDB it also empties the [persisted](/guides/persistence) r
 any hosting, and resolves once they are gone or the clear gave up; it never rejects for a disk failure.
 
 <<< @/snippets/client.ts#clear-all{ts}
+
+## client.memoryStats()
+
+Resolves with what the worker's caches hold now: the budget in force (absent without one), the bytes the
+cached points hold, the part pinned by pending reads and provisional bars, the pages evicted so far, and
+one row per cache, ascending by id. In a SharedWorker it covers every tab's caches. It rejects with
+`TscacheError` against a worker script from before memory budgets
+(`client.features.has('memoryBudget')` is then false).
+
+```ts
+const { budget, bytes, evictedPages } = await client.memoryStats();
+```
 
 ## client.on(event, fn) and client.off(event, fn)
 
