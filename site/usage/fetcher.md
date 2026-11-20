@@ -20,7 +20,7 @@ The module's **default export**: an object with
 | ----------------------------- | ---------------------------------------------------------------- |
 | `cacheId`                     | the cache the fetch is for                                       |
 | `range`                       | the inclusive range to fetch, on the grid, already coalesced     |
-| `interval`, `alignmentOffset` | the cache's grid                                                 |
+| `interval`, `alignmentOffset` | the cache's grid: ms, or a calendar interval with offset 0       |
 | `context`                     | a copy of the latest context from `createClient` or `updateAuth` |
 
 ## FetchResponse

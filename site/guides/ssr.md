@@ -59,6 +59,28 @@ as nothing applied, and the cache fetches. [Snapshots](/usage/snapshots) has the
 The snapshot stays usable after `hydrate`, so the client that replaces a lost one can be seeded from it
 too; the integrations' `connect(open, seeds)` does that.
 
+## Calendar caches
+
+A cache with a [calendar interval](/concepts/grid#calendar-intervals) in a zone computes its slot
+starts from the runtime's time-zone data, and the server and the browser each use their own. A
+snapshot of such a cache therefore stores, beside each instant that names a slot (its range, its
+coverage ranges, the start of each block of points), the slot the server gave it. `hydrate` refuses a
+snapshot when the browser's data places one of those instants in another slot, with a `TscacheError`,
+and changes nothing; treat that as "not seeded" and let the cache fetch.
+
+- **Keep the server's zone data current** (Node's ICU data, which a Node upgrade brings). The usual
+  cause of a difference is a rule change one side does not have yet.
+- **What the check covers.** A snapshot that applies has every bar on the day, week or month the server
+  put it on. It does not compare every bar's instant: when the two sides disagree only about dates
+  strictly inside the snapshot, for example a daylight-saving rule one side lacks while both ends of
+  the snapshot fall in the season where they agree, the snapshot applies, and the browser shows those
+  bars at its own start of their slots, as it would after fetching them itself.
+- **Very fragmented snapshots are refused.** The check's work is bounded before it starts: a snapshot
+  with more than about 14,500 separate coverage ranges is refused. A snapshot of bars has one coverage
+  range per uninterrupted stretch.
+
+`encodeSnapshot` and `decodeSnapshot` carry a calendar cache's snapshot as they carry any other.
+
 ## How stale can a snapshot be?
 
 As old as the page. With a versioned dataset, a stale snapshot is refused, or, in a cache created

@@ -2,8 +2,13 @@
 
 ## The grid
 
-Every cache has an `interval` in milliseconds, which is **required** and has no default, and an
-`alignmentOffset`, default 0. Together they define the grid: the timestamps `t` with
+Every cache has an `interval`, which is **required** and has no default. It is one of two things:
+
+- a **fixed interval** in milliseconds, with an `alignmentOffset` (default 0);
+- a **calendar interval**: a day, week, month, quarter or year in a time zone
+  ([below](#calendar-intervals)).
+
+A fixed interval and its offset define the grid as the timestamps `t` with
 
 ```
 (t - alignmentOffset) % interval === 0
@@ -19,33 +24,88 @@ between milliseconds and slots, so off-by-one errors have one place to live.
 
 ### alignmentOffset
 
-The offset moves the grid. Daily bars stamped at a market's open, 14:30 UTC, are on a grid of one day
-offset by 14.5 hours:
+The offset moves a fixed grid. Daily bars stamped at 14:30 UTC are on a grid of one day offset by 14.5
+hours:
 
 <<< @/snippets/grid.ts#offset{ts}
 
 Any integer offset is accepted and normalised into `[0, interval)`: an offset of `interval + 5` names the
-same grid as `5`, and both configs resolve identically. The grid is fixed: a session that moves with
-daylight saving time does not fit one offset all year.
+same grid as `5`, and both configs resolve identically. A fixed grid does not move: a session that
+follows daylight saving time does not fit one offset all year, and needs a calendar interval.
 
-## Data that does not fit a fixed grid
+## Calendar intervals
 
-The grid is one fixed step in milliseconds. Calendar-aware grids (a session that follows daylight saving
-time, months of different lengths) are not supported. A `put` with a timestamp off the grid is rejected
-whole (`'misaligned'`), so data on another schedule is mapped onto a grid in the fetcher, before the
-cache sees it. These recipes cover the common cases.
+A calendar interval makes each slot a calendar unit in a time zone. The slot starts when the zone's
+clock reads `at` on the unit's first day:
 
-### Daily bars from an exchange that observes daylight saving time
+```ts
+interface CalendarInterval {
+  unit: "day" | "week" | "month" | "quarter" | "year";
+  zone?: string; // an IANA time zone; default "UTC"
+  at?: string; // "HH:MM", 24-hour; default "00:00"
+  weekStart?: 1 | 2 | 3 | 4 | 5 | 6 | 7; // weeks only: 1 = Monday (default) … 7 = Sunday
+}
+```
 
-A session that opens at 9:30 New York time opens at 14:30 UTC in winter and 13:30 UTC in summer, so no
-`alignmentOffset` fits it all year, and bars stamped at the open are rejected for half of it. A daily bar's
-identity is its trading date, not the minute the session opened: stamp each bar at 00:00 UTC of that
-date in the fetcher, on a grid of one day with offset 0.
+A New York session opens at 09:30 local time, which is 14:30 UTC in winter and 13:30 UTC in summer.
+With a calendar interval both are slot starts, so daily bars are stamped at the open all year:
 
 <<< @/snippets/grid.ts#daily-dst{ts}
 
-Ranges you read are then dates at midnight UTC too: a chart that shows the trading date reads the
-same timestamps, and the session's open time, if you need it, is a field or a lookup of its own.
+Everything else works as on a fixed grid, in milliseconds: the ranges you pass, the timestamps a read
+returns, `coverage`, `misses`, watermarks and events. What changes is where the grid points lie.
+
+- **Every calendar day is a slot.** A weekend or a holiday is an empty slot: the fetcher's response
+  covers it and holds no bar for it, so the cache records a confirmed gap and does not ask again. The
+  cache holds no holiday list.
+- **`alignmentOffset` is not used.** `zone` and `at` place the slots; an offset other than 0 is
+  rejected with `ConfigError`.
+- **Zones are compared as written.** `US/Eastern` and `America/New_York` are two grids, and a second
+  tab that names the other one is refused. Use the canonical IANA name. A zone the runtime does not
+  know is rejected with `ConfigError`.
+- **Transitions.** A local time that a clock change skips starts after the change (an `at` of 02:30 on
+  the day clocks go forward starts at 03:30), and one that occurs twice starts at the first.
+- **Domain.** The years 1 to 9999. A range or timestamp outside them is rejected as one beyond the
+  safe integers is on a fixed grid.
+- **Reading the config back.** `interval` is `number | CalendarInterval` in a cache's config and in a
+  fetcher's request, so TypeScript code narrows it before doing arithmetic
+  (`typeof interval === "number"`).
+- **Sizes count slots.** `gapSplitK` and `segmentSlotCap` count days, weeks or months: with the
+  defaults, a closure of more than four days splits a segment, and one page of a daily cache spans
+  about 89 years.
+- **Units below a day** are not calendar units. A fixed interval covers those that divide an hour.
+
+Zone rules come from the runtime's `Intl`, so the library bundles no time-zone data. Two runtimes can
+hold different rules, for example a server and the browser that hydrates its snapshot; see
+[Server rendering](/guides/ssr#calendar-caches) for what the cache checks then.
+
+### Grid arithmetic in the page
+
+A view often needs the grid itself: the range a read returns for what is on screen, the bar forming
+now, or the start of the next one. On a calendar grid a fixed step is wrong at every edge, so
+`@anishbenji/tscache/grid` exports the arithmetic the cache uses, for both kinds of interval:
+
+<<< @/snippets/grid.ts#calendar-page{ts}
+
+| Function                                       | Returns                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------- |
+| `snapRange(range, interval, alignmentOffset?)` | `range` snapped outward to the grid: what `get` reads for it        |
+| `slotStart(t, interval, alignmentOffset?)`     | the start of the slot that contains `t`                             |
+| `nextSlotStart(t, interval, alignmentOffset?)` | the start of the slot after it; the difference is the slot's length |
+
+An application that does not import the entry does not load it.
+
+## Data that does not fit either grid
+
+A `put` with a timestamp off the grid is rejected whole (`'misaligned'`), so data on another schedule
+is mapped onto a grid in the fetcher, before the cache sees it. These recipes cover the common cases.
+
+### Daily bars from an exchange that observes daylight saving time
+
+Use a calendar interval with the exchange's zone and its opening time, as [above](#calendar-intervals).
+If the backend stamps a daily bar at midnight of its trading date instead, use
+`{ unit: "day" }` (UTC) or `{ unit: "day", zone }` with the default `at`, whichever the backend's
+midnight is.
 
 ### Weekly bars
 
@@ -56,21 +116,25 @@ Thursday, so Monday at 00:00 UTC is an offset of 4 days, 345,600,000 ms (Sunday 
 
 <<< @/snippets/grid.ts#weekly{ts}
 
-A week that starts in a local time zone, or follows daylight saving time, is stamped at its date as
-above.
+A week that starts at local midnight in a zone, and so moves by an hour twice a year, is a calendar
+week: `{ unit: "week", zone: "Europe/London" }`, with `weekStart` for a week that does not start on
+Monday. A fixed week and a calendar week number their slots differently, so they are two caches.
 
 ### Monthly, quarterly and yearly bars
 
-Months differ in length, so no millisecond interval holds them. Map each month to an ordinal, its number
-of months since January 1970, store it as the timestamp on a grid of interval 1, and convert back when
-drawing:
+Months differ in length, so no millisecond interval holds them. A calendar interval does:
 
 <<< @/snippets/grid.ts#monthly{ts}
 
-The trade-off: the cache no longer holds times. Every range you pass to `get`, `invalidate` or `put`,
-every `meta.finalizedUntil` the fetcher reports, and every timestamp a read returns is an ordinal, so
-the fetcher converts the requested ordinal range to the months it asks the backend for, and the chart
-needs a label for each ordinal. Quarters and years work the same way with their own ordinals.
+Quarters and years work the same way (`unit: "quarter"`, `unit: "year"`), and each takes a `zone` and
+an `at` like a day does.
+
+::: tip A calendar the units do not cover
+For a schedule none of the units describes (fiscal periods of four or five weeks, say), map each period
+to an ordinal in the fetcher: store period `n` at timestamp `n` on a fixed grid of interval 1, and
+convert back when drawing. Every range, watermark and timestamp of such a cache is then an ordinal, so
+the fetcher converts the requested ordinals to the periods it asks the backend for.
+:::
 
 ### Jittered timestamps
 
@@ -98,7 +162,7 @@ range feeds `get` directly.
 
 `start === end` is legal: one slot when it is aligned, two when it is not (outward snap). A range whose
 endpoints are not finite numbers within ±(2^53 − 1), or with `start > end`, rejects with
-`InvalidRangeError`. The `coverage` and `misses` of a result are on the grid, in milliseconds.
+`InvalidRangeError`; so does a range outside a calendar interval's years 1 to 9999. The `coverage` and `misses` of a result are on the grid, in milliseconds.
 
 <<< @/snippets/grid.ts#snap{ts}
 
@@ -106,7 +170,8 @@ endpoints are not finite numbers within ±(2^53 − 1), or with `start > end`, r
 An end of `Date.now()` snaps outward to the next grid point, whose bar does not exist yet, so the read
 asks the backend for it. A fetcher that reports `meta.finalizedUntil` keeps that slot provisional;
 without a watermark, the empty slot would be recorded as a confirmed gap. Floor the end to the grid
-(`Math.floor(now / interval) * interval` with offset 0) when you read up to the present.
+when you read up to the present: `Math.floor(now / interval) * interval` with a fixed interval and
+offset 0, or `slotStart(now, interval)` from `@anishbenji/tscache/grid` for any interval.
 :::
 
 ## Batches
