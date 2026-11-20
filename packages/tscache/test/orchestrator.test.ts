@@ -1241,3 +1241,102 @@ describe("round 10 and 11 regressions", () => {
     stalled?.();
   });
 });
+
+// Step 133, report (d): a tab that opens while auth is invalid. §4.9 Auth
+// and Loading: a joining tab whose context is not the identical value takes
+// the updateAuth path (so auth is restored and its material is tried); one
+// that brings no context, or the identical value, changes nothing.
+describe("a tab joining while auth is invalid (step 133)", () => {
+  /** Connects one more tab to `server`, with `context` if one is given. */
+  async function join(server: RpcServer, context?: unknown) {
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const client = await PortClient.connect(channel.port2 as MessagePortLike, {
+      fetcher: {
+        module: fetcherModule,
+        ...(context !== undefined ? { context } : {}),
+      },
+    });
+    open.push(client);
+    return client;
+  }
+
+  /** A worker whose first tab has had its fetch refused: auth is invalid. */
+  async function invalidated(context: unknown) {
+    resetLog("auth");
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const a = await join(server, context);
+    await a.request("cache", config);
+    const seen: Evt[] = [];
+    a.on((e) => seen.push(e));
+    expect((await get(a, { start: 3, end: 13 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    const refusals = () => seen.filter((e) => e.event === "authInvalid");
+    await eventually(() => expect(refusals()).toHaveLength(1));
+    expect(log().requests).toHaveLength(1);
+    return { server, a, refusals };
+  }
+
+  it("a tab without a context leaves auth invalid: nothing is fetched for any tab", async () => {
+    const { server, a, refusals } = await invalidated({ token: "old" });
+    const c = await join(server);
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([
+      { range: { start: 23, end: 33 }, reason: "auth-pending" },
+    ]);
+    expect((await get(a, { start: 43, end: 53 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(1);
+    expect(log().auth).toEqual([]);
+    // A second refusal would be broadcast before the barrier's answer on a.
+    await barrier(a);
+    expect(refusals()).toHaveLength(1);
+  });
+
+  it("a tab with the identical context leaves auth invalid: nothing is fetched for any tab", async () => {
+    // A primitive survives the structured clone as the identical value.
+    const { server, a } = await invalidated("old-token");
+    const c = await join(server, "old-token");
+    expect((await get(c, { start: 23, end: 33 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect((await get(a, { start: 43, end: 53 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(1);
+    expect(log().auth).toEqual([]);
+  });
+
+  it("a tab with other material restores auth through the hook, and fetches carry its context", async () => {
+    const { server, a } = await invalidated({ token: "old" });
+    log().mode = "ok";
+    const c = await join(server, { token: "fresh" });
+    // The fetcher heard the material before auth was restored (§4.9 Auth).
+    expect(log().auth).toEqual([{ token: "fresh" }]);
+    expect((await get(a, { start: 3, end: 13 })).misses).toEqual([]);
+    expect(log().requests.at(-1)?.context).toEqual({ token: "fresh" });
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
+  });
+
+  it("an equal but not identical stale context is tried once, then refused and reported again with it", async () => {
+    const { server, a, refusals } = await invalidated({ token: "old" });
+    const c = await join(server, { token: "old" });
+    expect(log().auth).toEqual([{ token: "old" }]);
+    // One fetch under the joining tab's copy; its refusal flips auth again.
+    expect((await get(c, { start: 23, end: 33 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(2);
+    await eventually(() => expect(refusals()).toHaveLength(2));
+    expect(refusals()[1]?.payload).toEqual({
+      error: { name: "Error", message: "401" },
+      context: { token: "old" },
+    });
+    // Invalid again: no further fetch until new material arrives.
+    expect((await get(a, { start: 43, end: 53 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(2);
+  });
+});
