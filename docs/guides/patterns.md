@@ -155,10 +155,10 @@ const candles = await client.cache({
   worker as well, call `clearAll` from one of its tabs. When the clear fails (IndexedDB unavailable or
   refusing it for five seconds), the call still resolves, and the next `clearAll` tries again.
 
-## Known limits of 0.1.0
+## Known limits of 0.2.0
 
-Three gaps have no code yet; the documentation site states each where an application meets it, and the
-designs follow after the release.
+Change events shipped in 0.2.0; memory bounds (finding M3) and a deploy-skew recovery (finding M5) are
+proposed but not built. The documentation site states each limit below where an application meets it.
 
 - **Memory is neither bounded nor reported.** No eviction, budget or size call exists; a SharedWorker
   keeps every cache until the last tab of the origin closes. One year of one-minute OHLCV with five `f64`
@@ -173,7 +173,8 @@ designs follow after the release.
   fetcher module (`Orchestrator.load`, `packages/tscache/src/orchestrator/orchestrator.ts`), so
   `createClient` rejects with `ConfigError` until the old tabs close. A fixed worker URL keeps one
   worker but needs a fixed fetcher URL too, for the same reason (`site/guides/workers.md`, Stale
-  scripts after a deploy). The deploy-skew proposal (finding M5) designs the recovery.
+  scripts after a deploy). The deploy-skew proposal (finding M5) designs the recovery; 0.2.0 does not
+  build it.
 - **Change notifications reach one cache's readers only.** `cacheChanged` (architecture §2.7, N71–N84,
   step 114) tells every listening tab of a SharedWorker where the cache changed, and a view re-reads by
   the read rule (N84). With a dedicated worker or in-process, each tab has a cache of its own and hears

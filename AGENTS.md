@@ -37,6 +37,7 @@ The per-step pipeline, the review loop, copy-paste prompts and the adversarial-r
 - Hook staging: pre-commit = Biome (staged) + gitleaks + commitlint (sub-second); pre-push = tsc + build, then full Biome (after the build: its promise rules read the package's types from `dist/`), Knip and the integration snippets (`bun run check:integrations`) + Fallow (`bun run fallow`) and the health floor (`bun run fallow:health`) + Vitest; `bun run ci` = superset incl. build + publint/attw + Playwright + bench smoke, plus gitleaks and commitlint over `main..HEAD` as the backstop for any skipped hook.
 - Multi-tab tests: standalone Playwright, one `BrowserContext` + multiple pages (Vitest browser mode cannot share a SharedWorker across tabs).
 - Tests follow `docs/testing.md`: no wall clock, no timing assertion, no sleep, no retries (`bun scripts/test-clocks.ts` in `bun run ci`). Hunt flakes with `scripts/flake-hunt.sh`.
+- **Effect is not used in this repository** (`docs/decisions/N85-effect-adoption.md`, 2026-11-15): one small module ported to it added about 14 kB brotli to its chunk, more than any entry's budget (`packages/tscache/bench/budgets.json`). Do not introduce `effect` or `@effect/*`; propose it to the user only with new facts, and the decision lists which. Every other dependency stays ask-first (Process, Dependencies).
 
 ## Resolved decisions
 

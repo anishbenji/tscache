@@ -11,6 +11,7 @@ import type {
   ClientOptions,
   GetOptions,
   HostingMode,
+  MemoryStats,
   Miss,
   Range,
   TscacheClient,
@@ -378,6 +379,13 @@ export function followed(
       return { events, fetching, cacheOnly, ...(last ? { last } : {}) };
     },
     { key, cfg: config },
+  );
+}
+
+/** What the page's client reports of its worker's memory (§2.9). */
+export function memoryStats(page: Page): Promise<MemoryStats> {
+  return page.evaluate(() =>
+    (window as unknown as E2EWindow).client.memoryStats(),
   );
 }
 

@@ -104,8 +104,9 @@ broke in.
 - [Demo benchmark](docs/benchmarks/demo-comparison.md): tscache against no
   cache, a per-tab memo and TanStack Query, on one seeded workload, with its
   method and limits.
-- [Known limits of 0.1.0](https://anishbenji.github.io/tscache/#known-limits):
-  unbounded memory, deploy skew, and no change notifications.
+- [Known limits of 0.2.0](https://anishbenji.github.io/tscache/#known-limits):
+  unbounded memory, deploy skew, and change events that reach other tabs only
+  through a SharedWorker.
 - [Architecture](docs/architecture.md): the API surface, the RPC protocol and
   the decision register. [Roadmap](docs/roadmap.md): what v1 leaves out.
 - [Changelog](CHANGELOG.md), [contributing](CONTRIBUTING.md),

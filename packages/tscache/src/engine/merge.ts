@@ -65,6 +65,18 @@ export class SegmentStore {
   /** No points, in the schema's shape: clears a range when merged with one. */
   readonly #nothing: Columns;
   #segments: Segment[] = [];
+  /**
+   * The running total of the segments' bytes once `count` switched it on
+   * (M3, with a memory budget); undefined otherwise, when `bytes` walks.
+   */
+  #total: number | undefined;
+  /** Told every change of the running total. */
+  #onBytes: ((delta: number) => void) | undefined;
+  /**
+   * Told each page a write stored or replaced points in, once the change
+   * landed (M3, N92): only pages written to, never pages a batch spans.
+   */
+  #onWrite: ((page: number) => void) | undefined;
 
   constructor(config: ResolvedCacheConfig) {
     this.#options = {
@@ -96,6 +108,67 @@ export class SegmentStore {
   }
 
   /**
+   * The bytes the segments have allocated (§2.9, N90): the running total
+   * once `count` switched it on, otherwise the sum over the segments.
+   */
+  get bytes(): number {
+    return this.#total ?? this.#bytesIn(undefined);
+  }
+
+  /**
+   * Keeps a running total of the segments' bytes from now on, and reports
+   * each change of it to `onBytes` and each page a write changes to
+   * `onWrite` (M3: only an engine with a budget pays for either). Called
+   * once, on a store that holds nothing.
+   */
+  count(
+    onBytes: (delta: number) => void,
+    onWrite?: (page: number) => void,
+  ): void {
+    this.#total = this.#bytesIn(undefined);
+    this.#onBytes = onBytes;
+    this.#onWrite = onWrite;
+  }
+
+  /** Adds `delta` to the running total, if one is kept. */
+  #counted(delta: number): void {
+    if (this.#total === undefined || delta === 0) return;
+    this.#total += delta;
+    this.#onBytes?.(delta);
+  }
+
+  /** The bytes of the segments that overlap `range`; every segment when undefined. */
+  #bytesIn(range: SlotRange | undefined): number {
+    let bytes = 0;
+    let i = range === undefined ? 0 : this.#firstEndingFrom(range.start);
+    for (; i < this.#segments.length; i++) {
+      const segment = this.#segments[i] as Segment;
+      if (range !== undefined && extentOf(segment).start > range.end) break;
+      bytes += segment.bytes;
+    }
+    return bytes;
+  }
+
+  /**
+   * The slots of the pages a put may change: every page from the first to
+   * the last slot of its points and authority. Segments never cross a page
+   * (N15), so no segment the put touches lies outside them.
+   */
+  #pagesOf(points: Columns, authority: SlotRange | undefined): SlotRange {
+    const n = points.slots.length;
+    let start = authority?.start ?? Number.POSITIVE_INFINITY;
+    let end = authority?.end ?? Number.NEGATIVE_INFINITY;
+    if (n > 0) {
+      start = Math.min(start, points.slots[0] as number);
+      end = Math.max(end, points.slots[n - 1] as number);
+    }
+    return {
+      start: this.#pageRange(this.#page(start)).start,
+      end: this.#pageRange(this.#page(end)).end,
+    };
+  }
+
+  /**
    * Merges validated points in; new values win. Without `authority` it only
    * adds or overwrites; with it the present points inside that range end up
    * exactly `points` (N11). Returns the overlap warnings, always empty when
@@ -104,6 +177,23 @@ export class SegmentStore {
    */
   put(points: Columns, authority?: SlotRange): SlotWarning[] {
     assertPoints(points, this.#names, authority);
+    if (
+      this.#total === undefined ||
+      (points.slots.length === 0 && authority === undefined)
+    ) {
+      return this.#put(points, authority);
+    }
+    // Counting: the bytes of the pages the put may change, before and after.
+    const pages = this.#pagesOf(points, authority);
+    const before = this.#bytesIn(pages);
+    try {
+      return this.#put(points, authority);
+    } finally {
+      this.#counted(this.#bytesIn(pages) - before);
+    }
+  }
+
+  #put(points: Columns, authority: SlotRange | undefined): SlotWarning[] {
     const incoming = this.#incoming(points);
     const warnings = this.#warn
       ? overlapWarnings(this.#segments, incoming)
@@ -144,6 +234,68 @@ export class SegmentStore {
   /** Drops every segment. */
   clear(): void {
     this.#segments = [];
+    this.#counted(-(this.#total ?? 0));
+  }
+
+  /** Index range `[from, to)` of the segments on `page`. */
+  #onPage(page: number): [number, number] {
+    const { start, end } = this.#pageRange(page);
+    const from = this.#firstEndingFrom(start);
+    let to = from;
+    while (
+      to < this.#segments.length &&
+      extentOf(this.#segments[to] as Segment).start <= end
+    ) {
+      to++;
+    }
+    return [from, to];
+  }
+
+  /**
+   * Drops every segment on `page` (§4.3, N91): they are contiguous, and
+   * none reaches another page (N15). Returns the bytes freed.
+   */
+  evictPage(page: number): number {
+    const [from, to] = this.#onPage(page);
+    let freed = 0;
+    for (let i = from; i < to; i++)
+      freed += (this.#segments[i] as Segment).bytes;
+    if (to > from) this.#segments.splice(from, to - from);
+    this.#counted(-freed);
+    return freed;
+  }
+
+  /** The bytes of the segments on `page`. */
+  pageBytes(page: number): number {
+    const [from, to] = this.#onPage(page);
+    let bytes = 0;
+    for (let i = from; i < to; i++)
+      bytes += (this.#segments[i] as Segment).bytes;
+    return bytes;
+  }
+
+  /** The last present slot on `page`, or undefined when it holds none. */
+  lastSlotOn(page: number): number | undefined {
+    const [from, to] = this.#onPage(page);
+    return to > from
+      ? extentOf(this.#segments[to - 1] as Segment).end
+      : undefined;
+  }
+
+  /**
+   * Calls `fn` once per page that holds points and overlaps `range`,
+   * ascending; every such page when `range` is undefined.
+   */
+  forEachPage(range: SlotRange | undefined, fn: (page: number) => void): void {
+    let last: number | undefined;
+    let i = range === undefined ? 0 : this.#firstEndingFrom(range.start);
+    for (; i < this.#segments.length; i++) {
+      const extent = extentOf(this.#segments[i] as Segment);
+      if (range !== undefined && extent.start > range.end) break;
+      const page = this.#page(extent.start);
+      if (page !== last) fn(page);
+      last = page;
+    }
   }
 
   /** The points as one array per schema field, in schema order and dtype. */
@@ -227,7 +379,10 @@ export class SegmentStore {
       if (extent.start < authority.start && extent.end > authority.end) {
         interior = segment;
       }
+      const size = segment.size;
       segment.mergeFrom(this.#nothing, authority);
+      // A replace that removed points wrote the page, emptied or not.
+      if (segment.size !== size) this.#onWrite?.(this.#page(extent.start));
       if (segment.extent === undefined) this.#segments.splice(i, 1);
       else i++;
     }
@@ -264,6 +419,8 @@ export class SegmentStore {
     } else {
       this.#join(at, end, chunk);
     }
+    // Reached only once the run landed: a failed allocation changed nothing.
+    this.#onWrite?.(this.#page(first));
   }
 
   /**
