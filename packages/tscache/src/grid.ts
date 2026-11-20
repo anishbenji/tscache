@@ -723,27 +723,33 @@ class Calendar {
   }
 
   /**
-   * The fill rule (N124): computes the table of each block that the
-   * conversion about to run needs more than half of. `values` are the
-   * ascending slots a read returns, or the timestamps of a put, whose
-   * candidate slots stand for their slots.
+   * The fill rule (N124), one block at a time: the end of the run of
+   * values from `from` that count toward one block, whose table is
+   * computed first when the run needs more than half of it. The caller
+   * converts the run before it asks for the next, so a table is used before
+   * a later fill can evict it, however few tables the context holds.
+   * `values` are the ascending slots a read returns, or the timestamps of a
+   * put, whose candidate slots stand for their slots.
    */
-  warm(values: ArrayLike<number>, n: number, instants: boolean): void {
-    if (this.#utc) return;
-    let block = Number.NaN;
-    let count = 0;
-    for (let i = 0; i < n; i++) {
-      const at = instants
-        ? this.#blockOfInstant(values[i])
-        : Math.floor((values[i] as number) / BLOCK);
-      if (at === block) count++;
-      else {
-        this.#need(block, count);
-        block = at;
-        count = 1;
-      }
-    }
-    this.#need(block, count);
+  #run(
+    values: ArrayLike<number>,
+    from: number,
+    n: number,
+    instants: boolean,
+  ): number {
+    if (this.#utc) return n;
+    const block = this.#blockAt(values[from], instants);
+    let end = from + 1;
+    while (end < n && this.#blockAt(values[end], instants) === block) end++;
+    this.#need(block, end - from);
+    return end;
+  }
+
+  /** The block a value of a bulk conversion counts toward. */
+  #blockAt(value: unknown, instants: boolean): number {
+    return instants
+      ? this.#blockOfInstant(value)
+      : Math.floor((value as number) / BLOCK);
   }
 
   /** The block of a put timestamp's candidate slot; NaN for what no slot can hold. */
@@ -920,20 +926,24 @@ class Calendar {
    * rule: the index of the first one that is no slot's start, or `n`.
    */
   slotsOf(timestamps: ArrayLike<number>, n: number, out: Float64Array): number {
-    this.warm(timestamps, n, true);
-    for (let i = 0; i < n; i++) {
-      const k = this.slotIfAligned(timestamps[i] as number);
-      if (Number.isNaN(k)) return i;
-      out[i] = k;
+    let i = 0;
+    while (i < n) {
+      const end = this.#run(timestamps, i, n, true);
+      for (; i < end; i++) {
+        const k = this.slotIfAligned(timestamps[i] as number);
+        if (Number.isNaN(k)) return i;
+        out[i] = k;
+      }
     }
     return n;
   }
 
-  /** Replaces a read's ascending slots by their starts, after the fill rule. */
+  /** Replaces a read's ascending slots by their starts, a block's run at a time. */
   startsInto(slots: Float64Array): void {
-    this.warm(slots, slots.length, false);
-    for (let i = 0; i < slots.length; i++) {
-      slots[i] = this.startOf(slots[i] as number);
+    let i = 0;
+    while (i < slots.length) {
+      const end = this.#run(slots, i, slots.length, false);
+      for (; i < end; i++) slots[i] = this.startOf(slots[i] as number);
     }
   }
 
