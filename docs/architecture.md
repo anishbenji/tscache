@@ -23,7 +23,7 @@ Status: **draft for review** (starter-prompt §12 deliverable). All decisions fr
         └────────────────────────┘
 ```
 
-Out of scope for v1 (roadmap): aggregation/resampling, ColumnarSegment, subscriptions, eviction, SharedArrayBuffer, per-field presence masks, irregular timestamps, elected auth handler, Node `worker_threads`. IndexedDB persistence, once on that list, is specified in §4.10 (step 38).
+Out of scope for v1 (roadmap): aggregation/resampling, ColumnarSegment, SharedArrayBuffer, per-field presence masks, irregular timestamps, elected auth handler, Node `worker_threads`. IndexedDB persistence, once on that list, is specified in §4.10 (step 38); so are change events (subscriptions), in §2.7 (step 114), and the memory budget with its eviction, in §2.9 (step 121).
 
 ## 2. Public API surface
 
@@ -647,7 +647,8 @@ coverage.ts         coverage index on slot ranges: sorted disjoint ranges, binar
 snapshot.ts         encodeSnapshot/decodeSnapshot: a Snapshot as a JSON value and back (N38);
                     imports types and errors only, so the '.' entry carries no engine code
 segment/
-  types.ts          Segment interface: lookup / slice / mergeFrom / transferPayload
+  types.ts          Segment interface: extent / size / bytes / lookup / slice / countIn /
+                    sliceInto / mergeFrom / transferPayload (§4.2)
   assert.ts         programming-error checks shared by segments and the merge path
   dense.ts          DenseSegment: implicit timestamps, presence bitmask, typed arrays
   payload.ts        DenseSegmentPayload encode/decode (one-format-three-uses lives here)
@@ -667,6 +668,9 @@ engine/
                     persistence reaches it through (§4.10.5)
   restore.ts        CacheState.restore's implementation, installed by the persister, so
                     only the lazily loaded persistence chunk carries it (§4.10.5, §4.10.8)
+  memory.ts         MemoryBudget: an engine's byte budget — the counted total, the use order
+                    of pages, the pins of pending gets, and enforcement by evicting the least
+                    recently used unpinned pages (§2.9, §4.6, N86–N105)
   emitter.ts        minimal typed emitter for engine events (engine/ must not import client/)
   engine.ts         Engine: caches map keyed by id, get-or-create with config conflicts (N4,
                     N20), cacheId-first ops, cacheCleared events; pure in-process API —
