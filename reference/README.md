@@ -99,7 +99,12 @@ Then replace what belongs to the demo:
 - the server's credential (`shared/src/server.ts`) with one from the server's environment;
 - the dev server's mock backend and server rendering (`mockBackend` and `ssrPage` from
   `@examples/mock-backend/vite`, in the client's `vite.config.ts` and the types its
-  `entry-server` imports) with your backend and your own server.
+  `entry-server` imports) with your backend and your own server;
+- the demo's insights with nothing, since an application has no counterpart: the `read-insights`
+  instrumentation in `shared/src/session.ts` (`createInsights`, `insights.instrument`), each
+  client's panel and draw reports (`Insights.tsx` in `react/` and `solid/`, `mountInsights` in
+  `vanilla/src/page.ts`, the `insights.drawn` calls), `pageContext` in `shared/src/auth.ts`, and
+  the `@import "@examples/mock-backend/insights.css"` at the top of `shared/src/style.css`.
 
 ## Limits
 

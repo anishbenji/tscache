@@ -68,7 +68,8 @@ least recently used pages above the budget, which a later read fetches
 again (§2.9). This page adds one reading a minute and sets no budget, but a
 server that reads many series over long ranges should set one, as the
 [Memory guide](../../site/guides/patterns.md#memory) recommends, or clear its
-caches on its own clock (`clear`, `invalidate`, §2.4). If creating the client fails, the next render tries
+caches on its own clock with `clear` (§2.4), which frees their points;
+`invalidate` forgets coverage but keeps the points, so it frees nothing. If creating the client fails, the next render tries
 again; in dev, the client is disposed before the dev server evaluates the
 server entry again after a change.
 
