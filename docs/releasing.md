@@ -17,9 +17,11 @@ provenance statement. No npm token is ever created or stored, and the workflow r
   unpacked.
 - The annotated tag `v0.2.0` points at `43393f3`, the merge commit of the release preparation
   (pull request #149) on `main`, and was pushed on 20 November 2026 at 17:55 UTC. The release run it
-  started (run 44787821712) succeeded, the maintainer approved the staged version (stage id
-  `5a52992d-6750-4538-a92a-3b8f2e4c99cc`) with 2FA, and the GitHub release `v0.2.0` was published on
-  20 November 2026 at 18:18:23 UTC.
+  started (run 44787821712) succeeded. The GitHub release `v0.2.0` was published at 18:18:23 UTC,
+  before the approval: the maintainer's npm token had expired, so the first approval failed. After a
+  new login the maintainer approved the staged version (stage id
+  `5a52992d-6750-4538-a92a-3b8f2e4c99cc`) with 2FA, and npm published 0.2.0 at 18:20:44 UTC
+  (`npm view @anishbenji/tscache time`).
 - 0.1.0 was released the same way on 13 November 2026: tag `v0.1.0` on `b2e1f06`, run 43470043079,
   GitHub release published at 17:21:12 UTC.
 - The trusted publisher (GitHub Actions, `anishbenji/tscache`, workflow `release.yml`, environment

@@ -18,7 +18,7 @@ Facts are from the director's brief (from the parent thread, 2026-11-20). Those 
   - The account, trusted-publisher and environment bullets are unchanged; they are still true.
 - **Cutting a release, step 5.** A paragraph after the tag commands: the ruleset `protect-release-tags` restricts creating a `v*` tag to the repository admin, so the maintainer's push prints a "Bypassed rule violations" notice about creations being restricted, which is expected. Basis: the 0.2.0 tag push printed it (brief); the ruleset and the admin bypass are described in `docs/supply-chain.md` (chain step 2 and the tag-ruleset check). The steps did not mention the ruleset before.
 - **Step 8.** Run `npm whoami` first and sign in again with `npm login` if it fails; an expired login token fails the stage commands with `E401`. Basis: the maintainer's token had expired during the 0.2.0 release (brief). Step 8 already said the stage commands need the maintainer's own login, but not how to check it.
-- **Between steps 8 and 9.** Steps 9 and 10 run one at a time, never as one chained block. Basis: in 0.2.0 they were given as one block, so `gh release edit --draft=false` ran although the approval had failed, and the GitHub release was public about 7 minutes before npm had the version (brief).
+- **Between steps 8 and 9.** Steps 9 and 10 run one at a time, never as one chained block. Basis: in 0.2.0 they were given as one block, so `gh release edit --draft=false` ran although the approval had failed, and the GitHub release was public before npm had the version: the release at 18:18:23 UTC (`gh release view v0.2.0`), npm at 18:20:44 UTC (`npm view @anishbenji/tscache time`), about 2 min 21 s. The brief's "about 7 minutes" did not match the registry.
 - **Step 10.** Publish the draft GitHub release only after `npm view @anishbenji/tscache version` prints the new version (the version of the `latest` dist-tag). Step 11 keeps `npm view @anishbenji/tscache@X.Y.Z` as a details check and now reads "Check the rest of the result", so the gating check is in step 10 and the order is clear.
 - **Dry run.**
   - The sentence "Today `main` says `0.2.0` and `latest` is still `0.1.0`, so a dry run on `main` passes without it" is false now. It reads: today `main` and `latest` both say `0.2.0`, so a dry run on `main` passes with the version warning. Checked against `plan` in `.github/workflows/release.yml`: a version equal to the highest published plain version produces the `::warning::` "is not above the highest published version" in a dry run. This is outside the brief's list but inside `docs/releasing.md`, and the brief allows fixing a statement the release made false.
@@ -45,3 +45,7 @@ None.
 ## Decision concerns
 
 None.
+
+## Pre-review (Claude), not the gate
+
+Pre-review 1 (Opus, head `59b863f`): one P2, valid, fixed by the director. "Current state" implied the staged version was approved before the GitHub release was published, and this file gave the gap as "about 7 minutes" from the brief. The registry shows npm published 0.2.0 at 18:20:44 UTC and the release went public at 18:18:23 UTC; both texts now give the order and the times.
