@@ -132,16 +132,17 @@ function formatterOf(zone: string): Intl.DateTimeFormat {
   return format;
 }
 
-const OFFSET = /GMT(?:([+-])(\d+)(?::(\d+))?(?::(\d+))?)?$/;
+// The sign may be an ASCII hyphen or U+2212, as the runtime's locale data has it.
+const OFFSET = /GMT(?:([+\-\u2212])(\d+)(?::(\d+))?(?::(\d+))?)?$/;
 
 /** The zone's UTC offset in ms at `instant`, from the runtime's zone data (N108). */
 function intlOffset(zone: string, instant: number): number {
   // "…, GMT-04:56:02", "…, GMT+05:45" or "…, GMT".
   const match = OFFSET.exec(formatterOf(zone).format(instant));
   if (match === null) throw new RangeError(`no offset for ${zone}`);
-  const [, sign, h = "0", m = "0", s = "0"] = match;
+  const [, sign = "+", h = "0", m = "0", s = "0"] = match;
   const ms = (+h * 3600 + +m * 60 + +s) * 1000;
-  return sign === "-" ? -ms : ms;
+  return sign === "+" ? ms : -ms;
 }
 
 class Context implements CalendarGridContext {
