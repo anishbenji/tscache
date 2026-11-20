@@ -1,7 +1,7 @@
 # tscache with Solid 2
 
 The adapter (`series.ts`) and the pages that use it, client-only and
-server-rendered, for Solid 2.0.0-rc.14 with `@solidjs/web`. Solid 2 removed
+server-rendered, for Solid 2.0 (2.0.3) with `@solidjs/web`. Solid 2 removed
 `createResource`, so a series is an async memo.
 
 ## The adapter
@@ -65,13 +65,11 @@ worker answered. SSR-only is `ssr-server.tsx` without the browser half.
 
 ## Known limits
 
-- Solid 2 is a release candidate; `loadingValue`, `onSettled` and the
-  boundaries may change before 2.0.
 - The live chart replaces the server's element with its own as hydration
   ends, with the same text.
 - Teardown does not wait for the client's `dispose()`, since a cleanup
   cannot be async; a rejection from it goes unhandled.
-- The JSX needs Solid's compiler (`vite-plugin-solid` with Vite); `tsc` only
+- The JSX needs Solid's compiler (`@solidjs/vite-plugin` with Vite); `tsc` only
   type-checks it.
 - A seed is checked against the dataset version only when the dataset has
   one (`../README.md`, "Checks and limits"; architecture §2.8).

@@ -1,6 +1,6 @@
 # Solid
 
-The Solid snippet targets Solid 2.0 (release candidate 14) with `@solidjs/web`. Solid 2 removed
+The Solid snippet targets Solid 2.0 (2.0.3) with `@solidjs/web`. Solid 2 removed
 `createResource`, so a series is an async memo.
 
 ## The adapter
@@ -39,8 +39,7 @@ tail.
 
 <<< ../../integrations/solid/ssr-browser.tsx{tsx}
 
-The snippet's [README](https://github.com/anishbenji/tscache/blob/main/integrations/solid/README.md) lists its limits; Solid 2 is a release
-candidate, and its APIs may change before 2.0.
+The snippet's [README](https://github.com/anishbenji/tscache/blob/main/integrations/solid/README.md) lists its limits.
 
 ## Complete apps
 
