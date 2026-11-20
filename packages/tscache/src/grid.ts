@@ -491,10 +491,13 @@ export function sameCalendar(
  * The calendar grid of a descriptor in a context (default: one shared by
  * every caller that names none). Equal descriptors give the same grid, so
  * they share its tables. Throws ConfigError for an invalid descriptor.
+ * With `keep` false a grid this call makes is not held by the context yet:
+ * the caller holds it with `keepGrid` once what it is for exists.
  */
 export function createCalendarGrid(
   descriptor: unknown,
   context?: CalendarGridContext,
+  keep = true,
 ): CalendarGrid {
   defaultContext ??= new Context({}, SHARED_GRIDS);
   const owner = (context as Context | undefined) ?? defaultContext;
@@ -505,14 +508,14 @@ export function createCalendarGrid(
   const key = `${fields.unit}|${fields.at}|${fields.weekStart}|${show(zone)}`;
   const held = typeof zone === "string" ? owner.grid(key) : undefined;
   if (held !== undefined) return held;
-  const { grid } = new Calendar(withZone(fields), owner);
-  owner.keep(key, grid);
+  const { grid } = new Calendar(withZone(fields), owner, key);
+  if (keep) owner.keep(key, grid);
   return grid;
 }
 
 /**
  * The grid of a resolved config: its own fixed grid, or the calendar grid
- * of its descriptor in `context`.
+ * of its descriptor in `context` (`keep` as `createCalendarGrid`).
  */
 export function gridOf(
   config: {
@@ -520,11 +523,22 @@ export function gridOf(
     alignmentOffset: number;
   },
   context?: CalendarGridContext,
+  keep = true,
 ): Grid {
   const { interval, alignmentOffset } = config;
   return typeof interval === "number"
     ? { interval, alignmentOffset }
-    : createCalendarGrid(interval, context);
+    : createCalendarGrid(interval, context, keep);
+}
+
+/**
+ * Has its context hold a calendar grid made with `keep` false, unless the
+ * context holds one for the descriptor already. An engine calls it once
+ * the cache the grid is for exists, so a rejected `cache()` leaves nothing
+ * behind (§4.1).
+ */
+export function keepGrid(g: Grid): void {
+  g.calendar?.keep();
 }
 
 /**
@@ -555,6 +569,8 @@ class Calendar {
   readonly kMax: number;
   /** What a put's `'misaligned'` error names. */
   readonly label: string;
+  /** The context's key for this grid: its descriptor as written. */
+  readonly #key: string;
   readonly #context: Context;
   readonly #zone: string;
   readonly #utc: boolean;
@@ -579,8 +595,13 @@ class Calendar {
   /** The start of the slot the last `#floor` returned. */
   #start = 0;
 
-  constructor(descriptor: ResolvedCalendarInterval, context: Context) {
+  constructor(
+    descriptor: ResolvedCalendarInterval,
+    context: Context,
+    key: string,
+  ) {
     const { unit, zone, at, weekStart } = descriptor;
+    this.#key = key;
     this.grid = Object.freeze({
       interval: descriptor,
       alignmentOffset: 0,
@@ -684,6 +705,13 @@ class Calendar {
   #forgetLast(): void {
     this.#lastBlock = Number.NaN;
     this.#lastTable = undefined;
+  }
+
+  /** Has the context hold this grid, when it holds none for the descriptor. */
+  keep(): void {
+    if (this.#context.grid(this.#key) === undefined) {
+      this.#context.keep(this.#key, this.grid);
+    }
   }
 
   /** The tables this grid references: those it holds, and its shortcut's. */

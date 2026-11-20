@@ -11,6 +11,7 @@ import {
   createCalendarGridContext,
   type Grid,
   gridOf,
+  keepGrid,
   type SlotRange,
   sameCalendar,
 } from "../grid";
@@ -293,8 +294,12 @@ export class Engine {
     if (typeof resolved.interval !== "number") {
       this.#calendar ??= createCalendarGridContext();
     }
+    // A calendar grid this call makes is held by the context only once the
+    // cache exists: its construction can still reject the config (a
+    // watermark outside the domain), and a rejected call leaves no grid.
+    const grid = gridOf(resolved, this.#calendar, false);
     const created = new CacheState(resolved, {
-      grid: gridOf(resolved, this.#calendar),
+      grid,
       onVersionClear: () => this.#cleared(id, "version-mismatch"),
       onChange: (change) => {
         for (const observer of observers) observer.onChange(id, change);
@@ -312,6 +317,7 @@ export class Engine {
       },
       ...(this.#memory === undefined ? {} : { memory: this.#memory }),
     });
+    keepGrid(grid);
     this.#caches.set(resolved.id, created);
     return created.config;
   }
