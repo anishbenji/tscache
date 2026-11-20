@@ -80,3 +80,7 @@ None.
 ## Decision concerns
 
 The checklist additions of pre-review 1 (PR-2's §12 clause, PR-3's §3 item, and gaps 3–5: the §9 and §7 items with their two cost-when-off clauses) add review rules in the builder's wording, each restating approved architecture text (§2.7, §2.9, §4.10.9) and its decisions. The checklist is a protected path that the user merges: the user may strike or reword any of them at merge, and nothing else in the step depends on them.
+
+## Round 1 (Codex) — reviewer verdict: merge
+
+Head `c7a53fa`. No findings; the reviewer confirmed pre-review 1's three fixes and the five additions. The review settles at round 1. The user merges (protected path) and may keep, reword or strike any of the five checklist additions.
