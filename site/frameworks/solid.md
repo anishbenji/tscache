@@ -39,8 +39,7 @@ tail.
 
 <<< ../../integrations/solid/ssr-browser.tsx{tsx}
 
-The snippet's [README](https://github.com/anishbenji/tscache/blob/main/integrations/solid/README.md) lists its limits; Solid 2 is a release
-candidate, and its APIs may change before 2.0.
+The snippet's [README](https://github.com/anishbenji/tscache/blob/main/integrations/solid/README.md) lists its limits.
 
 ## Complete apps
 
