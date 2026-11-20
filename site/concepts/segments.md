@@ -34,8 +34,8 @@ Two settings shape the layout:
 - **`gapSplitK`** (default 4): a segment splits where **more than K** consecutive slots hold no point.
   With K = 4 at one minute, points at 10:00 and 10:05 (four empty slots between) share a segment; 10:00
   and 10:06 (five) do not. A short gap costs its slots' storage; a long one costs nothing. K is a
-  positive integer, so 0 is rejected; it has no upper bound, and a K of `segmentSlotCap` or more
-  splits segments only at page edges.
+  positive safe integer (at most 2^53 − 1; 0 and `Infinity` are rejected), and a K of
+  `segmentSlotCap` or more splits segments only at page edges.
 - **`segmentSlotCap`** (default 32 768, at most 2^31 − 1): no segment spans more slots than this, and
   no segment crosses a multiple of it. The slots are divided into fixed pages, so the layout depends only
   on which points are present, never on the order they arrived in.

@@ -56,8 +56,8 @@ and settled their differences with experiments; method and reasoning in `docs/be
 - **Done:**
   1. Calibration on GitHub's runner (`bench-calibrate.yml`): a case gates in a runtime once it
      fired in none of 20 same-revision runs and caught at least 90 % of runs with a 25 % slowdown
-     injected. The first two calibrations kept timing report-only; the recalibration after the
-     engine optimisations (chore 43) gated the eight Bun cases. Chromium stayed report-only after
+     injected. The calibrations before chore 43 kept timing report-only; the recalibration after
+     the engine optimisations (chore 43) gated the eight Bun cases. Chromium stayed report-only after
      the confirming calibration (chore 45), and `read-year` in Bun after both
      (`docs/benchmarking.md`, calibration log).
   2. Step 22: a fast path in `DenseSegment.slice` for fully present spans (`read-viewport`
