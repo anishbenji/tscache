@@ -57,10 +57,10 @@ one interval into it.
 
 ## Errors
 
-| You throw          | The `get` sees                                                       | Then                                                                                          |
-| ------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `AuthInvalidError` | the range as `'auth-pending'`                                        | every tab hears `authInvalid`; no fetch runs until `updateAuth` ([Credentials](/guides/auth)) |
-| anything else      | the range as `'fetch-failed'`, with the error's `name` and `message` | nothing is cached; the next `get` tries again                                                 |
+| You throw          | The `get` sees                                                       | Then                                                                                                                                         |
+| ------------------ | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthInvalidError` | the range as `'auth-pending'`                                        | every tab hears `authInvalid`; no fetch runs until the next `updateAuth`, or a joining tab with other material ([Credentials](/guides/auth)) |
+| anything else      | the range as `'fetch-failed'`, with the error's `name` and `message` | nothing is cached; the next `get` tries again                                                                                                |
 
 Retries, backoff and timeouts are yours: tscache retries nothing on behalf of a `get` that already
 returned.

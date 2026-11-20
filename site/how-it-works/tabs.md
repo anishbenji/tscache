@@ -54,8 +54,8 @@ id. If its `init` names the module the worker already runs, it shares that load.
 context that is not the identical value (`Object.is`) the worker holds, the context takes the
 `updateAuth` path, so the fetcher's hook hears it. A context that is the same
 material (`sameMaterial`: equal primitives, or plain arrays and objects equal member by member) as the
-one the last refusal named changes nothing, whatever the auth state: auth stays invalid until a tab
-calls `updateAuth`, and a refresh that took effect first stays in place ([Auth refresh](./auth)). If it names another module, its `init` is refused
+one the last refusal named changes nothing, whatever the auth state: auth stays invalid until the next
+`updateAuth`, or a joining tab with other material, and a refresh that took effect first stays in place ([Auth refresh](./auth)). If it names another module, its `init` is refused
 with a `ConfigError` and its `createClient` rejects.
 
 From then on the tabs share everything the engine holds: data, coverage, versions, watermarks, the

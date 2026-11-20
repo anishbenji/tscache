@@ -200,9 +200,9 @@ What to notice:
 - `Orchestrator.load` imports the fetcher module once per server, so once per SharedWorker, once an
   import has succeeded; a failed import leaves the slot free for the next connection to retry. A
   connection naming another module gets a `ConfigError`; one bringing a context that is not the
-  identical value goes through `updateAuth`, except that one that `sameMaterial` finds equal to the context the last refusal named
-  (`AuthState.wasRefused`, checked when its turn comes and again after the hook) changes nothing,
-  whatever the auth state.
+  identical value goes through `updateAuth`, except a context that `sameMaterial` finds equal to the context the last refusal named
+  (`AuthState.wasRefused`, checked when its turn comes and again after the hook), which changes
+  nothing, whatever the auth state.
 
 In the demo hub: **Candles with weekend gaps**: load an earlier fortnight; the page asks for the whole
 range and only what the cache does not cover is fetched: the older fortnight and the provisional slot
