@@ -14,7 +14,7 @@ Every review of a step branch checks the diff against this list. Section referen
 ## 1. Locked decisions and scope
 
 - [ ] No silent deviation from S§3 or A§7–§8. Any deviation is P0 unless the diff or step review file records user approval.
-- [ ] Nothing from the roadmap leaks in: TTL, aggregation/resampling, SharedArrayBuffer, `ColumnarSegment` or another segment layout (irregular timestamps), subscriptions (dirty notifications), LRU/eviction, per-field presence masks, an elected auth handler, `i64`/`u64`/`f16`, `worker_threads` hosting (S§3.3, S§10, A§1, A§8 N7; `docs/roadmap.md`). IndexedDB persistence is no longer on this list: it is specified in A§4.10 (N45–N61, N66).
+- [ ] Nothing from the roadmap leaks in: TTL, aggregation/resampling, SharedArrayBuffer, `ColumnarSegment` or another segment layout (irregular timestamps), eviction beyond A§2.9's (a unit other than the page or an order other than least recently used, N91, N92; or evicted pages kept on disk, which needs lazy loading and a disk budget, A§4.10.10, N95), per-field presence masks, an elected auth handler, `i64`/`u64`/`f16`, `worker_threads` hosting (S§3.3, S§10, A§1, A§8 N7; `docs/roadmap.md`). IndexedDB persistence, change events and the memory budget are no longer on this list: they are specified in A§4.10 (N45–N61, N66), A§2.7 (N71–N84) and A§2.9 (N86–N105).
 
 ## 2. Data model and validation (S§3.1, A§2.4, N1)
 
@@ -34,7 +34,7 @@ Every review of a step branch checks the diff against this list. Section referen
 
 ## 4. Segments (S§3.2)
 
-- [ ] Code outside `segment/` depends only on the `Segment` interface (`extent`, `size`, `lookup`, `slice`, `countIn`, `sliceInto`, `mergeFrom`, `transferPayload`), never on `DenseSegment` internals.
+- [ ] Code outside `segment/` depends only on the `Segment` interface (`extent`, `size`, `bytes`, `lookup`, `slice`, `countIn`, `sliceInto`, `mergeFrom`, `transferPayload`), never on `DenseSegment` internals.
 - [ ] Mask is 1 bit per slot, `ceil(count / 8)` bytes; bit order is consistent between write, read and payload.
 - [ ] Gap split triggers at more than K intervals; the slot cap (32 768 default) is respected on every growth path.
 - [ ] New data wins on overlap; the overlap-difference warning is off by default and costs nothing when off.
