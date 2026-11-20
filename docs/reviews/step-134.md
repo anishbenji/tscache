@@ -88,3 +88,7 @@ None.
 - Round 0 (`b8c0d9a5`): `bun run docs:check` exit 0; `bun run ci` through `heavy-run.sh`, exit 0 (Vitest 156 files and 3058 tests passed, Playwright 193 passed, bench smoke ok).
 - After pre-review 1: `bun run docs:check` before committing, exit 0. `~/code/tscache-reports/bin/heavy-run.sh "134 child: ci" bun run ci` runs on the commit that adds this text, so its result is in the builder's report to the director rather than here.
 - `docs/INDEX.md`, re-measured with `wc -c` after pre-review 1 (bytes now; at `6716b4d`): `docs/guides/patterns.md` 12,830 (12,618), 12.8 KB; `docs/guides/worker-setup.md` 13,725 (13,219), 13.7 KB; `README.md` 9,032 (8,939), 9.0 KB; `packages/tscache/README.md` 7,512 (7,421), 7.5 KB; `site/` 272,622 over its 42 tracked Markdown pages (271,710), 272.6 KB. The other files changed have no row with a size (`docs/reviews/` carries a dash).
+
+## Round 1 (Codex) — reviewer verdict: merge
+
+Head `8395db3`. No findings; the reviewer confirmed the four pre-review fixes. `bun run ci` exited 0 on `8395db3`. The review settles at round 1.
