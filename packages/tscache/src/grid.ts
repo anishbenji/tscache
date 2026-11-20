@@ -277,7 +277,8 @@ function validWeekStart(unit: Unit, weekStart: unknown): WeekDay | undefined {
     if (weekStart === undefined) return undefined;
     failConfig(`interval.weekStart is only for the unit "week"`);
   }
-  const first = weekStart ?? 1;
+  // The default is for an absent field only: null is a value, and invalid.
+  const first = weekStart === undefined ? 1 : weekStart;
   if (typeof first !== "number" || !WEEK_DAYS.includes(first)) {
     failConfig(
       `interval.weekStart must be an integer from 1 (Monday) to 7 (Sunday), got ${show(weekStart)}`,
@@ -333,9 +334,15 @@ function calendarFields(input: unknown): CalendarFields {
   }
   const raw = input as Record<string, unknown>;
   const unit = validUnit(raw.unit);
-  const at = validAt(raw.at ?? "00:00");
+  // A default is for an absent field only: null is a value, and invalid.
+  const at = validAt(raw.at === undefined ? "00:00" : raw.at);
   const weekStart = validWeekStart(unit, raw.weekStart);
-  return { unit, at, weekStart, zone: raw.zone ?? "UTC" };
+  return {
+    unit,
+    at,
+    weekStart,
+    zone: raw.zone === undefined ? "UTC" : raw.zone,
+  };
 }
 
 /** The resolved interval of validated fields, once the zone is checked too. */
