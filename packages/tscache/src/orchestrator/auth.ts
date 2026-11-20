@@ -11,6 +11,12 @@ export class AuthState {
   #valid = true;
   /** Gets waiting on fetches; told once when auth flips to invalid. */
   readonly #waiters = new Set<() => void>();
+  /**
+   * The context of the last flip's refused fetch (step 133): kept until the
+   * next flip replaces it, whatever the state, so a joining tab cannot
+   * switch material already refused back in (see wasRefused).
+   */
+  #refused: { context: unknown } | undefined;
 
   constructor(broadcast: (evt: Evt) => void) {
     this.#broadcast = broadcast;
@@ -47,6 +53,7 @@ export class AuthState {
   invalidate(error: { name: string; message: string }, context: unknown): void {
     if (!this.#valid) return;
     this.#valid = false;
+    this.#refused = { context };
     // Release gets that are waiting on fetches: they report auth-pending.
     for (const fn of [...this.#waiters]) fn();
     this.#waiters.clear();
@@ -61,6 +68,18 @@ export class AuthState {
   /** New material arrived: fetches may resume. */
   restore(): void {
     this.#valid = true;
+  }
+
+  /**
+   * Whether `context` is the same material (sameMaterial) as the context
+   * the last flip refused, whether auth is valid or invalid now. False
+   * before any flip.
+   */
+  wasRefused(context: unknown): boolean {
+    return (
+      this.#refused !== undefined &&
+      sameMaterial(context, this.#refused.context)
+    );
   }
 }
 

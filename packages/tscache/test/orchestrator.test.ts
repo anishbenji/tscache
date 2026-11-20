@@ -1419,6 +1419,65 @@ describe("a tab joining while auth is invalid (step 133)", () => {
     expect(refusals()).toHaveLength(1);
   });
 
+  it("a join queued behind a refresh does not switch the refused material back in", async () => {
+    // Pre-review 2 P1: auth is valid again by the join's turn, so a check of
+    // the current state let the refused context replace the new one.
+    const { server, a, refusals } = await invalidated({ token: "old" });
+    const authReleases = captureAuthReleases();
+    // A's refresh: its hook stalls.
+    const updating = a.request("updateAuth", { context: { token: "new" } });
+    await eventually(() => expect(authReleases).toHaveLength(1));
+    // Any later hook runs at once, so a wrong switch shows in the log.
+    log().slowAuth = false;
+    // C opens with the token it read before the refresh; its join queues.
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const arrived = initOn(channel.port1);
+    const joining = PortClient.connect(channel.port2 as MessagePortLike, {
+      fetcher: { module: fetcherModule, context: { token: "old" } },
+    });
+    await arrived;
+    await barrier(a);
+    authReleases[0]?.();
+    await updating;
+    const c = await joining;
+    open.push(c);
+    // The fetcher heard only the refresh, and fetches carry it.
+    expect(log().auth).toEqual([{ token: "new" }]);
+    log().mode = "ok";
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
+    expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
+    expect(refusals()).toHaveLength(1);
+  });
+
+  it("the remembered material is the last refusal's: a later refusal replaces it", async () => {
+    const { server, a, refusals } = await invalidated({ token: "old" });
+    await a.request("updateAuth", { context: { token: "new" } });
+    // The refresh is refused too: "new" is now the refused material.
+    expect((await get(a, { start: 23, end: 33 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    await eventually(() => expect(refusals()).toHaveLength(2));
+    const c = await join(server, { token: "new" });
+    expect((await get(c, { start: 43, end: 53 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(2);
+    expect(log().auth).toEqual([{ token: "new" }]);
+  });
+
+  it("an explicit re-send of the refused material does not make a later join with it new", async () => {
+    const { server, a } = await invalidated({ token: "old" });
+    log().mode = "ok";
+    // The client vouches for "old" again, then refreshes to "new".
+    await a.request("updateAuth", { context: { token: "old" } });
+    await a.request("updateAuth", { context: { token: "new" } });
+    const c = await join(server, { token: "old" });
+    expect(log().auth).toEqual([{ token: "old" }, { token: "new" }]);
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
+    expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
+  });
+
   it("an explicit updateAuth with the refused material still restores auth, as §4.9 Auth says", async () => {
     // Only a join compares material; a client's updateAuth is always applied.
     const { a } = await invalidated({ token: "old" });
