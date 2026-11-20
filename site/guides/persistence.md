@@ -60,8 +60,10 @@ A persistence failure never rejects a call. The cache stops persisting, its reco
 tab hears `persistStopped` with `reason` `'quota-exceeded'` (the origin's storage quota is full: the cache
 stops at the first refused write, without retrying, with the `QuotaExceededError`), `'unavailable'` (the
 database cannot be opened, or a write or the load did not finish in time) or `'error'` (a write or the load
-failed, with the error); the cache goes on in memory. A stop while `cache()` loads is emitted before the
-handle exists, so listen on the client:
+failed, with the error); the cache goes on in memory. A database that cannot be opened stops every
+persisted cache of the worker, and deletes nothing. After the browser closes the database connection,
+a later load or write stops its cache with `'error'`, and the records stay, since the deletion fails too. A stop
+while `cache()` loads is emitted before the handle exists, so listen on the client:
 
 <<< @/snippets/persistence.ts#stopped{ts}
 

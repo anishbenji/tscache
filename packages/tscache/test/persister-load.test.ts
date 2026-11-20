@@ -125,6 +125,16 @@ describe("Persister.open (§4.10.6 Open, N46, N59)", () => {
     expect(h.engine.get("persist", all).timestamps).toEqual(new Float64Array());
     expect(writes(h.store)).toHaveLength(1);
   });
+  // Step 132, open decision: the two tests above pin today's contract (N59,
+  // §4.10.6 Stopping): a load that times out or whose read rejects deletes the
+  // records it could not read. Whether they should survive for a later session
+  // is the user's call (docs/reviews/step-132.md, Decision concerns).
+  it.todo(
+    "132: records survive a load timeout and a later session loads them (undecided)",
+  );
+  it.todo(
+    "132: records survive a read rejection and a later session loads them (undecided)",
+  );
   it("store opening and read share the same load deadline", async () => {
     const h = harness();
     h.engine.cache(config());
