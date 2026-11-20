@@ -169,23 +169,43 @@ export function calendarGridInternals(): {
   formatters: number;
   /** Formatters built so far, the ones a zone check throws away included. */
   built: number;
+  /** Grids and tables the shared context holds (the grid entry's). */
+  grids: number;
+  tables: number;
 } {
-  return { formatters: formatters.size, built };
+  return {
+    formatters: formatters.size,
+    built,
+    grids: defaultContext?.gridCount ?? 0,
+    tables: defaultContext?.tableCount ?? 0,
+  };
 }
+
+/**
+ * Grids the shared context holds at most (S2.2). A page can pass the grid
+ * entry any number of descriptors, a zone in every spelling among them;
+ * an engine's own context holds one grid for each descriptor of its caches
+ * and needs no bound.
+ */
+const SHARED_GRIDS = 64;
 
 class Context implements CalendarGridContext {
   readonly #offsetAt: ((zone: string, instant: number) => number) | undefined;
   readonly onFloorStep: ((direction: -1 | 1) => void) | undefined;
   readonly lookupBudget: number;
   readonly #capacity: number;
-  /** One grid per resolved descriptor. */
-  readonly grids: Map<string, CalendarGrid> = new Map();
+  /** One grid per descriptor as written, least recently asked for first. */
+  readonly #grids = new Map<string, CalendarGrid>();
+  /** Grids held at most; above it the least recently asked for is dropped. */
+  readonly #gridCapacity: number;
+  #recentGrid: string | undefined;
   /** Every table held, least recently used first, with its owner and block. */
   readonly #order = new Map<Float64Array, { owner: Calendar; block: number }>();
   /** The table used last: using it again changes nothing in the order. */
   #recent: Float64Array | undefined;
 
-  constructor(options: CalendarGridOptions) {
+  constructor(options: CalendarGridOptions, gridCapacity: number = Infinity) {
+    this.#gridCapacity = gridCapacity;
     this.#offsetAt = options.offsetAt;
     this.onFloorStep = options.onFloorStep;
     this.lookupBudget = options.lookupBudget ?? LOOKUP_BUDGET;
@@ -194,6 +214,46 @@ class Context implements CalendarGridContext {
 
   get tableCount(): number {
     return this.#order.size;
+  }
+
+  get gridCount(): number {
+    return this.#grids.size;
+  }
+
+  /** The grid held under a key, marked as the most recently asked for. */
+  grid(key: string): CalendarGrid | undefined {
+    const grid = this.#grids.get(key);
+    if (grid !== undefined && key !== this.#recentGrid) {
+      this.#grids.delete(key);
+      this.#grids.set(key, grid);
+      this.#recentGrid = key;
+    }
+    return grid;
+  }
+
+  /**
+   * Holds a new grid, dropping the least recently asked for above the
+   * capacity. A dropped grid gives up its tables and goes on working for
+   * whoever still holds it; the next request for its descriptor makes a
+   * new one.
+   */
+  keep(key: string, grid: CalendarGrid): void {
+    this.#grids.set(key, grid);
+    this.#recentGrid = key;
+    while (this.#grids.size > this.#gridCapacity) {
+      const [oldest, dropped] = this.#grids.entries().next().value as [
+        string,
+        CalendarGrid,
+      ];
+      this.#grids.delete(oldest);
+      dropped.calendar.release();
+    }
+  }
+
+  /** Stops holding a table its grid gave up. */
+  forget(table: Float64Array): void {
+    this.#order.delete(table);
+    if (table === this.#recent) this.#recent = undefined;
   }
 
   /** A zone's offset function: the injected rules, or the runtime's. */
@@ -426,17 +486,17 @@ export function createCalendarGrid(
   descriptor: unknown,
   context?: CalendarGridContext,
 ): CalendarGrid {
-  defaultContext ??= new Context({});
+  defaultContext ??= new Context({}, SHARED_GRIDS);
   const owner = (context as Context | undefined) ?? defaultContext;
   const fields = calendarFields(descriptor);
   // A grid the context holds was made from a checked zone: only a new one
   // pays for the check.
   const { zone } = fields;
   const key = `${fields.unit}|${fields.at}|${fields.weekStart}|${show(zone)}`;
-  const held = typeof zone === "string" ? owner.grids.get(key) : undefined;
+  const held = typeof zone === "string" ? owner.grid(key) : undefined;
   if (held !== undefined) return held;
   const { grid } = new Calendar(withZone(fields), owner);
-  owner.grids.set(key, grid);
+  owner.keep(key, grid);
   return grid;
 }
 
@@ -608,6 +668,13 @@ class Calendar {
   drop(block: number): void {
     this.#tables.delete(block);
     if (block === this.#lastBlock) this.#lastBlock = Number.NaN;
+  }
+
+  /** Gives up every table: the context no longer holds this grid. */
+  release(): void {
+    for (const table of this.#tables.values()) this.#context.forget(table);
+    this.#tables.clear();
+    this.#lastBlock = Number.NaN;
   }
 
   /** The slots of a block that lie within the margin `startOf` accepts. */
