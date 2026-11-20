@@ -47,11 +47,11 @@ Outside the checklist, noted for the director rather than changed here (the brie
 
 ## Verification
 
-| Command                                      | Result                                       |
-| -------------------------------------------- | -------------------------------------------- |
-| `wc -c docs/review-checklist.md`             | 15,303 bytes, the 15.3 KB in `docs/INDEX.md` |
-| `bun run docs:check` (after `bun run build`) | See the step report                          |
-| `heavy-run.sh "122 child: ci" bun run ci`    | See the step report                          |
+| Command                                      | Result                                                                                                                                                                           |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wc -c docs/review-checklist.md`             | 15,303 bytes, the 15.3 KB in `docs/INDEX.md`                                                                                                                                     |
+| `bun run docs:check` (after `bun run build`) | Exit 0; `doc-anchors: 246 anchors in 42 pages resolve`                                                                                                                           |
+| `heavy-run.sh "122 child: ci" bun run ci`    | Exit 0 on `fd0992c`: Vitest 156 files, 3,058 passed; Playwright 193 passed; bench smoke `ok`. The final run, on the commit that fills in this table, is reported to the director |
 
 ## Contract-test changes
 
