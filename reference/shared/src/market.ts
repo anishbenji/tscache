@@ -10,7 +10,9 @@ import { datasets } from "@examples/mock-backend/datasets";
 export const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
-export const market: CacheConfig = {
+// The market's interval is a fixed one: the type says so, so the chart
+// adapters, which step by whole intervals, take it without narrowing.
+export const market: CacheConfig & { interval: number } = {
   id: "crypto/BTC/1m",
   interval: MINUTE,
   fields: datasets.crypto.fields,
