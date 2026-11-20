@@ -20,7 +20,7 @@ import type {
   Miss,
   Range,
 } from "../types";
-import { AuthState } from "./auth";
+import { AuthState, sameMaterial } from "./auth";
 
 /** How a fetch ended, as every get awaiting it sees it (§4.9). */
 type Outcome =
@@ -333,9 +333,14 @@ export class Orchestrator {
     // module is there, so its hook hears it and the generation advances.
     // Only an identical value is "the same"; anything else is conservatively
     // new (structured-cloneable values have no cheap, cycle-safe equality).
+    // While auth is invalid the context in place is the refused one, and
+    // that direction is not conservative: a clone of it (every object
+    // context through a SharedWorker) would restore auth with material
+    // already refused. It changes nothing instead (step 133).
     if (
       config.context !== undefined &&
-      !Object.is(config.context, this.#context)
+      !Object.is(config.context, this.#context) &&
+      (this.#auth.valid || !sameMaterial(config.context, this.#context))
     ) {
       await this.updateAuth(config.context);
     }

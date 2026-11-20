@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClient } from "../src/client/client";
 import { Engine } from "../src/engine/engine";
 import { TscacheError } from "../src/errors";
+import { sameMaterial } from "../src/orchestrator/auth";
 import { coalesce, Orchestrator } from "../src/orchestrator/orchestrator";
 import { PortClient } from "../src/rpc/port-client";
 import type { Evt, MessagePortLike } from "../src/rpc/protocol";
@@ -1319,24 +1320,98 @@ describe("a tab joining while auth is invalid (step 133)", () => {
     expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
   });
 
-  it("an equal but not identical stale context is tried once, then refused and reported again with it", async () => {
+  it("a clone of the refused context leaves auth invalid: nothing is fetched and nothing is reported again", async () => {
+    // Through a SharedWorker an object context is always a clone, never the
+    // identical value: a tab that read the same expired token at startup.
     const { server, a, refusals } = await invalidated({ token: "old" });
     const c = await join(server, { token: "old" });
-    expect(log().auth).toEqual([{ token: "old" }]);
-    // One fetch under the joining tab's copy; its refusal flips auth again.
-    expect((await get(c, { start: 23, end: 33 })).misses[0]?.reason).toBe(
-      "auth-pending",
-    );
-    expect(log().requests).toHaveLength(2);
-    await eventually(() => expect(refusals()).toHaveLength(2));
-    expect(refusals()[1]?.payload).toEqual({
-      error: { name: "Error", message: "401" },
-      context: { token: "old" },
-    });
-    // Invalid again: no further fetch until new material arrives.
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([
+      { range: { start: 23, end: 33 }, reason: "auth-pending" },
+    ]);
     expect((await get(a, { start: 43, end: 53 })).misses[0]?.reason).toBe(
       "auth-pending",
     );
-    expect(log().requests).toHaveLength(2);
+    expect(log().requests).toHaveLength(1);
+    // Same material: the fetcher's hook does not hear it again.
+    expect(log().auth).toEqual([]);
+    // A second refusal would be broadcast before the barrier's answer on a.
+    await barrier(a);
+    expect(refusals()).toHaveLength(1);
+    // New material from any tab still restores auth.
+    log().mode = "ok";
+    await c.request("updateAuth", { context: { token: "new" } });
+    expect((await get(a, { start: 43, end: 53 })).misses).toEqual([]);
+    expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
+  });
+
+  it("a clone of a nested refused context, keys in another order, leaves auth invalid too", async () => {
+    const { server } = await invalidated({
+      token: "old",
+      scopes: ["read", "write"],
+      user: { id: 7, tags: [] },
+    });
+    const c = await join(server, {
+      user: { tags: [], id: 7 },
+      scopes: ["read", "write"],
+      token: "old",
+    });
+    expect((await get(c, { start: 23, end: 33 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(1);
+    expect(log().auth).toEqual([]);
+  });
+
+  it("a context that differs anywhere, even deep inside, is new material and restores auth", async () => {
+    const { server } = await invalidated({ token: "old", user: { id: 7 } });
+    log().mode = "ok";
+    const c = await join(server, { token: "old", user: { id: 8 } });
+    expect(log().auth).toEqual([{ token: "old", user: { id: 8 } }]);
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
+  });
+
+  it("a cyclic context cannot be compared cheaply: it is new material, and the join completes", async () => {
+    const cyclic = (): { token: string; self?: unknown } => {
+      const value: { token: string; self?: unknown } = { token: "old" };
+      value.self = value;
+      return value;
+    };
+    const { server } = await invalidated(cyclic());
+    log().mode = "ok";
+    const c = await join(server, cyclic());
+    expect(log().auth).toHaveLength(1);
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
+  });
+});
+
+describe("sameMaterial (step 133)", () => {
+  it("is true only when it is sure: plain values, member by member", () => {
+    expect(sameMaterial("t", "t")).toBe(true);
+    expect(sameMaterial(Number.NaN, Number.NaN)).toBe(true);
+    expect(sameMaterial({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] })).toBe(true);
+    expect(sameMaterial({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(true);
+    expect(sameMaterial(Object.create(null), {})).toBe(true);
+  });
+
+  it("answers false for anything it cannot be sure of", () => {
+    expect(sameMaterial({ a: 1 }, { a: 1, b: undefined })).toBe(false);
+    expect(sameMaterial([1], [1, 2])).toBe(false);
+    // A hole and an undefined element clone differently: not the same.
+    const holed = [1, 2, 3];
+    delete holed[1];
+    expect(sameMaterial(holed, [1, undefined, 3])).toBe(false);
+    expect(sameMaterial([], {})).toBe(false);
+    expect(sameMaterial(0, -0)).toBe(false);
+    expect(sameMaterial(new Map([["t", 1]]), new Map([["t", 1]]))).toBe(false);
+    expect(sameMaterial(new Date(0), new Date(0))).toBe(false);
+    expect(sameMaterial(new Uint8Array([1]), new Uint8Array([1]))).toBe(false);
+    const deep = (n: number): unknown => (n === 0 ? 1 : { d: deep(n - 1) });
+    expect(sameMaterial(deep(10), deep(10))).toBe(true);
+    expect(sameMaterial(deep(40), deep(40))).toBe(false);
+    const a: Record<string, unknown> = {};
+    a.self = a;
+    const b: Record<string, unknown> = {};
+    b.self = b;
+    expect(sameMaterial(a, b)).toBe(false);
   });
 });

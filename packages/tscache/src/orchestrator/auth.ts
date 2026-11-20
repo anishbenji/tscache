@@ -63,3 +63,57 @@ export class AuthState {
     this.#valid = true;
   }
 }
+
+/** How deep sameMaterial looks before it gives up (answers false). */
+const MAX_DEPTH = 32;
+
+/**
+ * Whether two structured-cloned contexts are certainly the same material
+ * (step 133): primitives by `Object.is`, plain arrays and plain objects
+ * member by member, keys in any order. Anything else (a Map, a Date, a
+ * typed array, a cycle, a structure deeper than MAX_DEPTH) answers false,
+ * so the caller treats it as new material, as §4.9 Loading does for every
+ * value that is not the identical one.
+ */
+export function sameMaterial(a: unknown, b: unknown): boolean {
+  return same(a, b, new Set(), 0);
+}
+
+function same(
+  a: unknown,
+  b: unknown,
+  open: Set<object>,
+  depth: number,
+): boolean {
+  if (Object.is(a, b)) return true;
+  if (!isObject(a) || !isObject(b)) return false;
+  if (depth >= MAX_DEPTH || open.has(a) || open.has(b)) return false;
+  const arrays = Array.isArray(a);
+  if (arrays !== Array.isArray(b)) return false;
+  if (!arrays && (!isPlain(a) || !isPlain(b))) return false;
+  if (arrays && (a as unknown[]).length !== (b as unknown[]).length)
+    return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  open.add(a);
+  open.add(b);
+  try {
+    const x = a as Record<string, unknown>;
+    const y = b as Record<string, unknown>;
+    return keys.every(
+      (key) => Object.hasOwn(y, key) && same(x[key], y[key], open, depth + 1),
+    );
+  } finally {
+    open.delete(a);
+    open.delete(b);
+  }
+}
+
+function isObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null;
+}
+
+function isPlain(value: object): boolean {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
