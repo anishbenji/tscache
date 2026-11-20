@@ -86,7 +86,7 @@ describe("Persister.open (§4.10.6 Open, N46, N59)", () => {
       );
     },
   );
-  it("read rejection emits error details once and one strict cleanup", async () => {
+  it("read rejection emits error details once and writes no cleanup", async () => {
     const h = harness();
     h.engine.cache(config());
     h.store.seed("persist", fixture());
@@ -101,13 +101,11 @@ describe("Persister.open (§4.10.6 Open, N46, N59)", () => {
         error: { name: "UnknownError", message: "read failed" },
       },
     ]);
-    expect(writes(h.store).map((c) => c.plan)).toEqual([
-      { deletePages: allPages, putPages: [], putCache: null, strict: true },
-    ]);
+    expect(writes(h.store)).toEqual([]);
     await h.persister.open("persist");
     expect(h.stopped).toHaveLength(1);
   });
-  it("a gated read times out at 5000ms; a late result is ignored", async () => {
+  it("a gated read times out at 5000ms without cleanup and ignores a late result", async () => {
     const h = harness();
     h.engine.cache(config());
     h.store.seed("persist", fixture());
@@ -123,18 +121,65 @@ describe("Persister.open (§4.10.6 Open, N46, N59)", () => {
     gate.release();
     await tick();
     expect(h.engine.get("persist", all).timestamps).toEqual(new Float64Array());
-    expect(writes(h.store)).toHaveLength(1);
+    expect(writes(h.store)).toHaveLength(0);
   });
-  // Step 132, open decision: the two tests above pin today's contract (N59,
-  // §4.10.6 Stopping): a load that times out or whose read rejects deletes the
-  // records it could not read. Whether they should survive for a later session
-  // is the user's call (docs/reviews/step-132.md, Decision concerns).
-  it.todo(
-    "132: records survive a load timeout and a later session loads them (undecided)",
-  );
-  it.todo(
-    "132: records survive a read rejection and a later session loads them (undecided)",
-  );
+  it("records survive a read timeout and a later session loads them", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    const seeded = fixture();
+    h.store.seed("persist", seeded);
+    const gate = h.store.gate("read");
+    const opening = h.persister.open("persist");
+    await tick();
+    await gate.entered;
+    await tick(5000);
+    await opening;
+    gate.release();
+    await tick();
+    await h.persister.durable("persist");
+    expect(h.store.records("persist")).toEqual(seeded);
+    const next = harness({}, h.store);
+    next.engine.cache(config());
+    await next.persister.open("persist");
+    expectRecords(seeded, next.engine);
+  });
+  it("records survive a read rejection and a later session loads them", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    const seeded = fixture();
+    h.store.seed("persist", seeded);
+    h.store.fail("read", 1, "UnknownError", "read failed");
+    await h.persister.open("persist");
+    await tick();
+    await h.persister.durable("persist");
+    expect(h.store.records("persist")).toEqual(seeded);
+    const next = harness({}, h.store);
+    next.engine.cache(config());
+    await next.persister.open("persist");
+    expectRecords(seeded, next.engine);
+  });
+  it("records survive a store opening timeout and a later session loads them", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    const seeded = fixture();
+    h.store.seed("persist", seeded);
+    const gate = deferred<typeof h.store>();
+    h.openStore.mockReturnValueOnce(gate.promise);
+    const opening = tracked(h.persister.open("persist"));
+    await tick(4999);
+    expect(h.openStore).toHaveBeenCalledTimes(1);
+    expect(opening.done).toBe(false);
+    await tick(1);
+    await opening.promise;
+    expect(h.stopped).toEqual([{ cacheId: "persist", reason: "unavailable" }]);
+    gate.resolve(h.store);
+    await tick();
+    expect(h.store.records("persist")).toEqual(seeded);
+    const next = harness({}, h.store);
+    next.engine.cache(config());
+    await next.persister.open("persist");
+    expectRecords(seeded, next.engine);
+  });
   it("store opening and read share the same load deadline", async () => {
     const h = harness();
     h.engine.cache(config());

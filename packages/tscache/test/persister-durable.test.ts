@@ -4,6 +4,7 @@ import {
   clearAll,
   fakeTime,
   finish,
+  harness,
   opened,
   tick,
   writes,
@@ -11,7 +12,9 @@ import {
 import {
   allPages,
   batch,
+  config,
   expectRecords,
+  fixture,
   tracked,
 } from "./persist-test-helpers";
 
@@ -79,10 +82,13 @@ describe("removal durability (§4.10.6 d/e, N49, N58)", () => {
       );
     },
   );
-  it("a held write stops unavailable and durable waits for its ordered cleanup", async () => {
-    const h = await opened();
-    h.engine.put("persist", batch([0, 3]));
-    await finish(h.persister.flush());
+  it("a held write after a successful load stops unavailable and durable waits for cleanup", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    const seeded = fixture({}, [0, 3]);
+    h.store.seed("persist", seeded);
+    await h.persister.open("persist");
+    expectRecords(seeded, h.engine);
     const write = h.store.gate("write");
     h.engine.invalidate("persist", { start: 1, end: 1 });
     const durable = tracked(h.persister.durable("persist"));

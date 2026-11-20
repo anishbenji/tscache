@@ -237,7 +237,11 @@ export class Persister {
       const elapsed = startedAt === undefined ? 0 : this.#now() - startedAt;
       cache.loadTimer = setTimeout(
         () => {
-          if (cache.status === "loading") this.#stop(cache, "unavailable");
+          // No cleanup: a loading cache has changed nothing, so its records
+          // stay for a later session (user decision 95, N59).
+          if (cache.status === "loading") {
+            this.#stop(cache, "unavailable", undefined, false);
+          }
         },
         Math.max(0, this.#timeoutMs - elapsed),
       );
@@ -503,8 +507,9 @@ export class Persister {
     try {
       stored = await store.read(cache.id);
     } catch (error) {
+      // No cleanup, as after the load deadline (user decision 95, N59).
       if (cache.status === "loading") {
-        this.#stop(cache, "error", failureOf(error));
+        this.#stop(cache, "error", failureOf(error), false);
       }
       return;
     }

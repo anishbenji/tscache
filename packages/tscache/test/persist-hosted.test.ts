@@ -9,6 +9,7 @@ import {
   all,
   batch,
   config,
+  expectRecords,
   fixture,
   recordsOf,
   tracked,
@@ -223,9 +224,11 @@ describe("lazily loaded persistence (§4.10.8)", () => {
     expect(h.load).toHaveBeenCalledTimes(1);
   });
 
-  it("a chunk not loaded within timeoutMs turns persistence off; its late arrival is ignored", async () => {
+  it("a chunk import timeout turns persistence off and keeps records for the next session", async () => {
     vi.useFakeTimers({ now: 0 });
     const h = hosted();
+    const seeded = fixture();
+    h.store.seed("persist", seeded);
     h.engine.cache(config());
     const opening = tracked(h.persistence.open("persist"));
     await vi.advanceTimersByTimeAsync(4999);
@@ -236,6 +239,13 @@ describe("lazily loaded persistence (§4.10.8)", () => {
     h.release();
     await vi.advanceTimersByTimeAsync(0);
     expect(h.persistence.persister).toBeUndefined();
+    expect(h.store.records("persist")).toEqual(seeded);
+    const next = hosted(h.store);
+    next.engine.cache(config());
+    const reloaded = next.persistence.open("persist");
+    next.release();
+    await reloaded;
+    expectRecords(seeded, next.engine);
   });
 
   it("the import counts against the load's deadline", async () => {
