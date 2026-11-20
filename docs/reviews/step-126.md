@@ -58,3 +58,7 @@ Run on head `fb1376b`. Report: `tscache-reports/reviews/step-126/security-1.md`.
 - The Stryker run above: the initial test run passed; the mutant runs did not finish.
 - `~/code/tscache-reports/bin/heavy-run.sh "126 child: ci" bun run ci` on `fb1376b`: exit 0 (Vitest 156 files, 3,058 tests; Playwright 193 passed; bench smoke ok). The run on the final head is in the child's report.
 - `git diff main -- vitest.config.ts` is empty.
+
+## Round 1 (Codex) — reviewer verdict: merge
+
+Head `c5ef24f`. No findings; the reviewer confirmed pre-review 1's four fixes. `bun run ci` exited 0 on `c5ef24f`. The review settles at round 1. The full mutation run is the director's, detached, after merge (step 124).
