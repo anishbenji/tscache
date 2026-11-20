@@ -1,6 +1,6 @@
 # Step 131 — Triage of two possible M3 engine defects
 
-Branch: `fix/131-m3-mutating-and-restore-evicted` · Status: triage done, awaiting the director's Codex gate · Verdict after triage: neither report is a defect under the spec as written; one decision concern for the user; three documentation fixes
+Branch: `fix/131-m3-mutating-and-restore-evicted` · Status: triage done; pre-review 1 and security lane run 1 fixed; awaiting the director's Codex gate · Verdict after triage: neither report is a defect under the spec as written; one decision concern for the user; three documentation fixes
 
 ## Scope
 
@@ -56,13 +56,28 @@ The restore-trimmed range was cached for the length of one synchronous call, so 
 
 | Commit     | Fix                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `4393fb33` | Architecture §2.8 said to escape "every `<` as `<`". The shipped snippet (`site/snippets/snapshots-server.ts`) and the guides (`site/usage/snapshots.md`, `site/guides/ssr.md`) replace it with `<`, which keeps the JSON valid. The text now says `<`.                                                                                                                                                                                |
+| `4393fb33` | Architecture §2.8 said to escape "every `<` as `<`". The shipped snippet (`site/snippets/snapshots-server.ts`) and the guides (`site/usage/snapshots.md`, `site/guides/ssr.md`) replace it with `\u003c`, which keeps the JSON valid. The text now says `\u003c`.                                                                                                                                                                      |
 | `a82d90b1` | §4.2 said payload `fields` follow "the schema's declaration order". The encoder (`segment/dense.ts:70`) and decoder (`segment/payload.ts`) use `Object.entries`, and `validateFields` accepts names such as `"1"`, so integer-like names come first, ascending. The text now says JavaScript key order and explains it. The `DenseSegmentPayload.fields` TSDoc in `src/types.ts` had the same wording and is fixed in the same commit. |
 | `0c26c227` | The `decodeSnapshot` comment in `src/snapshot.ts` had one overlong line. It is rewrapped, with the wording unchanged.                                                                                                                                                                                                                                                                                                                  |
 
+## Pre-review (Claude), not the gate
+
+The director relayed Fable pre-review 1 and security lane run 1 together. Item PR1-1 came from both. The relay did not say which review raised PR1-2 to PR1-4, so they are listed here. All four were validated and accepted.
+
+| #     | Sev | Finding                                                                                                                                                                        | Decision | Resolution                                                                                                                                                                                                                                                                                                                                       |
+| ----- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PR1-1 | P2  | The `4393fb33` row of this file's Documentation fixes table showed a bare `<` in both places where the replacement is meant. Copying that escape would leave `</script>` open. | accepted | Validated with `od -c`: both places held `` `<` ``. The tool that wrote the file had decoded the JSON escape. Both now hold `\u003c`, checked again with `grep -o` and `od -c`. Fixed in the commit that adds this section. The commit body of `4393fb33` is left as it is; this row is the record.                                              |
+| PR1-2 | P2  | The `docs/architecture.md` row of `docs/INDEX.md` gave 283.1 KB; the file is 283.2 KB.                                                                                         | accepted | `wc -c` gave 283,177 bytes, and 283,243 after PR1-4's edit; both are 283.2 KB. Fixed in `d528022d`.                                                                                                                                                                                                                                              |
+| PR1-3 | P2  | The field order §4.2 now describes had no test pinning it, and two test titles still said "declaration order".                                                                 | accepted | `segment-payload.test.ts` gains a case with fields `{ b, "1", a, "0" }` that expects `0, 1, b, a`. The titles at `segment-payload.test.ts:143` and `cache-snapshot.test.ts:241` now say "schema key order"; no assertion changed. Fixed in `649b8031`. Today's code already gives this order, so this is a regression test, not a contract test. |
+| PR1-4 | nit | "Integer-like names" is imprecise. Only canonical array-index names come first; `"-1"` and `"01"` keep insertion order.                                                        | accepted | §4.2 and the `DenseSegmentPayload.fields` TSDoc now say "canonical array-index names (`"0"`, `"12"`) first, ascending". Fixed in `ddf5019b`. The `a82d90b1` row above keeps its wording as the record of that commit.                                                                                                                            |
+
+## Security lane
+
+Run 1 raised PR1-1, the escape lost from this file's Documentation fixes row (above). It raised nothing else: no finding touched the engine, the protocol or the persistence code. Nothing is open.
+
 ## Contract-test changes
 
-None. No test was added, changed or removed. Report (a) has no reachable failing case, and report (b) waits on D1. Neither probe test was committed.
+None. No contract test was added, changed or removed. `649b8031` adds one regression test and retitles two existing tests without changing what they assert (PR1-3). Report (a) has no reachable failing case, and report (b) waits on D1. Neither probe test was committed.
 
 ## Decision concerns
 
@@ -81,4 +96,5 @@ None. No test was added, changed or removed. Report (a) has no reachable failing
 - `bun scripts/test-clocks.ts`: `test-clocks: 195 files clean`, exit 0.
 - `~/code/tscache-reports/bin/heavy-run.sh "131 child: ci" bun run ci` on the branch head that adds this file: exit 0.
 - The two probes for (a) and (b) ran as scratch Vitest files with `bunx vitest run`, and their output is quoted above. They were deleted afterwards.
-- The bench was not run: no engine code changed. The only source edits are one TSDoc line in `src/types.ts` and one comment in `src/snapshot.ts`.
+- The bench was not run: no engine code changed. The only source edits are the `DenseSegmentPayload.fields` TSDoc in `src/types.ts` and one comment in `src/snapshot.ts`.
+- After the pre-review fixes: `bunx vitest run packages/tscache/test/segment-payload.test.ts packages/tscache/test/cache-snapshot.test.ts` passed 127 tests. On the final head, `bun scripts/test-clocks.ts` and `~/code/tscache-reports/bin/heavy-run.sh "131 child: ci" bun run ci` both exit 0.
