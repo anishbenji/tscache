@@ -49,3 +49,7 @@ None.
 ## Pre-review (Claude), not the gate
 
 Pre-review 1 (Opus, head `59b863f`): one P2, valid, fixed by the director. "Current state" implied the staged version was approved before the GitHub release was published, and this file gave the gap as "about 7 minutes" from the brief. The registry shows npm published 0.2.0 at 18:20:44 UTC and the release went public at 18:18:23 UTC; both texts now give the order and the times.
+
+## Round 1 (Codex) — reviewer verdict: merge
+
+Head `69dc564`. No findings; the reviewer confirmed the pre-review's publication-order fix. `bun run ci` on `69dc564` exited 0 (run by the director under the heavy-job lock). The review settles at round 1.
