@@ -156,7 +156,8 @@ function firstWithinBudget(
 ): number {
   const budget = lookupBudgetOf(state.grid);
   if (budget === undefined) return 0;
-  let sum = record.watermark === undefined ? 0 : 12;
+  // A stored watermark is converted once, whether it is applied or set aside.
+  let sum = record.watermark === undefined && !record.setAside ? 0 : 12;
   let first = pages.length;
   while (first > 0) {
     const page = pages[first - 1];
