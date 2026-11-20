@@ -181,6 +181,16 @@ export function calendarGridInternals(): {
   };
 }
 
+/** The calendar grids a context holds (tests): no package entry exports it. */
+export function heldGrids(context: CalendarGridContext): number {
+  return (context as Context).gridCount;
+}
+
+/** The tables a grid references (tests): no package entry exports it. */
+export function heldTables(g: Grid): number {
+  return g.calendar?.heldTables ?? 0;
+}
+
 /**
  * Grids the shared context holds at most (S2.2). A page can pass the grid
  * entry any number of descriptors, a zone in every spelling among them;
@@ -667,14 +677,27 @@ class Calendar {
   /** Forgets an evicted table. */
   drop(block: number): void {
     this.#tables.delete(block);
-    if (block === this.#lastBlock) this.#lastBlock = Number.NaN;
+    if (block === this.#lastBlock) this.#forgetLast();
+  }
+
+  /** Clears the shortcut to the last table, the reference to it included. */
+  #forgetLast(): void {
+    this.#lastBlock = Number.NaN;
+    this.#lastTable = undefined;
+  }
+
+  /** The tables this grid references: those it holds, and its shortcut's. */
+  get heldTables(): number {
+    const tables = new Set(this.#tables.values());
+    if (this.#lastTable !== undefined) tables.add(this.#lastTable);
+    return tables.size;
   }
 
   /** Gives up every table: the context no longer holds this grid. */
   release(): void {
     for (const table of this.#tables.values()) this.#context.forget(table);
     this.#tables.clear();
-    this.#lastBlock = Number.NaN;
+    this.#forgetLast();
   }
 
   /** The slots of a block that lie within the margin `startOf` accepts. */
