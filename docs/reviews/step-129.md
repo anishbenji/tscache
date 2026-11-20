@@ -1,6 +1,6 @@
 # Step 129 — the calendar grid
 
-Branch: `feat/129-calendar-grid` · Reviewers: none yet (the director runs the pre-review, the security lane and the Codex gate after the implementer's report) · Status: built and verified (`bun run ci` exit 0 at `544dc50a`), awaiting review · The user merges: the step touches the public API, the architecture and locked decisions
+Branch: `feat/129-calendar-grid` · Reviewers: pre-review 1 (Claude Fable) and security lane 1 (Claude Opus), run by the director; the Codex gate not yet run · Status: pre-review 1 and security lane 1 triaged and fixed; `bun run ci` exit 0 at `22309fab`; awaiting the Codex gate · The user merges: the step touches the public API, the architecture and locked decisions
 
 ## Scope
 
@@ -120,22 +120,30 @@ What remains unbounded by design, for the record: a context holds one small grid
 
 ## Verification
 
-At `544dc50a`, the head of the code; the commit after it changes this file and the release notes' size figures only.
+At `22309fab`, the head of the code after the review fixes. The two commits after it change no code: a merge of `main`'s step 125 (release documents only; one conflict, in `docs/INDEX.md`) and this file with the release notes' size figures.
 
-| Check                                    | Command                                                                    | Result                                                                                                                                                                                                                                                                                                                                                    |
-| ---------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The full gate                            | `~/code/tscache-reports/bin/heavy-run.sh "129 child: ci" bun run ci`       | exit 0: Vitest 161 files and 3,258 tests passed; Playwright 196 passed, the three tests of `e2e/calendar.spec.ts` among them; `test-clocks` 202 files clean; type checks, Biome, Knip, Fallow and its health floor, the pack check, the integration snippets, the site's checks and build, the sizes, the bench smoke and the end-to-end smoke all passed |
-| The first run of the gate, at `104e7e1c` | the same command                                                           | exit 1: the three reference clients' builds failed to type-check (`market.interval`, now a union, passed to a chart adapter typed as a number); the root type check does not cover those apps. Fixed in `544dc50a` by typing the reference market's interval as a number. Everything before that point had passed                                         |
-| The contract tests                       | `bunx vitest run packages/tscache/test/calendar`                           | 5 files, 218 tests passed (the four phase A files and `calendar-surface.test.ts`)                                                                                                                                                                                                                                                                         |
-| Clocks                                   | `bun scripts/test-clocks.ts`                                               | clean                                                                                                                                                                                                                                                                                                                                                     |
-| Timings against `main`                   | `~/code/tscache-reports/bin/heavy-run.sh "129 child: bench" bun run bench` | exit 0; no gated case slower (below). Run at `104e7e1c`; the package source is the same at `544dc50a`                                                                                                                                                                                                                                                     |
+| Check                    | Command                                                                    | Result                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The full gate            | `~/code/tscache-reports/bin/heavy-run.sh "129 child: ci" bun run ci`       | exit 0 at `22309fab`: Vitest 164 files and 3,276 tests passed; Playwright 196 passed, the three tests of `e2e/calendar.spec.ts` among them; `test-clocks` 205 files clean; type checks, Biome, Knip, Fallow and its health floor, the pack check, the integration snippets, the site's checks and build, the sizes, the bench smoke and the end-to-end smoke all passed |
+| The calendar tests       | `bunx vitest run packages/tscache/test/calendar`                           | 8 files, 207 tests passed: the four phase A files, `calendar-surface.test.ts` and the three `calendar-*-review.test.ts` files                                                                                                                                                                                                                                           |
+| Clocks                   | `bun scripts/test-clocks.ts`                                               | 205 files clean                                                                                                                                                                                                                                                                                                                                                         |
+| Timings against `main`   | `~/code/tscache-reports/bin/heavy-run.sh "129 child: bench" bun run bench` | exit 0 at `22309fab` against `origin/main` at `e44aa413`; no gated case slower (below)                                                                                                                                                                                                                                                                                  |
+| Mutants of the new tests | each source change made, the test run, the change undone                   | the B4 tests fail when the record is refused whole; the 155-lookup load fails when a set-aside watermark charges 0; the table-order test fails when the repeated use, or any use, is not counted; the formatter test fails with a formatter per spelling                                                                                                                |
+
+Earlier runs of the gate:
+
+- At `104e7e1c`: exit 1. The three reference clients' builds failed to type-check (`market.interval`, now a union, passed to a chart adapter typed as a number); the root type check does not cover those apps. Fixed in `544dc50a`.
+- At `544dc50a`: exit 0 (Vitest 3,258 tests, Playwright 196), before the review fixes.
+
+**A red span in the history.** The commits from `7008d803` to `104e7e1c` do not pass the full gate: the reference clients' builds fail in each of them, for the reason above, although every check that was run commit by commit passed. `544dc50a` is the first green commit after the engine landed. History is not rewritten, so the span stays; a bisect across it should build the package only, or skip the reference clients.
 
 Not verified:
 
-- The calendar browser spec was not run on its own: its standalone run was stopped at the background time limit while still waiting for the heavy-job lock. It ran inside the full gate, where its three tests passed.
-- Runtimes other than Node 26, Bun 1.4 and Playwright's Chromium: the contract tests use injected zone rules and settled instants, and the test of a Node snapshot hydrated in Chromium found no difference in the dates it covers. Firefox and Safari were not run.
+- The calendar browser spec was never run on its own; it ran inside the full gate, where its three tests passed each time.
+- Runtimes other than Node 26, Bun 1.4 and Playwright's Chromium. Firefox and Safari were not run.
 - A load's wall-clock time with the store's read held just under `timeoutMs` (choice 11): the contract tests pin its lookup counts under fake time, and nothing times it.
-- `cache-reader-ranges.test.ts` ("reads O(log n) list entries…") crossed Vitest's 5 s timeout in local full runs while another agent's mutation run held every core (4.4 s alone at a load average of 21). It passed in both runs of the gate. It is an existing test, and this branch does not change the code it times.
+- The two docs-only commits after `22309fab` under the full gate: they passed Biome, the site's checks and `test-clocks`.
+- `cache-reader-ranges.test.ts` ("reads O(log n) list entries…") crossed Vitest's 5 s timeout in local full runs while another agent's mutation run held every core. It passed in all three runs of the gate and in the local full run at a normal load. It is an existing test, and this branch does not change the code it times.
 
 ## Sizes
 
@@ -143,55 +151,55 @@ Brotli, bytes as `scripts/size.ts` reports them in kB; before is `main` at `6716
 
 | Entry                  | Before   | After    | Budget before | Budget after |
 | ---------------------- | -------- | -------- | ------------- | ------------ |
-| `index`                | 5.31 kB  | 5.63 kB  | 5,952 B       | unchanged    |
-| `index` (lazy)         | 14.25 kB | 17.27 kB | 15,104 B      | 18,240 B     |
+| `index`                | 5.31 kB  | 5.65 kB  | 5,952 B       | unchanged    |
+| `index` (lazy)         | 14.25 kB | 17.40 kB | 15,104 B      | 18,240 B     |
 | `index` (lazy, nested) | 5.39 kB  | 5.61 kB  | 6,000 B       | unchanged    |
-| `worker`               | 15.50 kB | 18.49 kB | 16,352 B      | 19,488 B     |
+| `worker`               | 15.50 kB | 18.63 kB | 16,352 B      | 19,488 B     |
 | `worker` (lazy)        | 5.39 kB  | 5.61 kB  | 5,824 B       | unchanged    |
-| `engine`               | 11.57 kB | 14.75 kB | 12,352 B      | 15,616 B     |
+| `engine`               | 11.57 kB | 14.89 kB | 12,352 B      | 15,616 B     |
 | `fetcher`              | 0.17 kB  | 0.17 kB  | 656 B         | unchanged    |
-| `grid`                 | —        | 3.15 kB  | —             | 3,728 B      |
+| `grid`                 | —        | 3.40 kB  | —             | 3,728 B      |
 | `vite`                 | 1.24 kB  | 1.24 kB  | 1,488 B       | unchanged    |
 
-A raised budget is the measured size plus max(512 B, 3 %), the repository's rule; an entry still inside its budget keeps it.
+A raised budget is the measured size plus max(512 B, 3 %), the repository's rule, measured when the engine landed (`7008d803`); an entry still inside its budget keeps it. The review fixes added 0.02 to 0.25 kB to the entries they touched (the grid entry most: its checks of an instant, and the formatter rules), inside the budgets set then, which are unchanged.
 
 ## Bench
 
-`bun run bench`: `104e7e1c` against `origin/main` at `6716b4d5`, 30 rounds; the A/A control was 1.019 [0.999, 1.034] in Bun and 0.993 [0.980, 1.023] in Chromium.
+`bun run bench`: `22309fab` against `origin/main` at `e44aa413`, 30 rounds; the A/A control was 1.004 [0.997, 1.017] in Bun and 1.000 [0.987, 1.007] in Chromium. An earlier run, at `104e7e1c` against `6716b4d5`, gave the same picture.
 
 Fixed-grid cases, head/base (Bun gates the cases marked; Chromium reports):
 
 | Case                             | Bun                  | Chromium |
 | -------------------------------- | -------------------- | -------- |
-| `read-viewport` (gated)          | 0.796, faster        | 0.962    |
-| `read-viewport-sessions` (gated) | 0.840, faster        | 0.968    |
-| `read-viewport-budget`           | 0.796, faster        | 0.945    |
-| `read-year`                      | 0.840, faster        | 0.939    |
-| `put-page` (gated)               | 0.804, faster        | 0.917    |
-| `put-page-budget`                | 0.792, faster        | 0.922    |
-| `put-live-bar` (gated)           | 0.956                | 0.963    |
-| `append-bars` (gated)            | 0.998                | 0.971    |
-| `fill-month` (gated)             | 0.807, faster        | 0.941    |
-| `snapshot-roundtrip` (gated)     | 1.024 [0.941, 1.136] | 0.993    |
-| `read-transfer` (gated)          | 0.879, faster        | 0.976    |
+| `read-viewport` (gated)          | 0.809, faster        | 0.951    |
+| `read-viewport-sessions` (gated) | 0.816, faster        | 0.980    |
+| `read-viewport-budget`           | 0.809, faster        | 0.956    |
+| `read-year`                      | 0.759, faster        | 0.940    |
+| `put-page` (gated)               | 0.793, faster        | 0.913    |
+| `put-page-budget`                | 0.792, faster        | 0.913    |
+| `put-live-bar` (gated)           | 0.961                | 1.000    |
+| `append-bars` (gated)            | 0.977                | 0.973    |
+| `fill-month` (gated)             | 0.808, faster        | 0.940    |
+| `snapshot-roundtrip` (gated)     | 1.003 [0.854, 1.142] | 0.995    |
+| `read-transfer` (gated)          | 0.896                | 0.974    |
 
 No gated case regressed, so no `Perf-Accepted` trailer is needed. The reads and puts are faster because a put now converts each timestamp once (it checked alignment and then converted) and both loops decide the grid kind once per call.
 
-Calendar cases, first measurements (the head's time; `main` cannot run them, so the runner timed the head against a second copy of itself and the ratio is noise between two copies of one code):
+Calendar cases, the head's time (`main` cannot run them, so the runner timed the head against a second copy of itself and the ratio is noise between two copies of one code):
 
 | Case                                                                | Bun          | Chromium     |
 | ------------------------------------------------------------------- | ------------ | ------------ |
-| `calendar-put-year-cold`                                            | 845 µs       | 679 µs       |
-| `calendar-put-year-warm`                                            | 20 µs        | 17 µs        |
-| `calendar-read-year-cold`                                           | 835 µs       | 781 µs       |
-| `calendar-read-year-warm`                                           | 4.9 µs       | 3.9 µs       |
-| `calendar-put-35-years-cold`                                        | 20.7 ms      | 17.2 ms      |
-| `calendar-put-35-years-warm`                                        | 707 µs       | 653 µs       |
-| `calendar-read-35-years-cold`                                       | 21.0 ms      | 16.7 ms      |
-| `calendar-read-35-years-warm`                                       | 188 µs       | 144 µs       |
-| `calendar-read-beyond-tables` (146,097 bars, 286 blocks)            | 279 ms       | 227 ms       |
-| `calendar-read-sparse` (100 lone starts)                            | 379 µs       | 329 µs       |
-| `calendar-hydrate-page` (32,768 bars, anchors only)                 | 0.70–1.37 ms | 0.77–0.86 ms |
-| `calendar-hydrate-largest` (14,562 coverage ranges, charge 524,280) | 177 ms       | 151 ms       |
+| `calendar-put-year-cold`                                            | 761 µs       | 640 µs       |
+| `calendar-put-year-warm`                                            | 15 µs        | 15 µs        |
+| `calendar-read-year-cold`                                           | 784 µs       | 659 µs       |
+| `calendar-read-year-warm`                                           | 3.4 µs       | 3.0 µs       |
+| `calendar-put-35-years-cold`                                        | 16.0 ms      | 14.2 ms      |
+| `calendar-put-35-years-warm`                                        | 557 µs       | 531 µs       |
+| `calendar-read-35-years-cold`                                       | 15.9 ms      | 14.0 ms      |
+| `calendar-read-35-years-warm`                                       | 152–183 µs   | 119–159 µs   |
+| `calendar-read-beyond-tables` (146,097 bars, 286 blocks)            | 207 ms       | 186 ms       |
+| `calendar-read-sparse` (100 lone starts)                            | 265 µs       | 239 µs       |
+| `calendar-hydrate-page` (32,768 bars, anchors only)                 | 0.63–1.11 ms | 0.66–0.74 ms |
+| `calendar-hydrate-largest` (14,562 coverage ranges, charge 524,280) | 128 ms       | 115 ms       |
 
-The largest record within the lookup budget hydrates in about 0.15 to 0.18 s on this machine, against the 1.5 s the proposal sized the budget for at its worst measured rate. Four of these cases were flagged between the two copies of the head (`calendar-put-year-warm`, `calendar-put-35-years-warm` and `calendar-hydrate-page` in Bun, the first and the last in Chromium), which is the sampler's noise on them, not a difference in code; none is gated, and none should be until a calibration says its noise allows it (`docs/benchmarking.md`, "The gate").
+The largest record within the lookup budget hydrates in about 0.12 to 0.13 s on this machine, against the 1.5 s the proposal sized the budget for at its worst measured rate. Counting every table use (PR1-5) did not slow the warm cases: the table used last costs one comparison. Some cases were flagged between the two copies of the head (`calendar-put-year-warm`, `calendar-put-35-years-warm` and `calendar-hydrate-page` in Bun, the last in Chromium too), in both runs, which is the sampler's order effect on them, not a difference in code; none is gated, and none should be until a calibration says its noise allows it (`docs/benchmarking.md`, "The gate").
