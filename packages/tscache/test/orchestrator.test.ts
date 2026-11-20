@@ -1384,6 +1384,49 @@ describe("a tab joining while auth is invalid (step 133)", () => {
     expect(log().auth).toHaveLength(1);
     expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
   });
+
+  it("a join queued while auth is valid does not restore auth that a refusal flipped during its hook", async () => {
+    // Pre-review P1, security S1.2: the check at load time is not enough.
+    resetLog("slow");
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const a = await join(server, { token: "old" });
+    await a.request("cache", config);
+    const seen: Evt[] = [];
+    a.on((e) => seen.push(e));
+    const refusals = () => seen.filter((e) => e.event === "authInvalid");
+    const releases = captureReleases();
+    const stalled = get(a, { start: 3, end: 13 });
+    await eventually(() => expect(releases).toHaveLength(1));
+    const authReleases = captureAuthReleases();
+    // C joins with a clone while auth is still valid: its hook stalls.
+    const joining = join(server, { token: "old" });
+    await eventually(() => expect(authReleases).toHaveLength(1));
+    // A's fetch is refused under the unchanged generation: auth flips.
+    log().afterRelease = "auth";
+    releases[0]?.();
+    expect((await stalled).misses[0]?.reason).toBe("auth-pending");
+    await eventually(() => expect(refusals()).toHaveLength(1));
+    // The hook ends; the refused material must not switch back in.
+    authReleases[0]?.();
+    const c = await joining;
+    log().mode = "auth";
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([
+      { range: { start: 23, end: 33 }, reason: "auth-pending" },
+    ]);
+    expect(log().requests).toHaveLength(1);
+    // A second refusal would be broadcast before the barrier's answer on a.
+    await barrier(a);
+    expect(refusals()).toHaveLength(1);
+  });
+
+  it("an explicit updateAuth with the refused material still restores auth, as §4.9 Auth says", async () => {
+    // Only a join compares material; a client's updateAuth is always applied.
+    const { a } = await invalidated({ token: "old" });
+    log().mode = "ok";
+    await a.request("updateAuth", { context: { token: "old" } });
+    expect(log().auth).toEqual([{ token: "old" }]);
+    expect((await get(a, { start: 23, end: 33 })).misses).toEqual([]);
+  });
 });
 
 describe("sameMaterial (step 133)", () => {

@@ -331,18 +331,13 @@ export class Orchestrator {
     await this.#loading;
     // A joining tab with other material takes the updateAuth path once the
     // module is there, so its hook hears it and the generation advances.
-    // Only an identical value is "the same"; anything else is conservatively
-    // new (structured-cloneable values have no cheap, cycle-safe equality).
-    // While auth is invalid the context in place is the refused one, and
-    // that direction is not conservative: a clone of it (every object
-    // context through a SharedWorker) would restore auth with material
-    // already refused. It changes nothing instead (step 133).
+    // Only an identical value is "the same" here; the join's own update
+    // compares material while auth is invalid (#update, step 133).
     if (
       config.context !== undefined &&
-      !Object.is(config.context, this.#context) &&
-      (this.#auth.valid || !sameMaterial(config.context, this.#context))
+      !Object.is(config.context, this.#context)
     ) {
-      await this.updateAuth(config.context);
+      await this.#update(config.context, true);
     }
   }
 
@@ -382,12 +377,28 @@ export class Orchestrator {
    * never blocks on a credential refresh).
    */
   updateAuth(context: unknown): Promise<void> {
+    return this.#update(context, false);
+  }
+
+  /**
+   * updateAuth, and a joining tab's context (`joining`). While auth is
+   * invalid the context in place is the refused one, so a join that brings
+   * the same material (every object context through a SharedWorker is a
+   * clone) changes nothing: auth stays invalid until the next updateAuth
+   * (§4.9.1 rule 4). That is checked when the update's turn comes and again
+   * after the hook, since a refusal may flip auth while the hook runs. A
+   * client's updateAuth is always applied.
+   */
+  #update(context: unknown, joining: boolean): Promise<void> {
     // Pure pull-model worker: nothing to deliver to, nothing to remember
     // (§4.9: a no-op without a fetcher), so a later first load starts clean.
     if (this.#loading === undefined) return Promise.resolve();
+    const refused = () =>
+      joining && !this.#auth.valid && sameMaterial(context, this.#context);
     const apply = async () => {
       // The first import may still be in flight: the hook must hear this.
       await this.#loading?.catch(() => {});
+      if (refused()) return;
       this.#transitioning = true;
       try {
         // A copy: the hook may keep and change it; what fetches carry and
@@ -396,6 +407,9 @@ export class Orchestrator {
       } finally {
         this.#transitioning = false;
       }
+      // Auth may have flipped while the hook ran (pre-review P1): the
+      // refused material must not switch back in.
+      if (refused()) return;
       this.#context = context;
       this.#authGeneration++;
       this.#auth.restore();
