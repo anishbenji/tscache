@@ -180,10 +180,14 @@ function lengthOf(value: unknown): number {
 }
 
 /**
- * The offset lookups a snapshot's validation and application can cause at
- * most (N113), from its shape alone: 24 for the range, 36 for each
- * coverage range (its two ends, and the two ends of what it applies), 12
- * for each payload's start and 12 for a watermark.
+ * A snapshot's charge (N113), from its shape alone: 24 for the range, 36
+ * for each coverage range (its two ends, and the two ends of the one part
+ * it applies), 12 for each payload's start and 12 for a watermark. It is
+ * at least the offset lookups of the snapshot's validation, and of its
+ * application into a cache that knows nothing of its coverage. A receiver
+ * that already covers stretches inside a coverage range applies one part
+ * more for each, at 12 lookups a part: that work follows the receiver's
+ * own state and is outside the charge (§4.5).
  */
 export function chargeOf(s: Record<string, unknown>): number {
   return (
