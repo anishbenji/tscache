@@ -1243,10 +1243,12 @@ describe("round 10 and 11 regressions", () => {
   });
 });
 
-// Step 133, report (d): a tab that opens while auth is invalid. §4.9 Auth
-// and Loading: a joining tab whose context is not the identical value takes
-// the updateAuth path (so auth is restored and its material is tried); one
-// that brings no context, or the identical value, changes nothing.
+// Step 133, report (d): a tab that opens while auth is invalid (§4.9 Auth
+// and Loading). A joining tab whose context is the same material as the
+// refused one (sameMaterial), or that brings no context, changes nothing:
+// auth stays invalid until the next updateAuth (§4.9.1 rule 4). One with
+// other material takes the updateAuth path and restores auth. The same
+// holds when auth flips to invalid while the join's own hook is running.
 describe("a tab joining while auth is invalid (step 133)", () => {
   /** Connects one more tab to `server`, with `context` if one is given. */
   async function join(server: RpcServer, context?: unknown) {
@@ -1370,7 +1372,7 @@ describe("a tab joining while auth is invalid (step 133)", () => {
     expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
   });
 
-  it("a cyclic context cannot be compared cheaply: it is new material, and the join completes", async () => {
+  it("a cyclic context is new material, and the join completes", async () => {
     const cyclic = (): { token: string; self?: unknown } => {
       const value: { token: string; self?: unknown } = { token: "old" };
       value.self = value;
@@ -1413,5 +1415,33 @@ describe("sameMaterial (step 133)", () => {
     const b: Record<string, unknown> = {};
     b.self = b;
     expect(sameMaterial(a, b)).toBe(false);
+  });
+
+  it("compares a context that shares references once per pair, so a deep DAG finishes", () => {
+    // Pre-review P2, security S1.1: structured clone keeps shared
+    // references, and a walk that follows every path is exponential (2^30
+    // paths here). Only a walk linear in the pairs it compares returns.
+    const dag = (levels: number, leaf: unknown): unknown => {
+      let node: unknown = { leaf };
+      for (let i = 0; i < levels; i++) node = { l: node, r: node };
+      return node;
+    };
+    expect(sameMaterial(dag(30, "t"), dag(30, "t"))).toBe(true);
+    expect(sameMaterial(dag(30, "t"), dag(30, "u"))).toBe(false);
+    // Shared on one side, separate equal copies on the other.
+    const shared = { token: "t" };
+    expect(
+      sameMaterial(
+        { x: shared, y: shared },
+        { x: { token: "t" }, y: { token: "t" } },
+      ),
+    ).toBe(true);
+  });
+
+  it("gives up, answering false, past its member budget", () => {
+    const wide = (n: number) =>
+      Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, i]));
+    expect(sameMaterial(wide(1000), wide(1000))).toBe(true);
+    expect(sameMaterial(wide(20_000), wide(20_000))).toBe(false);
   });
 });

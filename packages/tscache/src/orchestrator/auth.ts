@@ -66,47 +66,68 @@ export class AuthState {
 
 /** How deep sameMaterial looks before it gives up (answers false). */
 const MAX_DEPTH = 32;
+/** How many members sameMaterial examines before it gives up (answers false). */
+const MAX_MEMBERS = 10_000;
+
+/** One comparison's state: see sameMaterial. */
+interface Walk {
+  /** The objects on the path being compared: meeting one again is a cycle. */
+  readonly open: Set<object>;
+  /** Pairs already proven the same, so a shared reference is walked once. */
+  readonly proven: WeakMap<object, WeakSet<object>>;
+  /** Members examined so far, against MAX_MEMBERS. */
+  members: number;
+}
 
 /**
  * Whether two structured-cloned contexts are certainly the same material
  * (step 133): primitives by `Object.is`, plain arrays and plain objects
  * member by member, keys in any order. Anything else (a Map, a Date, a
- * typed array, a cycle, a structure deeper than MAX_DEPTH) answers false,
- * so the caller treats it as new material, as §4.9 Loading does for every
- * value that is not the identical one.
+ * typed array, a cycle, nesting deeper than MAX_DEPTH, more than
+ * MAX_MEMBERS members in all) answers false, so the caller treats it as new
+ * material, as §4.9 Loading does for every value that is not the identical
+ * one. Structured clone keeps shared references, so a pair already proven
+ * the same is not walked again: each pair of objects is expanded at most
+ * once, and the members budget bounds the whole walk. It runs
+ * synchronously in the worker that every tab shares.
  */
 export function sameMaterial(a: unknown, b: unknown): boolean {
-  return same(a, b, new Set(), 0);
+  return same(a, b, 0, { open: new Set(), proven: new WeakMap(), members: 0 });
 }
 
-function same(
-  a: unknown,
-  b: unknown,
-  open: Set<object>,
-  depth: number,
-): boolean {
+function same(a: unknown, b: unknown, depth: number, walk: Walk): boolean {
   if (Object.is(a, b)) return true;
   if (!isObject(a) || !isObject(b)) return false;
-  if (depth >= MAX_DEPTH || open.has(a) || open.has(b)) return false;
+  if (walk.proven.get(a)?.has(b) === true) return true;
+  if (depth >= MAX_DEPTH || walk.open.has(a) || walk.open.has(b)) return false;
   const arrays = Array.isArray(a);
   if (arrays !== Array.isArray(b)) return false;
   if (!arrays && (!isPlain(a) || !isPlain(b))) return false;
   if (arrays && (a as unknown[]).length !== (b as unknown[]).length)
     return false;
   const keys = Object.keys(a);
+  walk.members += keys.length;
+  if (walk.members > MAX_MEMBERS) return false;
   if (keys.length !== Object.keys(b).length) return false;
-  open.add(a);
-  open.add(b);
+  walk.open.add(a);
+  walk.open.add(b);
+  let result: boolean;
   try {
     const x = a as Record<string, unknown>;
     const y = b as Record<string, unknown>;
-    return keys.every(
-      (key) => Object.hasOwn(y, key) && same(x[key], y[key], open, depth + 1),
+    result = keys.every(
+      (key) => Object.hasOwn(y, key) && same(x[key], y[key], depth + 1, walk),
     );
   } finally {
-    open.delete(a);
-    open.delete(b);
+    walk.open.delete(a);
+    walk.open.delete(b);
   }
+  if (result) {
+    const pairs = walk.proven.get(a) ?? new WeakSet<object>();
+    pairs.add(b);
+    walk.proven.set(a, pairs);
+  }
+  return result;
 }
 
 function isObject(value: unknown): value is object {
