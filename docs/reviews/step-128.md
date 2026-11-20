@@ -105,14 +105,14 @@ Each is a choice, so none was acted on.
 
 ## Verification
 
-| Command                                    | Result                                                            |
-| ------------------------------------------ | ----------------------------------------------------------------- |
-| `bunx attw --pack .` in `packages/tscache` | The table above: `node10` "Resolution failed" on all five entries |
-| `bun scripts/size.ts`                      | Every entry `ok`; sizes as in decision 5                          |
-| `bunx biome ci .`                          | One warning (decision 1), no error                                |
-| `bunx knip`                                | Exit 0; two configuration hints (decision 2)                      |
-| `bun run docs:check`                       | Exit 0; `doc-anchors: 246 anchors in 42 pages resolve`            |
-| `heavy-run.sh "128 child: ci" bun run ci`  | Pending                                                           |
+| Command                                    | Result                                                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `bunx attw --pack .` in `packages/tscache` | The table above: `node10` "Resolution failed" on all five entries                                 |
+| `bun scripts/size.ts`                      | Every entry `ok`; sizes as in decision 5                                                          |
+| `bunx biome ci .`                          | One warning (decision 1), no error                                                                |
+| `bunx knip`                                | Exit 0; two configuration hints (decision 2)                                                      |
+| `bun run docs:check`                       | Exit 0; `doc-anchors: 246 anchors in 42 pages resolve`                                            |
+| `heavy-run.sh "128 child: ci" bun run ci`  | Exit 0 on `c2a7e21`: Vitest 3,058 passed in 156 files; Playwright, bench smoke and e2e smoke `ok` |
 
 ## Contract-test changes
 
