@@ -238,7 +238,7 @@ describe("CacheState.snapshot — architecture §2.8, §3.4, §4.2, §4.5", () =
     expect(c.get(range, { snapshot: false })).not.toHaveProperty("snapshot");
   });
 
-  it("S10 clipping rebases a multi-byte mask and emits fields in declaration order", () => {
+  it("S10 clipping rebases a multi-byte mask and emits fields in schema key order", () => {
     const c = cache({ gapSplitK: 8, fields: { zeta: "i16", alpha: "f64" } });
     c.put({
       timestamps: [3, 33, 73, 83, 163],
