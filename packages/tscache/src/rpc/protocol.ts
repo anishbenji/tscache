@@ -49,6 +49,8 @@ export type Op =
 export const WORKER_FEATURES: readonly WorkerFeature[] = [
   "cacheChanged",
   "memoryBudget",
+  // Calendar intervals in a cache config (§2.2, N119).
+  "calendar-grid",
 ];
 
 export interface WireError {
