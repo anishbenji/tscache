@@ -1,10 +1,10 @@
 # Step 131 — Triage of two possible M3 engine defects
 
-Branch: `fix/131-m3-mutating-and-restore-evicted` · Status: triage done; pre-review 1 and security lane run 1 fixed; awaiting the director's Codex gate · Verdict after triage: neither report is a defect under the spec as written; one decision concern for the user; three documentation fixes
+Branch: `fix/131-m3-mutating-and-restore-evicted` · Status: phase B built; awaiting the director's Codex gate · Verdict after triage: report (a) is not a defect; report (b) is fixed under user decision 96 (B), 2026-11-21; three documentation fixes; pre-review 1 and security lane run 1 fixed
 
 ## Scope
 
-The parent thread's read-only walkthrough of the M3 code at `6716b4d` (step 121, PR #150) raised two possible defects, neither seen failing. This step checks each one against the spec and the code and writes a failing test where there is a defect. It also fixes three documentation nits the same walkthrough found. No engine code changed. §4.5's code sketches and the `grid.ts` header are left for step 129, as the brief asks.
+The parent thread's read-only walkthrough of the M3 code at `6716b4d` (step 121, PR #150) raised two possible defects, neither seen failing. This step checks each one against the spec and the code and writes a failing test where there is a defect. It also fixes three documentation nits the same walkthrough found. Phase A (triage) changed no engine code. Phase B fixes report (b) after the user's decision 96 (section Phase B). §4.5's code sketches and the `grid.ts` header are left for step 129, as the brief asks.
 
 ## Report (a): enforcement that throws inside a mutating call
 
@@ -34,7 +34,7 @@ So only two things can make enforcement throw: a broken internal invariant (a pr
 
 **The report.** Pages that enforcement trims during a `restore` still enter the evicted-coverage index. A later `invalidate` then reports them, although no reader was ever shown them.
 
-**Verdict: the mechanics are confirmed. Whether this is a defect is not settled by the spec (Decision concerns, D1). Nothing is fixed.**
+**Verdict: the mechanics are confirmed. At triage the spec did not settle whether this is a defect (Decision concerns, D1). The user chose (B) in decision 96 (2026-11-21), and it is fixed in `44814eb0` (Phase B, below).** The rest of this section is the triage as written.
 
 **Correction to the report.** A later `invalidate` reports the range in `removed`, not in `evicted`: `#withdraw` lists the part of its range that is in the evicted index (N104).
 
@@ -75,13 +75,35 @@ The director relayed Fable pre-review 1 and security lane run 1 together. Item P
 
 Run 1 raised PR1-1, the escape lost from this file's Documentation fixes row (above). It raised nothing else: no finding touched the engine, the protocol or the persistence code. Nothing is open.
 
+## Phase B: report (b) fixed under decision 96 (B)
+
+The user answered D1 (director queue #96) with option (B) on 2026-11-21: the pages a `restore` trims from its own cache stay out of that cache's evicted-coverage index.
+
+**Contract tests (phase A, Codex).** Codex wrote three tests, a new `describe` block "M3 restore-trimmed coverage (step 131)" in `packages/tscache/test/m3-memory-accounting.test.ts`. They were committed unchanged with the code, as `AGENTS.md` requires.
+
+1. "keeps a restore's own trimmed page out of the evicted index and later reader changes": restores three pages under a two-page budget. It asserts that the trimmed page `[0, 3]` is not in the index. It then checks that `invalidate([0, 2])` sends nothing and that `invalidate([3, 4])` sends `removed: [4]` only, the one surviving covered slot. Without the fix this test fails; I confirmed it by putting the old line back temporarily: 1 failed, 9 passed.
+2. "remembers another cache's page evicted during restore and reports it on removal": cache `old`'s page evicted by the same enforcement is still indexed, is reported once in `evicted`, and is reported in `removed` by a later `invalidate`. It passes with and without the fix.
+3. "reports the page hydrate trims in its own reader change": `hydrate` sends `written: [0, 11]` and `evicted: [0, 3]` in one event. It passes with and without the fix.
+
+**Code.** One condition in `CacheState.evict` (`engine/cache.ts`): `if (!this.#restoring) this.#evicted?.add(range);`. `#restoring` is set only on the cache `restore` runs on, so another cache evicted by the same enforcement indexes its pages as before (test 2). The `evict` TSDoc names the exception. No other line was needed.
+
+**Spec.**
+- Architecture §2.7 rule (2) gains: "The pages a `restore` trims from its own cache stay out of that cache's index, since no reader has seen them (user decision 96, 2026-11-21, narrowing N104); another cache's pages the same enforcement evicts enter that cache's index as any eviction does."
+- §4.5 gains, after the sentence on not reporting those pages: "Nor do they enter the evicted index: `evict` skips the index while `restore` runs on its own cache, so a later removal over them lists only the coverage it withdrew (user decision 96, 2026-11-21, narrowing N104)."
+
+**How decision 96 is recorded.** As a dated amendment to N104 (`docs/decisions/N104-evicted-coverage-index.md`, "Amendment, 2026-11-21"), not as a new decision file. `docs/INDEX.md` gives the rule: "A new decision gets a file `N<next>-<slug>.md` and one index line in §8; an amendment edits the file, adds a dated note and updates the index line if the first clause changes". Decision 96 narrows N104 without changing its first clause, so N104's §8 line is unchanged. The precedent is N70's amendment under user decision 52.
+
+**Index.** `docs/architecture.md` is now 283,710 bytes (283.7 KB), and `docs/decisions/` 176,890 bytes (176.9 KB); both rows of `docs/INDEX.md` are updated.
+
 ## Contract-test changes
 
-None. No contract test was added, changed or removed. `649b8031` adds one regression test and retitles two existing tests without changing what they assert (PR1-3). Report (a) has no reachable failing case, and report (b) waits on D1. Neither probe test was committed.
+- `44814eb0` adds Codex's three phase A contract tests (Phase B, above), unchanged. No existing contract test was changed or removed.
+- `649b8031` adds one regression test and retitles two existing tests without changing what they assert (PR1-3).
+- Report (a) has no reachable failing case. Neither triage probe test was committed.
 
 ## Decision concerns
 
-**D1. Should the pages a `restore` trims from its own cache enter the evicted-coverage index (N104)?**
+**D1. Should the pages a `restore` trims from its own cache enter the evicted-coverage index (N104)?** Answered: (B), user decision 96, 2026-11-21. Built in `44814eb0`. The options below are kept as raised.
 
 - **(A) Yes, as now.** The literal §2.7 and §4.5 text applies: every eviction enters the index.
   - Pros: no change; one rule for every eviction.
@@ -97,4 +119,5 @@ None. No contract test was added, changed or removed. `649b8031` adds one regres
 - `~/code/tscache-reports/bin/heavy-run.sh "131 child: ci" bun run ci` on the branch head that adds this file: exit 0.
 - The two probes for (a) and (b) ran as scratch Vitest files with `bunx vitest run`, and their output is quoted above. They were deleted afterwards.
 - The bench was not run: no engine code changed. The only source edits are the `DenseSegmentPayload.fields` TSDoc in `src/types.ts` and one comment in `src/snapshot.ts`.
-- After the pre-review fixes: `bunx vitest run packages/tscache/test/segment-payload.test.ts packages/tscache/test/cache-snapshot.test.ts` passed 127 tests. On the final head, `bun scripts/test-clocks.ts` and `~/code/tscache-reports/bin/heavy-run.sh "131 child: ci" bun run ci` both exit 0.
+- After the pre-review fixes: `bunx vitest run packages/tscache/test/segment-payload.test.ts packages/tscache/test/cache-snapshot.test.ts` passed 127 tests. On that head (`830d62ba`), `bun scripts/test-clocks.ts` and `~/code/tscache-reports/bin/heavy-run.sh "131 child: ci" bun run ci` both exited 0.
+- Phase B: `bunx vitest run packages/tscache/test/m3-memory-accounting.test.ts` gave 1 failed, 9 passed without the fix, and 10 passed with it; all six `m3-memory-*` files passed 100 tests. `bunx tsc --noEmit -p packages/tscache` exited 0. On the final head, `bun scripts/test-clocks.ts`, `~/code/tscache-reports/bin/heavy-run.sh "131 child: ci" bun run ci` and `~/code/tscache-reports/bin/heavy-run.sh "131 child: bench" bun run bench` all exit 0 with no gated bench case failing.
