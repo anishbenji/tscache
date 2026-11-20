@@ -6,10 +6,10 @@
   </head>
   <body>
     <script type="module">
-      import { createClient } from "/dist/index.js";
+      import { createClient, decodeSnapshot } from "/dist/index.js";
 
       // The suite drives the client through window.tscache.
-      window.tscache = { createClient };
+      window.tscache = { createClient, decodeSnapshot };
       window.ready = true;
     </script>
   </body>
