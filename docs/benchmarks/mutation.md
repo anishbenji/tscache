@@ -126,4 +126,6 @@ The configuration is `stryker.config.json` at the repository root. It runs Vites
 - `plugins` names `@stryker-mutator/vitest-runner`, because Bun installs each package in isolation and Stryker's default plugin search finds nothing next to its core.
 - `tsconfigFile` names a file that does not exist, which turns off Stryker's tsconfig rewrite. The rewrite calls the TypeScript JS API, which TypeScript 7 does not ship. It only fixes paths that would leave the sandbox, and the sandbox holds the whole repository, so none do.
 
+`vitest.mutation.config.ts` also raises Vitest's per-test and per-hook timeouts to 60 s (step 126, user decision 90): instrumentation for per-test coverage makes the slowest test take 4.5 s or more instead of about 300 ms, and a Vitest timeout would count a mutant as killed, whereas Stryker's own per-mutant timeout (`timeoutMS`, `timeoutFactor`) reports a hang as `Timeout`; the root configuration, CI and `bun run test` keep Vitest's 5 s default.
+
 The numbers depend on the suite and on Stryker's version. Compare runs only at the same Stryker version.
