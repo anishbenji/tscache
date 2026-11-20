@@ -47,11 +47,13 @@ One consequence for the lockstep groups: a member still inside its cooldown is l
 
 ## Verification
 
-| Check                   | Command                                                              | Result                                                                                              |
-| ----------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Biome before the change | `bunx biome ci .` on `main` (`6716b4d5`)                             | `Checked 869 files … No fixes applied. Found 1 warning.` (`e2e/examples/react-lwcharts.spec.ts:37`) |
-| Biome after the change  | `bunx biome ci .`                                                    | `Checked 869 files … No fixes applied.` No warning                                                  |
-| Full gate, final head   | `~/code/tscache-reports/bin/heavy-run.sh "130 child: ci" bun run ci` | see below                                                                                           |
+| Check                   | Command                                                                            | Result                                                                                                                                                                                                                                                                                                 |
+| ----------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Biome before the change | `bunx biome ci .` on `main` (`6716b4d5`)                                           | `Checked 869 files … No fixes applied. Found 1 warning.` (`e2e/examples/react-lwcharts.spec.ts:37`)                                                                                                                                                                                                    |
+| Biome after the change  | `bunx biome ci .`                                                                  | `Checked 869 files … No fixes applied.` No warning                                                                                                                                                                                                                                                     |
+| Full gate               | `~/code/tscache-reports/bin/heavy-run.sh "130 child: ci" bun run ci` on `284e0e2b` | exit 0: gitleaks over `main..HEAD` (5 commits, no leaks) and commitlint, Biome `Checked 870 files … No fixes applied.` with no warning, typecheck, build with publint and attw clean, Knip, Fallow (health 97), Vitest 3058 passed (156 files), Playwright 193 passed, size, bench smoke and e2e smoke |
+
+The full gate ran on `284e0e2b`, which includes every change above. The only commit after it fills in this table and changes only this file.
 
 ## Contract-test changes
 
