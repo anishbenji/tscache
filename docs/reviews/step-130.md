@@ -70,3 +70,7 @@ Pre-review 1 (Fable, head `18d1ee6`): one P2 and three nits, all in this file, f
 ## Security lane
 
 Run 1 (Opus, head `18d1ee6`): no findings. Cooldown applies to version updates only, never security updates. Not a finding: the `github-actions` entry keeps GitHub's default 3 days, majors included; a 7-day major cooldown there is a separate user decision.
+
+## Round 1 (Codex) — reviewer verdict: merge
+
+Head `229868b`. No findings; the reviewer confirmed the pre-review corrections. `bun run ci` exited 0 on `284e0e2` (later commits change only this file). The review settles at round 1. The user merges (protected paths). Open with the user: #105, whether the `github-actions` entry gets the same cooldown; if yes, one more commit on this branch.
