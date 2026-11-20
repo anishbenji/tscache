@@ -100,21 +100,34 @@ function same(a: unknown, b: unknown, depth: number, walk: Walk): boolean {
   if (!isObject(a) || !isObject(b)) return false;
   if (walk.proven.get(a)?.has(b) === true) return true;
   if (depth >= MAX_DEPTH || walk.open.has(a) || walk.open.has(b)) return false;
-  const arrays = Array.isArray(a);
-  if (arrays !== Array.isArray(b)) return false;
-  if (!arrays && (!isPlain(a) || !isPlain(b))) return false;
-  if (arrays && (a as unknown[]).length !== (b as unknown[]).length)
-    return false;
+  if (!sameShape(a, b)) return false;
+  return sameMembers(a, b, depth, walk);
+}
+
+/** Both plain arrays of one length, or both plain objects. */
+function sameShape(a: object, b: object): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      (a as unknown[]).length === (b as unknown[]).length
+    );
+  }
+  return isPlain(a) && isPlain(b);
+}
+
+/** The members of two objects of the same shape, within the walk's budget. */
+function sameMembers(a: object, b: object, depth: number, walk: Walk): boolean {
   const keys = Object.keys(a);
   walk.members += keys.length;
   if (walk.members > MAX_MEMBERS) return false;
   if (keys.length !== Object.keys(b).length) return false;
+  const x = a as Record<string, unknown>;
+  const y = b as Record<string, unknown>;
   walk.open.add(a);
   walk.open.add(b);
   let result: boolean;
   try {
-    const x = a as Record<string, unknown>;
-    const y = b as Record<string, unknown>;
     result = keys.every(
       (key) => Object.hasOwn(y, key) && same(x[key], y[key], depth + 1, walk),
     );
@@ -122,12 +135,15 @@ function same(a: unknown, b: unknown, depth: number, walk: Walk): boolean {
     walk.open.delete(a);
     walk.open.delete(b);
   }
-  if (result) {
-    const pairs = walk.proven.get(a) ?? new WeakSet<object>();
-    pairs.add(b);
-    walk.proven.set(a, pairs);
-  }
+  if (result) prove(a, b, walk);
   return result;
+}
+
+/** Records that `a` and `b` are the same, so the pair is not walked again. */
+function prove(a: object, b: object, walk: Walk): void {
+  const pairs = walk.proven.get(a) ?? new WeakSet<object>();
+  pairs.add(b);
+  walk.proven.set(a, pairs);
 }
 
 function isObject(value: unknown): value is object {
