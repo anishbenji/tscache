@@ -46,17 +46,21 @@ and settled their differences with experiments; method and reasoning in `docs/be
   - reallocations while a segment grows.
 
   Hot-path timings compare each pull request with a rebuild of its base in one job, in Chromium (V8)
-  and Bun (JSC), paired and interleaved, with an A/A control and a fresh-process confirmation;
-  report-only for now. Chromium end-to-end scenarios (a new tab's first read, a read through a
-  SharedWorker, two tabs sharing a fetch) are paired the same way and report only; a smoke run in
-  `bun run ci` fails on a wrong result or an extra fetch.
-- **Next:**
-  1. Calibrate on GitHub's runner (`bench-calibrate.yml`): no false alarm in 20 same-revision runs,
-     at least 90 % detection of an injected 25 % slowdown. Then the timing gate blocks: a confirmed
-     regression of 10 % or more fails a pull request unless a `Perf-Accepted` trailer allows it.
-     The first calibration (2026-10-30) kept timing report-only: Bun nearly passed, Chromium's
-     runs were too noisy to judge (`docs/benchmarking.md`, calibration log).
-  2. Done in step 22: a fast path in `DenseSegment.slice` for fully present spans (`read-viewport`
+  and Bun (JSC), paired and interleaved, with an A/A control and a fresh-process confirmation. In
+  Bun, the eight cases listed in `packages/tscache/bench/gated.json` block: a confirmed regression
+  in one of them fails the required `bench` check unless a `Perf-Accepted` trailer allows it. Every
+  other case, and all of Chromium, reports only (`docs/benchmarking.md`, "The gate"). Chromium
+  end-to-end scenarios (a new tab's first read, a read through a SharedWorker, two tabs sharing a
+  fetch) are paired the same way and report only; a smoke run in `bun run ci` fails on a wrong
+  result or an extra fetch.
+- **Done:**
+  1. Calibration on GitHub's runner (`bench-calibrate.yml`): a case gates in a runtime once it
+     fired in none of 20 same-revision runs and caught at least 90 % of runs with a 25 % slowdown
+     injected. The first two calibrations kept timing report-only; the recalibration after the
+     engine optimisations (chore 43) gated the eight Bun cases. Chromium stayed report-only after
+     the confirming calibration (chore 45), and `read-year` in Bun after both
+     (`docs/benchmarking.md`, calibration log).
+  2. Step 22: a fast path in `DenseSegment.slice` for fully present spans (`read-viewport`
      about 6.7 times faster in Bun and 1.7 times in Chromium; `docs/benchmarking.md`).
 
 ## Design sketch: IndexedDB persistence
