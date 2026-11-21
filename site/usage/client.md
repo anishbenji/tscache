@@ -69,7 +69,7 @@ one call ([Sensitive data and logout](/guides/persistence#sensitive-data-and-log
 
 Resolves with what the worker's caches hold now: the budget in force (absent without one), the bytes the
 cached points hold, the part pinned by pending reads and provisional bars, the pages evicted so far, and
-one row per cache, ascending by id. In a SharedWorker it covers every tab's caches. It rejects with
+one row per cache, ascending by id. In a SharedWorker it covers the caches of every tab of that worker, not those of another deploy's worker. It rejects with
 `TscacheError` against a worker script from before memory budgets
 (`client.features.has('memoryBudget')` is then false).
 

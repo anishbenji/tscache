@@ -85,8 +85,8 @@ export interface TscacheClient {
   /**
    * What the worker's caches hold now (§2.9): the budget in force, the
    * bytes the cached points hold, the pinned part, the pages evicted so far
-   * and one entry per cache. In a SharedWorker it covers every tab's
-   * caches. Rejects with TscacheError against a worker that does not offer
+   * and one entry per cache. In a SharedWorker it covers the caches of
+   * every tab of that worker, never another deploy's worker. Rejects with TscacheError against a worker that does not offer
    * memory budgets (`client.features.has('memoryBudget')` is false).
    */
   memoryStats(): Promise<MemoryStats>;

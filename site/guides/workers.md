@@ -10,8 +10,10 @@ The engine runs in one of three hostings, tried in order from `mode` (default `'
    thread.
 3. **`'in-process'`**: an engine in the page itself, behind the same message protocol. No sharing.
 
-A `memoryBudget` ([Memory](/guides/patterns#memory)) bounds one engine: in a SharedWorker every tab's
-caches together, in a dedicated worker or in-process one tab's.
+A `memoryBudget` ([Memory](/guides/patterns#memory)) bounds one engine: in a SharedWorker the caches of
+every tab of that worker together, in a dedicated worker or in-process one tab's. While tabs of two
+deploys run two SharedWorkers ([Stale scripts after a deploy](#stale-scripts-after-a-deploy)), each
+worker has a budget of its own.
 
 A hosting **fails**, and the chain steps down with a `modeFallback` event, when its constructor throws
 (a browser without `SharedWorker`, see [Browser support](#browser-support)), when the worker fires `error` before the handshake (the script
