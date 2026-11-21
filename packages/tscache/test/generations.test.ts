@@ -275,6 +275,7 @@ describe("14: announce and present (N127)", () => {
       { t: "clearAll", v: 2, id: "n", clear: "x" },
       { t: "clearAll", v: 1, id: "n" },
       { t: "clearAll", v: 1, id: "n", clear: 7 },
+      { t: "clearAll", v: 1, id: 7, clear: "x" },
     ]) {
       other.postMessage(message);
     }
@@ -287,6 +288,43 @@ describe("14: announce and present (N127)", () => {
     // The well-formed one is answered and supersedes.
     other.postMessage(newer);
     expect(bus.posts.at(-1)).toMatchObject({ t: "present", id: "a" });
+    expect(a.superseded).toEqual(["9.0.0"]);
+  });
+
+  // Treated as absent, a malformed optional field would rank the sender as
+  // another, newer generation and supersede this worker for its life (gate
+  // round 3, R3-1). Each such message is ignored: not answered, not compared.
+  it.each(
+    ["announce", "present"].flatMap((t) =>
+      [
+        { fetcher: 123 },
+        { fetcher: { href: "/fetcher.js" } },
+        { fetcher: null },
+        { name: 7 },
+        { name: ["tscache:9.0.0:"] },
+        { name: null },
+      ].map((malformed) => ({ t, malformed })),
+    ),
+  )("ignores a $t with $malformed", ({ t, malformed }) => {
+    const bus = fakeChannels();
+    const a = joined(bus, worker({ id: "a" }));
+    a.generations.announce("/fetcher.js");
+    const before = bus.posts.length;
+    const other = bus.open();
+    const newer = { v: 1, id: "n", lib: "9.0.0", url, startedAt: 9 };
+    other.postMessage({ ...newer, t, ...malformed });
+    const answers = bus.posts
+      .slice(before)
+      .filter((m) => (m as { id?: unknown } | null)?.id === "a");
+    expect(answers).toEqual([]);
+    expect(a.superseded).toEqual([]);
+    // The same message with both fields well formed is taken.
+    other.postMessage({
+      ...newer,
+      t,
+      fetcher: "/fetcher.js",
+      name: "tscache:9.0.0:/fetcher.js",
+    });
     expect(a.superseded).toEqual(["9.0.0"]);
   });
 

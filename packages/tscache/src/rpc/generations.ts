@@ -136,7 +136,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-/** The announcement of an `announce` or `present`, or undefined if malformed. */
+/**
+ * The announcement of an `announce` or `present`, or undefined if malformed:
+ * a required field missing or of the wrong type, or an optional one present
+ * with the wrong type (read as absent, a bad `fetcher` would make the sender
+ * another generation).
+ */
 function announcementOf(m: Record<string, unknown>): Announcement | undefined {
   const { id, lib, url, fetcher, name, startedAt } = m;
   if (
@@ -144,7 +149,9 @@ function announcementOf(m: Record<string, unknown>): Announcement | undefined {
     typeof lib !== "string" ||
     typeof url !== "string" ||
     typeof startedAt !== "number" ||
-    !Number.isFinite(startedAt)
+    !Number.isFinite(startedAt) ||
+    (fetcher !== undefined && typeof fetcher !== "string") ||
+    (name !== undefined && typeof name !== "string")
   ) {
     return undefined;
   }
