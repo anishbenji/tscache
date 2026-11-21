@@ -69,8 +69,11 @@ stops at the first refused write, without retrying, with the `QuotaExceededError
 database cannot be opened, or a write or the load did not finish in time) or `'error'` (a write or the load
 failed, with the error). A failed write deletes the cache's records, since the disk may still hold what
 memory removed. A load whose read fails or does not finish in time deletes nothing: the records stay,
-and the next session loads them.
-A database that cannot be opened stops every persisted cache of the worker, and deletes nothing. After
+and the next session loads them. A database that cannot be opened, or a persistence module that does
+not load, stops every persisted cache of the worker the same way. Such a cache keeps its records until
+its first later removal (`invalidate`, `clear`, a watermark moved back, a version change, `clearAll`):
+that removal deletes them, strict, and its call resolves once the deletion has settled, within about
+five seconds. When the deletion fails as well, the records stay. Later removals write nothing. After
 the browser closes the database connection, a later load or write stops its cache with `'error'`, and
 the records stay, since the deletion fails too. A stop while `cache()` loads is emitted before the handle
 exists, so listen on the client:
