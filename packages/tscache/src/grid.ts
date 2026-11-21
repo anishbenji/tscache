@@ -885,6 +885,12 @@ class Calendar {
     this.#memoBase = candidate - 2;
     const start = this.#near(candidate);
     if (Number.isNaN(start)) return Number.NaN;
+    if (start === t) {
+      // `t` is the candidate's own start: starts strictly increase, so no
+      // later slot starts at or before it, and the next start is not needed.
+      this.#start = start;
+      return candidate;
+    }
     return start > t
       ? this.#below(candidate, t)
       : this.#from(candidate, start, t);
