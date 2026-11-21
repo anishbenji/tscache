@@ -1,6 +1,12 @@
 import { expect, it } from "vitest";
 import { slotStart } from "../src/entries/grid";
-import { createCalendarGrid, heldTables, msInto, startOf } from "../src/grid";
+import {
+  createCalendarGrid,
+  heldTables,
+  msInto,
+  startOf,
+  withGridOf,
+} from "../src/grid";
 import { DAY, HOUR, NY, probe, slots } from "./calendar-contract-helpers";
 
 // Implementer tests added after Codex round 1 of step 129
@@ -45,7 +51,8 @@ it("R1-1: a grid holds no reference to a table the context evicted", () => {
 
 it("R1-1: a grid the shared context drops holds no table reference", () => {
   const descriptor = { unit: "day", zone: "Asia/Seoul", at: "03:00" } as const;
-  const grid = createCalendarGrid(descriptor);
+  // Held by the shared context, as after a call that succeeded.
+  const grid = withGridOf(descriptor, undefined, (held) => held);
   const starts = most(40);
   msInto(starts, grid);
   expect(heldTables(grid)).toBe(1);

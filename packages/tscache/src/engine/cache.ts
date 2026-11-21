@@ -15,11 +15,11 @@ import {
 } from "../errors";
 import {
   type Grid,
-  gridOf,
   type SlotRange,
   slotAtOrAfter,
   snapOut,
   toMs,
+  withGrid,
 } from "../grid";
 import { getOwn, setOwn } from "../segment/own";
 import type { Columns } from "../segment/types";
@@ -338,6 +338,23 @@ export function installRestore(impl: Restore): void {
   restoreImpl = impl;
 }
 
+/**
+ * The first provisional slot a config's watermark gives, or undefined
+ * without one. Throws ConfigError for a watermark the grid rejects.
+ */
+function initialVolatile(
+  config: ResolvedCacheConfig,
+  grid: Grid,
+): number | undefined {
+  if (config.finalizedUntil === undefined) return undefined;
+  try {
+    return slotAtOrAfter(config.finalizedUntil, grid);
+  } catch (error) {
+    if (!(error instanceof InvalidRangeError)) throw error;
+    throw new ConfigError(`finalizedUntil: ${error.message}`);
+  }
+}
+
 export class CacheState {
   readonly config: ResolvedCacheConfig;
   /** The config's grid: what every ms↔slot conversion of the cache takes (§4.1). */
@@ -364,8 +381,19 @@ export class CacheState {
 
   constructor(config: ResolvedCacheConfig, hooks: CacheStateHooks = {}) {
     this.config = config;
-    this.grid = hooks.grid ?? gridOf(config);
     this.#hooks = hooks;
+    // The watermark's slot is what can still reject the config here. An
+    // engine wraps the whole construction in `withGrid`; a cache made
+    // without one holds its grid the same way, once the slot is found.
+    const begin = (grid: Grid) => ({
+      grid,
+      from: initialVolatile(config, grid),
+    });
+    const { grid, from } =
+      hooks.grid === undefined
+        ? withGrid(config, undefined, begin)
+        : begin(hooks.grid);
+    this.grid = grid;
     this.#store = new SegmentStore(config, this.grid);
     const memory = hooks.memory;
     this.#memory = memory;
@@ -377,15 +405,8 @@ export class CacheState {
       this.#evicted = new CoverageIndex();
     }
     this.#version = config.version;
-    if (config.finalizedUntil !== undefined) {
-      try {
-        this.#volatileFrom = slotAtOrAfter(config.finalizedUntil, this.grid);
-      } catch (error) {
-        if (!(error instanceof InvalidRangeError)) throw error;
-        throw new ConfigError(`finalizedUntil: ${error.message}`);
-      }
-      this.#finalizedUntil = config.finalizedUntil;
-    }
+    this.#volatileFrom = from;
+    this.#finalizedUntil = config.finalizedUntil;
   }
 
   static {

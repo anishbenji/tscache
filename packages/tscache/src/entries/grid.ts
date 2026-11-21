@@ -11,25 +11,16 @@
  */
 
 import {
-  type Grid,
-  resolveGrid,
   slotContaining,
   snapOut,
   startAfter,
   startOf,
   toMs,
+  withGridOf,
 } from "../grid";
 import type { CalendarInterval, Range } from "../types";
 
 export type { CalendarInterval, Range } from "../types";
-
-/** The grid of a config's `interval` and `alignmentOffset`; ConfigError when invalid. */
-function gridFor(
-  interval: number | CalendarInterval,
-  alignmentOffset: number | undefined,
-): Grid {
-  return resolveGrid(interval, alignmentOffset);
-}
 
 /**
  * The range a cache reads for `range`: snapped outward to the grid, as
@@ -50,8 +41,9 @@ export function snapRange(
   interval: number | CalendarInterval,
   alignmentOffset?: number,
 ): Range {
-  const grid = gridFor(interval, alignmentOffset);
-  return toMs(snapOut(range, grid), grid);
+  return withGridOf(interval, alignmentOffset, (grid) =>
+    toMs(snapOut(range, grid), grid),
+  );
 }
 
 /**
@@ -66,8 +58,9 @@ export function slotStart(
   interval: number | CalendarInterval,
   alignmentOffset?: number,
 ): number {
-  const grid = gridFor(interval, alignmentOffset);
-  return startOf(slotContaining(t, grid), grid);
+  return withGridOf(interval, alignmentOffset, (grid) =>
+    startOf(slotContaining(t, grid), grid),
+  );
 }
 
 /**
@@ -82,6 +75,7 @@ export function nextSlotStart(
   interval: number | CalendarInterval,
   alignmentOffset?: number,
 ): number {
-  const grid = gridFor(interval, alignmentOffset);
-  return startAfter(slotContaining(t, grid), grid);
+  return withGridOf(interval, alignmentOffset, (grid) =>
+    startAfter(slotContaining(t, grid), grid),
+  );
 }

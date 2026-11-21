@@ -204,9 +204,9 @@ class Context implements CalendarGridContext {
   readonly onFloorStep: ((direction: -1 | 1) => void) | undefined;
   readonly lookupBudget: number;
   readonly #capacity: number;
-  /** One grid per descriptor as written, least recently asked for first. */
+  /** One grid per descriptor as written, least recently used first. */
   readonly #grids = new Map<string, CalendarGrid>();
-  /** Grids held at most; above it the least recently asked for is dropped. */
+  /** Grids held at most; above it the least recently used is dropped. */
   readonly #gridCapacity: number;
   #recentGrid: string | undefined;
   /** Every table held, least recently used first, with its owner and block. */
@@ -230,25 +230,28 @@ class Context implements CalendarGridContext {
     return this.#grids.size;
   }
 
-  /** The grid held under a key, marked as the most recently asked for. */
-  grid(key: string): CalendarGrid | undefined {
-    const grid = this.#grids.get(key);
-    if (grid !== undefined && key !== this.#recentGrid) {
-      this.#grids.delete(key);
-      this.#grids.set(key, grid);
-      this.#recentGrid = key;
-    }
-    return grid;
+  /**
+   * The grid held under a key. Looking one up changes nothing: only a call
+   * that succeeded moves the order (`hold`).
+   */
+  find(key: string): CalendarGrid | undefined {
+    return this.#grids.get(key);
   }
 
   /**
-   * Holds a new grid, dropping the least recently asked for above the
-   * capacity. A dropped grid gives up its tables and goes on working for
-   * whoever still holds it; the next request for its descriptor makes a
-   * new one.
+   * Holds a grid as the most recently used, for a call that needed it and
+   * succeeded: the one place a grid becomes held (`heldAfter`). When the
+   * context already holds a grid for the key, that one stays and is the
+   * one marked. Above the capacity the least recently used grid is
+   * dropped: it gives up its tables and goes on working for whoever still
+   * has it, and the next successful call for its descriptor holds a new
+   * one.
    */
-  keep(key: string, grid: CalendarGrid): void {
-    this.#grids.set(key, grid);
+  hold(key: string, grid: CalendarGrid): void {
+    if (key === this.#recentGrid && this.#grids.has(key)) return;
+    const held = this.#grids.get(key) ?? grid;
+    this.#grids.delete(key);
+    this.#grids.set(key, held);
     this.#recentGrid = key;
     while (this.#grids.size > this.#gridCapacity) {
       const [oldest, dropped] = this.#grids.entries().next().value as [
@@ -288,7 +291,7 @@ class Context implements CalendarGridContext {
   }
 
   /** Holds a new table, dropping the least recently used ones above the capacity. */
-  hold(table: Float64Array, owner: Calendar, block: number): void {
+  holdTable(table: Float64Array, owner: Calendar, block: number): void {
     this.#order.set(table, { owner, block });
     this.#recent = table;
     while (this.#order.size > this.#capacity) {
@@ -489,15 +492,14 @@ export function sameCalendar(
 
 /**
  * The calendar grid of a descriptor in a context (default: one shared by
- * every caller that names none). Equal descriptors give the same grid, so
- * they share its tables. Throws ConfigError for an invalid descriptor.
- * With `keep` false a grid this call makes is not held by the context yet:
- * the caller holds it with `keepGrid` once what it is for exists.
+ * every caller that names none): the grid the context holds for the
+ * descriptor, or a new one that nobody holds yet. Making a grid never
+ * holds it; `withGrid` and `withGridOf` do, for a call that succeeds.
+ * Throws ConfigError for an invalid descriptor.
  */
 export function createCalendarGrid(
   descriptor: unknown,
   context?: CalendarGridContext,
-  keep = true,
 ): CalendarGrid {
   defaultContext ??= new Context({}, SHARED_GRIDS);
   const owner = (context as Context | undefined) ?? defaultContext;
@@ -506,58 +508,76 @@ export function createCalendarGrid(
   // pays for the check.
   const { zone } = fields;
   const key = `${fields.unit}|${fields.at}|${fields.weekStart}|${show(zone)}`;
-  const held = typeof zone === "string" ? owner.grid(key) : undefined;
-  if (held !== undefined) return held;
-  const { grid } = new Calendar(withZone(fields), owner, key);
-  if (keep) owner.keep(key, grid);
-  return grid;
+  const held = typeof zone === "string" ? owner.find(key) : undefined;
+  return held ?? new Calendar(withZone(fields), owner, key).grid;
+}
+
+/** A resolved config's grid fields. */
+interface GridFields {
+  interval: number | ResolvedCalendarInterval;
+  alignmentOffset: number;
 }
 
 /**
  * The grid of a resolved config: its own fixed grid, or the calendar grid
- * of its descriptor in `context` (`keep` as `createCalendarGrid`).
+ * of its descriptor in `context`, as `createCalendarGrid` gives it. For
+ * code that is handed a config and no grid; it holds nothing.
  */
 export function gridOf(
-  config: {
-    interval: number | ResolvedCalendarInterval;
-    alignmentOffset: number;
-  },
+  config: GridFields,
   context?: CalendarGridContext,
-  keep = true,
 ): Grid {
   const { interval, alignmentOffset } = config;
   return typeof interval === "number"
     ? { interval, alignmentOffset }
-    : createCalendarGrid(interval, context, keep);
+    : createCalendarGrid(interval, context);
 }
 
 /**
- * Has its context hold a calendar grid made with `keep` false, unless the
- * context holds one for the descriptor already. An engine calls it once
- * the cache the grid is for exists, so a rejected `cache()` leaves nothing
- * behind (§4.1).
+ * When a context holds a grid (§4.1): only once a call that needed the
+ * grid has succeeded. `use` is that call. If it throws, a grid made for it
+ * is held by nobody, and a grid the context held before is as it was, in
+ * its place in the order of use. This is the one place a grid becomes
+ * held, and every entry point that holds one goes through it.
  */
-export function keepGrid(g: Grid): void {
-  g.calendar?.keep();
+function heldAfter<T>(grid: Grid, use: (grid: Grid) => T): T {
+  const result = use(grid);
+  grid.calendar?.hold();
+  return result;
 }
 
 /**
- * The grid of a config's `interval` and `alignmentOffset`, as given (the
- * grid entry, §2.10), with `cache()`'s errors in `cache()`'s order. A
- * calendar grid the shared context already holds is returned without a
- * zone check, so a caller that asks per event or per frame pays for one
- * check per descriptor.
+ * Runs `use` with the grid of a resolved config in `context`, which holds
+ * the grid once `use` has returned (`heldAfter`): an engine constructing a
+ * cache, or a cache constructed without an engine.
  */
-export function resolveGrid(interval: unknown, alignmentOffset: unknown): Grid {
-  if (typeof interval === "object" && interval !== null) {
-    // A grid this call makes is held only once the whole call is valid: a
-    // rejected one must not push another view's grid out of the context.
-    const grid = createCalendarGrid(interval, undefined, false);
-    assertNoOffset(alignmentOffset);
-    keepGrid(grid);
-    return grid;
+export function withGrid<T>(
+  config: GridFields,
+  context: CalendarGridContext | undefined,
+  use: (grid: Grid) => T,
+): T {
+  return heldAfter(gridOf(config, context), use);
+}
+
+/**
+ * As `withGrid`, for a config's `interval` and `alignmentOffset` as given
+ * (the grid entry, §2.10), with `cache()`'s errors in `cache()`'s order:
+ * the interval's fields, then the offset, then whatever `use` rejects. A
+ * calendar grid the shared context already holds is found without a zone
+ * check, so a caller that asks per event or per frame pays for one check
+ * per descriptor.
+ */
+export function withGridOf<T>(
+  interval: unknown,
+  alignmentOffset: unknown,
+  use: (grid: Grid) => T,
+): T {
+  if (typeof interval !== "object" || interval === null) {
+    return use(gridOf(resolveGridFields(interval, alignmentOffset)));
   }
-  return gridOf(resolveGridFields(interval, alignmentOffset));
+  const grid = createCalendarGrid(interval);
+  assertNoOffset(alignmentOffset);
+  return heldAfter(grid, use);
 }
 
 /**
@@ -710,11 +730,9 @@ class Calendar {
     this.#lastTable = undefined;
   }
 
-  /** Has the context hold this grid, when it holds none for the descriptor. */
-  keep(): void {
-    if (this.#context.grid(this.#key) === undefined) {
-      this.#context.keep(this.#key, this.grid);
-    }
+  /** Has the context hold this grid: for `heldAfter` only. */
+  hold(): void {
+    this.#context.hold(this.#key, this.grid);
   }
 
   /** The tables this grid references: those it holds, and its shortcut's. */
@@ -750,7 +768,7 @@ class Calendar {
       own = next;
     }
     this.#tables.set(block, table);
-    this.#context.hold(table, this, block);
+    this.#context.holdTable(table, this, block);
   }
 
   /**

@@ -5,6 +5,7 @@ import {
   createCalendarGrid,
   msInto,
   startOf,
+  withGridOf,
 } from "../src/grid";
 import type { CalendarInterval } from "../src/types";
 import { slots } from "./calendar-contract-helpers";
@@ -34,7 +35,8 @@ it("18: the grid entry's shared context holds a bounded number of grids", () => 
 
 it("18: a grid the shared context drops gives up its tables and goes on converting", () => {
   const descriptor = { unit: "day", zone: "Asia/Seoul", at: "03:00" } as const;
-  const grid = createCalendarGrid(descriptor);
+  // Held by the shared context, as after a call that succeeded.
+  const grid = withGridOf(descriptor, undefined, (held) => held);
   const block = 40 * 512;
   const starts = new Float64Array(slots(block, block + 256));
   msInto(starts, grid);
