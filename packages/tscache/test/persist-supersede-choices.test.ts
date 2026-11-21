@@ -195,16 +195,21 @@ describe("ClearPosts", () => {
   it("never relays a seen clear id again, however many others pass after it", () => {
     const post = vi.fn<(clearId: string) => void>();
     const posts = new ClearPosts({ post, nextClearId: () => "own" });
+    // Far above any count bound worth keeping: a set capped at any size
+    // below this must fail here, since every such cap relays forever once
+    // one id more than it holds circulates between two workers (gate round
+    // 1 of step 135). Do not shrink it.
+    const fillers = 100_000;
     posts.begin("first")();
     posts.begin()();
-    for (let i = 0; i < 500; i++) posts.begin(`filler-${i}`)();
+    for (let i = 0; i < fillers; i++) posts.begin(`filler-${i}`)();
     post.mockClear();
 
-    // The first ids seen, foreign and own, are still known after 500 more.
+    // The first ids seen, foreign and own, are still known after them all.
     posts.begin("first")();
     posts.begin("own")();
     posts.begin("filler-0")();
-    posts.begin("filler-499")();
+    posts.begin(`filler-${fillers - 1}`)();
     expect(post).not.toHaveBeenCalled();
 
     // A new id is still relayed once, and only once.
