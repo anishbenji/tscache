@@ -88,6 +88,10 @@ from before change events (a stale cached script during a deploy) never sends on
 then lacks `'cacheChanged'`, the listener is never called, and a development build warns once. Check
 `client.features.has('cacheChanged')` and poll where it is missing.
 
+`superseded` comes only from a SharedWorker, which lists `'superseded'` in `client.features`. A
+dedicated worker, the in-process hosting and a worker script from before 0.3.0 do not list it and never
+send the event; a listener there is never called, and no warning is printed for it.
+
 ## Request ids
 
 A request-scoped event carries the `requestId` of the call that caused it, `'<clientId>:<seq>'`. The

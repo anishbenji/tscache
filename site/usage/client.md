@@ -85,6 +85,9 @@ module or worker build) runs in the origin; then `{ lib }`, with that worker's t
 from memory and its fetcher, and a reload joins the newer worker
 ([Stale scripts after a deploy](/guides/workers#older-tabs-are-told-superseded)).
 
+Only a SharedWorker reports it. Where `client.features.has('superseded')` is false (a dedicated worker,
+in-process, an older worker script) the property stays `undefined`, which then means "not known".
+
 <<< @/snippets/client.ts#superseded{ts}
 
 ## client.on(event, fn) and client.off(event, fn)

@@ -211,6 +211,11 @@ closed. A prompt shown once costs little in either case; a loop of reloads does 
 A superseded worker stays superseded: when the newer tabs close first, an old tab left open persists
 nothing until it is reloaded.
 
+`client.features.has('superseded')` says whether a tab can be told at all. It is true behind a
+SharedWorker, and false behind a dedicated worker, an in-process client and a worker script from before
+0.3.0. Where it is false, `client.superseded` stays `undefined` for good, which means "not known", not
+"current"; a `superseded` listener there is simply never called, and no warning is printed for it.
+
 ### What takes no part
 
 - A worker of tscache 0.1.0 or 0.2.0 has no name and does not listen. Beside a worker of a later release
