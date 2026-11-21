@@ -94,8 +94,8 @@ function filled(engine: Engine): string {
 }
 
 const open: PortClient[] = [];
-afterEach(async () => {
-  for (const client of open.splice(0)) await client.dispose();
+afterEach(() => {
+  for (const client of open.splice(0)) client.dispose();
   vi.restoreAllMocks();
 });
 

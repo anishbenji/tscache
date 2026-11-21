@@ -265,7 +265,6 @@ Codex at `46ae12e` (`~/code/tscache-reports/reviews/step-114/codex-round-2.md`);
 
 `bunx vitest run integrations`: 94 tests passed.
 
-
 ### Pre-review before round 3 (Claude Opus 5.5, on `b9790f6`)
 
 R2-1 and R2-2 checked as fixed everywhere they apply. One P2, accepted and fixed by the director:

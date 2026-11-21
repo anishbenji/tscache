@@ -217,5 +217,6 @@ No findings. **Settled** after three rounds (8–10).
 **Known limits.** A seed carries no dataset version, and the browser's coverage check and the seed's put are two requests (R2-2): either matters only when the backend changed covered history after the server's read. Not proven at runtime anywhere: a real worker loss (every probe simulated it the way the client signals it), production builds other than Solid's, Angular's ahead-of-time compiler, and the Svelte component under `svelte-check`. `resourceFromSnapshots` (Angular) is experimental in Angular 22, and Solid is a release candidate.
 
 **For the user.**
+
 - R2-2: closing the seed race needs a library-level put that fills only uncovered slots in one engine step, recorded with the snapshot API for the post-build architecture review. The ⑬b examples' `putSeeds` has the same race. Say if you want it sooner.
 - Learning loop for R2-3 (a test that broke the type check reached a commit): no local hook type-checks `integrations/`. Smallest durable fix, on a `chore/` branch: run `bun run check:integrations` in pre-push, which needs the built package or a `paths` mapping from `tscache` to `src`. Related to backlog item 5 (type-check `e2e/` and `scripts/`).

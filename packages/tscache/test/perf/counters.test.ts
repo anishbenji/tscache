@@ -116,8 +116,8 @@ function counting(port: MessagePort, traffic: Traffic): MessagePortLike {
 }
 
 const open: PortClient[] = [];
-afterEach(async () => {
-  for (const client of open.splice(0)) await client.dispose();
+afterEach(() => {
+  for (const client of open.splice(0)) client.dispose();
 });
 
 /** A client and a worker's server on one MessageChannel, both counted. */
