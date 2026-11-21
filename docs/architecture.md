@@ -403,6 +403,8 @@ The initiating call additionally receives request-scoped results directly — `p
 
 `modeFallback` is an addition beyond the starter's event list — observability for the documented Chrome-Android path (accepted under N5). `workerLost` is another such addition (N32).
 
+**A listener that throws (the emitter's rule, §4.6, §4.8; documented as built at step 133).** Every listener of an emitted event runs, and the first error is rethrown after all ran; a throwing listener does not break the port, and later events reach every listener. Nobody awaits an event, so the rethrown error reaches the host's error reporting, by one of two routes. An event from the wire (`authInvalid`, `cacheCleared`, `persistStopped`, `cacheChanged`, `mergeWarning`) is emitted inside the port's `message` listener, and the error propagates out of it: the host reports it as an uncaught exception (in a browser the window's `error` event, in Node `uncaughtException`), and each message reports its own first error. The client-made events go through `reportError` where the realm has it, and are thrown otherwise: `workerLost` reports the first error of its one emit; the `modeFallback` steps are all emitted in one macrotask after `createClient` resolves, and only the first error across all the steps is reported. In a browser both routes reach the window's `error` event.
+
 **Change events (N71–N84, step 114).** `cacheChanged` tells a reader that what a `get` over some range returns (its points, its coverage or its misses) may have changed. It answers finding M7; the alternatives are recorded in `docs/design/m7-change-events.md`.
 
 - _Payload (N71, N72)._ Ranges, never values. `written` lists the slots the call touched: a put's authority (N13) or without one its batch's span (N3), a hydrate's applied parts, provisional slots included (N76), whether or not values differed, and also when the write failed part-way (an ascending prefix may have landed, N70). `removed` lists the coverage the call actually withdrew, never slots that were not covered (N82). `cleared` says everything the cache held before the call went; `removed` is then empty and `written` lists what the same call wrote after the clear. A range may be in both lists.
@@ -1198,6 +1200,10 @@ class RpcServer {
    *  then dispatches req → engine and fans out evt to every attached port. */
   attach(port: MessagePortLike): void;
   detach(port: MessagePortLike): void;
+  /** Tells every ready port that a cache's persistence stopped (§4.10.8). */
+  persistStopped(payload: ClientEvents["persistStopped"]): void;
+  /** Attached ports still alive (tests and diagnostics). */
+  readonly connections: number;
 }
 
 // rpc/port-client.ts — client-side port wrapper.
@@ -1216,11 +1222,22 @@ class PortClient {
   readonly clientId: string;
   /** hello.lock, when the worker holds a lifetime lock (N32). */
   readonly lock: string | undefined;
+  /** hello.features this client knows (N79); empty for an older worker. */
+  readonly features: ReadonlySet<WorkerFeature>;
+  /** Requests awaiting a response (tests and diagnostics). */
+  readonly pendingCount: number;
   request(op: Op, params: unknown, transfer?: ArrayBuffer[]): Promise<unknown>;
+  /** The op of this client's request `id` while it awaits its response. */
+  pendingOp(id: number): Op | undefined;
   on(fn: (evt: Evt) => void): () => void;
   /** Called once when the transport fails underneath; never after dispose(). */
   onLost(fn: (error: TscacheError) => void): () => void;
+  /** Releases the port; pending requests reject. Idempotent. */
   dispose(): void;
+  /** The transport failed underneath (a dedicated worker's fatal error, the
+   *  SharedWorker's lifetime lock granted): pending and later requests
+   *  reject with `error`'s message, and onLost listeners run. Idempotent. */
+  abort(error: TscacheError): void;
 }
 ```
 
@@ -1293,8 +1310,13 @@ Not an engine step: tests are written with the code (in-flight subtraction, §4.
 
 ```ts
 // orchestrator/orchestrator.ts
+/** Runs an engine call on behalf of a request: the RPC server names the
+ *  request that caused the change events the call reports (§4.7, N75). */
+type Caused = <T>(requestId: string | undefined, call: () => T) => T;
 class Orchestrator {
-  constructor(engine: Engine, broadcast: (evt: Evt) => void);
+  /** `caused` (default: runs the call) wraps the put that applies a fetch,
+   *  and the release of a get's pin (N94), under the issuing get's id. */
+  constructor(engine: Engine, broadcast: (evt: Evt) => void, caused?: Caused);
   /** import()s the module once; a failure rejects (N30). */
   load(config: FetcherConfig): Promise<void>;
   /** `requestId` names the get on the request-scoped mergeWarning events
@@ -1308,14 +1330,25 @@ class Orchestrator {
   updateAuth(context: unknown): Promise<void>;
   /** engine.invalidate, then fences the fetches in flight over the range (§4.9.1, N64). */
   invalidate(cacheId: string, range: Range): void;
+  /** Gets currently subscribed to auth invalidation (diagnostics and tests). */
+  readonly authWaiters: number;
 }
-// orchestrator/auth.ts — AuthState: 'valid' | 'invalid'; see rules.
+// orchestrator/auth.ts — AuthState: 'valid' | 'invalid'; see rules. It also
+// remembers the context of the last flip's refused fetch until the next flip:
+//   wasRefused(context: unknown): boolean; // sameMaterial with that context
+/** Whether two structured-cloned contexts are certainly the same material:
+ *  primitives by Object.is, plain arrays and plain objects member by member,
+ *  keys in any order. False for anything it cannot be sure of (Map, Date,
+ *  typed arrays, class instances, cycles, nesting deeper than 32 levels,
+ *  more than 10,000 members in all). Each pair of objects is expanded at
+ *  most once, so shared references cost one walk (step 133). */
+function sameMaterial(a: unknown, b: unknown): boolean;
 // entries/fetcher.ts — exports Fetcher, FetchRequest, FetchResponse (§2.5).
 ```
 
 Rules:
 
-- **Loading (N30).** `init.fetcher` makes the server call `load()` before answering: `import(module)` once per worker (the first connection loads it; later connections reuse it; a different module on a later connection is a `ConfigError` in `init-err`). An import failure, or a module whose default export has no `fetch` function, answers `init-err` with a `TscacheError` naming the module, so `createClient` rejects at startup. The fetcher module must load or fail: an `import()` that never settles (a module server that accepts the request and never answers, a top-level `await` that never resolves) leaves `createClient` pending, and no timeout bounds it in 0.1.0 (user decision 2026-11-10, decision 25). `context` is stored and sent with every request; `updateAuth` replaces it. A tab that joins with a context that is not the identical value takes the `updateAuth` path once the module is loaded (structured-cloneable values have no cheap, cycle-safe equality, so anything else is treated as new material).
+- **Loading (N30).** `init.fetcher` makes the server call `load()` before answering: `import(module)` once per worker (the first connection loads it; later connections reuse it; a different module on a later connection is a `ConfigError` in `init-err`). An import failure, or a module whose default export has no `fetch` function, answers `init-err` with a `TscacheError` naming the module, so `createClient` rejects at startup. The fetcher module must load or fail: an `import()` that never settles (a module server that accepts the request and never answers, a top-level `await` that never resolves) leaves `createClient` pending, and no timeout bounds it in 0.1.0 (user decision 2026-11-10, decision 25). `context` is stored and sent with every request; `updateAuth` replaces it. A tab that joins with a context that is not the identical value takes the `updateAuth` path once the module is loaded. Every value that is not the identical one counts as other material on purpose: the generation must advance for any credential that may be new, so that a late 401 under the credential it replaces is ignored (step 11, R4-2; step 133 restated the reason, which this sentence used to give as the lack of a cheap, cycle-safe equality). One exception (step 133): a joining tab whose context is the same material as the context the last flip to invalid refused changes nothing, whatever the auth state now. Its fetcher hook does not run, the context and the generation do not switch, and auth is not restored, so auth stays invalid until the next `updateAuth` (§4.9.1 rule 4) and a refresh that took effect before the join's turn stays in place. `AuthState` remembers the refused context from the flip until the next flip replaces it; nothing else forgets it, an explicit `updateAuth` with the same material included, because a join may only ever skip what was already refused, which is safe to keep for as long as the worker runs. The join's update checks the rule when its turn in the update queue comes, so the hook never hears material refused by then, and again after the hook, just before the switch, because a fetch in flight may be refused while the hook runs. A client's own `updateAuth` is always applied, so a page may deliberately send any context again. "The same material" is decided by `sameMaterial` (`orchestrator/auth.ts`): a primitive by `Object.is`, plain arrays and plain objects member by member in any key order. Anything it cannot be sure of counts as new material: a `Map`, a `Date`, a typed array, a cycle, nesting deeper than 32 levels, or more than 10,000 members in all. The comparison runs synchronously in the worker every tab shares, so its cost is bounded: structured clone keeps shared references, and a pair of objects already proven the same is not walked again, so each pair is expanded at most once and the member budget bounds the whole walk. A joining tab with other material restores auth, and the next fetch carries its context. A tab that brings no context changes nothing. Through a SharedWorker an object context is always a clone, never the identical value, so until step 133 (2026-11-21) a tab that brought a clone of the refused context restored auth, and the next get fetched with the refused credential: a defect against §4.9.1 rule 4 and the step-11 intent that the same context changes nothing (`docs/reviews/step-11.md`, R4-2). Only the last refusal is remembered, so a tab that read its context before two refreshes can still bring a credential refused earlier; whether a different context brought by a joining tab may restore auth at all, and how a tab that joins while auth is invalid learns of it, is decision concern DC-1 of `docs/reviews/step-133.md`.
 - **Orchestrated get (N2).** With `cacheOnly` or no fetcher, `get` reads the engine and returns that. Otherwise it plans from `engine.coverage`: the request's uncovered slots, which a read would report as `'uncached'` misses, are **coalesced**: adjacent misses merge, and a miss abutting existing coverage is extended by one interval into it (locked: the one-point overlap aids range merge). What is already in flight for the cache is subtracted first, and the `get` awaits those fetches for the overlap (§4.9.1); each coalesced range of the rest becomes one `FetchRequest`; the response is applied with `engine.put(cacheId, response, { range })`, so the fetched range is authoritative (N3, clipped by the response's own watermark, N19). The engine is then read once, after the fetches the `get` awaited, its own and those of other gets (at once when it awaits none), and the result returned; `options.snapshot` is applied to that read, so the result's columns and its `snapshot` come from one state (N36). One read per `get` is an exact budget (`test/perf/counters.test.ts`). A range whose fetch threw comes back as a miss with `reason: 'fetch-failed'` and `error: { name, message }`; a range not fetched because auth is invalid comes back `'auth-pending'`; `'uncached'` is reserved for slots nobody asked to fetch (only after the fence, below).
 - **Dedup (N31).** _Replaced at step 44 by in-flight subtraction (§4.9.1)._ Until then, in-flight fetches were keyed by `(cacheId, range.start, range.end)` of the coalesced range, a second `get` from any tab that produced the same key awaited the same promise, and overlapping but different ranges fetched separately. A `get` that joins a fetch still applies nothing itself.
 - **Version fence (N29, amended 2026-10-31; companion to N19).** The orchestrator counts `cacheCleared` events per cache: the cache's generation. A response whose fetch started before the latest clear is **not applied**. A `get` whose fetches end under another generation than the one it planned them under (the cache was cleared while it waited, whether the clear dropped a response it awaited or wiped one already applied) asks for what is still missing **once** more; that second answer is final, and whatever is still missing after it, because a second clear dropped or wiped it, is returned as `'uncached'`. A fetch's `put` may itself trigger a version-mismatch clear (its `meta.version` is newer): that clear happens inside the put and does not fence the response that caused it, but the fetch then ends under a new generation, so the get asks once more for what the clear wiped. With fetches shared between gets, the fence reads as §4.9.1 rule 5 says. As first written, only a dropped response led to the second request, so a get whose awaited responses were all applied, the clearing one among them, returned the wiped slots `'uncached'` (amended by user decision #10, option B; DC-1 in `docs/reviews/step-44.md`).

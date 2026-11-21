@@ -52,7 +52,10 @@ A later tab constructs a SharedWorker with the same URL and the same options, an
 it to the running worker. Its port is attached to the same `RpcServer`, which gives it the next client
 id. If its `init` names the module the worker already runs, it shares that load. If it carries a
 context that is not the identical value (`Object.is`) the worker holds, the context takes the
-`updateAuth` path, so the fetcher's hook hears it. If it names another module, its `init` is refused
+`updateAuth` path, so the fetcher's hook hears it. A context that is the same
+material (`sameMaterial`: equal primitives, or plain arrays and objects equal member by member) as the
+one the last refusal named changes nothing, whatever the auth state: auth stays invalid until the next
+`updateAuth`, or a joining tab with other material, and a refresh that took effect first stays in place ([Auth refresh](./auth)). If it names another module, its `init` is refused
 with a `ConfigError` and its `createClient` rejects.
 
 From then on the tabs share everything the engine holds: data, coverage, versions, watermarks, the
@@ -102,4 +105,5 @@ Drawn from:
 - [`packages/tscache/src/entries/worker.ts#sharedWorkerScope`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/entries/worker.ts)
 - [`packages/tscache/src/entries/worker.ts#createServer`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/entries/worker.ts)
 - [`packages/tscache/src/orchestrator/orchestrator.ts#Orchestrator`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/orchestrator.ts)
+- [`packages/tscache/src/orchestrator/auth.ts#sameMaterial`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/auth.ts)
 - [`packages/tscache/src/persist/hosted.ts#HostedPersistence`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/persist/hosted.ts)

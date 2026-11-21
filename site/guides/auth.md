@@ -15,7 +15,9 @@ With tokens, the flow is:
    once each time credentials become invalid, with the `context` the refused fetch carried. With a
    SharedWorker that is every tab of the origin; in a fallback it is one tab (see below).
 4. While credentials are invalid, no fetch runs: `get` does not wait, and the affected ranges come back
-   at once as misses with reason `'auth-pending'`.
+   at once as misses with reason `'auth-pending'`. A tab opened while credentials are invalid gets
+   `'auth-pending'` too, without an `authInvalid`: the event was broadcast before it connected. Whether
+   such a tab should be told is an open design decision.
 5. Any tab refreshes and calls `client.updateAuth(newContext)`. The fetcher's optional `updateAuth` hook
    runs, the new context takes effect, and fetching resumes.
 6. Tabs read again; the ranges that were `'auth-pending'` are fetched.

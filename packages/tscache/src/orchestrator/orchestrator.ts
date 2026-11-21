@@ -331,13 +331,15 @@ export class Orchestrator {
     await this.#loading;
     // A joining tab with other material takes the updateAuth path once the
     // module is there, so its hook hears it and the generation advances.
-    // Only an identical value is "the same"; anything else is conservatively
-    // new (structured-cloneable values have no cheap, cycle-safe equality).
+    // Every value that is not the identical one counts as other material on
+    // purpose: the generation must advance for any credential that may be
+    // new, so a late 401 under the old one is ignored (step 11, R4-2). The
+    // join's update then skips material already refused (#update, step 133).
     if (
       config.context !== undefined &&
       !Object.is(config.context, this.#context)
     ) {
-      await this.updateAuth(config.context);
+      await this.#update(config.context, true);
     }
   }
 
@@ -377,12 +379,29 @@ export class Orchestrator {
    * never blocks on a credential refresh).
    */
   updateAuth(context: unknown): Promise<void> {
+    return this.#update(context, false);
+  }
+
+  /**
+   * updateAuth, and a joining tab's context (`joining`). A join whose
+   * material the last flip refused (AuthState.wasRefused; every object
+   * context through a SharedWorker is a clone) changes nothing, whatever
+   * the auth state: no hook, no switch, no generation, no restore, so auth
+   * stays invalid until the next updateAuth (§4.9.1 rule 4) and a refresh
+   * that landed first stays in place (step 133). The rule is checked when
+   * the update's turn comes, so the hook never hears material refused by
+   * then, and again after the hook, since a refusal may land while it runs.
+   * A client's updateAuth is always applied.
+   */
+  #update(context: unknown, joining: boolean): Promise<void> {
     // Pure pull-model worker: nothing to deliver to, nothing to remember
     // (§4.9: a no-op without a fetcher), so a later first load starts clean.
     if (this.#loading === undefined) return Promise.resolve();
+    const refused = () => joining && this.#auth.wasRefused(context);
     const apply = async () => {
       // The first import may still be in flight: the hook must hear this.
       await this.#loading?.catch(() => {});
+      if (refused()) return;
       this.#transitioning = true;
       try {
         // A copy: the hook may keep and change it; what fetches carry and
@@ -391,6 +410,9 @@ export class Orchestrator {
       } finally {
         this.#transitioning = false;
       }
+      // A refusal may have landed while the hook ran (pre-review P1): the
+      // refused material must not switch back in.
+      if (refused()) return;
       this.#context = context;
       this.#authGeneration++;
       this.#auth.restore();
