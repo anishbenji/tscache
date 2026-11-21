@@ -52,7 +52,7 @@ const lazyPersist = () => import("../persist/lazy");
  * A SharedWorker among the workers of its origin (§4.7, Generations): the
  * channel they share, already open, and what this worker announces on it.
  */
-export interface SharedIdentity {
+interface SharedIdentity {
   channel: WorkersChannel;
   /** The worker script's URL (`self.location.href`). */
   url: string;

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClient, type TscacheClient } from "../src/client/client";
 import { ClientEmitter } from "../src/client/events";
 import { Engine } from "../src/engine/engine";
-import { createServer, type SharedIdentity } from "../src/entries/worker";
+import { createServer } from "../src/entries/worker";
 import { ConfigError } from "../src/errors";
 import { HostedPersistence } from "../src/persist/hosted";
 import * as lazy from "../src/persist/lazy";
@@ -32,6 +32,8 @@ import { fakeChannels } from "./workers-channel";
 // posted before it (docs/testing.md, Waiting).
 
 type Bus = ReturnType<typeof fakeChannels>;
+/** What a SharedWorker's server is told of itself (entries/worker.ts). */
+type SharedIdentity = NonNullable<Parameters<typeof createServer>[4]>;
 
 const workerUrl = "https://app.example/dist/worker.js";
 const open: { dispose(): unknown }[] = [];
