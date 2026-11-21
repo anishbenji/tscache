@@ -86,6 +86,72 @@ describe("a cleanup pending when the worker is superseded", () => {
     expect(h.stopped).toHaveLength(1);
     expect(writes(h.store)).toHaveLength(2);
   });
+
+  /** A cache stopped for its quota, whose cleanup write is held. */
+  async function cleaning() {
+    const h = harness({ debounceMs: 10, timeoutMs: 25 });
+    h.store.seed("unopened", fixture({ id: "unopened" }));
+    h.engine.cache(config());
+    await h.persister.open("persist");
+    h.store.fail("write", 1, "QuotaExceededError");
+    const flush = h.store.gate("write");
+    const cleanup = h.store.gate("write");
+    h.engine.put("persist", batch([0]));
+    const flushing = h.persister.flush();
+    await tick();
+    await flush.entered;
+    flush.release();
+    await flushing;
+    await cleanup.entered;
+    return { h, cleanup };
+  }
+
+  it("starts a clearAll queued behind the abandoned cleanup at once", async () => {
+    const { h, cleanup } = await cleaning();
+    const clear = h.store.gate("clearAll");
+    h.engine.clearAll();
+    const clearing = tracked(h.persister.clearAll());
+    await tick();
+    // The writer runs one job at a time: the clear waits for the cleanup.
+    expect(h.store.log.at(-1)?.kind).toBe("write");
+
+    h.persister.supersede();
+    // No time passes: the clear starts in the step that dropped the cleanup,
+    // not at the cleanup's deadline.
+    await tick();
+    await clear.entered;
+    expect(h.store.log.at(-1)?.kind).toBe("clearAll");
+    expect(clearing.done).toBe(false);
+    // The store commits in order, as IndexedDB does: the abandoned
+    // cleanup's transaction first, then the clear.
+    cleanup.release();
+    clear.release();
+    await clearing.promise;
+    expect(h.store.records("unopened")).toEqual({
+      cache: undefined,
+      pages: [],
+    });
+    await tick(10_000);
+    expect(h.stopped).toHaveLength(1);
+    expect(h.store.log.map(({ kind }) => kind).slice(-2)).toEqual([
+      "write",
+      "clearAll",
+    ]);
+  });
+
+  it("lets a close() that waits for the abandoned cleanup drain at once", async () => {
+    const { h, cleanup } = await cleaning();
+    const closing = tracked(h.persister.close());
+    await tick();
+    expect(closing.done).toBe(false);
+
+    h.persister.supersede();
+    await tick();
+    expect(closing.done).toBe(true);
+    cleanup.release();
+    await tick(10_000);
+    expect(writes(h.store)).toHaveLength(2);
+  });
 });
 
 describe("ClearPosts", () => {

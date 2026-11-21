@@ -342,6 +342,10 @@ export class Persister {
         this.#stop(cache, "superseded", undefined, false);
       }
       this.#dropCleanups();
+      // A dropped cleanup may have been the running job: what was queued
+      // behind it (a clearAll) starts now, and a close() waiting for the
+      // writer to drain is answered, not at the cleanup's old deadline.
+      this.#pump();
     });
   }
 
