@@ -75,7 +75,10 @@ tabs of two deploys have a worker each for a while
 ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)). A worker that clears
 for another worker's call sends its tabs `cacheCleared` with `'clear-all'` and `cacheChanged` with
 `cleared: true` and no `requestId`, for every cache, once each time it clears, which can be more than
-once for one call. Read again as the rule says: a fetching read.
+once for one call. Read again as the rule says: a fetching read. With k other workers running, a worker
+clears up to k + 1 times for one `clearAll`, so a view that follows the rule fetches up to k + 1 times
+and can show misses in between; the read after the last event fills it. k is 0 unless tabs of two
+deploys are open.
 
 ### Hostings and older workers
 
