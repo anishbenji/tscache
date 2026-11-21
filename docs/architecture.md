@@ -739,8 +739,10 @@ rpc/
   port-client.ts    client-side port wrapper: req/res correlation, handshake, evt re-emit
   lifetime.ts       the worker's lifetime Web Lock: held by the SharedWorker, watched by
                     shared-mode clients (N32)
-  generations.ts    the SharedWorkers' BroadcastChannel: announce and present, the rank,
-                    the same-generation rule and the clearAll messages (N108, N109, N116)
+  workers-channel.ts the BroadcastChannel the SharedWorkers of an origin share, and the post
+                    of the hostings that only post their clearAll on it (N108, N116)
+  generations.ts    a SharedWorker's part in that channel: announce and present, the rank and
+                    the same-generation rule (N108, N109, N121)
 client/
   client.ts         createClient: fallback chain (shared → dedicated → in-process), pinning
   hosting.ts        the three hostings: each a connected PortClient or a HostingError;
@@ -1285,7 +1287,8 @@ class PortClient {
   dispose(): void;
 }
 
-// rpc/generations.ts — worker ↔ worker, on BroadcastChannel "tscache-workers".
+// rpc/workers-channel.ts and rpc/generations.ts — worker ↔ worker, on
+// BroadcastChannel "tscache-workers".
 // A message may come from any release: an unknown `t` or `v` is ignored.
 type Announce = {
   t: "announce" | "present";
