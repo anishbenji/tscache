@@ -4,6 +4,8 @@ One file per commit-plan step, `step-NN.md` (`NN` is the step number: two digits
 
 Project-wide reviews sit beside the step files: [`2026-11-review.md`](2026-11-review.md) (2026-11-10) and its follow-up [`2026-11-review-update.md`](2026-11-review-update.md) (2026-11-11).
 
+PRs #29 and #32–#37 (chores and a docs step, numbered 17–23 a second time) and steps 49–50 (#74 and #75, two dependency bumps) merged before the numbering rule (#100, 2026-11-11) and have no review file.
+
 Add one table per round; keep earlier rounds unchanged. Number findings across rounds (`R2-1`, `R2-2`, …) so a re-raised finding can point at its original. A rejection states how the finding was validated and cites the doc section that decides it. Raw reviewer output stays in `.reviews/step-NN/` (gitignored).
 
 ## Template
