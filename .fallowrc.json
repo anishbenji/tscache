@@ -29,7 +29,8 @@
     "site/scripts/*.ts"
   ],
   // The examples import the built package (its exports point into dist/),
-  // which does not exist yet when `bun run ci` runs Fallow before the build.
+  // which may not exist yet: the pre-push hook runs Fallow beside the build,
+  // and `bun run fallow` can run in a checkout that was never built.
   "ignoreUnresolvedImports": ["@anishbenji/tscache", "@anishbenji/tscache/**"],
   "workspaces": {
     "packages": [
