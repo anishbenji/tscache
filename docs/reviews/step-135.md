@@ -1,6 +1,6 @@
 # Step 135 — M5 deploy skew
 
-Branch: `feat/135-m5-deploy-skew` · Reviewers: none yet (the director starts the rounds) · Status: built, verified by the implementer, awaiting review · Merge: by the user (the step touches the public API, the architecture and locked decisions)
+Branch: `feat/135-m5-deploy-skew` · Reviewers: pre-review 1 (Claude Fable) and security lane 1 (Claude Opus), both run by the director; the Codex gate not yet run · Status: pre-review 1 and security lane 1 triaged and fixed, awaiting the Codex gate · Merge: by the user (the step touches the public API, the architecture and locked decisions)
 
 ## Scope
 
@@ -55,7 +55,7 @@ User decision 71 (2026-11-16), each row as the brief lists it:
 
 Codex's three open points, each taken as the option that fits the proposal and the existing code, and each tested in `packages/tscache/test/persist-supersede-choices.test.ts`:
 
-- **A cleanup queued by an earlier per-cache failure when `supersede()` runs.** It is dropped, and one that is running is abandoned; the `durable` waiters of those caches are released, as a settled cleanup releases them. A cleanup deletes every record of its cache, and after the stop those records may be the current generation's: §4.4 of the proposal says the superseded worker writes nothing more and that "the records belong to the current generation now". The cost is the one §4.4 already accepts for a removal released by the stop: what the old worker's memory had withdrawn can stay on disk, and the current generation's engine never held that memory.
+- **A cleanup queued by an earlier per-cache failure when `supersede()` runs.** It is dropped, and one that is running is abandoned; the `durable` waiters of those caches are released, as a settled cleanup releases them, and the writer is stepped so that what was queued behind it starts at once (PR1-2). A cleanup deletes every record of its cache, and after the stop those records may be the current generation's: §4.4 of the proposal says the superseded worker writes nothing more and that "the records belong to the current generation now". The cost is the one §4.4 already accepts for a removal released by the stop: what the old worker's memory had withdrawn can stay on disk, and the current generation's engine never held that memory.
 - **How long seen clear ids are kept.** The 64 seen last, own ones included. Forgetting an id costs at most one more relay post for it, and an id is forgotten only after 64 other `clearAll` calls reached the hosting, so repeated posts cannot sustain themselves: each would need that many new calls by the application. A count, not a time: the library's persistence has no timer that is not a deadline or a debounce.
 - **A `post` callback that throws.** Ignored, at the start and at the settling. A logout on this worker must neither fail nor wait because the channel did; other workers then miss that post.
 
@@ -71,6 +71,26 @@ Further choices:
 - **Tests run without Node's real `BroadcastChannel`.** It spans every thread of a process, so the worker entry under test would join the workers of other test files. `packages/tscache/test/setup-channel.ts` removes it for this package's files; tests of the channel install the fake of `test/workers-channel.ts`, whose delivery is synchronous or held. `docs/testing.md` records it under Shared state.
 - **Three size budgets, not eight.** `index`, `index:lazy` and `worker` grew past their budgets and were raised by the repository's rule; the persistence chunk and the engine grew by 0.09 and 0.01 kB and keep theirs, as `fetcher` and `vite` do, so no unrelated gate loosens.
 - **The worker entry's exports are unchanged.** `createServer` gained a fifth, optional argument for tests and for the entry itself; its type is not exported.
+
+## Pre-review 1 (Claude Fable), not the gate
+
+Run by the director on `598a384e`. The findings below are the ones the director passed on; each was validated against the code before it was fixed.
+
+| #     | Sev | Finding                                                                                                                                                                                                                                                                                   | Decision | Resolution                                                                                                                                                                                                                                                                                                                             |
+| ----- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR1-1 | P1  | `persistStopped` is reported twice when a persisted cache is opened again between `supersede()` and the chunk's arrival (`persist/hosted.ts`): the second open stopped it at once, and the first, still waiting, stopped it again through the persister. N59 and §4.10.8 allow one report | accepted | Fixed in `2c885555`. Reproduced first: a new test with exactly that sequence failed. A second open of a cache whose open waits for the chunk now joins that open, superseded or not, so the waiting open reports, as contract test 7 has it. Tested for a chunk that arrives, fails and times out (`persist-hosted-supersede.test.ts`) |
+| PR1-2 | P1  | `supersede()` abandons a running cleanup without stepping the writer (`persist/persister.ts`, `#dropCleanups`): a `clearAll` queued behind it started only at the cleanup's old deadline and could then fail at its own deadline, leaving the records on disk                             | accepted | Fixed in `b1a9c3bb`. Reproduced first: two new tests failed, a `clearAll` queued behind a running cleanup, and a `close()` waiting for the writer to drain. `supersede()` now pumps after dropping the cleanups; both tests fail again without the pump (`persist-supersede-choices.test.ts`)                                          |
+
+Both are in the two choices this step made where the proposal is silent or brief (a second open during the import, and a cleanup pending at `supersede()`), which is where the implementer's own tests were thinnest.
+
+## Security lane 1
+
+Run by the director on `598a384e`.
+
+| #     | Sev              | Finding                                                                                                                                                                                                                               | Decision  | Resolution                                                                                                                                                                                                           |
+| ----- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SL1-1 | P2               | The guides promise that an awaited removal is durable or the records were deleted, without the superseded stop: after `'superseded'` the call resolves and the records stay (`site/guides/persistence.md`, `docs/guides/patterns.md`) | accepted  | Fixed in `50ad9adf`: both guides, and architecture §4.10.1, state the exception and point at `clearAll()` for removing data from the disk                                                                            |
+| SL1-2 | Decision concern | The design assumes one tscache application per origin: two applications with their own worker scripts would supersede each other and alternate their reload prompts                                                                   | escalated | User item #118, recommended option A (document it). Built as A in `d6613ad8`, a commit of its own: architecture §4.7 and `site/guides/workers.md` state the assumption and its reason. See Decision concerns, item 7 |
 
 ## Contract-test changes
 
@@ -88,18 +108,19 @@ No contract test looked wrong against the proposal.
 
 ## New tests
 
-| Spec test (§6)                                         | Where                                                                                                                                        |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1–6, 25–27, 28 (barrier)                               | `persister-supersede.test.ts` (Codex)                                                                                                        |
-| 7–10, 28 (relay)                                       | `persist-deploy-skew.test.ts` (Codex)                                                                                                        |
-| 35                                                     | `orchestrator-deploy-skew.test.ts` (Codex)                                                                                                   |
-| 11, 12 (seeded properties), 14, the posting half of 16 | `generations.test.ts`                                                                                                                        |
-| 13, 15, 16, 17, 31, 32, 36                             | `deploy-skew-rpc.test.ts`; 13's first half also in `client.test.ts`                                                                          |
-| 29 (DC2)                                               | `deploy-skew-features.test.ts`                                                                                                               |
-| 30 (DC4)                                               | `deploy-skew-late-event.test.ts`                                                                                                             |
-| The entry among the workers of its origin              | `deploy-skew-entry.test.ts`                                                                                                                  |
-| Codex's three open points                              | `persist-supersede-choices.test.ts`                                                                                                          |
-| 18–24, 33, 34                                          | `e2e/deploy-skew.spec.ts`, with `scripts/e2e-server.ts` serving `/fetcher-b.js`, `/backend/<ns>/fetcher.js` and the package as `/dist-next/` |
+| Spec test (§6)                                                                               | Where                                                                                                                                        |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1–6, 25–27, 28 (barrier)                                                                     | `persister-supersede.test.ts` (Codex)                                                                                                        |
+| 7–10, 28 (relay)                                                                             | `persist-deploy-skew.test.ts` (Codex)                                                                                                        |
+| 35                                                                                           | `orchestrator-deploy-skew.test.ts` (Codex)                                                                                                   |
+| 11, 12 (seeded properties), 14, the posting half of 16                                       | `generations.test.ts`                                                                                                                        |
+| 13, 15, 16, 17, 31, 32, 36                                                                   | `deploy-skew-rpc.test.ts`; 13's first half also in `client.test.ts`                                                                          |
+| 29 (DC2)                                                                                     | `deploy-skew-features.test.ts`                                                                                                               |
+| 30 (DC4)                                                                                     | `deploy-skew-late-event.test.ts`                                                                                                             |
+| The entry among the workers of its origin                                                    | `deploy-skew-entry.test.ts`                                                                                                                  |
+| Codex's three open points, and a `clearAll` or `close()` behind an abandoned cleanup (PR1-2) | `persist-supersede-choices.test.ts`                                                                                                          |
+| A cache opened again between `supersede()` and the chunk (PR1-1)                             | `persist-hosted-supersede.test.ts`                                                                                                           |
+| 18–24, 33, 34                                                                                | `e2e/deploy-skew.spec.ts`, with `scripts/e2e-server.ts` serving `/fetcher-b.js`, `/backend/<ns>/fetcher.js` and the package as `/dist-next/` |
 
 Test 22's last clause, "the messages-per-read budget is unchanged", is the existing counted budget in `packages/tscache/test/perf/`, which passes unchanged. Tests 20 and 21 read the store itself (`storedPages` and `stored` in `e2e/support.ts`) and never rely on a reload.
 
@@ -113,8 +134,10 @@ For the user. None of them is acted on beyond what is said.
 2. **DC1–DC4** are built with their recommended options (above). They stay the user's to answer.
 3. **`docs/review-checklist.md` §12** is a protected path and is not edited. Its item "Two engines writing one database" describes the overlap before F5 (a) and F11 (b). It should say that a superseded worker stops writing, and that a `clearAll` is relayed to every SharedWorker. The user owns that file.
 4. **A newcomer ranked below a superseded worker.** Worker A (0.3.0) is superseded by B (0.4.0); B's tabs close, A's stay; a rolled-back tab C (0.2.x with this design, or any generation ranked below A) then starts. A answers C's `announce`, C finds A higher-ranked and is superseded, and nobody persists until A or C ends, although neither writes. The proposal's rule ranks by message alone (§4.3) and F6 (a) keeps A superseded, so this is the design as approved; §4.9's rollback paragraph describes the two-worker case only. Options: (a) as built; (b) a superseded worker stops answering `announce` and is not compared against, so C stays current and persists, which changes §4.3's unconditional answer. Recommendation: (a) for now; it needs three generations and costs persistence, never data.
-5. **Decision numbers.** N125–N141 are taken here. The brief warns that step 129 (the calendar grid) may number its decisions from N125 on its own branch. Whichever merges second has to renumber; this step did not touch that branch.
+5. **Decision numbers.** Built as N106–N122, then renumbered to N125–N141 on the director's instruction after pre-review 1 (`b84f0399`): step 129 (the calendar grid) holds N106–N124 on its branch and merges first. Architecture §8 says why its table has no N106–N124 yet. The commit messages of this branch from before `b84f0399` still use the old numbers, and `docs/reviews/step-127.md`, another step's record, still says "N106 onward". If step 129's numbers change before it merges, these move again.
 6. **`docs/INDEX.md`'s `docs/design/` row on `main`** lost the words step 127 gave it ("reconciled with M7 and M3 as built in step 127, which lists four decision concerns in its §8") when step 128 merged. This step's row says "built in step 135" and does not restore them.
+
+7. **One tscache application per origin** (security lane 1; user item #118). The workers' channel is the origin's and an announcement names no application, so two tscache applications under one origin, each with its own worker script or fetcher, are two generations to each other: they supersede each other, their reload prompts alternate, and a `clearAll` in one clears the other. Options as the director put them: (A) document that one origin hosts one tscache application, with the reason; the alternative is an application id in the generation key and in the announcement, which is F2 (d)'s later route and a new option. Built as A, the recommended one, in `d6613ad8`; another answer changes that commit and needs a design row.
 
 ## Verification
 
@@ -132,6 +155,17 @@ Run by the implementer on this machine (macOS, Bun, Node 22 under nvm), heavy jo
 | Bench against `main`            | `heavy-run.sh "135 child: bench" bun run bench`                                                                                      | exit 0; no gated case fails (below)                                                                                                              |
 
 Not verified: Firefox and Safari (the suite runs Chromium only, as before); a real deploy with a bundler other than the e2e server's unbundled `dist/`; and the development warning of F16 in a real worker console, which is covered under Vitest only. The first `bun run ci` attempt after this file was drafted failed in `biome ci` on this file's own table alignment, before it was committed; nothing else was run in that attempt.
+
+### After pre-review 1 and security lane 1
+
+The table above is the state before the review fixes. For the fixes (`2c885555` to `b84f0399`):
+
+- Each P1 was reproduced by a failing test before its fix: five new cases failed (three for PR1-1, two for PR1-2) and pass now; without the pump of `b1a9c3bb` the two PR1-2 cases fail again.
+- `bunx vitest run packages/tscache`: 127 files, 2,723 tests passed, after the fixes and again after the renumbering.
+- The renumbering was checked by script: each decision file's heading matches its file name, each row of architecture §8 links to an existing file of its own number, and no tracked file cites a number from 106 to 124 except `docs/reviews/step-127.md`.
+- `bun run docs:check`: 246 anchors in 42 pages resolve.
+
+`bun scripts/test-clocks.ts`, `bun run ci` and `bun run bench` were then run on the final head, the commit of this text; the implementer's report gives their results, since recording them here would move the head.
 
 ## Sizes and bench
 
