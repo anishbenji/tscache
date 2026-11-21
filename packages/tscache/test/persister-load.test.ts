@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { Engine } from "../src/engine/engine";
 import { UnknownCacheError } from "../src/errors";
+import { HostedPersistence, type LazyPersist } from "../src/persist/hosted";
+import * as lazy from "../src/persist/lazy";
 import { Persister } from "../src/persist/persister";
-import { fakeTime, harness, tick, writes } from "./persist-harness";
-import { deferred } from "./persist-memory-store";
+import { fakeTime, finish, harness, tick, writes } from "./persist-harness";
+import { deferred, MemoryStore } from "./persist-memory-store";
 import {
   all,
   allPages,
+  batch,
   config,
   expectRecords,
   fixture,
@@ -229,5 +232,198 @@ describe("Persister.open (§4.10.6 Open, N46, N59)", () => {
       strict: false,
     });
     expectRecords(h.store.records("persist"), h.engine);
+  });
+});
+
+const invalidated = { start: 0, end: 0 };
+const emptyRecords = { cache: undefined, pages: [] };
+
+async function expectDeferredCleanup(
+  store: MemoryStore,
+  invalidate: () => Promise<void>,
+): Promise<void> {
+  const write = store.gate("write");
+  const acknowledged = invalidate().then(() => store.records("persist"));
+  const durable = tracked(acknowledged.then(() => undefined));
+  await tick();
+  const completedWhileWriteHeld = durable.done;
+  write.release();
+  await finish(durable.promise);
+
+  const next = harness({}, store);
+  next.engine.cache(config());
+  await next.persister.open("persist");
+  const { misses, timestamps } = next.engine.get("persist", invalidated);
+  expect({
+    completedWhileWriteHeld,
+    recordsAtAcknowledgment: await acknowledged,
+    misses,
+    timestamps,
+  }).toEqual({
+    completedWhileWriteHeld: false,
+    recordsAtAcknowledgment: emptyRecords,
+    misses: [{ range: invalidated, reason: "uncached" }],
+    timestamps: new Float64Array(),
+  });
+  expect(writes(store)).toMatchObject([
+    { cacheId: "persist", settled: true, plan: { strict: true } },
+  ]);
+}
+
+describe("deferred cleanup after a load stop (user decision 113 A, N58)", () => {
+  it("makes an invalidate durable after a read timeout", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    h.store.seed("persist", fixture({}, [0, 4]));
+    const read = h.store.gate("read");
+    const opening = h.persister.open("persist");
+    await read.entered;
+    await tick(5000);
+    await opening;
+    expect(h.stopped).toEqual([{ cacheId: "persist", reason: "unavailable" }]);
+    read.release();
+    await tick();
+
+    await expectDeferredCleanup(h.store, () => {
+      h.engine.invalidate("persist", invalidated);
+      return h.persister.durable("persist");
+    });
+  });
+
+  it("makes an invalidate durable after a rejected read", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    h.store.seed("persist", fixture({}, [0, 4]));
+    h.store.fail("read");
+    await h.persister.open("persist");
+    expect(h.stopped).toHaveLength(1);
+    expect(h.stopped[0]?.reason).toBe("error");
+
+    await expectDeferredCleanup(h.store, () => {
+      h.engine.invalidate("persist", invalidated);
+      return h.persister.durable("persist");
+    });
+  });
+
+  it.each(["rejection", "timeout"])(
+    "makes an invalidate durable after a store-open %s",
+    async (failure) => {
+      const h = harness();
+      h.engine.cache(config());
+      h.store.seed("persist", fixture({}, [0, 4]));
+      const gate = deferred<MemoryStore>();
+      h.openStore.mockReturnValueOnce(gate.promise);
+      const opening = h.persister.open("persist");
+      if (failure === "rejection") {
+        gate.reject(new DOMException("open failed", "UnknownError"));
+      } else {
+        await tick(5000);
+      }
+      await opening;
+      expect(h.stopped).toHaveLength(1);
+      expect(h.stopped[0]?.reason).toBe("unavailable");
+
+      await expectDeferredCleanup(h.store, () => {
+        h.engine.invalidate("persist", invalidated);
+        const durable = h.persister.durable("persist");
+        if (failure === "timeout") gate.resolve(h.store);
+        return durable;
+      });
+    },
+  );
+
+  it.each(["rejection", "timeout"])(
+    "makes an invalidate durable after a chunk-import %s",
+    async (failure) => {
+      const engine = new Engine();
+      const store = new MemoryStore();
+      const onStopped = vi.fn();
+      engine.cache(config());
+      store.seed("persist", fixture({}, [0, 4]));
+      const chunk = deferred<LazyPersist>();
+      const persistence = new HostedPersistence(
+        engine,
+        () => chunk.promise,
+        async () => store,
+        { onStopped },
+      );
+      const opening = persistence.open("persist");
+      if (failure === "rejection") {
+        chunk.reject(new TypeError("chunk failed"));
+      } else {
+        await tick(5000);
+      }
+      await opening;
+      expect(onStopped).toHaveBeenCalledTimes(1);
+      expect(onStopped).toHaveBeenCalledWith(
+        expect.objectContaining({ cacheId: "persist", reason: "unavailable" }),
+      );
+
+      await expectDeferredCleanup(store, async () => {
+        const removal = persistence.durably("persist", () =>
+          engine.invalidate("persist", invalidated),
+        );
+        if (failure === "timeout") chunk.resolve(lazy);
+        await removal;
+      });
+    },
+  );
+
+  it("keeps every record after a load stop with no later removal", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    const seeded = fixture();
+    h.store.seed("persist", seeded);
+    h.store.fail("read");
+    await h.persister.open("persist");
+    expect(h.stopped[0]?.reason).toBe("error");
+    h.engine.put("persist", batch([10]));
+    await tick(5000);
+    await h.persister.durable("persist");
+
+    expect(writes(h.store)).toEqual([]);
+    expect(h.store.records("persist")).toEqual(seeded);
+    const next = harness({}, h.store);
+    next.engine.cache(config());
+    await next.persister.open("persist");
+    expectRecords(seeded, next.engine);
+  });
+
+  it("cleans up a stopped cache once while a running cache's removal still writes", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    h.engine.cache(config({ id: "running" }));
+    h.store.seed("persist", fixture({}, [0, 4]));
+    h.store.seed("running", fixture({ id: "running" }, [0, 4]));
+    h.store.fail("read");
+    await h.persister.open("persist");
+    await h.persister.open("running");
+
+    const cleanup = h.store.gate("write");
+    h.engine.invalidate("persist", invalidated);
+    const first = h.persister.durable("persist");
+    await tick();
+    h.engine.invalidate("persist", { start: 4, end: 4 });
+    const second = h.persister.durable("persist");
+    h.engine.invalidate("running", invalidated);
+    const running = h.persister.durable("running");
+    cleanup.release();
+    await finish(Promise.all([first, second, running]).then(() => undefined));
+
+    expect(writes(h.store)).toMatchObject([
+      {
+        cacheId: "persist",
+        settled: true,
+        plan: {
+          deletePages: allPages,
+          putPages: [],
+          putCache: null,
+          strict: true,
+        },
+      },
+      { cacheId: "running", settled: true, plan: { strict: true } },
+    ]);
+    expect(h.store.records("persist")).toEqual(emptyRecords);
+    expectRecords(h.store.records("running"), h.engine, "running");
   });
 });

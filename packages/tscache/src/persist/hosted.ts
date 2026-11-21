@@ -18,14 +18,20 @@
  * together. An import that fails, or that has not settled `timeoutMs` after
  * it started, turns persistence off for the worker's life, as a store that
  * fails to open does (§4.10.6): every waiting and later open stops with
- * `'unavailable'`.
+ * `'unavailable'`. Each such cache was stopped by its load, so its records
+ * stay until its first later removal, which runs one strict cleanup through
+ * the store opener, without the persister, and waits for it (user decision
+ * 113 A, N59). In the worker the opener imports the same chunk: when the
+ * import fails again, the cleanup fails, its failure is ignored and the
+ * records stay, as for any cleanup.
  */
 
-import type { Engine } from "../engine/engine";
+import type { CacheChange } from "../engine/cache";
+import { type Engine, observeCaches } from "../engine/engine";
 import type { Persistence } from "../rpc/server";
 import type { ClientEvents } from "../types";
 import type { durably, Persister, PersisterOptions } from "./persister";
-import type { PersistStore } from "./store";
+import type { PersistStore, WritePlan } from "./store";
 
 type StopEvent = ClientEvents["persistStopped"];
 type Failure = { name: string; message: string };
@@ -39,6 +45,21 @@ export type OpenStore = (options?: {
 export interface LazyPersist {
   Persister: typeof Persister;
   durably: typeof durably;
+}
+
+/** A stopped cache's cleanup (§4.10.6, Failures): every record goes, strict. */
+const CLEANUP: WritePlan = {
+  deletePages: [{ start: -Infinity, end: Infinity }],
+  putPages: [],
+  putCache: null,
+  strict: true,
+};
+
+/** A cleanup the chunk's failure deferred, from its removal until it settles. */
+interface Cleanup {
+  /** Removals recorded since it was queued, its own included. */
+  removals: number;
+  readonly settled: Promise<void>;
 }
 
 function failureOf(error: unknown): Failure {
@@ -70,6 +91,12 @@ export class HostedPersistence implements Persistence {
   #held = 0;
   /** Caches stopped because the chunk did not load: each is reported once. */
   readonly #stopped = new Set<string>();
+  /** Of those, the caches whose cleanup waits for a removal (user decision 113 A). */
+  readonly #deferred = new Set<string>();
+  /** Their cleanups, from the removal until they settle. */
+  readonly #cleanups = new Map<string, Cleanup>();
+  /** The store's opening for the cleanups, kept once it opened. */
+  #store: Promise<PersistStore | undefined> | undefined;
 
   /**
    * `load` imports the chunk; it is called once, at the first open or
@@ -115,6 +142,7 @@ export class HostedPersistence implements Persistence {
     if (persister !== undefined) {
       return (this.#durably as LazyPersist["durably"])(persister, cacheId, op);
     }
+    if (this.#state === "failed") return this.#durablyUnloaded(cacheId, op);
     if (this.#state !== "loading") return op();
     if (!this.#pending.has(cacheId) && this.#held === 0) return op();
     this.#held++;
@@ -136,7 +164,12 @@ export class HostedPersistence implements Persistence {
     const persister = this.#persister;
     let cleared: Promise<unknown>;
     if (persister !== undefined) cleared = persister.clearAll();
-    else if (this.#state === "failed") cleared = Promise.resolve();
+    else if (this.#state === "failed") {
+      // The clear was a removal of every cache whose cleanup it deferred.
+      cleared = Promise.all(
+        [...this.#cleanups.values()].map((cleanup) => cleanup.settled),
+      );
+    }
     // Earlier sessions may have persisted: the chunk loads to empty the disk.
     else cleared = this.#later((loaded) => loaded?.clearAll());
     return cleared.then(() => {
@@ -204,6 +237,10 @@ export class HostedPersistence implements Persistence {
     if (this.#persister === undefined) {
       this.#state = "failed";
       this.#failure = failure;
+      observeCaches(this.#engine, {
+        onChange: (cacheId, change) => this.#changed(cacheId, change),
+        onMutate: () => {},
+      });
     } else {
       this.#state = "ready";
     }
@@ -216,11 +253,90 @@ export class HostedPersistence implements Persistence {
   #stopUnloaded(cacheId: string): void {
     if (this.#stopped.has(cacheId)) return;
     this.#stopped.add(cacheId);
+    this.#deferred.add(cacheId);
     const error = this.#failure;
     const event: StopEvent =
       error === undefined
         ? { cacheId, reason: "unavailable" }
         : { cacheId, reason: "unavailable", error };
     this.#options.onStopped?.(event);
+  }
+
+  /**
+   * An op without the chunk (persistence is off): it runs in its own call
+   * and answers at once, unless it, or another op meanwhile, recorded a
+   * removal whose cleanup is pending; then it answers, success or failure,
+   * once that cleanup settled (N58, user decision 113 A).
+   */
+  #durablyUnloaded(cacheId: string, op: () => unknown): unknown {
+    const before = this.#cleanups.get(cacheId)?.removals ?? 0;
+    const waited = (): Promise<void> | undefined => {
+      const cleanup = this.#cleanups.get(cacheId);
+      return cleanup !== undefined && cleanup.removals > before
+        ? cleanup.settled
+        : undefined;
+    };
+    let result: unknown;
+    try {
+      result = op();
+    } catch (error) {
+      const cleanup = waited();
+      if (cleanup === undefined) throw error;
+      return cleanup.then(() => Promise.reject(error));
+    }
+    const cleanup = waited();
+    if (cleanup === undefined) return result;
+    return Promise.resolve(result).then(
+      (value) => cleanup.then(() => value),
+      (error: unknown) => cleanup.then(() => Promise.reject(error)),
+    );
+  }
+
+  /** A change after the chunk failed: a removal starts a deferred cleanup. */
+  #changed(cacheId: string, change: CacheChange): void {
+    if (change.kind !== "remove" && change.kind !== "clear") return;
+    const pending = this.#cleanups.get(cacheId);
+    if (pending !== undefined) {
+      pending.removals++;
+      return;
+    }
+    if (!this.#deferred.delete(cacheId)) return;
+    const settled = this.#cleanup(cacheId).then(() => {
+      this.#cleanups.delete(cacheId);
+    });
+    this.#cleanups.set(cacheId, { removals: 1, settled });
+  }
+
+  /**
+   * One strict deletion of the cache's records, through a store that exists,
+   * with the persister's deadline and no retry; never rejects: a failure
+   * leaves the records (§4.10.6, Failures).
+   */
+  #cleanup(cacheId: string): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, this.#timeoutMs);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.#cleanupStore()
+        .then((store) => store?.write(cacheId, CLEANUP))
+        .then(done, done);
+    });
+  }
+
+  /** Opens the store once for the cleanups; a failed opening is tried again by the next. */
+  #cleanupStore(): Promise<PersistStore | undefined> {
+    this.#store ??= this.#openStore({ ifExists: true }).then(
+      (store) => {
+        if (store === undefined) this.#store = undefined;
+        return store;
+      },
+      (error: unknown) => {
+        this.#store = undefined;
+        throw error;
+      },
+    );
+    return this.#store;
   }
 }

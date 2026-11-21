@@ -4,6 +4,7 @@ import { HostedPersistence, type LazyPersist } from "../src/persist/hosted";
 import * as lazy from "../src/persist/lazy";
 import type { Persister } from "../src/persist/persister";
 import type { ClientEvents } from "../src/types";
+import { writes } from "./persist-harness";
 import { deferred, MemoryStore } from "./persist-memory-store";
 import {
   all,
@@ -213,14 +214,31 @@ describe("lazily loaded persistence (§4.10.8)", () => {
       { cacheId: "later", reason: "unavailable", error },
     ]);
     expect(h.persistence.persister).toBeUndefined();
-    // Persistence is off for the worker: ops run as they come, clearAll
-    // clears memory only.
+    // Persistence is off for the worker: ops run as they come. A cache's
+    // first removal runs the cleanup its stop deferred, through the store
+    // opener, and answers once that settled (user decision 113 A); a later
+    // removal answers at once, and clearAll waits for the cleanups it started.
+    const removal = h.persistence.durably("persist", () =>
+      h.engine.invalidate("persist", all),
+    );
+    expect(removal).toBeInstanceOf(Promise);
+    expect(await removal).toBeUndefined();
     expect(
       h.persistence.durably("persist", () =>
         h.engine.invalidate("persist", all),
       ),
     ).toBeUndefined();
     await h.persistence.clearAll();
+    const cleanup = {
+      deletePages: [{ start: -Infinity, end: Infinity }],
+      putPages: [],
+      putCache: null,
+      strict: true,
+    };
+    expect(writes(h.store)).toMatchObject([
+      { cacheId: "persist", settled: true, plan: cleanup },
+      { cacheId: "later", settled: true, plan: cleanup },
+    ]);
     expect(h.load).toHaveBeenCalledTimes(1);
   });
 
