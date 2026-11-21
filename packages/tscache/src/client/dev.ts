@@ -101,7 +101,7 @@ export function warnWorkerLib(
   const worker =
     workerLib === undefined ? "reports no version" : `is tscache ${workerLib}`;
   console.warn(
-    `tscache: this page runs tscache ${clientLib}, and the worker script it reached ${worker}. The script at the worker URL is not this page's build (served stale, or replaced under an open page): reload with the HTTP cache revalidated, and serve the worker script with revalidation. Printed in development builds only.`,
+    `tscache: this page runs tscache ${clientLib}, and the worker script it reached ${worker}: a stale or replaced script. Reload with the HTTP cache revalidated, and serve the worker script with revalidation. Printed in development builds only.`,
   );
 }
 
@@ -116,6 +116,6 @@ export function noteSuperseded(
 ): void {
   if (!development()) return;
   console.info(
-    `tscache: a worker of a newer generation of this application is running (tscache ${newerLib}; this tab's worker is tscache ${workerLib ?? "of an unknown version"}). This tab's worker no longer persists; reload the tab to join the newer one. client.superseded holds this; printed in development builds only.`,
+    `tscache: a newer generation's worker is running (tscache ${newerLib}; this tab's worker: ${workerLib ?? "unknown"}). This tab's worker no longer persists: reload the tab to join the newer one (client.superseded). Printed in development builds only.`,
   );
 }

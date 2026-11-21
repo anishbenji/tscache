@@ -11,7 +11,6 @@
 
 import { Engine } from "../engine/engine";
 import { ClearOnlyPersistence, lazyIdbStore } from "../persist/clear-only";
-import { clearPoster } from "../rpc/generations";
 import { PortClient } from "../rpc/port-client";
 import {
   type FetcherConfig,
@@ -19,6 +18,7 @@ import {
   type MessagePortLike,
 } from "../rpc/protocol";
 import { RpcServer } from "../rpc/server";
+import { clearPoster } from "../rpc/workers-channel";
 import type { Hosting } from "./hosting";
 
 /** The persistence chunk (persist/lazy.ts), for the clear-only call. */

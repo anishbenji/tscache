@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import type { WorkersChannel } from "../src/rpc/generations";
+import type { WorkersChannel } from "../src/rpc/workers-channel";
 
 /**
  * A fake of the origin's BroadcastChannels (the real one is removed for

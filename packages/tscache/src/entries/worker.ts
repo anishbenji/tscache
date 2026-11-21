@@ -18,12 +18,7 @@ import { ClearOnlyPersistence, lazyIdbStore } from "../persist/clear-only";
 import { HostedPersistence, type OpenStore } from "../persist/hosted";
 import type { PersisterOptions } from "../persist/persister";
 import { randomId } from "../random-id";
-import {
-  clearPoster,
-  Generations,
-  openWorkersChannel,
-  type WorkersChannel,
-} from "../rpc/generations";
+import { Generations } from "../rpc/generations";
 import { holdLifetimeLock, lockManager } from "../rpc/lifetime";
 import {
   LIB_VERSION,
@@ -31,6 +26,11 @@ import {
   WORKER_FEATURES,
 } from "../rpc/protocol";
 import { RpcServer } from "../rpc/server";
+import {
+  clearPoster,
+  openWorkersChannel,
+  type WorkersChannel,
+} from "../rpc/workers-channel";
 
 /** The dedicated-worker global, when this module runs inside one. */
 function dedicatedWorkerScope(): MessagePortLike | undefined {

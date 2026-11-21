@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type Announcement,
-  clearPoster,
   Generations,
   outranks,
   sameGeneration,
 } from "../src/rpc/generations";
+import { clearPoster } from "../src/rpc/workers-channel";
 import { rng } from "./cache-model";
 import { fakeChannels } from "./workers-channel";
 
