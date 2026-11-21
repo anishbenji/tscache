@@ -39,6 +39,12 @@ export interface PersisterOptions {
 }
 
 type StopEvent = ClientEvents["persistStopped"];
+/**
+ * A stop's cleanup: true runs it now when a store is open, "deferred" at the
+ * first later removal (a stop that ended the load, user decision 113 A),
+ * false never.
+ */
+type Cleanup = boolean | "deferred";
 type Reason = StopEvent["reason"];
 type Failure = { name: string; message: string };
 type OpenStore = (options?: {
@@ -87,11 +93,10 @@ interface Tracked {
   /** Stopped: whether the cleanup after the stop has settled, or there is none. */
   cleaned: boolean;
   /**
-   * A stop that ended the load defers the cleanup to the first later
-   * removal (user decision 113 A): 'deferred' until then, 'queued' from
-   * that removal until the cleanup settles, 'none' otherwise.
+   * Stopped: the stop ended the load, so its cleanup waits for the first
+   * later removal, which clears this (user decision 113 A).
    */
-  deferred: "none" | "deferred" | "queued";
+  deferred: boolean;
 }
 
 /** What a flush attempt took from its cache, put back if the attempt fails. */
@@ -170,11 +175,11 @@ export class Persister {
   #openingIfExists = false;
   /**
    * Set when the store failed to open or a clearAll failed: nothing persists
-   * any more. `load` when the opening failed: a cache opened later is stopped
-   * by its load, so its cleanup waits for a removal (user decision 113 A).
+   * any more. `cleanup` is the stop of a cache opened later: deferred after
+   * a failed opening, since its load stopped (user decision 113 A).
    */
   #failure:
-    | { reason: Reason; error: Failure | undefined; load: boolean }
+    | { reason: Reason; error: Failure | undefined; cleanup: Cleanup }
     | undefined;
 
   /** Queued jobs, and the one whose attempt is running. */
@@ -244,8 +249,8 @@ export class Persister {
     const cache = this.#track(cacheId, state);
     if (this.#failure !== undefined) {
       // A failed opening or clearAll: nothing loads or persists any more.
-      const { reason, error, load } = this.#failure;
-      this.#stop(cache, reason, error, load ? "deferred" : "none");
+      const { reason, error, cleanup } = this.#failure;
+      this.#stop(cache, reason, error, cleanup);
     } else if (this.#barrier !== undefined) {
       // No load during a clearAll (§4.10.5 rule 3): cold, rewritten after it.
       this.#run(cache);
@@ -336,7 +341,16 @@ export class Persister {
     // A second call joins the pending job and takes over what changed since.
     for (const cache of this.#tracked.values()) {
       if (cache.status === "stopped") {
-        this.#absorbCleanup(cache, job);
+        // A deferred cleanup the engine's clear queued just before, in this
+        // step: the clear deletes its records and releases its durable()
+        // calls (user decision 113 A). One queued earlier runs first.
+        const cleanup =
+          this.#fresh.includes(cache) &&
+          this.#queue.find((j) => j.kind === "cleanup" && j.cache === cache);
+        if (cleanup) {
+          this.#unqueue(cleanup);
+          job.waiters.push(() => this.#cleaned(cache));
+        }
         continue;
       }
       // The engine's clear has abandoned a pending load already (rule 2).
@@ -394,7 +408,7 @@ export class Persister {
       queued: undefined,
       running: undefined,
       cleaned: false,
-      deferred: "none",
+      deferred: false,
     };
     this.#tracked.set(id, cache);
     return cache;
@@ -403,7 +417,7 @@ export class Persister {
   #change(cacheId: string, change: CacheChange): void {
     const cache = this.#live(cacheId);
     if (cache === undefined) {
-      this.#stoppedChange(cacheId, change);
+      this.#stoppedRemoval(cacheId, change.kind);
       return;
     }
     if (cache.status === "loading") this.#abandon(cache);
@@ -439,17 +453,13 @@ export class Persister {
    * deferred (user decision 113 A), and every removal until the stop's
    * cleanup settles, deferred or not, waits for it (N58).
    */
-  #stoppedChange(cacheId: string, change: CacheChange): void {
+  #stoppedRemoval(cacheId: string, kind: CacheChange["kind"]): void {
     const cache = this.#tracked.get(cacheId);
-    if (cache === undefined || this.#closed || !REMOVALS.has(change.kind)) {
-      return;
-    }
-    if (cache.deferred === "deferred") {
-      cache.deferred = "queued";
-      cache.cleaned = false;
-      const now = this.#now();
-      this.#queue.push(this.#job("cleanup", cache, now, now + this.#timeoutMs));
-      if (this.#fresh.length === 0) {
+    if (!cache || this.#closed || !REMOVALS.has(kind)) return;
+    if (cache.deferred) {
+      cache.deferred = cache.cleaned = false;
+      this.#queueCleanup(cache);
+      if (!this.#fresh.length) {
         queueMicrotask(() => {
           this.#fresh = [];
         });
@@ -635,7 +645,7 @@ export class Persister {
 
   #openFailed(error: Failure | undefined): void {
     this.#atomically(() => {
-      this.#failure ??= { reason: "unavailable", error, load: true };
+      this.#failure ??= { reason: "unavailable", error, cleanup: "deferred" };
       for (const cache of this.#tracked.values()) {
         this.#stop(cache, "unavailable", error, "deferred");
       }
@@ -655,7 +665,7 @@ export class Persister {
     cache: Tracked,
     reason: Reason,
     error?: Failure,
-    cleanup: "now" | "deferred" | "none" = "now",
+    cleanup: Cleanup = true,
   ): void {
     if (cache.status === "stopped") return;
     cache.status = "stopped";
@@ -669,14 +679,19 @@ export class Persister {
         ? { cacheId: cache.id, reason }
         : { cacheId: cache.id, reason, error },
     );
-    if (cleanup === "now" && this.#store !== undefined) {
-      const now = this.#now();
-      this.#queue.push(this.#job("cleanup", cache, now, now + this.#timeoutMs));
+    if (cleanup === true && this.#store !== undefined) {
+      this.#queueCleanup(cache);
     } else {
-      if (cleanup === "deferred") cache.deferred = "deferred";
+      cache.deferred = cleanup === "deferred";
       this.#cleaned(cache);
     }
     this.#pump();
+  }
+
+  /** Queues a stopped cache's cleanup job, due now. */
+  #queueCleanup(cache: Tracked): void {
+    const now = this.#now();
+    this.#queue.push(this.#job("cleanup", cache, now, now + this.#timeoutMs));
   }
 
   /** A stopped cache's queued and running jobs are abandoned; their waiters settle. */
@@ -702,7 +717,6 @@ export class Persister {
   /** The stop's cleanup settled, or there is none: release durable(). */
   #cleaned(cache: Tracked): void {
     cache.cleaned = true;
-    if (cache.deferred === "queued") cache.deferred = "none";
     for (const waiter of cache.waiters.splice(0)) waiter.resolve();
   }
 
@@ -725,22 +739,6 @@ export class Persister {
     this.#unqueue(queued);
     cache.queued = undefined;
     clear.waiters.push(...queued.waiters);
-  }
-
-  /**
-   * A deferred cleanup queued by the engine's clear just before, in the same
-   * step: the clear deletes its records, so its settling releases the
-   * cache's durable() calls (user decision 113 A). A cleanup queued before
-   * the call runs first, as any other.
-   */
-  #absorbCleanup(cache: Tracked, clear: Job): void {
-    if (cache.deferred !== "queued" || !this.#fresh.includes(cache)) return;
-    const cleanup = this.#queue.find(
-      (job) => job.kind === "cleanup" && job.cache === cache,
-    );
-    if (cleanup === undefined) return;
-    this.#unqueue(cleanup);
-    clear.waiters.push(() => this.#cleaned(cache));
   }
 
   #clearSucceeded(job: Job): void {
@@ -775,9 +773,9 @@ export class Persister {
       this.#barrier = undefined;
       this.#unqueue(job);
       if (this.#current === job) this.#current = undefined;
-      this.#failure = { reason, error, load: false };
+      this.#failure = { reason, error, cleanup: false };
       for (const cache of this.#tracked.values()) {
-        this.#stop(cache, reason, error, "none");
+        this.#stop(cache, reason, error, false);
       }
       this.#settle(job);
     });
@@ -1089,16 +1087,10 @@ export class Persister {
   }
 
   async #attemptCleanup(job: Job, cache: Tracked): Promise<void> {
-    let store = this.#store;
-    if (store === undefined && cache.deferred === "queued") {
-      // The load's stop may have left no store open: open one that exists
-      // (user decision 113 A). A failed opening fails the cleanup.
-      try {
-        store = await this.#storeFor(true);
-      } catch {
-        store = undefined;
-      }
-    }
+    // A deferred cleanup may find no store open: it opens one that exists
+    // (user decision 113 A). A failed opening fails the cleanup.
+    const store =
+      this.#store ?? (await this.#storeFor(true).catch(() => undefined));
     if (store !== undefined && this.#current === job) {
       try {
         await store.write(cache.id, {

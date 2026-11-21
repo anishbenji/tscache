@@ -59,9 +59,8 @@ const CLEANUP: WritePlan = {
 interface Cleanup {
   /** Removals recorded since it started, its own included; kept after it settles. */
   removals: number;
-  readonly settled: Promise<void>;
-  /** Settled: a later removal waits for nothing. */
-  done: boolean;
+  /** Until it settles: a later removal waits for nothing. */
+  settled: Promise<void> | undefined;
 }
 
 function failureOf(error: unknown): Failure {
@@ -93,9 +92,10 @@ export class HostedPersistence implements Persistence {
   #held = 0;
   /** Caches stopped because the chunk did not load: each is reported once. */
   readonly #stopped = new Set<string>();
-  /** Of those, the caches whose cleanup waits for a removal (user decision 113 A). */
-  readonly #deferred = new Set<string>();
-  /** Their cleanups, from the removal on: at most one per opened cache. */
+  /**
+   * Their cleanups, from the first later removal on (user decision 113 A):
+   * at most one per opened cache.
+   */
   readonly #cleanups = new Map<string, Cleanup>();
   /** The store's opening for the cleanups, kept once it opened. */
   #store: Promise<PersistStore | undefined> | undefined;
@@ -255,7 +255,6 @@ export class HostedPersistence implements Persistence {
   #stopUnloaded(cacheId: string): void {
     if (this.#stopped.has(cacheId)) return;
     this.#stopped.add(cacheId);
-    this.#deferred.add(cacheId);
     const error = this.#failure;
     const event: StopEvent =
       error === undefined
@@ -277,7 +276,7 @@ export class HostedPersistence implements Persistence {
     const before = this.#cleanups.get(cacheId)?.removals ?? 0;
     const waited = (): Promise<void> | undefined => {
       const cleanup = this.#cleanups.get(cacheId);
-      return cleanup !== undefined && !cleanup.done && cleanup.removals > before
+      return cleanup !== undefined && cleanup.removals > before
         ? cleanup.settled
         : undefined;
     };
@@ -289,20 +288,9 @@ export class HostedPersistence implements Persistence {
       if (cleanup === undefined) throw error;
       return cleanup.then(() => Promise.reject(error));
     }
-    if (!(result instanceof Promise)) {
-      const cleanup = waited();
-      return cleanup === undefined ? result : cleanup.then(() => result);
-    }
-    return result.then(
-      async (value: unknown) => {
-        await waited();
-        return value;
-      },
-      async (error: unknown) => {
-        await waited();
-        throw error;
-      },
-    );
+    if (result instanceof Promise) return result.finally(waited);
+    const cleanup = waited();
+    return cleanup === undefined ? result : cleanup.then(() => result);
   }
 
   /** A change after the chunk failed: a removal starts a deferred cleanup. */
@@ -313,13 +301,12 @@ export class HostedPersistence implements Persistence {
       started.removals++;
       return;
     }
-    if (!this.#deferred.delete(cacheId)) return;
+    if (!this.#stopped.has(cacheId)) return;
     const cleanup: Cleanup = {
       removals: 1,
       settled: this.#cleanup(cacheId).then(() => {
-        cleanup.done = true;
+        cleanup.settled = undefined;
       }),
-      done: false,
     };
     this.#cleanups.set(cacheId, cleanup);
   }
@@ -330,30 +317,24 @@ export class HostedPersistence implements Persistence {
    * leaves the records (§4.10.6, Failures).
    */
   #cleanup(cacheId: string): Promise<void> {
+    this.#store ??= this.#openStore({ ifExists: true });
+    const opening = this.#store;
+    // A failed opening is tried again by the next cleanup.
+    const forget = () => {
+      if (this.#store === opening) this.#store = undefined;
+    };
     return new Promise((resolve) => {
       const timer = setTimeout(resolve, this.#timeoutMs);
       const done = () => {
         clearTimeout(timer);
         resolve();
       };
-      this.#cleanupStore()
-        .then((store) => store?.write(cacheId, CLEANUP))
+      opening
+        .then((store) => {
+          if (store === undefined) forget();
+          return store?.write(cacheId, CLEANUP);
+        }, forget)
         .then(done, done);
     });
-  }
-
-  /** Opens the store once for the cleanups; a failed opening is tried again by the next. */
-  #cleanupStore(): Promise<PersistStore | undefined> {
-    this.#store ??= this.#openStore({ ifExists: true }).then(
-      (store) => {
-        if (store === undefined) this.#store = undefined;
-        return store;
-      },
-      (error: unknown) => {
-        this.#store = undefined;
-        throw error;
-      },
-    );
-    return this.#store;
   }
 }
