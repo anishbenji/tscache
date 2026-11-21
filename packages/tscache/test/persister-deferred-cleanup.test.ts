@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { durably } from "../src/persist/persister";
 import {
   clearAll,
   fakeTime,
@@ -89,6 +90,32 @@ describe("a clearAll after a load stop (user decision 113 A)", () => {
       .filter((call) => call.kind === "write" || call.kind === "clearAll")
       .map((call) => (call.kind === "write" ? call.cacheId : call.kind));
     expect(order).toEqual(["running", "persist", "clearAll"]);
+    expect(h.store.records("persist")).toEqual({ cache: undefined, pages: [] });
+  });
+});
+
+describe("an op whose removal comes after an await (security lane 2, S2.1)", () => {
+  it("answers through durably once the deferred cleanup settled", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    h.store.seed("persist", fixture({}, [0, 4]));
+    h.store.fail("read");
+    await h.persister.open("persist");
+    const cleanup = h.store.gate("write");
+    const answer = tracked(
+      Promise.resolve(
+        durably(h.persister, "persist", async () => {
+          await Promise.resolve();
+          h.engine.invalidate("persist", { start: 0, end: 0 });
+        }),
+      ).then(() => undefined),
+    );
+    await tick();
+    await cleanup.entered;
+    await tick();
+    expect(answer.done).toBe(false);
+    cleanup.release();
+    await finish(answer.promise);
     expect(h.store.records("persist")).toEqual({ cache: undefined, pages: [] });
   });
 });

@@ -434,9 +434,10 @@ export class Persister {
   }
 
   /**
-   * A change of a stopped cache counts only as a removal whose cleanup the
-   * load's stop deferred (user decision 113 A): the first one queues the
-   * cleanup, and every removal until it settles waits for it (N58).
+   * A change of a stopped cache counts only as a removal while a cleanup is
+   * due: the first removal after a load's stop queues the cleanup the stop
+   * deferred (user decision 113 A), and every removal until the stop's
+   * cleanup settles, deferred or not, waits for it (N58).
    */
   #stoppedChange(cacheId: string, change: CacheChange): void {
     const cache = this.#tracked.get(cacheId);
@@ -456,7 +457,7 @@ export class Persister {
       this.#fresh.push(cache);
       this.#arm();
     }
-    if (cache.deferred === "queued") cache.removals++;
+    if (!cache.cleaned) cache.removals++;
   }
 
   #mutate(cacheId: string): void {

@@ -242,6 +242,36 @@ describe("lazily loaded persistence (§4.10.8)", () => {
     expect(h.load).toHaveBeenCalledTimes(1);
   });
 
+  // Security lane 2 of step 132 (S2.1), from its reproduction: an op whose
+  // removal comes after an await, as a get whose fetch brings a new version
+  // does, answers once the deferred cleanup settled (user decision 113 A).
+  it("after a chunk failure, an op whose removal comes after an await answers once the cleanup settled", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = hosted();
+    const seeded = fixture();
+    h.store.seed("persist", seeded);
+    h.engine.cache(config());
+    const opening = h.persistence.open("persist");
+    h.fail(new Error("chunk 404"));
+    await opening;
+    const cleanup = h.store.gate("write");
+    const answer = tracked(
+      Promise.resolve(
+        h.persistence.durably("persist", async () => {
+          await Promise.resolve();
+          h.engine.invalidate("persist", all);
+        }),
+      ).then(() => undefined),
+    );
+    await cleanup.entered;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answer.done).toBe(false);
+    expect(h.store.records("persist")).toEqual(seeded);
+    cleanup.release();
+    await answer.promise;
+    expect(h.store.records("persist")).toEqual({ cache: undefined, pages: [] });
+  });
+
   it("a chunk import timeout turns persistence off and keeps records for the next session", async () => {
     vi.useFakeTimers({ now: 0 });
     const h = hosted();

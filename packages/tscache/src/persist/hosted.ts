@@ -55,11 +55,13 @@ const CLEANUP: WritePlan = {
   strict: true,
 };
 
-/** A cleanup the chunk's failure deferred, from its removal until it settles. */
+/** A cleanup the chunk's failure deferred, from its removal on. */
 interface Cleanup {
-  /** Removals recorded since it was queued, its own included. */
+  /** Removals recorded since it started, its own included; kept after it settles. */
   removals: number;
   readonly settled: Promise<void>;
+  /** Settled: a later removal waits for nothing. */
+  done: boolean;
 }
 
 function failureOf(error: unknown): Failure {
@@ -93,7 +95,7 @@ export class HostedPersistence implements Persistence {
   readonly #stopped = new Set<string>();
   /** Of those, the caches whose cleanup waits for a removal (user decision 113 A). */
   readonly #deferred = new Set<string>();
-  /** Their cleanups, from the removal until they settle. */
+  /** Their cleanups, from the removal on: at most one per opened cache. */
   readonly #cleanups = new Map<string, Cleanup>();
   /** The store's opening for the cleanups, kept once it opened. */
   #store: Promise<PersistStore | undefined> | undefined;
@@ -264,15 +266,18 @@ export class HostedPersistence implements Persistence {
 
   /**
    * An op without the chunk (persistence is off): it runs in its own call
-   * and answers at once, unless it, or another op meanwhile, recorded a
-   * removal whose cleanup is pending; then it answers, success or failure,
-   * once that cleanup settled (N58, user decision 113 A).
+   * and answers as it does, unless it, or another op meanwhile, recorded a
+   * removal of a cache whose cleanup was deferred; then it answers, success
+   * or failure, once that cleanup settled (N58, user decision 113 A). An op
+   * that returns a promise is checked again when it settles, as `durably`
+   * does: its removal may come after an await (a fetch bringing a new
+   * version).
    */
   #durablyUnloaded(cacheId: string, op: () => unknown): unknown {
     const before = this.#cleanups.get(cacheId)?.removals ?? 0;
     const waited = (): Promise<void> | undefined => {
       const cleanup = this.#cleanups.get(cacheId);
-      return cleanup !== undefined && cleanup.removals > before
+      return cleanup !== undefined && !cleanup.done && cleanup.removals > before
         ? cleanup.settled
         : undefined;
     };
@@ -284,27 +289,39 @@ export class HostedPersistence implements Persistence {
       if (cleanup === undefined) throw error;
       return cleanup.then(() => Promise.reject(error));
     }
-    const cleanup = waited();
-    if (cleanup === undefined) return result;
-    return Promise.resolve(result).then(
-      (value) => cleanup.then(() => value),
-      (error: unknown) => cleanup.then(() => Promise.reject(error)),
+    if (!(result instanceof Promise)) {
+      const cleanup = waited();
+      return cleanup === undefined ? result : cleanup.then(() => result);
+    }
+    return result.then(
+      async (value: unknown) => {
+        await waited();
+        return value;
+      },
+      async (error: unknown) => {
+        await waited();
+        throw error;
+      },
     );
   }
 
   /** A change after the chunk failed: a removal starts a deferred cleanup. */
   #changed(cacheId: string, change: CacheChange): void {
     if (change.kind !== "remove" && change.kind !== "clear") return;
-    const pending = this.#cleanups.get(cacheId);
-    if (pending !== undefined) {
-      pending.removals++;
+    const started = this.#cleanups.get(cacheId);
+    if (started !== undefined) {
+      started.removals++;
       return;
     }
     if (!this.#deferred.delete(cacheId)) return;
-    const settled = this.#cleanup(cacheId).then(() => {
-      this.#cleanups.delete(cacheId);
-    });
-    this.#cleanups.set(cacheId, { removals: 1, settled });
+    const cleanup: Cleanup = {
+      removals: 1,
+      settled: this.#cleanup(cacheId).then(() => {
+        cleanup.done = true;
+      }),
+      done: false,
+    };
+    this.#cleanups.set(cacheId, cleanup);
   }
 
   /**
