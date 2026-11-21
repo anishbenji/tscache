@@ -1,8 +1,8 @@
 import { fetcherUrl } from "@anishbenji/tscache/vite";
 import { mockBackend, ssrPage } from "@examples/mock-backend/vite";
 import { SERVICE_TOKEN } from "@reference/shared/server";
+import solid from "@solidjs/vite-plugin";
 import { defineConfig } from "vite";
-import solid from "vite-plugin-solid";
 
 // Two pages: the client-only page at /, and the same page rendered on the
 // server at /ssr. The mock backend requires a token, as a real one would.

@@ -95,7 +95,14 @@ function tanstack(cacheId: string): Source {
   };
 }
 
-/** The worker script's URL for run `run`: a SharedWorker of its own. */
+/**
+ * The worker script's URL for run `run`: a SharedWorker of its own. The
+ * query is deliberate, against the advice of docs/guides/worker-setup.md:
+ * a run must not inherit a warm worker. That advice guards against the
+ * worker's persistence chunk, which imports the worker file by its plain
+ * URL; no cache here persists and nothing calls `clearAll`, so that chunk
+ * never loads.
+ */
 function runWorkerUrl(run: string): string {
   const url = new URL(workerUrl, location.href);
   url.searchParams.set("run", run);

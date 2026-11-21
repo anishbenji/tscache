@@ -10,13 +10,13 @@
   "dependencies": {
     "@examples/mock-backend": "workspace:*",
     "@reference/shared": "workspace:*",
-    "@solidjs/web": "2.0.0-rc.20",
+    "@solidjs/web": "2.0.3",
     "@tscache/integrations": "workspace:*",
-    "solid-js": "2.0.0-rc.20",
+    "solid-js": "2.0.3",
     "@anishbenji/tscache": "workspace:*"
   },
   "devDependencies": {
     "vite": "^8.3.5",
-    "vite-plugin-solid": "3.0.0-next.27"
+    "@solidjs/vite-plugin": "3.0.1"
   }
 }

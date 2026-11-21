@@ -157,13 +157,16 @@ const candles = await client.cache({
 
 ## Known limits of 0.2.0
 
-Change events shipped in 0.2.0; memory bounds (finding M3) and a deploy-skew recovery (finding M5) are
-proposed but not built. The documentation site states each limit below where an application meets it.
+Change events shipped in 0.2.0. Memory bounds (finding M3) are built for 0.3.0 (in preparation); a
+deploy-skew recovery (finding M5) is proposed but not built. The documentation site states each limit
+below where an application meets it.
 
-- **Memory is neither bounded nor reported.** No eviction, budget or size call exists; a SharedWorker
-  keeps every cache until the last tab of the origin closes. One year of one-minute OHLCV with five `f64`
-  fields is 525,600 bars of 40 bytes and one presence bit, about 21 MB per series. `clear()` frees a
-  cache's points (`site/guides/patterns.md`, Memory; roadmap: eviction and memory limits).
+- **Memory is neither bounded nor reported.** In 0.2.0 no eviction, budget or size call exists; a
+  SharedWorker keeps every cache until the last tab of the origin closes. One year of one-minute OHLCV
+  with five `f64` fields is 525,600 bars of 40 bytes and one presence bit, about 21 MB per series.
+  `clear()` frees a cache's points. From 0.3.0 (in preparation) an opt-in `memoryBudget` evicts the
+  least recently used pages above it and `memoryStats()` reports what the caches hold; there is still
+  no default budget (architecture §2.9; `site/guides/patterns.md`, Memory).
 - **Deploy skew has no recovery path.** A protocol mismatch rejects `createClient` with
   `ProtocolMismatchError` and nothing more. With hashed worker URLs, two deploys that change the worker
   run two SharedWorkers side by side, unreported, and both write the origin's IndexedDB database. A

@@ -73,9 +73,13 @@ forming today.
 That sharing suits public data only. Every visitor reads from the same
 cache, so data that differs per user would leak between visitors; such data
 needs a client per user, or no cache on the server. The cache is also never
-trimmed: tscache v1 has no eviction, only `invalidate` and `clear` (§2.4),
-so a server that reads many series or ever wider ranges needs its own policy
-for clearing them. If creating the client fails, the server forgets the
+trimmed unless the client has a memory budget: tscache sets none by default,
+and with `memoryBudget` it evicts the least recently used pages above the
+budget, which a later read fetches again (§2.9). This page sets no budget,
+but a server that reads many series or ever wider ranges should set one, as
+the [Memory guide](../../site/guides/patterns.md#memory) recommends, or clear
+its caches on its own clock with `clear` (§2.4), which frees their points;
+`invalidate` forgets coverage but keeps the points, so it frees nothing. If creating the client fails, the server forgets the
 failed attempt and the next render tries again.
 
 ## Hydration
@@ -146,6 +150,10 @@ provisional day.
   `hydrate` refuses a snapshot of another version (architecture §2.8). A
   backend that reports no version gets no such check: a restatement between
   the server's read and the browser's hydrate is undetectable (§2.4).
+- A seed that fails, for any reason but a worker without `hydrate`, fails
+  the connection: the log reads `could not connect`, and the page does not
+  try again until it is reloaded, unless the worker was lost during the
+  seeding, which connects a new client.
 
 ## What else is in here
 
