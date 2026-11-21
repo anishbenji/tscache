@@ -6,13 +6,14 @@ const entry = (name: string) =>
     new URL(`packages/tscache/src/entries/${name}.ts`, import.meta.url),
   );
 
-// Vitest runs under Node (never `bun test` — different runner). Engine unit
-// tests cover ~90% of logic; browser-mode and Playwright suites arrive at
-// steps ⑨–⑫ of the commit plan.
+// Vitest runs under Node (never `bun test` — different runner). Behaviour
+// that needs a browser is tested by the Playwright suites
+// (playwright.config.ts), not by Vitest's browser mode.
 export default defineConfig({
   // The examples' unit tests import the package by name, whose exports
-  // point into dist/; `bun run ci` runs Vitest before the build, so they
-  // resolve to the source instead, as the package's own tests do.
+  // point into dist/; `bun run test` can run before any build, or against a
+  // dist/ older than the source, so they resolve to the source instead, as
+  // the package's own tests do.
   resolve: {
     alias: [
       { find: /^@anishbenji\/tscache$/, replacement: entry("index") },

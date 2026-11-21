@@ -13,7 +13,7 @@ with the cache id filled in; `cache.id` is that id.
 | `interval`          | required | milliseconds between grid points, or a [calendar interval](/concepts/grid#calendar-intervals)                      |
 | `alignmentOffset`   | `0`      | shifts a fixed grid; normalised into `[0, interval)`; must be absent or 0 with a calendar interval                 |
 | `fields`            | required | field name → dtype, at least one ([dtypes](/concepts/segments))                                                    |
-| `gapSplitK`         | `4`      | segments split where more than K slots in a row are empty                                                          |
+| `gapSplitK`         | `4`      | a positive safe integer; segments split where more than K slots in a row are empty                                 |
 | `segmentSlotCap`    | `32768`  | most slots per segment, at most 2^31 − 1                                                                           |
 | `version`           | none     | dataset version; a different one reported by a put clears the cache                                                |
 | `finalizedUntil`    | none     | initial watermark; points at or after it are provisional                                                           |

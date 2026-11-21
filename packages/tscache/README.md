@@ -42,6 +42,13 @@ ESM-only, no runtime dependencies.
 npm install @anishbenji/tscache
 ```
 
+The package is ESM-only: its entries are listed in `exports`, with no `main`
+field. TypeScript finds its types with `moduleResolution` set to `bundler`,
+`node16` or `nodenext`. The older `node` setting (also called `node10`) does
+not read `exports` and finds no types; that is the "Resolution failed" result
+that [Are the Types Wrong?](https://arethetypeswrong.github.io/) reports for
+`node10`. From a CommonJS module, load the package with `import()`.
+
 ## Quick start
 
 With Vite, add the plugin that serves the fetcher module:
