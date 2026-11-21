@@ -10,7 +10,7 @@
   "dependencies": {
     "@examples/mock-backend": "workspace:*",
     "@solidjs/web": "2.0.3",
-    "lightweight-charts": "^5.2.1",
+    "lightweight-charts": "^5.3.0",
     "solid-js": "2.0.3",
     "@anishbenji/tscache": "workspace:*"
   },
