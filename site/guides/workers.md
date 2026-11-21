@@ -219,6 +219,19 @@ SharedWorker, and false behind a dedicated worker, an in-process client and a wo
 0.3.0. Where it is false, `client.superseded` stays `undefined` for good, which means "not known", not
 "current"; a `superseded` listener there is simply never called, and no warning is printed for it.
 
+### One tscache application per origin
+
+The workers' channel belongs to the origin, as the `tscache` database does, and a worker on it cannot
+tell another application from another deploy of its own. Two applications under one origin (say
+`/charts/` and `/admin/`), each with its own worker script or fetcher, are two generations to tscache:
+the one that started earlier is superseded and stops persisting, its tabs are told to reload, and the
+reload starts a worker that supersedes the other application in turn. A `clearAll` in one clears the
+other, and both would write one database.
+
+Host one tscache application per origin. Serve a second application from an origin of its own (another
+subdomain), or build the two as one: the same tscache version, worker script URL and fetcher module on
+every page.
+
 ### What takes no part
 
 - A worker of tscache 0.1.0 or 0.2.0 has no name and does not listen. Beside a worker of a later release
