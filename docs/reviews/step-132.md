@@ -259,6 +259,8 @@ The user answered on 2026-11-21, about 14:25 IST, taking the recommended option 
 
 The second and third stop a cache the engine does not hold, so only the whole-store clear can reach the opener; otherwise the opened cache's deferred cleanup would call it and the tests would pass without the fix. All four fail with `3618651b`'s `hosted.ts` and pass with `b12c671a`'s (Verification, below).
 
+**User decision 124 A, part 2: the budgets.** On the final code `bun run size` measures `worker` at 19.57 kB and `worker (lazy)` at 5.79 kB brotli (main `1ab139b4`: 19.22 kB and 5.61 kB). Their budgets in `packages/tscache/bench/budgets.json` are raised by the rule of `docs/benchmarking.md` (measured plus max(512 B, 3 %), rounded up to 16 B), from 19,888 B to 20,640 B and from 5,824 B to 6,448 B; no other entry changed. Reason: user decisions 113 A, 123 A and 124 A.
+
 **A changed implementer test.** "a chunk that fails to load stops every waiting and later open with 'unavailable', once each" expected two cleanup writes after its `clearAll`, one for `persist` (from its earlier removal) and one for `later`. `later`'s cleanup is now the whole-store clear, so the test expects the one write for `persist` followed by the store's `clearAll` call. Reason: user decision 123 A.
 
 ## Contract-test changes
