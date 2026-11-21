@@ -126,6 +126,7 @@ export class PortClient {
   #seq = 0;
   /** Why requests reject from now on; set once by dispose or a loss. */
   #ended: string | undefined;
+  #superseded: Evt | undefined;
 
   private constructor(
     port: MessagePortLike,
@@ -221,6 +222,18 @@ export class PortClient {
     });
   }
 
+  /**
+   * The first `superseded` event the worker sent on this port (N113), kept
+   * whoever was listening, as `features` is kept from the hello. A
+   * connection that joins a superseded worker is sent the event right after
+   * its init-ok, which with a `memoryBudget` is before the client exists
+   * and so before anything listens here: the client reads it from this when
+   * it is built.
+   */
+  get superseded(): Evt | undefined {
+    return this.#superseded;
+  }
+
   /** Requests awaiting a response (for tests and diagnostics). */
   get pendingCount(): number {
     return this.#pending.size;
@@ -311,6 +324,14 @@ export class PortClient {
     for (const fn of [...this.#lostListeners]) fn(error);
   }
 
+  /** Keeps the first superseded event (N113), then tells the listeners. */
+  #event(evt: Evt): void {
+    if (evt.scope === "client" && evt.event === "superseded") {
+      this.#superseded ??= evt;
+    }
+    for (const fn of [...this.#listeners]) fn(evt);
+  }
+
   #receive(data: unknown): void {
     if (!isObject(data)) return;
     const message = data as ToClient;
@@ -321,7 +342,7 @@ export class PortClient {
       if (message.ok) pending.resolve(message.result);
       else pending.reject(rebuild(message.error));
     } else if (message.t === "evt") {
-      for (const fn of [...this.#listeners]) fn(message);
+      this.#event(message);
     } else if (message.t === "bye") {
       // Controlled detach on the other side (no close event in browsers).
       this.#shutDown(new TscacheError("port closed"), true);

@@ -343,7 +343,10 @@ export interface ClientEvents {
    * from memory and its fetcher. Reload the tab to join the newer worker:
    * show the user a prompt, since the library never reloads a page. `lib`
    * is the newer worker's tscache version. At most once per client;
-   * `client.superseded` holds the payload afterwards.
+   * `client.superseded` holds the payload afterwards. A client created
+   * against a worker that is already superseded hears it on the macrotask
+   * after `createClient` resolves, as `modeFallback` is delivered, with
+   * `client.superseded` already set.
    */
   superseded: { lib: string };
   /**
