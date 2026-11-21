@@ -8,10 +8,11 @@ updates:
       interval: monthly
     commit-message:
       prefix: ci
-    # The same release age as the bun entry below, for the same reason.
+    # A release ages before Dependabot proposes it, for the reason given on
+    # the bun entry below. Every Actions update waits 7 days: Actions support
+    # only default-days, not the per-semver keys.
     cooldown:
-      default-days: 3
-      semver-major-days: 7
+      default-days: 7
     groups:
       actions:
         patterns: ["*"]
