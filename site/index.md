@@ -41,17 +41,22 @@ once.
 
 ## What it leaves out
 
-Version 1 has no aggregation or resampling (a series at one minute and at one hour are two caches), no
-eviction or memory limit, and no irregular timestamps. Change events (`cacheChanged`) arrived in 0.2.0
-([Change events](/concepts/events#change-events)). The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
+Version 1 has no aggregation or resampling (a series at one minute and at one hour are two caches), and
+no irregular timestamps. Change events (`cacheChanged`) arrived in 0.2.0
+([Change events](/concepts/events#change-events)). Memory has no default limit; from 0.3.0 (in
+preparation) an opt-in memory budget evicts the least recently used pages above it, and
+`memoryStats()` reports what the caches hold ([Memory](/guides/patterns#memory)). The [roadmap](https://github.com/anishbenji/tscache/blob/main/docs/roadmap.md) lists what is planned.
 
 ### Known limits
 
 The limits of 0.2.0 that an application has to design around:
 
-- **Memory is neither bounded nor reported.** A cache keeps everything it was asked for until its worker
-  ends, and a SharedWorker runs while any tab of the origin uses it. A year of one-minute OHLCV bars is
-  about 21 MB per series. [Memory](/guides/patterns#memory) says how to keep it in check.
+- **Memory is bounded only by a budget you set.** In 0.2.0 nothing bounds or reports it: a cache keeps
+  everything it was asked for until its worker ends, and a SharedWorker runs while any tab of the
+  origin uses it. A year of one-minute OHLCV bars is about 21 MB per series. From 0.3.0 (in
+  preparation) `memoryBudget` bounds it by evicting the least recently used pages, and `memoryStats()`
+  reports it; there is still no default budget. [Memory](/guides/patterns#memory) says how to keep it
+  in check.
 - **A deploy can leave tabs on two versions.** With a hashed worker URL, a deploy that changes the
   worker gives old and new tabs separate SharedWorkers that share no memory, silently, and both write
   the origin's IndexedDB database. A deploy that changes only the fetcher keeps the worker URL, and
