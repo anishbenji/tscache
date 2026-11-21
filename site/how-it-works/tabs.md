@@ -29,7 +29,7 @@ sequenceDiagram
   T2->>W: req dispose
   T2->>L: withdraw the queued request
   Note over T2: in the same step Tab 2 closes its port
-  W--xT2: res, to a port already closed; the server forgets the port
+  W--xT2: res, to a port already closed, so the server forgets the port
   opt that was the last connection
     W->>D: flush what the debounce still holds
   end
