@@ -1,0 +1,7 @@
+# N109: Where the calendar goes in the config (G4)
+
+Row N109 of the decision table in `docs/architecture.md` §8, whose introduction says how its rows were taken. Recorded in step 129 from the calendar grid design proposal (`docs/design/calendar-grid.md`, row G4), which keeps the alternatives in full. Decisions are locked (`AGENTS.md`); the architecture section lists every decision with a one-line summary.
+
+## Resolution
+
+**In `interval`: `interval: number | CalendarInterval`.** One field names the grid, and decision 2's "required, no default" keeps its words. `alignmentOffset` must be absent or 0 with a calendar interval, whose `zone` and `at` place the slots; the resolved config holds the descriptor with its defaults, frozen, and `alignmentOffset: 0`. N20 compares `interval` by value: two numbers when equal, two calendar intervals field by field, and a number never equals a calendar interval. This amends decision 2 (the meaning of `interval`, no longer always milliseconds) and narrows decision 3 (no offset with a calendar interval), both with the user's explicit approval. The cost: `CacheConfig.interval`, `ResolvedCacheConfig.interval` and `FetchRequest.interval` become unions, a compile-time break for code that does arithmetic on them, fixed-grid code included. Rejected: a separate `calendar` field with `interval` omitted (two fields that exclude each other, and decision 2 reworded); a new `grid` field for every cache (breaks every existing config). User decision 83, row G4 option (a), 2026-11-21 (§2.2, step 129)

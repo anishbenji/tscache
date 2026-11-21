@@ -81,8 +81,8 @@ bun run docs:build
 bunx playwright test --pass-with-no-tests
 # Performance (docs/benchmarking.md): the package entries' sizes against
 # their budgets, and every benchmark and end-to-end scenario once, its
-# result checked. The timings run in the separate bench job, which reports
-# and does not gate yet.
+# result checked. The timings run in the separate bench job, which gates the
+# cases in packages/tscache/bench/gated.json and reports the rest.
 bun scripts/size.ts
 bun scripts/bench.ts smoke
 bun scripts/bench.ts e2e --smoke

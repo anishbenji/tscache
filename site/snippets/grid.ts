@@ -1,4 +1,5 @@
 import { createClient } from "@anishbenji/tscache";
+import { nextSlotStart, slotStart, snapRange } from "@anishbenji/tscache/grid";
 
 // No fetcher: nothing loads, so a read returns its snapped range as a miss.
 const client = await createClient({ mode: "in-process" });
@@ -24,29 +25,42 @@ console.log(week.misses[0]?.range); // 25 Oct 14:30 UTC to 30 Oct 14:30 UTC
 // #endregion snap
 
 // #region daily-dst
-const DAY = 86_400_000;
-
-// In the fetcher: a bar's identity is its trading date, so stamp it at
-// 00:00 UTC of that date, whenever the session opened.
-function dayStamp(tradingDate: string): number {
-  return Date.parse(`${tradingDate}T00:00:00Z`); // "2026-03-06" → ms
-}
-
+// One slot per New York session day, starting at the open: 14:30 UTC in
+// winter and 13:30 UTC in summer.
 const sessions = await client.cache({
-  id: "candles/ACME/1d-by-date",
-  interval: DAY, // alignmentOffset 0: midnight UTC
+  id: "candles/ACME/1d-ny",
+  interval: { unit: "day", zone: "America/New_York", at: "09:30" },
   fields: { close: "f64" },
 });
-// New York moved to daylight saving time on 8 March 2026: the session opened
-// at 14:30 UTC on the 6th and at 13:30 UTC on the 9th. Both stamps are on
-// the grid.
+// New York moved to daylight saving time on 8 March 2026. Both opens are
+// slot starts, so both bars are on the grid.
 await sessions.put({
-  timestamps: [dayStamp("2026-03-06"), dayStamp("2026-03-09")],
+  timestamps: [
+    Date.UTC(2026, 2, 6, 14, 30), // Friday, 09:30 EST
+    Date.UTC(2026, 2, 9, 13, 30), // Monday, 09:30 EDT
+  ],
   fields: { close: [101.5, 102.25] },
 });
 // #endregion daily-dst
 
+// #region calendar-page
+// A view's range as the cache reads it, and the bar forming now, for any
+// interval: the arithmetic the engine itself uses.
+const nySession = {
+  unit: "day",
+  zone: "America/New_York",
+  at: "09:30",
+} as const;
+const shown = snapRange(
+  { start: Date.UTC(2026, 2, 6, 20), end: Date.UTC(2026, 2, 9, 20) },
+  nySession,
+); // 6 March 14:30 UTC to 10 March 13:30 UTC
+const forming = slotStart(Date.UTC(2026, 2, 9, 20), nySession); // 9 March 13:30 UTC
+const next = nextSlotStart(forming, nySession); // 10 March 13:30 UTC
+// #endregion calendar-page
+
 // #region weekly
+const DAY = 86_400_000;
 const WEEK = 7 * DAY; // 604_800_000
 
 // 1 January 1970, the epoch, was a Thursday. The first Monday, 5 January
@@ -67,35 +81,23 @@ await weekly.put({
 // #endregion weekly
 
 // #region monthly
-// Months differ in length, so no millisecond grid holds them. Store month n
-// since January 1970 at timestamp n, on a grid of interval 1, and convert in
-// the fetcher (ordinal range → months to ask for) and when drawing (ordinal →
-// label). Every range, watermark and timestamp of this cache is an ordinal.
-function monthIndex(year: number, month: number): number {
-  return (year - 1970) * 12 + (month - 1); // month 1-12
-}
-function monthOf(index: number): { year: number; month: number } {
-  // A true modulo: months before 1970 have negative ordinals.
-  return {
-    year: 1970 + Math.floor(index / 12),
-    month: (((index % 12) + 12) % 12) + 1,
-  };
-}
-
+// One slot per calendar month, starting at 00:00 UTC of its first day.
 const monthly = await client.cache({
   id: "candles/ACME/1mo",
-  interval: 1,
+  interval: { unit: "month" },
   fields: { close: "f64" },
 });
 await monthly.put({
-  timestamps: [monthIndex(2026, 9), monthIndex(2026, 10)],
+  timestamps: [Date.UTC(2026, 8, 1), Date.UTC(2026, 9, 1)], // September, October
   fields: { close: [97, 104] },
 });
+// Ranges are instants too, snapped outward as on any grid: mid-January
+// reads from January's start.
 const months = await monthly.get(
-  { start: monthIndex(2026, 1), end: monthIndex(2026, 12) },
+  { start: Date.UTC(2026, 0, 15), end: Date.UTC(2026, 11, 1) },
   { cacheOnly: true },
 );
-console.log([...months.timestamps].map(monthOf)); // September and October 2026
+console.log([...months.timestamps].map((t) => new Date(t).toISOString()));
 // #endregion monthly
 
 // #region jitter
@@ -141,4 +143,4 @@ await gauge.put({ timestamps, fields: { load: values } });
 // #endregion jitter
 
 // Read by `bun run docs:run`, which checks what the example produced.
-export { gauge, monthIndex, monthOf, months, sessions, week, weekly };
+export { forming, gauge, months, next, sessions, shown, week, weekly };

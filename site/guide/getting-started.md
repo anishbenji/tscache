@@ -14,6 +14,7 @@ The package is ESM-only and has no runtime dependencies. Its entries:
 | `@anishbenji/tscache/worker`  | the worker script; you serve it, you never import it into the page                     |
 | `@anishbenji/tscache/fetcher` | your fetcher module: its types and `AuthInvalidError`, nothing else                    |
 | `@anishbenji/tscache/engine`  | the engine without a worker, for Node and tests                                        |
+| `@anishbenji/tscache/grid`    | grid arithmetic for the page: `snapRange`, `slotStart`, `nextSlotStart`                |
 | `@anishbenji/tscache/vite`    | `fetcherUrl()`, the Vite plugin for the fetcher module (`vite` 8 is an optional peer)  |
 
 ## 1. Serve the worker

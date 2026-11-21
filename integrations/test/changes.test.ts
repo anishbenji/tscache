@@ -256,3 +256,66 @@ describe("series follows the cache", () => {
     expect(Array.from(answers[1]?.result.fields.v ?? [])).toEqual([9, 2]);
   });
 });
+
+// The calendar grid (design §9 test 20): the view is judged as a read
+// returns it, snapped outward to calendar slots, whose lengths differ.
+describe("reaction on a calendar grid", () => {
+  const grid = {
+    interval: { unit: "day", zone: "America/New_York", at: "09:30" },
+  } as const;
+  // New York sessions around the start of daylight saving on 2026-03-08:
+  // they open at 14:30 UTC before it and at 13:30 UTC from it.
+  const mar6 = Date.UTC(2026, 2, 6, 14, 30);
+  const mar7 = Date.UTC(2026, 2, 7, 14, 30);
+  const mar8 = Date.UTC(2026, 2, 8, 13, 30);
+  const mar9 = Date.UTC(2026, 2, 9, 13, 30);
+  const mar10 = Date.UTC(2026, 2, 10, 13, 30);
+  const mar11 = Date.UTC(2026, 2, 11, 13, 30);
+  // An unaligned view: it shows the sessions from 7 March to 10 March.
+  const view: Range = { start: mar7 + 1, end: mar9 + 1 };
+  const at = (t: number): Range[] => [{ start: t, end: t }];
+
+  it.each([
+    {
+      name: "a write at its first calendar edge",
+      e: event(at(mar7)),
+      how: "cache",
+    },
+    {
+      name: "a write at its last calendar edge",
+      e: event(at(mar10)),
+      how: "cache",
+    },
+    {
+      name: "a write on the summer side inside it",
+      e: event(at(mar8)),
+      how: "cache",
+    },
+    { name: "a write one slot before it", e: event(at(mar6)), how: undefined },
+    { name: "a write one slot after it", e: event(at(mar11)), how: undefined },
+    {
+      name: "a removal at its last calendar edge",
+      e: event([], at(mar10)),
+      how: "fetch",
+    },
+    {
+      name: "a removal one slot after it",
+      e: event([], at(mar11)),
+      how: undefined,
+    },
+  ])("$name: $how", ({ e, how }) => {
+    expect(reaction(e, view, grid)).toBe(how);
+  });
+
+  it("a fixed 24-hour step would misplace the same edges", () => {
+    // What the grid entry replaced: with a fixed day anchored at the winter
+    // open, the summer session at the view's edge is not a grid point.
+    const fixed = { interval: 86_400_000, alignmentOffset: mar6 % 86_400_000 };
+    expect(reaction(event(at(mar10)), { start: mar7, end: mar9 }, fixed)).toBe(
+      undefined,
+    );
+    expect(
+      reaction(event(at(mar10)), { start: mar7, end: mar9 + 1 }, grid),
+    ).toBe("cache");
+  });
+});

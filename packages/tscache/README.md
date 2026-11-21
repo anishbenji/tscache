@@ -42,6 +42,13 @@ ESM-only, no runtime dependencies.
 npm install @anishbenji/tscache
 ```
 
+The package is ESM-only: its entries are listed in `exports`, with no `main`
+field. TypeScript finds its types with `moduleResolution` set to `bundler`,
+`node16` or `nodenext`. The older `node` setting (also called `node10`) does
+not read `exports` and finds no types; that is the "Resolution failed" result
+that [Are the Types Wrong?](https://arethetypeswrong.github.io/) reports for
+`node10`. From a CommonJS module, load the package with `import()`.
+
 ## Quick start
 
 With Vite, add the plugin that serves the fetcher module:
@@ -135,6 +142,7 @@ covers webpack, setups without a bundler, and the full fetcher contract.
 | `@anishbenji/tscache/worker`  | the worker script; you serve it, you never import it into the page                     |
 | `@anishbenji/tscache/fetcher` | your fetcher module: its types and `AuthInvalidError`, nothing else                    |
 | `@anishbenji/tscache/engine`  | the engine without a worker, for Node, server rendering and tests                      |
+| `@anishbenji/tscache/grid`    | grid arithmetic for the page: `snapRange`, `slotStart`, `nextSlotStart`                |
 | `@anishbenji/tscache/vite`    | `fetcherUrl()`, the Vite plugin for the fetcher module (`vite` 8 is an optional peer)  |
 
 ## Browser support
@@ -161,9 +169,10 @@ has the details.
 tscache follows semantic versioning within 0.x: a minor release (0.3.0) may
 break the API, a patch release (0.2.1) never does. Pin a minor range
 (`~0.2.0`) to take fixes without breaking changes.
-[Known limits](https://anishbenji.github.io/tscache/#known-limits) of 0.2.0:
-unbounded memory, deploy skew, and change events that reach other tabs only
-through a SharedWorker.
+[Known limits](https://anishbenji.github.io/tscache/#known-limits): memory
+bounded only by a budget you set (budgets and `memoryStats()` from 0.3.0, in
+preparation; unbounded in 0.2.0), deploy skew, and change events that reach
+other tabs only through a SharedWorker.
 
 ## Documentation
 

@@ -46,17 +46,21 @@ and settled their differences with experiments; method and reasoning in `docs/be
   - reallocations while a segment grows.
 
   Hot-path timings compare each pull request with a rebuild of its base in one job, in Chromium (V8)
-  and Bun (JSC), paired and interleaved, with an A/A control and a fresh-process confirmation;
-  report-only for now. Chromium end-to-end scenarios (a new tab's first read, a read through a
-  SharedWorker, two tabs sharing a fetch) are paired the same way and report only; a smoke run in
-  `bun run ci` fails on a wrong result or an extra fetch.
-- **Next:**
-  1. Calibrate on GitHub's runner (`bench-calibrate.yml`): no false alarm in 20 same-revision runs,
-     at least 90 % detection of an injected 25 % slowdown. Then the timing gate blocks: a confirmed
-     regression of 10 % or more fails a pull request unless a `Perf-Accepted` trailer allows it.
-     The first calibration (2026-10-30) kept timing report-only: Bun nearly passed, Chromium's
-     runs were too noisy to judge (`docs/benchmarking.md`, calibration log).
-  2. Done in step 22: a fast path in `DenseSegment.slice` for fully present spans (`read-viewport`
+  and Bun (JSC), paired and interleaved, with an A/A control and a fresh-process confirmation. In
+  Bun, the eight cases listed in `packages/tscache/bench/gated.json` block: a confirmed regression
+  in one of them fails the required `bench` check unless a `Perf-Accepted` trailer allows it. Every
+  other case, and all of Chromium, reports only (`docs/benchmarking.md`, "The gate"). Chromium
+  end-to-end scenarios (a new tab's first read, a read through a SharedWorker, two tabs sharing a
+  fetch) are paired the same way and report only; a smoke run in `bun run ci` fails on a wrong
+  result or an extra fetch.
+- **Done:**
+  1. Calibration on GitHub's runner (`bench-calibrate.yml`): a case gates in a runtime once it
+     fired in none of 20 same-revision runs and caught at least 90 % of runs with a 25 % slowdown
+     injected. The calibrations before chore 43 kept timing report-only; the recalibration after
+     the engine optimisations (chore 43) gated the eight Bun cases. Chromium stayed report-only after
+     the confirming calibration (chore 45), and `read-year` in Bun after both
+     (`docs/benchmarking.md`, calibration log).
+  2. Step 22: a fast path in `DenseSegment.slice` for fully present spans (`read-viewport`
      about 6.7 times faster in Bun and 1.7 times in Chromium; `docs/benchmarking.md`).
 
 ## Design sketch: IndexedDB persistence
@@ -160,8 +164,9 @@ database (architecture §4.10.7, N52).
 
 ## Design sketch: calendar grid
 
-**Proposed in detail in [`docs/design/calendar-grid.md`](design/calendar-grid.md) (step 118, finding
-M4), with its open choices as decision rows for the user.** It adds built-in calendar intervals to the
+**Specified in `docs/architecture.md` (§2.2, §2.8, §2.10, §4.1; decisions N106–N124) and built in step
+129, from the proposal [`docs/design/calendar-grid.md`](design/calendar-grid.md) (step 118, finding
+M4), whose rows the user decided on 2026-11-21 (decision 83).** It adds built-in calendar intervals to the
 config: one slot per day, week, month, quarter or year, starting at a local time in an IANA zone, with
 the zone rules taken from the runtime's `Intl` and nothing bundled. Inside the engine the range
 arithmetic changes in `grid.ts` alone, since coverage, segments and pages run on slot indices; the
@@ -170,9 +175,9 @@ where they name the grid. Snapshots, payloads and records of a calendar cache ga
 while those of a fixed cache stay byte for byte as they are.
 
 Zone data differs between runtimes, so a record written under one can be read under another. In the
-recommended design a record stores the slot index of each instant that names a slot, and a reader whose
-zone data places one elsewhere refuses the record and fetches again; an exact check of every slot is
-specified as an option for applications that need it (row G8 of the proposal).
+design as decided a record stores the slot index of each instant that names a slot, and a reader whose
+zone data places one elsewhere refuses the record and fetches again (N113); an exact check of every slot
+stays specified in the proposal, unbuilt, for a later decision if an application needs it (row G8).
 
 Today the grid is fixed milliseconds (N9), so daily bars stamped at a session open in a daylight-saving
 zone are rejected as `'misaligned'` for half the year, and weekly and monthly bars rely on the recipes

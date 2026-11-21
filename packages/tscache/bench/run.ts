@@ -93,8 +93,11 @@ export function runBench(
       results.push({ name: c.name, what: c.what, value, expected: c.expect });
       continue;
     }
+    // A case the base cannot run (a feature it lacks) is timed against the
+    // second copy of the head: it reports, and has nothing to regress from.
+    const comparable = c.needs === undefined || c.needs(impls.base);
     const base = c.prepare(
-      options.mode === "control" ? impls.control : impls.base,
+      options.mode === "control" || !comparable ? impls.control : impls.base,
     );
     const prepared = c.prepare(impls.head);
     const { slowdown } = options;

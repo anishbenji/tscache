@@ -49,10 +49,15 @@ export interface TscacheClient {
   /**
    * The optional features this client's worker offers (N79): empty for a
    * worker script from before them (a stale cached script during a deploy).
-   * Without `'cacheChanged'`, its listeners are never called.
+   * Without `'cacheChanged'`, its listeners are never called; without
+   * `'calendar-grid'`, `cache()` rejects a calendar interval.
    */
   readonly features: ReadonlySet<WorkerFeature>;
-  /** Get-or-create (N4). */
+  /**
+   * Get-or-create (N4). Rejects with `ConfigError`, before anything is
+   * sent, for a calendar `interval` when the worker does not list
+   * `'calendar-grid'` in `features` (N119).
+   */
   cache(config: CacheConfig): Promise<CacheHandle>;
   /**
    * Empties every cache; in SharedWorker mode this affects ALL tabs. Where
@@ -249,6 +254,20 @@ class Client implements TscacheClient {
 
   async cache(config: CacheConfig): Promise<CacheHandle> {
     this.#live();
+    // A worker from before calendar grids would reject the descriptor as
+    // an `interval` that is not a number: refuse it here, by name, before
+    // anything is posted (N119).
+    const interval: unknown = (config as { interval?: unknown } | null)
+      ?.interval;
+    if (
+      typeof interval === "object" &&
+      interval !== null &&
+      !this.features.has("calendar-grid")
+    ) {
+      throw new ConfigError(
+        "this worker does not support calendar intervals (it lists no 'calendar-grid' feature): it runs an older version of the library",
+      );
+    }
     const resolved = (await this.#port.request(
       "cache",
       config,

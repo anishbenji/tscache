@@ -57,18 +57,21 @@ export function recordsOf(
   id = "persist",
 ): StoredCache {
   const c = engine.configOf(id);
+  // This oracle does the arithmetic of a fixed grid.
+  const { interval } = c;
+  if (typeof interval !== "number") throw new Error("a fixed grid only");
   const coverage = engine.coverage(id, all);
   if (coverage.length === 0) return { cache: undefined, pages: [] };
   const cap = c.segmentSlotCap;
   const pageCoverage = new Map<number, Range[]>();
   for (const r of coverage) {
-    const start = (r.start - c.alignmentOffset) / c.interval;
-    const end = (r.end - c.alignmentOffset) / c.interval;
+    const start = (r.start - c.alignmentOffset) / interval;
+    const end = (r.end - c.alignmentOffset) / interval;
     for (let p = Math.floor(start / cap); p <= Math.floor(end / cap); p++) {
       const ranges = pageCoverage.get(p) ?? [];
       ranges.push({
-        start: Math.max(start, p * cap) * c.interval + c.alignmentOffset,
-        end: Math.min(end, p * cap + cap - 1) * c.interval + c.alignmentOffset,
+        start: Math.max(start, p * cap) * interval + c.alignmentOffset,
+        end: Math.min(end, p * cap + cap - 1) * interval + c.alignmentOffset,
       });
       pageCoverage.set(p, ranges);
     }
@@ -78,7 +81,7 @@ export function recordsOf(
     cacheId: id,
     format: 1,
     config: {
-      interval: c.interval,
+      interval,
       alignmentOffset: c.alignmentOffset,
       fields: { ...c.fields },
       gapSplitK: c.gapSplitK,

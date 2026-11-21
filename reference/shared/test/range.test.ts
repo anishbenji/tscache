@@ -5,6 +5,7 @@ import {
   formingBar,
   MINUTE,
   market,
+  oneBarPast,
   openingRange,
   readRange,
 } from "../src/market";
@@ -95,5 +96,35 @@ describe("chartKindOf", () => {
     expect(chartKindOf("?chart=uplot")).toBe("uplot");
     expect(chartKindOf("?chart=other")).toBe("lightweight");
     expect(chartKindOf("")).toBe("lightweight");
+  });
+});
+
+describe("oneBarPast and formingBar on the market's grid", () => {
+  it("steps by the market's fixed interval, from any instant", () => {
+    expect(oneBarPast(NOW)).toBe(NOW + MINUTE);
+    expect(oneBarPast(NOW - 30_000)).toBe(NOW - 30_000 + MINUTE);
+    expect(formingBar(NOW)).toBe(NOW - 30_000);
+  });
+
+  it("steps by the length of the slot that holds the instant on a calendar grid", () => {
+    const HOUR = 60 * MINUTE;
+    const sessions = {
+      ...market,
+      id: "equity/ACME/1d",
+      interval: { unit: "day", zone: "America/New_York", at: "09:30" },
+    } as const;
+    // New York's clocks go forward on 8 March 2026: the session of the 7th
+    // opens at 14:30 UTC and the next one 23 hours later.
+    const open7 = Date.UTC(2026, 2, 7, 14, 30);
+    expect(oneBarPast(open7, sessions)).toBe(open7 + 23 * HOUR);
+    expect(oneBarPast(open7 + 5 * HOUR, sessions)).toBe(open7 + 28 * HOUR);
+    const open9 = Date.UTC(2026, 2, 9, 13, 30);
+    expect(oneBarPast(open9 + HOUR, sessions)).toBe(open9 + 25 * HOUR);
+    expect(formingBar(open9 + 6 * HOUR, sessions)).toBe(open9);
+    // A month is as long as its calendar says.
+    const months = { ...market, id: "m", interval: { unit: "month" } } as const;
+    expect(oneBarPast(Date.UTC(2026, 1, 10), months)).toBe(
+      Date.UTC(2026, 1, 10) + 28 * 24 * HOUR,
+    );
   });
 });

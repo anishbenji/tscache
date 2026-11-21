@@ -23,7 +23,7 @@ Status: **draft for review** (starter-prompt §12 deliverable). All decisions fr
         └────────────────────────┘
 ```
 
-Out of scope for v1 (roadmap): aggregation/resampling, ColumnarSegment, subscriptions, eviction, SharedArrayBuffer, per-field presence masks, irregular timestamps, elected auth handler, Node `worker_threads`. IndexedDB persistence, once on that list, is specified in §4.10 (step 38).
+Out of scope for v1 (roadmap): aggregation/resampling, ColumnarSegment, SharedArrayBuffer, per-field presence masks, irregular timestamps, elected auth handler, Node `worker_threads`. IndexedDB persistence, once on that list, is specified in §4.10 (step 38); so are change events (subscriptions), in §2.7 (step 114), and the memory budget with its eviction, in §2.9 (step 121).
 
 ## 2. Public API surface
 
@@ -74,7 +74,7 @@ interface ClientOptions {
 }
 
 /** An optional worker feature a client learns of from `hello.features` (N79). */
-type WorkerFeature = "cacheChanged" | "memoryBudget";
+type WorkerFeature = "cacheChanged" | "memoryBudget" | "calendar-grid"; // 'calendar-grid': N119
 
 /** Resolves after transport is established and the protocol handshake passed. */
 declare function createClient(options?: ClientOptions): Promise<TscacheClient>;
@@ -84,6 +84,8 @@ interface TscacheClient {
    * Get-or-create. Identical config returns the existing cache (multi-tab:
    * every tab calls this with the same values). Structural mismatch with the
    * live config (interval/fields/offset/...) rejects with ConfigError (N4).
+   * A calendar interval (§2.2) is refused with ConfigError, before anything
+   * is posted, when the worker does not list 'calendar-grid' (N119).
    */
   cache(config: CacheConfig): Promise<CacheHandle>;
   /** Which hosting mode actually won the fallback chain. */
@@ -118,11 +120,26 @@ The in-process engine has zero DOM/worker imports at module top level (lazy cons
 ```ts
 type Dtype = "f64" | "f32" | "i32" | "u32" | "i16" | "u16" | "i8" | "u8"; // N7: final for v1
 
+/** A calendar grid: one slot per calendar unit in a time zone (N106). */
+interface CalendarInterval {
+  /** N107. */
+  unit: "day" | "week" | "month" | "quarter" | "year";
+  /** An IANA time zone, compared as written (N112). Default "UTC". */
+  zone?: string;
+  /** Local wall-clock time each slot starts at, "HH:MM" (24-hour). Default "00:00". */
+  at?: string;
+  /** For unit "week" only: the first day, 1 = Monday … 7 = Sunday (ISO 8601). Default 1. */
+  weekStart?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+}
+
 interface CacheConfig {
   id: string;
-  /** Interval in ms. REQUIRED — no default (resolved decision #2). */
-  interval: number;
-  /** Timestamps satisfy (t - alignmentOffset) % interval === 0. Default 0. */
+  /** A fixed interval in ms, or a calendar interval (N109). REQUIRED — no
+   *  default (resolved decision #2). */
+  interval: number | CalendarInterval;
+  /** Fixed intervals only: timestamps satisfy
+   *  (t - alignmentOffset) % interval === 0. Default 0. Must be absent or 0
+   *  with a calendar interval (N109). */
   alignmentOffset?: number;
   /** Field name → dtype. Every field names its dtype; 'f64' is the usual choice. */
   fields: Record<string, Dtype>;
@@ -144,7 +161,19 @@ interface CacheConfig {
 }
 ```
 
-Timestamps are Float64 ms epoch, exact integers to 2^53, aligned to `interval` (modulo `alignmentOffset`). Presence is point-level (1 bit per point); `NaN` is a legal field value; integer fields cannot represent per-field missingness (documented limitation; the self-describing payload format leaves room for per-field masks later).
+Timestamps are Float64 ms epoch, exact integers to 2^53, aligned to the grid: to `interval` (modulo `alignmentOffset`) on a fixed grid, to slot starts on a calendar grid. Presence is point-level (1 bit per point); `NaN` is a legal field value; integer fields cannot represent per-field missingness (documented limitation; the self-describing payload format leaves room for per-field masks later).
+
+**Calendar intervals (N106–N112, N117, N120, N123; user decision 83, step 129).** A calendar interval makes the cache's slots calendar units in a zone: `{ unit: "day", zone: "America/New_York", at: "09:30" }` has one slot per New York session day, starting at 14:30 UTC in winter and at 13:30 UTC in summer, where no `alignmentOffset` fits both. Its rules:
+
+- _Resolved form._ The resolved config holds the descriptor with its defaults applied (`zone: "UTC"`, `at: "00:00"`, and `weekStart: 1` for weeks only), frozen, and `alignmentOffset: 0`. A fixed config resolves as before.
+- _Slots._ Slot 0 is the unit that contains the local date 1970-01-01 in the grid's zone; slots before it are negative. A slot starts at the instant at which its first local date reads `at` on the zone's clock; §4.1 has the exact rule, including a local time that a transition skips or repeats (N111) and a local date the zone skipped (N123). The numbering depends only on the descriptor, never on the data or on the zone's rules. Every calendar day is a slot (N110): a day without a session is an empty slot, which a fetch confirms as a gap, and no weekday mask or holiday list is part of the grid. Units below a day are not supported (N120); a fixed interval covers those that divide an hour.
+- _Domain (N117)._ The slots whose first local date lies in the years 1 to 9999. A range, watermark or timestamp outside it is rejected as one beyond the safe integers is on a fixed grid: `InvalidRangeError` from `get`, `invalidate`, `coverage` and `setFinalizedUntil`, `PutError` `'misaligned'` from `put`.
+- _Zones (N108, N112)._ Zone rules come from the runtime's `Intl`; nothing is bundled. A zone is compared as written, so two aliases of one zone (`US/Eastern`, `America/New_York`) name two grids: use canonical names. Two engines can hold different zone data (a browser update, a server and its page); §2.8 says what a snapshot's reader checks.
+- _Errors._ An unknown `unit`, a `zone` the runtime does not resolve, an `at` that is not `HH:MM` from `00:00` to `23:59`, a `weekStart` on a unit other than week or outside 1–7, or a non-zero `alignmentOffset` with a calendar interval rejects `cache()` with `ConfigError` naming the field. A misaligned put names the calendar ("not the start of a day in America/New_York at 09:30").
+- _Identity (N20)._ `interval` is compared by value: two numbers when equal, two calendar intervals field by field after defaults, and a number never equals a calendar interval. The structural list of N20 is unchanged.
+- _What reads the config back._ `interval` is a union wherever a config is read back (`ResolvedCacheConfig`, `FetchRequest`, §2.5), so TypeScript code narrows it before doing arithmetic (`typeof interval === "number"`); `@anishbenji/tscache/grid` (§2.10) does grid arithmetic for both kinds.
+- _Sizes read in slots._ `gapSplitK` and `segmentSlotCap` count calendar slots: with the default cap of 32,768, one page of a daily cache spans about 89 years, as on a fixed daily grid.
+- _Old workers (N119)._ A worker that supports calendar intervals lists `'calendar-grid'` in `hello.features` (§3.1); against one that does not, `cache()` rejects the config itself with a `ConfigError` naming the feature, before anything is posted.
 
 ### 2.3 Read path
 
@@ -265,9 +294,11 @@ interface Fetcher {
 
 interface FetchRequest {
   cacheId: string;
-  range: Range; // already miss-coalesced (flank-extended by one interval)
-  interval: number;
-  alignmentOffset: number;
+  range: Range; // aligned to slot starts and already miss-coalesced: a miss that
+  //              abuts covered slots is extended one slot into them
+  /** As the config resolved it (N115): ms, or the calendar interval with its defaults. */
+  interval: number | ResolvedCalendarInterval;
+  alignmentOffset: number; // 0 for a calendar interval
   context: unknown; // latest auth/config material
 }
 
@@ -403,11 +434,13 @@ The initiating call additionally receives request-scoped results directly — `p
 
 `modeFallback` is an addition beyond the starter's event list — observability for the documented Chrome-Android path (accepted under N5). `workerLost` is another such addition (N32).
 
+**A listener that throws (the emitter's rule, §4.6, §4.8; documented as built at step 133).** Every listener of an emitted event runs, and the first error is rethrown after all ran; a throwing listener does not break the port, and later events reach every listener. Nobody awaits an event, so the rethrown error reaches the host's error reporting, by one of two routes. An event from the wire (`authInvalid`, `cacheCleared`, `persistStopped`, `cacheChanged`, `mergeWarning`) is emitted inside the port's `message` listener, and the error propagates out of it: the host reports it as an uncaught exception (in a browser the window's `error` event, in Node `uncaughtException`), and each message reports its own first error. The client-made events go through `reportError` where the realm has it, and are thrown otherwise: `workerLost` reports the first error of its one emit; the `modeFallback` steps are all emitted in one macrotask after `createClient` resolves, and only the first error across all the steps is reported. In a browser both routes reach the window's `error` event.
+
 **Change events (N71–N84, step 114).** `cacheChanged` tells a reader that what a `get` over some range returns (its points, its coverage or its misses) may have changed. It answers finding M7; the alternatives are recorded in `docs/design/m7-change-events.md`.
 
 - _Payload (N71, N72)._ Ranges, never values. `written` lists the slots the call touched: a put's authority (N13) or without one its batch's span (N3), a hydrate's applied parts, provisional slots included (N76), whether or not values differed, and also when the write failed part-way (an ascending prefix may have landed, N70). `removed` lists the coverage the call actually withdrew, never slots that were not covered (N82). `cleared` says everything the cache held before the call went; `removed` is then empty and `written` lists what the same call wrote after the clear. A range may be in both lists.
 - _What sends one._ At most one event per cache per mutating call, and only when it touched, withdrew or cleared something: a `put` with points or a range (an orchestrated fetch's put included), a version-mismatch put (`cleared`, after `cacheCleared 'version-mismatch'`), a failed put (its touched slots, the coverage withdrawn, `cleared` when its version had cleared), an empty put whose `meta.finalizedUntil` sets a first watermark over covered slots, `hydrate` (N77), `invalidate`, `setFinalizedUntil` moved back or set for the first time, `clear`, and each cache of `clearAll` (N78). Nothing is sent for a put rejected by validation, an empty put without a range whose `meta` changes no read (no `meta`, the cache's own version, a first version adopted, N18, or a `finalizedUntil` on a cache that already has a watermark), a watermark moved forward (it promotes nothing, §4.5), a persistence load (`cache()` resolves only after it, §4.10.5), a fetch that fails, is dropped by the version fence (N29) or is not issued while auth is invalid, nor for `get`, `cacheOnly` reads, `snapshot`, `coverage`, `updateAuth` or `memoryStats`. With a memory budget an eviction is reported too (below).
-- _Eviction and memory budgets (N99, N104; user decision 67, 2026-11-16; built in step 121)._ Both rules apply only to an engine with a memory budget (§2.9); without one the payload carries no `evicted` and `removed` is the coverage actually withdrawn, as N82 says. (1) An eviction is reported in a separate `evicted` list, the coverage the eviction actually withdrew, which needs no re-read: the data did not change and the view's copy is still right. That copy lasts until the view's next re-read: a later read from the cache, the `cacheOnly` re-read N84 prescribes after a write included, shows the evicted part as `uncached` misses, which the application fetches if it wants them (a fetching read fetches it as any miss). Evicting a page that holds points but no coverage (an invalidated page) sends nothing. An eviction belongs to the report of the call whose enforcement ran it, one event per cache per call (N73): a put that evicts pages of its own cache sends that cache one event with its `written` and its `evicted`, and pages of another cache evicted by the same call go into that cache's one event for the call, with `evicted` only, under the same `requestId`; an enforcement at a pending get's pin release (§4.9) reports in one event per cache under that get's `requestId`. The field is absent when the call evicted nothing. (2) Each cache keeps the coverage it evicted in a second coverage index, also while nobody subscribes: a removal (`invalidate`, a watermark moved back or set for the first time) lists in `removed` what it withdrew plus the part of its range that is in that index, and drops that part from the index; a write drops what it touched before it writes (§4.5), so the withdrawal after a failed write finds none of it there, and a clear (`clear`, `clearAll`, a version mismatch) empties it. A later `invalidate` or watermark withdrawal therefore reaches views still showing evicted data, and no event names a range that was never cached.
+- _Eviction and memory budgets (N99, N104; user decision 67, 2026-11-16; built in step 121)._ Both rules apply only to an engine with a memory budget (§2.9); without one the payload carries no `evicted` and `removed` is the coverage actually withdrawn, as N82 says. (1) An eviction is reported in a separate `evicted` list, the coverage the eviction actually withdrew, which needs no re-read: the data did not change and the view's copy is still right. That copy lasts until the view's next re-read: a later read from the cache, the `cacheOnly` re-read N84 prescribes after a write included, shows the evicted part as `uncached` misses, which the application fetches if it wants them (a fetching read fetches it as any miss). Evicting a page that holds points but no coverage (an invalidated page) sends nothing. An eviction belongs to the report of the call whose enforcement ran it, one event per cache per call (N73): a put that evicts pages of its own cache sends that cache one event with its `written` and its `evicted`, and pages of another cache evicted by the same call go into that cache's one event for the call, with `evicted` only, under the same `requestId`; an enforcement at a pending get's pin release (§4.9) reports in one event per cache under that get's `requestId`. The field is absent when the call evicted nothing. (2) Each cache keeps the coverage it evicted in a second coverage index, also while nobody subscribes: a removal (`invalidate`, a watermark moved back or set for the first time) lists in `removed` what it withdrew plus the part of its range that is in that index, and drops that part from the index; a write drops what it touched before it writes (§4.5), so the withdrawal after a failed write finds none of it there, and a clear (`clear`, `clearAll`, a version mismatch) empties it. The pages a `restore` trims from its own cache stay out of that cache's index, since no reader has seen them (user decision 96, 2026-11-21, narrowing N104); another cache's pages the same enforcement evicts enter that cache's index as any eviction does. A later `invalidate` or watermark withdrawal therefore reaches views still showing evicted data, and no event names a range that was never cached.
 - _Subscription (N74, N80)._ `client.on('cacheChanged', fn)` hears every cache's changes; `cache.on('cacheChanged', fn)` only its own. The first listener for a cache on a client (or the first `client.on` listener) sends `subscribe`, the last one's removal `unsubscribe`; `on` stays synchronous and returns the unsubscribe. Against a worker whose hello lists no `'cacheChanged'` feature (N79) the listener is never called, nothing is posted, `client.features` is empty and a development build warns once per client.
 - _Delivery (N73, N75)._ Once per mutating call, synchronously, posted when the call ends: for one call `cacheCleared` (when it cleared), then `cacheChanged`, then its `mergeWarning` events, then its response. No timer is involved. Every subscriber hears it, the writer's own tab included, with `requestId` naming the call (for a fetch, the `get` that issued it; joined gets are not named). A put's event arrives before the put resolves, and a fetch's before the issuing `get` resolves. A call through persistence (N58) whose answer waits for the disk still sends its event when memory changed. Messages on one port arrive in order, so a read sent after hearing an event sees that change or a later state: subscribe, then read, and no change is lost. In the SharedWorker hosting a change by any tab reaches every subscribed tab; a dedicated worker or in-process client has its own engine, so its events reach that tab only, and a page that needs another tab's data there must still send it. A connection's subscriptions go with it (dispose, `pagehide`, `bye`); after `workerLost` no event arrives.
 - _Reading after an event (N84)._ An `evicted` range needs no read, whatever else the event lists (N99). When `written` is not empty, read the shown range with `get(range, { cacheOnly: true })` if a written or removed range overlaps it (the shown range as read, snapped outward to the grid as `get` snaps it, so a change at a grid point just outside an unaligned range counts) or `cleared` is set; when `written` is empty and `cleared` is set or a `removed` range overlaps the shown range, read it with a fetching `get`; otherwise do nothing. Every event a fetch causes has a non-empty `written`, so no event caused by a fetch causes a fetch, and one application call that writes nothing costs at most one fetching read per subscribed view. The cost: after a fetch's response clears the cache for a new version, other tabs show misses outside the fetched range until their next ordinary read. Bursts are the consumer's to coalesce: the integrations schedule at most one read per animation frame, and the library ships no view helper (N83).
@@ -419,13 +452,30 @@ The initiating call additionally receives request-scoped results directly — `p
 A snapshot is what a cache knows about a range: the §3.4 payloads of its present points, clipped to the range, in an envelope that names the grid and schema they belong to, the dataset version and watermark in force, and the covered sub-ranges. It is the server-rendering hydration payload the one-format invariant promised (starter §3.7) and the cache record of the persistence sketch (`docs/roadmap.md`). It is applied in one engine call, so a seed can neither outlive a restatement nor overwrite what another tab fetched (step ⑭ R2-2).
 
 ```ts
-/** What a cache knows about a range (N34): §3.4 payloads in an envelope. */
-interface Snapshot {
+/** What a cache knows about a range (N34): §3.4 payloads in an envelope.
+ *  A fixed cache's is format 1, a calendar cache's format 2 (N114). */
+type Snapshot = FixedSnapshot | CalendarSnapshot;
+
+interface FixedSnapshot extends SnapshotBase {
   /** The envelope's schema version; each payload carries its own `format`. */
   format: 1;
-  /** The grid and schema of the cache it was taken from; hydrate refuses any other. */
+  /** The grid of the cache it was taken from; hydrate refuses any other. */
   interval: number;
   alignmentOffset: number;
+}
+
+interface CalendarSnapshot extends SnapshotBase {
+  format: 2;
+  /** The resolved calendar interval of the cache it was taken from. */
+  grid: ResolvedCalendarInterval;
+  /** The slot indices of `range.start` and `range.end` (N113). */
+  rangeSlots: [number, number];
+  /** One pair for each range of `coverage`, in order: the slot indices of its ends. */
+  coverageSlots: [number, number][];
+}
+
+interface SnapshotBase {
+  /** The schema of the cache it was taken from; hydrate refuses any other. */
   fields: Record<string, Dtype>;
   /** The request it answers, snapped outward (N1), in ms. */
   range: Range;
@@ -438,7 +488,8 @@ interface Snapshot {
   /**
    * The present points inside `range`, covered or not (N16): one payload per
    * segment of the cache with a point inside the range, holding exactly those
-   * points; ascending and disjoint; fresh buffers.
+   * points; ascending and disjoint; fresh buffers. Each is in the
+   * envelope's format.
    */
   segments: DenseSegmentPayload[];
 }
@@ -466,14 +517,18 @@ interface HydrateResult {
 // CacheHandle
 hydrate(snapshot: Snapshot): Promise<HydrateResult>;
 
-/** A Snapshot with its binary parts as base64 text: a plain JSON value (N38). */
-interface EncodedSnapshot extends Omit<Snapshot, 'segments'> {
+/** A Snapshot with its binary parts as base64 text: a plain JSON value (N38),
+ *  in the snapshot's format: a format 2 value keeps its grid and slot indices. */
+type EncodedSnapshot = (Omit<FixedSnapshot, 'segments'> | Omit<CalendarSnapshot, 'segments'>) & {
   segments: EncodedSegmentPayload[];
-}
-interface EncodedSegmentPayload extends Omit<DenseSegmentPayload, 'mask' | 'fields'> {
+};
+type EncodedSegmentPayload = (
+  | Omit<FixedSegmentPayload, 'mask' | 'fields'>
+  | Omit<CalendarSegmentPayload, 'mask' | 'fields'>
+) & {
   mask: string;
   fields: { name: string; dtype: Dtype; data: string }[];
-}
+};
 // Exported from '.' and './engine'; no DOM, no engine code.
 function encodeSnapshot(snapshot: Snapshot): EncodedSnapshot;
 function decodeSnapshot(encoded: EncodedSnapshot): Snapshot;
@@ -483,7 +538,7 @@ function decodeSnapshot(encoded: EncodedSnapshot): Snapshot;
 
 **Applying a snapshot: `hydrate`.** One engine call, and between two messages no other write runs (§4.7), so another tab's fetch cannot land between the check and the write. Its rules:
 
-- _Checked first, in full._ The envelope must describe this cache: `format` 1, `interval` and `alignmentOffset` equal to the grid, `fields` the schema's names and dtypes (key order irrelevant); then every range and every payload (by the §4.2 decoding rules). Any failure throws `TscacheError` before anything changes, as an invalid payload does (N10); an unknown cache throws `UnknownCacheError`. A snapshot with no segment, a confirmed gap, is therefore checked too (step ⑭ R6-1). A snapshot that carries a `finalizedUntil` must keep its coverage below it (N69): coverage of a slot at or after the snapshot's own watermark, which the snapshot itself calls provisional, is a malformation and throws like the others, while its points there, outside its coverage, stay legal. Taking a snapshot never produces one, since a cache never covers a volatile slot (§4.5). A malformed snapshot is rejected, never snapped or repaired: snapshots are made by the library, so a malformation is corruption.
+- _Checked first, in full._ The envelope must describe this cache: for a fixed cache `format` 1 with `interval` and `alignmentOffset` equal to the grid, for a calendar cache `format` 2 with a `grid` equal to the cache's calendar interval (a fixed cache refuses a format 2 snapshot and a calendar cache a format 1 one), and `fields` the schema's names and dtypes (key order irrelevant); then every range and every payload (by the §4.2 decoding rules), and for format 2 the stored slot indices (below). Any failure throws `TscacheError` before anything changes, as an invalid payload does (N10); an unknown cache throws `UnknownCacheError`. A snapshot with no segment, a confirmed gap, is therefore checked too (step ⑭ R6-1). A snapshot that carries a `finalizedUntil` must keep its coverage below it (N69): coverage of a slot at or after the snapshot's own watermark, which the snapshot itself calls provisional, is a malformation and throws like the others, while its points there, outside its coverage, stay legal. Taking a snapshot never produces one, since a cache never covers a volatile slot (§4.5). A malformed snapshot is rejected, never snapped or repaired: snapshots are made by the library, so a malformation is corruption.
 - _Version precondition._ When the snapshot and the cache both have a version and they differ, nothing is applied, not even the watermark, and the result is `{ applied: [], skipped: 'version-mismatch' }`. A versioned `put` clears and adopts (§2.4); a seed never does, since a stale page would wipe a newer cache. A cache without a version adopts the snapshot's without clearing, as N18 does for the first versioned put; a snapshot without a version leaves the cache's alone.
 - _Watermark._ The snapshot's `finalizedUntil` advances the cache's watermark as a put's `meta.finalizedUntil` does: forwards only (N17), never back.
 - _Fill only where nothing is known._ The parts written are each covered range of the snapshot minus the slots the cache already covers and minus the cache's volatile region (after the advance). Inside a part the points end up exactly the snapshot's (a replace, N11: what was there had been invalidated or was provisional, never authoritative), and the part is recorded as coverage. Covered slots are never touched, so a later fetch by another tab survives; volatile slots are never touched, so a seed neither covers nor replaces a slot the browser calls provisional; and the snapshot's own provisional tail, its points outside its coverage, is not applied: the browser fetches it, as its first live `get` does anyway.
@@ -491,11 +546,19 @@ function decodeSnapshot(encoded: EncodedSnapshot): Snapshot;
 - _Result._ `applied` lists the parts written, in ms: empty when the cache already covered everything, or when the snapshot covered nothing.
 - _Ownership._ The snapshot is cloned to the worker, not transferred: it stays usable, so a page can hydrate a replacement client from the same object. A `get` result's snapshot is transferred the other way, as the result's arrays are: the page owns it.
 
+**Zone data that differs between writer and reader (N113; format 2 only).** A calendar slot's start in a zone is computed from the runtime's zone data, and two engines can hold different data: a browser updated between two visits, which reads the records an older version of itself wrote, or a Node server and the browser that hydrates its snapshot. A snapshot is written from slots and read back into slots through instants. Its _anchors_ are the instants that name a slot: the two ends of its `range`, the two ends of each coverage range, and each payload's `start`; everything else is relative (entry `i` of a payload is the `i`-th slot after the slot of its `start`). Format 2 stores, beside each anchor, the slot index its writer gave it: `rangeSlots`, `coverageSlots` and each payload's `startSlot`. The watermark has none: it is an instant, names no slot, and every reader places it with its own zone data.
+
+- _What a reader checks._ Every anchor must be a slot start, as for format 1, and must be the start of the slot its stored index names. Since slot starts are strictly increasing, an anchor passes exactly when its slot starts at the same instant for writer and reader. A failure refuses the snapshot as a malformed one is refused: `hydrate` throws `TscacheError` and changes nothing, and a load skips the page, which the cache rewrites at its next flush (§4.10.5).
+- _What then holds._ Coverage and points are in the writer's slots: every bar is on the local date, week or month its writer put it on. A difference that reaches an anchor refuses the record: an offset that changed from some date on, or a move across the date line that one runtime lacks, differs at every later slot, the record's last included.
+- _What stays open, by decision._ A difference at a slot the snapshot names that is no anchor's. Within a slot (a daylight-saving date or rule that differs): the bar stays in its slot and reads at the reader's start of that slot, an hour from the instant it was put at; a daylight-saving rule that one runtime lacks applies silently when both ends of the record fall in the season where the two agree. A cache returns, for a bar, the start of its slot under its own zone data, so a reader that refused the record and fetched would return the same instant; refusing would add a signal and a fetch, not a better instant. Across slots (a skipped date that two runtimes date a day apart, inside the record): the bar stays in a slot whose instant belongs to a neighbour for the reader. `docs/design/calendar-grid.md` §5.6 and §9.1 list the cases; the contract tests pin each outcome.
+- _The work is bounded before it starts._ A snapshot's _charge_ is 24 for its range, 36 for each coverage range, 12 for each payload and 12 for a watermark, computed from the lengths of `coverage` and `segments` with no lookup. It is at least the offset lookups the snapshot causes in a `hydrate` into a cache that covers nothing of its coverage, and in a load. `hydrate` refuses a snapshot whose charge exceeds the budget of 524,288 lookups with `TscacheError`, before any lookup; a `hydrate` into a cache that already covers part of the snapshot's coverage applies more, smaller parts and makes at most 12 lookups more for each of the receiver's own coverage ranges inside it, which is outside the charge and the budget: the budget bounds what a snapshot can ask for, not what the receiver's own fragmentation costs. Outside it too is the `cacheChanged` event a `hydrate` sends while a tab is subscribed (§2.7): the worker converts each range of the event once more, at most 12 lookups a range, so a hydrate into a cache that knows nothing makes at most its charge plus 12 for each range of its event. A grid in `"UTC"` looks nothing up and has no budget. Taking a snapshot has none either: it costs in proportion to the cache's own payloads and coverage ranges (at most 36 lookups for the range, 12 for each coverage range and 6 for each payload).
+- _Assumption._ One engine sees one set of zone data from start to stop.
+
 **Old workers (N37).** The op is additive and `PROTOCOL_VERSION` stays 1. A worker from before it (a stale cached script, §3.1) answers `unknown op`, so `hydrate` rejects with `TscacheError` and the cache is as it was; a `get` with `snapshot: true` from such a worker returns no `snapshot`. An app treats a failed `hydrate` as "not seeded" and lets the cache fetch: hydration is an optimisation, never a requirement for correctness.
 
-**Encoding for HTML (N38).** A snapshot holds `ArrayBuffer`s and a `Uint8Array`; a page carries text. `encodeSnapshot` returns the snapshot with each payload's mask and field data as base64 strings: a plain JSON value the app serialises with `JSON.stringify` next to its own data (the columns it renders, say), and `decodeSnapshot` restores it. The byte form survives what JSON loses: `NaN`, a legal field value, becomes `null` in JSON. `decodeSnapshot` checks the shape only: an object with the envelope's fields of the right JavaScript types (`format` 1, numbers, strings, arrays, `fields` an object of strings, and in each payload a `mask` and every `data` as a base64 string that `atob` accepts), and throws `TscacheError` for anything else, leaving its input unchanged. It restores the buffers and checks nothing more: lengths, ordering, alignment and the schema are `hydrate`'s to check against the cache. Escaping for a `<script>` element (every `<` as `<`) stays with the app, since it depends on how the page is built. Both functions use the native `Uint8Array.prototype.toBase64` and `Uint8Array.fromBase64` where the runtime has both (detected once, at load) and `btoa`/`atob`, which browsers and Node provide, otherwise; the text is the same either way, and `fromBase64` accepts what `atob` accepts. Neither uses the DOM. Persistence needs neither: IndexedDB stores the buffers.
+**Encoding for HTML (N38).** A snapshot holds `ArrayBuffer`s and a `Uint8Array`; a page carries text. `encodeSnapshot` returns the snapshot with each payload's mask and field data as base64 strings: a plain JSON value the app serialises with `JSON.stringify` next to its own data (the columns it renders, say), and `decodeSnapshot` restores it. The byte form survives what JSON loses: `NaN`, a legal field value, becomes `null` in JSON. `decodeSnapshot` checks the shape only: an object with the envelope's fields of the right JavaScript types (`format` 1 or 2, numbers, strings, arrays, `fields` an object of strings, and in each payload a `mask` and every `data` as a base64 string that `atob` accepts), and throws `TscacheError` for anything else, leaving its input unchanged. Both formats are carried (N114): a format 2 envelope and its payloads keep their `grid`, checked only to be an object with a string `unit`, and their slot indices as numbers, checked position by position, holes included (`rangeSlots` an array of exactly two numbers, `coverageSlots` an array whose every position holds such a pair, each payload's `startSlot` a number); each payload is rebuilt in its own format. That there is one pair for each coverage range, and what the grid and the indices mean, are `hydrate`'s to check. It restores the buffers and checks nothing more: lengths, ordering, alignment and the schema are `hydrate`'s to check against the cache. Escaping for a `<script>` element (every `<` as `\u003c`) stays with the app, since it depends on how the page is built. Both functions use the native `Uint8Array.prototype.toBase64` and `Uint8Array.fromBase64` where the runtime has both (detected once, at load) and `btoa`/`atob`, which browsers and Node provide, otherwise; the text is the same either way, and `fromBase64` accepts what `atob` accepts. Neither uses the DOM. Persistence needs neither: IndexedDB stores the buffers.
 
-**Server rendering.** The server reads with an in-process client, `get(range, { snapshot: true })`. The page carries two forms of the answer: the result's columns, so the server's render and the browser's hydration render agree before any client exists, and the encoded snapshot, for the cache. The browser decodes the snapshot and calls `hydrate` before its first live read; that read then fetches only what the snapshot did not cover, typically the provisional tail. A page's snapshot is as old as the page. With a versioned dataset a stale snapshot is refused; a cache created without a version adopts the snapshot's, and the first response reporting a newer version clears it and is applied, with fetches then in flight re-issued once (N29). Without a version a seed is no staler than the server's render was. The helpers of the examples and integrations (`putSeeds`, `putCovered` and their encodings) are replaced by this API in the step that adds it (N39). A public reader that derives `GetResult` columns from a snapshot can be added later without changing the format (N38).
+**Server rendering.** The server reads with an in-process client, `get(range, { snapshot: true })`. The page carries two forms of the answer: the result's columns, so the server's render and the browser's hydration render agree before any client exists, and the encoded snapshot, for the cache. The browser decodes the snapshot and calls `hydrate` before its first live read; that read then fetches only what the snapshot did not cover, typically the provisional tail. A calendar cache in a zone adds one requirement: the server's zone data should be current (Node's ICU data), since `hydrate` refuses a snapshot whose anchors the browser's zone data places in other slots, and the page then fetches what the snapshot held. A page's snapshot is as old as the page. With a versioned dataset a stale snapshot is refused; a cache created without a version adopts the snapshot's, and the first response reporting a newer version clears it and is applied, with fetches then in flight re-issued once (N29). Without a version a seed is no staler than the server's render was. The helpers of the examples and integrations (`putSeeds`, `putCovered` and their encodings) are replaced by this API in the step that adds it (N39). A public reader that derives `GetResult` columns from a snapshot can be added later without changing the format (N38).
 
 ### 2.9 Memory budget and stats (N86–N105, step 121)
 
@@ -542,6 +605,34 @@ interface MemoryStats {
 - _Cost._ Without a budget, nothing per operation: no order is kept, nothing is counted, no pin is registered and no evicted coverage is kept; the orchestrator's check is a field read. With a budget, a read moves each page it overlaps in the order, a write also re-counts the bytes of the pages it touched, an orchestrated get registers and releases one pin, and an eviction costs a binary search, the removal of the page's segments, one coverage subtraction and one `covered` lookup, paid for by the memory it frees.
 - _Old workers (N101)._ Against a worker whose hello lists no `'memoryBudget'` feature (a worker script from before it) the client sends nothing, a development build warns once, `createClient` resolves without a budget, and `memoryStats()` rejects with `TscacheError`.
 
+### 2.10 Grid arithmetic for the page: `@anishbenji/tscache/grid` (N116, step 129)
+
+A page does grid arithmetic too: a view decides whether a `cacheChanged` range touches it by snapping its own range outward as a read does (§2.7), and a chart looks one bar past an edge or floors `now` to the forming bar. On a calendar grid a fixed step is wrong at every edge, so the package exports the arithmetic the engine itself uses, for both kinds of interval:
+
+```ts
+// '@anishbenji/tscache/grid': grid.ts and errors.ts only; no client, no engine.
+/** `range` as a cache reads it: snapped outward to the grid (N1). */
+function snapRange(
+  range: Range,
+  interval: number | CalendarInterval,
+  alignmentOffset?: number,
+): Range;
+/** The start of the slot that contains `t`: the grid point at or before it. */
+function slotStart(
+  t: number,
+  interval: number | CalendarInterval,
+  alignmentOffset?: number,
+): number;
+/** The start of the slot after the one that contains `t`. */
+function nextSlotStart(
+  t: number,
+  interval: number | CalendarInterval,
+  alignmentOffset?: number,
+): number;
+```
+
+They take a config's `interval` and `alignmentOffset` as given and validate them as `cache()` does (`ConfigError`, in `cache()`'s order: the calendar interval's fields, then the offset); a range or instant the cache would reject throws `InvalidRangeError`: a range as `get` rejects it, and for `slotStart` and `nextSlotStart` an instant that is not a finite number within ±(2^53 − 1) (a string or `NaN` included), one outside a calendar's domain, or one whose slot start, or next slot start, on a fixed grid is no safe integer. On a calendar grid's last slot `nextSlotStart` returns the end of the domain. `snapRange` equals the engine's `toMs(snapOut(range))`, and `slotStart` and `nextSlotStart` its two primitives (§4.1), on both kinds of grid. Calendar grids made through this entry share one context (§4.1) per realm, under §4.1's one rule: the context holds a call's grid only once the whole call has succeeded, so a call rejected for its interval, its offset, its range or its instant holds none and moves none. The shared context holds at most 64 grids, the least recently used dropped first: a page may pass any number of descriptors, a zone in every spelling among them, and each is a grid as written (N112). An application that never imports the entry pays nothing for it.
+
 ## 3. RPC protocol
 
 ### 3.1 Handshake (locked)
@@ -555,10 +646,10 @@ const PROTOCOL_VERSION = 1;
 // worker per connection (N23) and prefixes the client's request ids (§2.7).
 // lock names the Web Lock a SharedWorker holds for its lifetime (N32);
 // absent where there is none. features lists the optional features the
-// worker offers (N79, amended 2026-11-16; 'memoryBudget' since N101);
-// absent from older workers:
+// worker offers (N79, amended 2026-11-16; 'memoryBudget' since N101,
+// 'calendar-grid' since N119); absent from older workers:
 { t: 'hello', protocol: 1, lib: '0.1.0', clientId: 'c1', lock?: 'tscache-worker:<uuid>',
-  features?: ['cacheChanged', 'memoryBudget'] }
+  features?: ['cacheChanged', 'memoryBudget', 'calendar-grid'] }
 // client → worker (also carries fetcher config so the worker can import it):
 { t: 'init', protocol: 1, fetcher?: { module: string, context?: unknown } }
 // worker → client:
@@ -617,7 +708,10 @@ SharedWorker: one RPC server, N ports; `evt` fans out to all ports, except `cach
 The same self-describing structure is the RPC wire format, the future IndexedDB persistence value, and the SSR hydration payload serialized into HTML. As built, all three carry it inside a snapshot (§2.8): a `get` result's snapshot and a `hydrate` request cross a port with it, while ordinary `get` and `put` carry plain columns (§3.3); each persisted page record holds one (§4.10.2, shipped with persistence); and the SSR payload is an encoded snapshot. Every design change must keep all three viable.
 
 ```ts
-interface DenseSegmentPayload {
+type DenseSegmentPayload = FixedSegmentPayload | CalendarSegmentPayload;
+
+/** A cache on a fixed grid. */
+interface FixedSegmentPayload {
   format: 1; // payload schema version (persistence requirement)
   layout: "dense"; // future: 'columnar', ...
   start: number; // aligned first-slot timestamp
@@ -627,7 +721,21 @@ interface DenseSegmentPayload {
   mask: Uint8Array; // ceil(count/8) bytes, 1 bit per slot
   fields: { name: string; dtype: Dtype; data: ArrayBuffer }[];
 }
+
+/** A cache on a calendar grid (N114, amended 2026-11-21). */
+interface CalendarSegmentPayload {
+  format: 2;
+  layout: "dense";
+  start: number; // the start of the first slot
+  count: number; // slot count; slot i is the i-th slot after the slot of start
+  grid: ResolvedCalendarInterval; // in place of interval and alignmentOffset
+  startSlot: number; // the slot index the writer gave start (N113)
+  mask: Uint8Array;
+  fields: { name: string; dtype: Dtype; data: ArrayBuffer }[];
+}
 ```
+
+**Two formats, one structure (amended 2026-11-21, user decision 83, N114).** A fixed cache writes format 1, byte for byte as before; a calendar cache writes format 2, whose rule for slot `i` is what the decoder always computed (the slot of `start`, then `count` slots from it). A reader accepts the format of its own grid and refuses the other, and an engine from before format 2 refuses it as an unsupported format, never misreading it. The invariant holds: one self-describing structure for RPC, IndexedDB and server rendering. The key order above is part of each format: writers (`transferPayload`, `encodeSnapshot`) and `decodeSnapshot` list the keys in it, so the JSON text of a snapshot, which a server-rendered page carries and an application may hash, is a function of the data; a format 1 payload's text is what 0.2.0 wrote.
 
 A `Snapshot` (§2.8, N34) is a set of these payloads, clipped to a request, in an envelope naming the grid, the schema, the dataset version, the watermark and the coverage: the SSR hydration payload of this invariant, and the cache record of the persistence sketch in `docs/roadmap.md`.
 
@@ -641,13 +749,15 @@ Dependency rule: `engine/*`, `grid`, `coverage`, `segment/*` import nothing from
 types.ts            public shared types (Range, Dtype, CacheConfig, GetResult, Miss, events,
                     Snapshot, HydrateResult, EncodedSnapshot, DenseSegmentPayload)
 errors.ts           §2.6 taxonomy
-grid.ts             ms↔slot conversion — the single fencepost site (N1, N9)
+grid.ts             ms↔slot conversion — the single fencepost site (N1, N9): fixed grids, and
+                    calendar grids with their zone lookups and tables of slot starts (N118)
 coverage.ts         coverage index on slot ranges: sorted disjoint ranges, binary
                     search, splice on merge, subtraction (invalidate), miss computation
 snapshot.ts         encodeSnapshot/decodeSnapshot: a Snapshot as a JSON value and back (N38);
                     imports types and errors only, so the '.' entry carries no engine code
 segment/
-  types.ts          Segment interface: lookup / slice / mergeFrom / transferPayload
+  types.ts          Segment interface: extent / size / bytes / lookup / slice / countIn /
+                    sliceInto / mergeFrom / transferPayload (§4.2)
   assert.ts         programming-error checks shared by segments and the merge path
   dense.ts          DenseSegment: implicit timestamps, presence bitmask, typed arrays
   payload.ts        DenseSegmentPayload encode/decode (one-format-three-uses lives here)
@@ -667,6 +777,9 @@ engine/
                     persistence reaches it through (§4.10.5)
   restore.ts        CacheState.restore's implementation, installed by the persister, so
                     only the lazily loaded persistence chunk carries it (§4.10.5, §4.10.8)
+  memory.ts         MemoryBudget: an engine's byte budget — the counted total, the use order
+                    of pages, the pins of pending gets, and enforcement by evicting the least
+                    recently used unpinned pages (§2.9, §4.6, N86–N105)
   emitter.ts        minimal typed emitter for engine events (engine/ must not import client/)
   engine.ts         Engine: caches map keyed by id, get-or-create with config conflicts (N4,
                     N20), cacheId-first ops, cacheCleared events; pure in-process API —
@@ -711,6 +824,8 @@ entries/
                     (the worker global attached as a port, addEventListener('message')) entry
   engine.ts         './engine' → Engine direct (SSR/Node, tests)
   fetcher.ts        './fetcher' → fetcher author surface: types + AuthInvalidError, zero other imports (N6)
+  grid.ts           './grid' → snapRange / slotStart / nextSlotStart for the page (§2.10, N116);
+                    imports grid.ts and errors only
   vite.ts           './vite' → fetcherUrl(), the Vite plugin for the fetcher module (N40, N41);
                     imports Vite's types only, so it adds no runtime dependency
 vite/
@@ -728,20 +843,42 @@ vite/
 
 `package.json` exports: `.`, `./worker`, `./engine` (locked) + `./fetcher` (N6, accepted 2026-06-11) + `./vite` (N40, 2026-10-23; `vite ^8.0.0` as an optional peer dependency, the one major the tests build with). ESM-only (resolved decision #6). `tsconfig` strict with `isolatedDeclarations: true`.
 
-### 4.1 Internal contracts — `grid.ts` and `coverage.ts` (N9, approved 2026-10-03)
+### 4.1 Internal contracts — `grid.ts` and `coverage.ts` (N9, approved 2026-10-03; calendar grids N106–N124, 2026-11-21)
 
-Internal modules: not exported from any package entry. Contract tests (step ③) pin this surface.
+Internal modules: not exported from any package entry, except that the `./grid` entry (§2.10) wraps three of `grid.ts`'s functions. Contract tests (step ③, and step 129 for calendar grids) pin this surface.
 
-**Supported domain: safe integers.** Timestamps and slot indices are safe integers (|x| ≤ 2^53 − 1), so every `± 1` on a slot and every ms↔slot conversion is exact. Values outside the domain are rejected at the boundary as described below (user-confirmed 2026-10-03).
+**Supported domain: safe integers.** Timestamps and slot indices are safe integers (|x| ≤ 2^53 − 1), so every `± 1` on a slot and every ms↔slot conversion is exact. Values outside the domain are rejected at the boundary as described below (user-confirmed 2026-10-03). A calendar grid's domain is narrower (below).
 
 ```ts
 // grid.ts — every ms↔slot conversion in the codebase goes through here (N1).
-/** Built from ResolvedCacheConfig: interval a positive safe integer,
- *  alignmentOffset in [0, interval). */
-interface Grid {
+/** A fixed grid. The functions do not validate it: they assume interval is a
+ *  positive safe integer and alignmentOffset an integer in [0, interval),
+ *  which config resolution guarantees (resolveGridFields, below). */
+interface FixedGrid {
   interval: number;
   alignmentOffset: number;
 }
+/** A calendar grid (N106): the resolved descriptor and the grid's own state
+ *  (arithmetic, zone lookups, tables). One object per descriptor and context. */
+interface CalendarGrid {
+  readonly interval: ResolvedCalendarInterval;
+  readonly alignmentOffset: 0;
+  readonly calendar: Calendar; // opaque outside grid.ts
+}
+type Grid = FixedGrid | CalendarGrid;
+/** A cache's grid: its own fixed grid, or the calendar grid of its descriptor
+ *  in `context` (default: one shared by callers that name none). CacheState
+ *  holds it as `grid`; every conversion takes it, never the config. */
+function gridOf(
+  config: Pick<ResolvedCacheConfig, "interval" | "alignmentOffset">,
+  context?: CalendarGridContext,
+): Grid;
+/** Validates a config's grid fields and applies their defaults (§2.2);
+ *  ConfigError naming the field. Used by config resolution and by './grid'. */
+function resolveGridFields(
+  interval: unknown,
+  alignmentOffset: unknown,
+): Pick<ResolvedCacheConfig, "interval" | "alignmentOffset">;
 /** Inclusive on both ends; safe-integer slot indices; start <= end. Slots
  *  may be negative (timestamps before the grid origin). */
 interface SlotRange {
@@ -749,17 +886,41 @@ interface SlotRange {
   end: number;
 }
 
+/** The two primitives; every function below reduces to them.
+ *  floorSlot: the slot at or before t. startOf: the instant a slot starts at
+ *  (msOf is the same function). On a fixed grid both are arithmetic. On a
+ *  calendar grid they check the domain (below) and throw InvalidRangeError. */
+function floorSlot(t: number, g: Grid): number;
+function startOf(slot: number, g: Grid): number;
+
 /** True when t is a safe integer lying exactly on the grid:
  *  (t - alignmentOffset) % interval === 0 in exact integer arithmetic, for
  *  every safe-integer t (the literal floating-point expression is not the
- *  definition: its subtraction can round near ±2^53). False for anything
- *  else, including fractions, NaN and |t| >= 2^53. */
+ *  definition: its subtraction can round near ±2^53). On a calendar grid:
+ *  t is a safe integer and startOf(floorSlot(t)) === t. False for anything
+ *  else, including fractions, NaN, |t| >= 2^53 and an instant outside a
+ *  calendar's domain. */
 function isAligned(t: number, g: Grid): boolean;
 /** Slot of an aligned timestamp. Throws RangeError if t is not aligned —
  *  callers validate first (put validation reports PutError 'misaligned'). */
 function slotOf(t: number, g: Grid): number;
-/** Timestamp of a slot: alignmentOffset + slot * interval. */
+/** Timestamp of a slot: alignmentOffset + slot * interval on a fixed grid;
+ *  startOf on a calendar grid. */
 function msOf(slot: number, g: Grid): number;
+/** Whether a slot has a timestamp callers may use: a safe-integer one on a
+ *  fixed grid, a slot of the domain on a calendar grid. */
+function inDomain(slot: number, g: Grid): boolean;
+/** The two bulk conversions, which decide the grid kind once per call: a
+ *  put's first n timestamps into slots (returns the index of the first that
+ *  is not aligned, or n), and a read's ascending slots into timestamps, in
+ *  place. On a calendar grid each applies the fill rule (below) first. */
+function slotsOf(
+  timestamps: ArrayLike<number>,
+  n: number,
+  g: Grid,
+  out: Float64Array,
+): number;
+function msInto(slots: Float64Array, g: Grid): void;
 /** get/invalidate input → slots, snapped OUTWARD: start floors to the slot at
  *  or before it, end ceils to the slot at or after it. Never narrower than the
  *  input. Throws InvalidRangeError if either endpoint is not a finite number
@@ -773,7 +934,8 @@ function snapOut(r: Range, g: Grid): SlotRange;
  *  InvalidRangeError if either endpoint is not a finite number within
  *  ±(2^53 − 1) or if start > end. */
 function snapIn(r: Range, g: Grid): SlotRange | undefined;
-/** Slot range → inclusive ms Range (GetResult.coverage and misses). */
+/** Slot range → inclusive ms Range (GetResult.coverage and misses). On a
+ *  calendar grid: InvalidRangeError for a slot outside the domain. */
 function toMs(r: SlotRange, g: Grid): Range;
 /** First slot whose timestamp is at or after t (the watermark's slot: points
  *  at t >= finalizedUntil are provisional, §2.4). Throws InvalidRangeError
@@ -800,6 +962,26 @@ class CoverageIndex {
   clear(): void;
 }
 ```
+
+**Calendar grids (N106–N124; user decision 83, step 129).** `snapOut`, `snapIn`, `slotAtOrAfter` and `toMs` keep their contracts on a calendar grid, with "the grid point at or before" read on the calendar (N1, N13 and the watermark keep their meaning); only the two primitives differ. All of it is in `grid.ts` (N118): the calendar arithmetic, the `Intl` lookup and the tables of slot starts. Every other module still sees integer slots only.
+
+- **Slot numbering.** Slot 0 is the unit that contains the local date 1970-01-01 in the grid's zone: for days, the local day number since that date; for weeks, the week containing it (a Thursday), so with `weekStart: 1` slot 0 starts on Monday 1969-12-29; for months, `(year − 1970) × 12 + (month − 1)`; for quarters, `(year − 1970) × 4 + ⌊(month − 1) / 3⌋`; for years, `year − 1970`. The numbering depends only on the descriptor, so page keys (N15) are stable across changes of zone rules.
+- **Nominal start and resolution (N111).** A slot's _nominal start_ is its first local date at `at`, read as if the zone were UTC: calendar arithmetic on the descriptor, the same in every runtime. A _resolution_ turns a nominal start into the instant at which the zone's clock reads that local time, in at most three offset lookups: the offset a day before the nominal start gives a first instant; if the offset at that instant is another, that one gives a second; if neither instant reads the local time, the time does not exist and the first stands. So a local time that a transition skips resolves after the shift (02:30 becomes 03:30), and one that occurs twice to the earlier instant, as `Temporal`'s `"compatible"` wherever at most one transition lies within a day of the local time. The offset comes from the runtime's `Intl` (N108): the `longOffset` time-zone name of an `en-US` formatter, which is kept by the name the runtime itself gives the zone (`resolvedOptions().timeZone`) and only for a grid that is made, so the formatters held are bounded by the zones the runtime knows, however many spellings of a zone a page sends; validating a config builds a formatter and throws it away. A grid in `"UTC"` resolves by identity and looks nothing up.
+- **`startOf(k)` (N123).** The resolution of slot `k`'s nominal start, unless that instant is not before the resolution of slot `k + 1`'s, and then one millisecond before that. The rule looks one slot ahead and no further, so a start takes two resolutions (at most six lookups), and `startOf` is strictly increasing for any zone data whose offsets are each under a day. In today's zone data the exception applies exactly to the day slot of a local date a zone skipped (Pacific/Apia 2011-12-30, Pacific/Kwajalein 1993-08-21): a real slot with a start of its own, which holds a point only if a put stamps one at that instant.
+- **`floorSlot(t)`.** From the candidate slot of `t`'s UTC date it steps until `startOf(k) <= t < startOf(k + 1)`: at most one slot above the candidate and two below it, since every offset is under a day (with `{ unit: "day", zone: "America/Los_Angeles", at: "18:00" }` in winter, the answer for 00:30 UTC is two slots below). One call shares its resolutions between the starts it compares, so it takes at most four (12 lookups): this is the cost of converting an anchor, `isAligned` and `slotOf` together, or `slotAtOrAfter` for a watermark. The contract tests assert the step bound. It returns at once when `t` is the candidate's own start: starts strictly increase, so no other start has to be compared. **The starts a conversion needs** are those of the slots its `floorSlot` visits: the candidate's, and, unless `t` is that start, each further slot until it has the start at or before `t` and, going up, the one after it. Computed alone, `v` consecutive starts cost `v + 1` resolutions, since neighbours share one. A put's timestamp, which is a slot start, therefore costs 2 resolutions for the 1 start it needs when its candidate is its slot (New York at 09:30, whose slots start on their own UTC date), 3 for 2 when its slot is the one above or below its candidate (Tokyo at 03:00, whose slots start at 18:00 UTC of the day before), and 4 for 3 when its slot is two below. An instant that is no slot's start needs the two starts around it and those it stepped over: 3 or 4 resolutions for 2 or 3 starts. Each is within the bound of N124, two resolutions for each start a conversion needs: the bound counts the starts needed, not the timestamps converted.
+- **Supported domain (N117), checked once, inside the two primitives.** The domain is the slots `kMin` to `kMax` whose first local date lies in the years 1–9999; both follow from the descriptor by arithmetic. `floorSlot(t)` first checks `t` against an arithmetic _outer bound_, from the nominal start of `kMin` minus one day to the nominal start of `kMax + 1` plus one day, and throws `InvalidRangeError` before any lookup outside it; inside it, it throws when the slot it finds lies outside `kMin`–`kMax`, after at most 12 lookups. `startOf(k)` returns a start for `kMin − 2` to `kMax + 2`, the two slots beyond each end being what `floorSlot` steps over at the edges, and throws `InvalidRangeError` for any other `k` before any lookup; resolutions are therefore made for `kMin − 2` to `kMax + 3` only, each lookup at an instant within a day of one of those slots' nominal starts, all valid for `Intl`. No caller checks the domain itself: `snapOut`, `slotAtOrAfter` and `toMs` reject with `InvalidRangeError` (an end that is no slot start is ceiled, so the last range end that succeeds is `startOf(kMax)`), `isAligned` turns it into false (a put reports `'misaligned'`), and the checks that asked whether a slot's timestamp is a safe integer ask `inDomain`. A `RangeError` out of `Intl` can then only be a bug. A week grid's last slot, the week that holds 9999-12-31, can run up to seven days into the year 10000 and is inside the outer bound.
+- **Tables of slot starts (N124).** A context holds, for all calendar grids made in it, tables of the starts of 512 consecutive slots (a block, `⌊k / 512⌋`) in one least-recently-used order with a fixed capacity (256 tables, about 1 MB); a block at an edge of the domain holds only the slots within the margin `startOf` accepts. Equal resolved descriptors give the same grid object, so every cache of a descriptor shares its tables, and `clear`, `clearAll` and eviction (M3) have nothing to drop: the tables hold no points and are a pure function of the descriptor and the runtime's zone rules. They are object overhead, outside M3's count. **The fill rule:** a table is computed whole only for a conversion that needs more than half of its slots at once; every other start is computed alone and not kept. The two conversions that know their slots before they convert them apply it, one block at a time: `msInto` takes the run of the read's slots that lie in one block, and `slotsOf` the run of the put's timestamps whose candidate slots do, computes that block's table when the run needs more than half of it, and converts the run before it looks at the next. A put counts candidate slots, which can lie one or two off the timestamps' own slots: where the candidate is one below, 257 timestamps from a block's first slot count 256 for that block and fill no table, and their starts are computed alone, within the same bound (`floorSlot`, above). A table is therefore used before a later fill can evict it, however few tables the context holds. A put rejected for a misaligned timestamp fills no table past that offender, since the conversion stops there. One rejected for its order (an unsorted or a repeated timestamp) is found after the aligned timestamps were converted (§4.3), so the tables its runs need may all be filled; that is the cost of converting the batch, within the same bound. A range's ends, a watermark and `floorSlot`'s neighbours are lone starts. A table that is held answers every lookup, and every use moves it to the back of the context's order, a grid's repeated use of one table included (the table used last costs one comparison), so the table evicted is the least recently used of all grids. Filling a table takes one resolution per slot and one more, so no conversion makes more than two resolutions for each start it needs, wherever its slots lie; a load or a `hydrate`, which convert a record's anchors and nothing else (§4.5), fill no table. When the context evicts a table, the grid's shortcut to its last table is cleared with it, so nothing references the buffer.
+- **When a context holds a grid: only once a call that needed it has succeeded.** A _context_ is what the calendar grids of one owner share: the zone lookups, the tables and their order. An engine makes its own with its first calendar cache; the `./grid` entry and a cache constructed without an engine use one shared per realm. A context _holds_ a grid when it keeps it for the next caller with the same descriptor as written, which is what makes equal descriptors share their tables. The rule is one, and one function applies it (`heldAfter`, through `withGrid` and `withGridOf`): the grid a call needs is looked up or made first, without being held; the call runs; and only if it returns does the context hold the grid, as the most recently used. A call that throws, for any reason and at any point, leaves the context exactly as it was: a grid made for it is held by nobody, and a grid the context held before keeps its place in the order, since looking a grid up does not move it. The entry points that hold a grid, and the call each one's holding waits for:
+
+  | Entry point                                       | The call that must succeed                                                                        | Context        |
+  | ------------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------- |
+  | `Engine.cache()`                                  | the cache's construction, the watermark's slot included, after the config resolved and passed N20 | the engine's   |
+  | `new CacheState(config)` without an engine's grid | finding the watermark's slot                                                                      | the shared one |
+  | `snapRange`, `slotStart`, `nextSlotStart` (§2.10) | the whole call: the interval's fields, the offset, and the range or instant                       | the shared one |
+
+  Everything else holds nothing. `gridOf(config)` and `createCalendarGrid(descriptor)`, the fallbacks of code that is handed a config and no grid (`SegmentStore`, `validateBatch`, `takeSnapshot`, `validateSnapshot` called directly, and the tests), return the grid the context holds for the descriptor or a new one that nobody holds. `restore`, the records, the orchestrator and the RPC server take the cache's own grid and make none. So an engine's context holds one grid for each descriptor of the caches it has, and no other. The shared context is handed descriptors by the page without limit, so it also has a bound: at most 64 grids, the least recently used dropped first. A dropped grid gives up its tables, its shortcut to the last one included, and goes on converting for whoever still has it; the next successful call for its descriptor holds a new grid, validated again. Because only successful calls hold or move a grid, rejected calls can neither grow a context nor push a live view's grid out of the 64.
+- **Fixed grids are untouched.** Their functions keep their arithmetic; each conversion function tests the grid kind first, and the two bulk conversions decide it once per call. A fixed grid and a `"UTC"` calendar never look an offset up.
+- **Test seam.** `createCalendarGridContext({ offsetAt, onFloorStep, tableCapacity, lookupBudget })` makes a context with injected zone rules (an offset function of the zone and the instant), a spy on `floorSlot`'s steps, and lowered limits; `createCalendarGrid(descriptor, context)` gives a grid in it, and `resolveCalendarStart(nominal, grid)` one resolution. `useCalendarGridContext(engine, context)` (`engine/engine.ts`) hands a context to an engine before its first calendar cache. None of them is exported by a package entry: `EngineOptions` is public and names no such option.
 
 Ownership: `CoverageIndex` never shares range objects with its callers. It does not keep an object passed to it, and `covered()`, `gaps()` and `ranges()` return fresh objects, so callers may mutate or keep results freely.
 
@@ -890,8 +1072,8 @@ Rules:
 - **Slot cap.** `slotCap` is a positive integer up to 2^31 − 1 (N12); the constructor throws `RangeError` otherwise. `mergeFrom` throws `RangeError` if the extent after the merge would span more than `slotCap` slots. Where to split (gap-split K, segment selection) is merge-path policy (step ⑤); the segment only refuses to exceed its own limit. A segment grows in either direction.
 - **Atomic.** `mergeFrom` validates, and allocates any buffers it needs, before it mutates; when it throws, including on an allocation failure, the segment is unchanged.
 - **Programming errors** throw `RangeError`: a slot or range that is not made of safe integers or has start > end; a `sliceInto` offset that is not a non-negative safe integer, or an `out` too short to hold the points from it (checked before anything is written); `points` whose slots are not strictly ascending safe integers, whose field names are not exactly the schema's, or whose field arrays differ in length from `slots`; a point outside `authority`; `transferPayload()` on an empty segment. None is reachable from consumer input, which put validation rejects first.
-- **Payload layout.** `start` is the timestamp of `extent.start`; `count` is the extent's slot count; `mask` is a `Uint8Array` of exactly `ceil(count / 8)` bytes in which slot `i` of the extent is bit `i & 7` of byte `i >> 3`, with unused trailing bits zero; `fields` follows the schema's declaration order, each `data` an `ArrayBuffer` of exactly `count × bytes-per-element`, with the values of absent slots zero. Equal segments therefore produce equal payloads. Field data is little-endian, which is the native order of every supported platform; no byte swapping is done. The payload is a plain structured-cloneable object.
-- **Decoding.** `segmentFromPayload` throws `TscacheError` with a descriptive message for an invalid payload: `format` other than 1, `layout` other than `'dense'`, `interval` or `alignmentOffset` differing from the grid, `start` not aligned, `count` not a positive safe integer or greater than `slotCap`, a mask of the wrong type or length or with trailing bits set, fields that do not match the schema's names and dtypes with correctly sized buffers, or a `start` and `count` whose last slot has no safe-integer timestamp. Field entries may come in any order (a schema declared in a different key order names the same fields); re-encoding restores schema order. Values stored under absent mask bits are ignored, since presence is decided by the mask alone; re-encoding writes zeros. The decoded segment's extent is the tight bounds of the present points, and `segmentFromPayload(s.transferPayload(), …)` is equal to `s` in every observable way.
+- **Payload layout.** `start` is the timestamp of `extent.start`; `count` is the extent's slot count; `mask` is a `Uint8Array` of exactly `ceil(count / 8)` bytes in which slot `i` of the extent is bit `i & 7` of byte `i >> 3`, with unused trailing bits zero; `fields` follows the schema's JavaScript key order (`Object.entries`: canonical array-index names, such as `"0"` and `"12"`, first, ascending, then the others in the order they were added, `"-1"` and `"01"` among them), each `data` an `ArrayBuffer` of exactly `count × bytes-per-element`, with the values of absent slots zero. Equal segments therefore produce equal payloads. Field data is little-endian, which is the native order of every supported platform; no byte swapping is done. The payload is a plain structured-cloneable object.
+- **Decoding.** `segmentFromPayload` throws `TscacheError` with a descriptive message for an invalid payload: a `format` other than its grid's (1 for a fixed grid, 2 for a calendar grid, N114), `layout` other than `'dense'`, `interval` or `alignmentOffset` differing from the grid (format 1) or a `grid` that does not name the cache's calendar interval (format 2), `start` not aligned, a format 2 `startSlot` that is not the slot of `start` (N113), `count` not a positive safe integer or greater than `slotCap`, a mask of the wrong type or length or with trailing bits set, fields that do not match the schema's names and dtypes with correctly sized buffers, or a `start` and `count` whose last slot has no safe-integer timestamp (on a calendar grid: lies outside the domain, §4.1). `start` is converted once, so decoding a format 2 payload costs one anchor's conversion. Field entries may come in any order (a schema declared in a different key order names the same fields); re-encoding restores schema order. Values stored under absent mask bits are ignored, since presence is decided by the mask alone; re-encoding writes zeros. The decoded segment's extent is the tight bounds of the present points, and `segmentFromPayload(s.transferPayload(), …)` is equal to `s` in every observable way.
 
 Out of step ④ by design: gap-split K and segment selection (step ⑤), the overlap-difference warning (step ⑤ builds it from `slice`, so it costs nothing when off), ms conversion of results and concatenation across segments (step ⑥).
 
@@ -1031,16 +1213,34 @@ interface CachePutResult {
   cleared: boolean;
 }
 
+/** What the engine observes and provides; every hook is optional. */
 interface CacheStateHooks {
   /** Called once when a put's version mismatch has cleared the cache: after
    *  the put was applied, or, if its write then failed, before the error
    *  propagates. */
   onVersionClear?: () => void;
+  /** After each change to what persistence stores (§4.10.4). */
+  onChange?: (change: CacheChange) => void;
+  /** Once at the end of every mutating call that passed validation (§4.10.4). */
+  onMutate?: () => void;
+  /** Whether a reader listens: gates the call's reader change (§2.7, M7). */
+  hasReaders?: () => boolean;
+  /** One mutating call's reader change, in slots, once the call ended (§2.7). */
+  onReaderChange?: (change: ReaderChange) => void;
+  /** The engine's memory budget (§2.9); absent without one. */
+  memory?: CacheMemory;
+  /** Once per evicted page, with the coverage that went, in slots (N96). */
+  onEvict?: (covered: SlotRange[]) => void;
+  /** The cache's grid (§4.1); default gridOf(config). The engine passes it,
+   *  so that its calendar caches share one context. */
+  grid?: Grid;
 }
 
 class CacheState {
   constructor(config: ResolvedCacheConfig, hooks?: CacheStateHooks);
   readonly config: ResolvedCacheConfig;
+  /** The config's grid: what every ms↔slot conversion of the cache takes. */
+  readonly grid: Grid;
   /** The dataset version in force: config.version, then whatever puts report. */
   readonly version: string | undefined;
   /** Points at t >= finalizedUntil are provisional; undefined: nothing is. */
@@ -1053,12 +1253,24 @@ class CacheState {
   snapshot(range: Range): Snapshot;
   /** §2.8: applies a snapshot where nothing is known; one synchronous call. */
   hydrate(snapshot: Snapshot): HydrateResult;
+  /** §4.10.5: applies stored records into a cache that knows nothing. */
+  restore(stored: { cache: unknown; pages: readonly unknown[] }): RestoreResult;
   /** Covered sub-ranges of the range (snapped outward), in ms, without
    *  reading points; the orchestrator's flank check uses it. */
   coverage(range: Range): Range[];
   invalidate(range: Range): void;
-  clear(): void;
+  /** `notify` runs after the call's persistence signals: the engine's
+   *  `cacheCleared 'manual'` (§4.6). */
+  clear(notify?: () => void): void;
   setFinalizedUntil(t: number): void;
+
+  // Memory budget (§2.9; "Eviction" below): what the engine's budget calls.
+  readonly bytes: number;
+  pageBytes(page: number): number;
+  forEachPage(slots: SlotRange | undefined, fn: (page: number) => void): void;
+  holdsProvisional(page: number): boolean;
+  evict(page: number): number;
+  flushEvicted(): void;
 }
 ```
 
@@ -1074,14 +1286,14 @@ Rules:
 - **Errors.** `get`/`invalidate` throw `InvalidRangeError` for a malformed range (as `snapOut`), `setFinalizedUntil` as `slotAtOrAfter` does; `put` throws as `validateBatch` does; a `config.finalizedUntil` that `slotAtOrAfter` rejects makes the constructor throw `ConfigError`. Nothing is changed by a call that throws, except the recorded coverage withdrawal above.
 
 - **Snapshot (N34, N36).** `snapshot(range)` builds, from the current state in one synchronous call: `range` = `toMs(snapOut(range))`; `coverage` = `covered(request)` in ms, ascending; `version` and `finalizedUntil` as the getters report them (omitted when undefined); `fields`, a copy of the schema; `segments`: for each segment of the store, ascending, that has at least one present point inside the request, the payload (§4.2 layout) of a segment holding exactly the present points of that segment inside the request, so `start` is the first of them and `count` their tight span. An implementation may build each from `slice()` into a fresh `DenseSegment`. Payloads are fresh buffers; `coverage` and `range` are fresh objects. Because the store's layout is a function of the present points (N15) and the extent is tight, the snapshot is a function of the state and the request. `get(range, { snapshot: true })` adds this snapshot to the result from the same state: its `coverage` equals the result's, and the payloads' present points, concatenated, are the result's `timestamps` and `fields`. Errors: `InvalidRangeError` as `get`.
-- **Hydrate: validation (N35).** Before anything changes, in this order, each failure throwing `TscacheError` whose message starts with `invalid snapshot:` (a payload keeps `segmentFromPayload`'s own message): (1) the snapshot is an object with `format === 1`, `interval` and `alignmentOffset` equal to the grid's, and `fields` an object naming exactly the schema's fields with equal dtypes; (2) `range` is an object whose `start` and `end` are aligned safe-integer timestamps (`isAligned`) with `start <= end`; its slots are the request, and an unaligned endpoint is a malformation (§2.8: a snapshot is never snapped), unlike a call argument; (3) `version`, when present, is a non-empty string, and `finalizedUntil`, when present, is accepted by `slotAtOrAfter` (as `put` validates `meta`); (4) `coverage` is an array of ranges with aligned safe-integer endpoints and `start <= end`, each inside the request, ascending, disjoint and not adjacent (as `CoverageIndex.ranges()` yields them), and, when `finalizedUntil` is present, each ending below `w = slotAtOrAfter(finalizedUntil)`, the snapshot's own `volatileFrom` (N69): a coverage range whose last slot is `w` or later fails with a message naming it and the watermark (for example `invalid snapshot: coverage[0] reaches past finalizedUntil 30`), checked in the same pass, so a coverage range that breaks an earlier rule reports that rule; a snapshot without `finalizedUntil` is not bound by it; (5) `segments` is an array of payloads, each accepted by `segmentFromPayload` with this cache's options and with its extent inside the request, their extents ascending and disjoint. Anything else, including a missing field or a value of the wrong type, fails. A failure inside the snapshot is a `TscacheError` even where the same value as a call argument would be an `InvalidRangeError`. Field values are not otherwise checked: a payload's data are arrays of the field's own dtype, which cannot hold a value N68 rejects (as a typed array of the field's dtype passes `put` unchecked), and `NaN` is legal in a float field, as in `put`. Rule (4)'s watermark bound (N69) is the snapshot analogue of N19: a put is clipped to its own watermark, while a snapshot is made by the library and crosses a trust boundary (a server's HTML), so a snapshot that claims authority over slots it calls provisional is corrupt and is refused whole, never clipped. A snapshot it rejects fails `hydrate` as any malformed snapshot does: it throws before anything changes, the version and watermark included, and nothing is applied. A snapshot whose points (not coverage) lie at or after its watermark is legal: those are the provisional tail §2.8 leaves unapplied. Stored records (§4.10.5 step 5) reuse this validation, and a page snapshot never carries `finalizedUntil`, so the rule binds no page record and changes no load: coverage of a page at or after the cache record's watermark is already clipped there, with `rewrite: true` (§4.10.5 step 6).
+- **Hydrate: validation (N35).** Before anything changes, in this order, each failure throwing `TscacheError` whose message starts with `invalid snapshot:` (a payload keeps `segmentFromPayload`'s own message): (1) the snapshot is an object in the format of the cache's grid, for a fixed grid `format === 1` with `interval` and `alignmentOffset` equal to the grid's, for a calendar grid `format === 2` with a `grid` that is an object naming exactly the cache's calendar interval, field by field (N114), and `fields` an object naming exactly the schema's fields with equal dtypes; (1b) on a calendar grid in a zone other than `"UTC"`, the snapshot's charge (24, plus 36 for each entry of `coverage`, 12 for each entry of `segments` and 12 when `finalizedUntil` is present; an entry list that is not an array counts as empty, and a later rule refuses it) is at most the context's lookup budget, 524,288 (N113): checked here, before the first rule that converts an instant, so a refusal makes no offset lookup, also for a snapshot that later rules would refuse; (2) `range` is an object whose `start` and `end` are aligned safe-integer timestamps (`isAligned`) with `start <= end`; its slots are the request, and an unaligned endpoint is a malformation (§2.8: a snapshot is never snapped), unlike a call argument; (3) `version`, when present, is a non-empty string, and `finalizedUntil`, when present, is accepted by `slotAtOrAfter` (as `put` validates `meta`); (4) `coverage` is an array of ranges with aligned safe-integer endpoints and `start <= end`, each inside the request, ascending, disjoint and not adjacent (as `CoverageIndex.ranges()` yields them), and, when `finalizedUntil` is present, each ending below `w = slotAtOrAfter(finalizedUntil)`, the snapshot's own `volatileFrom` (N69): a coverage range whose last slot is `w` or later fails with a message naming it and the watermark (for example `invalid snapshot: coverage[0] reaches past finalizedUntil 30`), checked in the same pass, so a coverage range that breaks an earlier rule reports that rule; a snapshot without `finalizedUntil` is not bound by it; (5) `segments` is an array of payloads, each accepted by `segmentFromPayload` with this cache's options and with its extent inside the request, their extents ascending and disjoint; a format 2 payload must also carry a `startSlot` equal to the slot of its `start` (§4.2); (6) for format 2 only (N113): `rangeSlots` is an array of exactly two numbers, the slots of `range.start` and `range.end`, and `coverageSlots` an array with exactly one such pair for each coverage range, in order, each the slots of that range's two ends; a missing field, another shape, a hole, or an index that is not the slot its instant has under this engine's zone data fails with a message naming the field. Each anchor is converted once: rules 2, 4 and 5 keep the slots they find, and rule 6 compares them, so the lookups of a validation stay within the charge. The charge bounds the validation, and the application into a cache that knows nothing of the snapshot's coverage, where each coverage range is one part and its two ends are converted back once for the result. It does not bound the application into a cache that already covers stretches inside a coverage range: that range splits into one part more for each such stretch, and each part's two ends are converted for the result, at most 12 lookups a part. That work is in proportion to the receiver's own state, and is outside the charge and the budget by decision (N113; a load is not affected, since `restore` applies only into a cache that knows nothing, §4.10.5). Nor does the charge bound what the worker then tells its readers: while a tab is subscribed to the cache's `cacheChanged` (§2.7), the RPC server converts every range of the call's event, written, removed and evicted, to milliseconds once more, at most 12 lookups a range (§4.7). For a `hydrate` into a cache that knows nothing that is one written range for each coverage range, so its lookups are at most the charge plus 12 for each range of its event; a load sends no event. This too is the receiver's own work, in proportion to what the call changed and to who listens, and outside the charge. Anything else, including a missing field or a value of the wrong type, fails. A failure inside the snapshot is a `TscacheError` even where the same value as a call argument would be an `InvalidRangeError`. Field values are not otherwise checked: a payload's data are arrays of the field's own dtype, which cannot hold a value N68 rejects (as a typed array of the field's dtype passes `put` unchecked), and `NaN` is legal in a float field, as in `put`. Rule (4)'s watermark bound (N69) is the snapshot analogue of N19: a put is clipped to its own watermark, while a snapshot is made by the library and crosses a trust boundary (a server's HTML), so a snapshot that claims authority over slots it calls provisional is corrupt and is refused whole, never clipped. A snapshot it rejects fails `hydrate` as any malformed snapshot does: it throws before anything changes, the version and watermark included, and nothing is applied. A snapshot whose points (not coverage) lie at or after its watermark is legal: those are the provisional tail §2.8 leaves unapplied. Stored records (§4.10.5 step 5) reuse this validation, and a page snapshot never carries `finalizedUntil`, so the rule binds no page record and changes no load: coverage of a page at or after the cache record's watermark is already clipped there, with `rewrite: true` (§4.10.5 step 6).
 - **Hydrate: application (N35).** (1) Version precondition: both set and different → return `{ applied: [], skipped: 'version-mismatch' }` with nothing changed; cache unversioned and snapshot versioned → adopt it, no clear, no hook; snapshot unversioned → the cache's version is untouched. (2) Watermark: `finalizedUntil`, when present, advances the watermark exactly as a put's `meta.finalizedUntil` does (N17: a value at or below the current one is ignored). (3) Parts: for each coverage range, in order, subtract the cache's covered slots and, when the cache has a volatile region after step 2, the slots at or after `volatileFrom`; the pieces, ascending, are the parts. (4) For each part, ascending: the decoded present points inside it are written with the part as authority (`store.put(points, part)`, a replace, N11), then the part is recorded as coverage (`#cover`, which cannot clip it further). Points outside every part are not written. Warnings from `store.put` are dropped. (5) Result: `applied` = the parts in ms (`toMs`), ascending and disjoint; two parts are never adjacent, since covered or volatile slots separate them.
 - **Hydrate: failure part-way.** A write that fails (an allocation failure, §4.3) withdraws coverage for its part, as a put does, and rethrows; parts already applied stay, as do the version and watermark steps; the store is then as §4.3 describes after a failed put.
 - **Properties the contract tests pin.** (a) Round trip: for any state `S` and request `R`, hydrating `S.snapshot(R)` into an empty cache `E` of the same structural config, created without a version or watermark, gives `E.get(R)` whose `coverage` equals `S.get(R).coverage` and whose points are `S`'s points inside that coverage; `E.version` is `S.version` when set, and `E.finalizedUntil` is `S.finalizedUntil`. (b) Idempotence: hydrating the same snapshot again applies nothing. (c) Never overwrites: for a cache `C` that covers part of `R` with other values, `C.hydrate(S.snapshot(R))` leaves `C`'s covered points unchanged, and `applied` is exactly `S`'s coverage of `R` minus `C`'s coverage and `C`'s volatile region. (d) `get(R, { snapshot: true }).snapshot` deep-equals `snapshot(R)`. (e) `decodeSnapshot(JSON.parse(JSON.stringify(encodeSnapshot(s))))` deep-equals `s`, `NaN` included.
 
 Out of step ⑦ by design: the caches map, `clearAll`, config conflicts (N4) and event emission (step ⑧); orchestration (step ⑪).
 
-**Eviction (N92, N96, N99, N104; step 121).** With a memory budget the engine passes each `CacheState` a `memory` hook (`CacheStateHooks.memory`); without it none of the following runs. The state then switches on its store's running total, keeps a second `CoverageIndex` of the coverage it evicted, reports every read (`get`, `snapshot`: the pages the request overlaps that hold points) and write as a use: a page is used when the call wrote to it, as the store reports through `onWrite` (§4.3), for `put` (a failed write's landed prefix included), each applied part of `hydrate` and `restore`; a written page that no longer holds points leaves the order, and calls the hook's enforcement at the end of every mutating call, inside the call's reader change, and at the end of `restore`. `evict(page)` runs §2.9's safety rule in one synchronous step: drops the page's segments, records the page's covered ranges, subtracts the page's whole slot range from coverage, adds the recorded ranges to the evicted index, and reports them through a hook of its own, `onEvict(covered)`, never `onChange` or `onMutate`; it returns the bytes freed. While the cache's own mutating call collects a reader change, the ranges join its `evicted` list; otherwise they wait for `flushEvicted()`, which the engine calls once its enforcement ended and which reports them as one reader change of their own, when a reader listens. The pages a `restore` trims from its own cache are not reported (no reader has seen them, and a load sends nothing, §2.7); another cache's pages it evicts are. `#withdraw` also lists the part of its slots in the evicted index and drops it from the index; a put drops its touched slots from the index before it writes (so the withdrawal after a failed put finds none of them there and lists only the coverage it withdrew), `hydrate` each part before it applies it, and a clear empties it. `holdsProvisional(page)` answers whether the page holds a point at or after the volatile region's start.
+**Eviction (N92, N96, N99, N104; step 121).** With a memory budget the engine passes each `CacheState` a `memory` hook (`CacheStateHooks.memory`); without it none of the following runs. The state then switches on its store's running total, keeps a second `CoverageIndex` of the coverage it evicted, reports every read (`get`, `snapshot`: the pages the request overlaps that hold points) and write as a use: a page is used when the call wrote to it, as the store reports through `onWrite` (§4.3), for `put` (a failed write's landed prefix included), each applied part of `hydrate` and `restore`; a written page that no longer holds points leaves the order, and calls the hook's enforcement at the end of every mutating call, inside the call's reader change, and at the end of `restore`. `evict(page)` runs §2.9's safety rule in one synchronous step: drops the page's segments, records the page's covered ranges, subtracts the page's whole slot range from coverage, adds the recorded ranges to the evicted index, and reports them through a hook of its own, `onEvict(covered)`, never `onChange` or `onMutate`; it returns the bytes freed. While the cache's own mutating call collects a reader change, the ranges join its `evicted` list; otherwise they wait for `flushEvicted()`, which the engine calls once its enforcement ended and which reports them as one reader change of their own, when a reader listens. The pages a `restore` trims from its own cache are not reported (no reader has seen them, and a load sends nothing, §2.7); another cache's pages it evicts are. Nor do they enter the evicted index: `evict` skips the index while `restore` runs on its own cache, so a later removal over them lists only the coverage it withdrew (user decision 96, 2026-11-21, narrowing N104). `#withdraw` also lists the part of its slots in the evicted index and drops it from the index; a put drops its touched slots from the index before it writes (so the withdrawal after a failed put finds none of them there and lists only the coverage it withdrew), `hydrate` each part before it applies it, and a clear empties it. `holdsProvisional(page)` answers whether the page holds a point at or after the volatile region's start.
 
 ### 4.6 Internal contracts — engine assembly (N20–N22, approved 2026-10-07; N34–N36 approved 2026-10-23)
 
@@ -1194,6 +1406,10 @@ class RpcServer {
    *  then dispatches req → engine and fans out evt to every attached port. */
   attach(port: MessagePortLike): void;
   detach(port: MessagePortLike): void;
+  /** Tells every ready port that a cache's persistence stopped (§4.10.8). */
+  persistStopped(payload: ClientEvents["persistStopped"]): void;
+  /** Attached ports still alive (tests and diagnostics). */
+  readonly connections: number;
 }
 
 // rpc/port-client.ts — client-side port wrapper.
@@ -1212,11 +1428,22 @@ class PortClient {
   readonly clientId: string;
   /** hello.lock, when the worker holds a lifetime lock (N32). */
   readonly lock: string | undefined;
+  /** hello.features this client knows (N79); empty for an older worker. */
+  readonly features: ReadonlySet<WorkerFeature>;
+  /** Requests awaiting a response (tests and diagnostics). */
+  readonly pendingCount: number;
   request(op: Op, params: unknown, transfer?: ArrayBuffer[]): Promise<unknown>;
+  /** The op of this client's request `id` while it awaits its response. */
+  pendingOp(id: number): Op | undefined;
   on(fn: (evt: Evt) => void): () => void;
   /** Called once when the transport fails underneath; never after dispose(). */
   onLost(fn: (error: TscacheError) => void): () => void;
+  /** Releases the port; pending requests reject. Idempotent. */
   dispose(): void;
+  /** The transport failed underneath (a dedicated worker's fatal error, the
+   *  SharedWorker's lifetime lock granted): pending and later requests
+   *  reject with `error`'s message, and onLost listeners run. Idempotent. */
+  abort(error: TscacheError): void;
 }
 ```
 
@@ -1289,8 +1516,13 @@ Not an engine step: tests are written with the code (in-flight subtraction, §4.
 
 ```ts
 // orchestrator/orchestrator.ts
+/** Runs an engine call on behalf of a request: the RPC server names the
+ *  request that caused the change events the call reports (§4.7, N75). */
+type Caused = <T>(requestId: string | undefined, call: () => T) => T;
 class Orchestrator {
-  constructor(engine: Engine, broadcast: (evt: Evt) => void);
+  /** `caused` (default: runs the call) wraps the put that applies a fetch,
+   *  and the release of a get's pin (N94), under the issuing get's id. */
+  constructor(engine: Engine, broadcast: (evt: Evt) => void, caused?: Caused);
   /** import()s the module once; a failure rejects (N30). */
   load(config: FetcherConfig): Promise<void>;
   /** `requestId` names the get on the request-scoped mergeWarning events
@@ -1304,14 +1536,25 @@ class Orchestrator {
   updateAuth(context: unknown): Promise<void>;
   /** engine.invalidate, then fences the fetches in flight over the range (§4.9.1, N64). */
   invalidate(cacheId: string, range: Range): void;
+  /** Gets currently subscribed to auth invalidation (diagnostics and tests). */
+  readonly authWaiters: number;
 }
-// orchestrator/auth.ts — AuthState: 'valid' | 'invalid'; see rules.
+// orchestrator/auth.ts — AuthState: 'valid' | 'invalid'; see rules. It also
+// remembers the context of the last flip's refused fetch until the next flip:
+//   wasRefused(context: unknown): boolean; // sameMaterial with that context
+/** Whether two structured-cloned contexts are certainly the same material:
+ *  primitives by Object.is, plain arrays and plain objects member by member,
+ *  keys in any order. False for anything it cannot be sure of (Map, Date,
+ *  typed arrays, class instances, cycles, nesting deeper than 32 levels,
+ *  more than 10,000 members in all). Each pair of objects is expanded at
+ *  most once, so shared references cost one walk (step 133). */
+function sameMaterial(a: unknown, b: unknown): boolean;
 // entries/fetcher.ts — exports Fetcher, FetchRequest, FetchResponse (§2.5).
 ```
 
 Rules:
 
-- **Loading (N30).** `init.fetcher` makes the server call `load()` before answering: `import(module)` once per worker (the first connection loads it; later connections reuse it; a different module on a later connection is a `ConfigError` in `init-err`). An import failure, or a module whose default export has no `fetch` function, answers `init-err` with a `TscacheError` naming the module, so `createClient` rejects at startup. The fetcher module must load or fail: an `import()` that never settles (a module server that accepts the request and never answers, a top-level `await` that never resolves) leaves `createClient` pending, and no timeout bounds it in 0.1.0 (user decision 2026-11-10, decision 25). `context` is stored and sent with every request; `updateAuth` replaces it. A tab that joins with a context that is not the identical value takes the `updateAuth` path once the module is loaded (structured-cloneable values have no cheap, cycle-safe equality, so anything else is treated as new material).
+- **Loading (N30).** `init.fetcher` makes the server call `load()` before answering: `import(module)` once per worker (the first connection loads it; later connections reuse it; a different module on a later connection is a `ConfigError` in `init-err`). An import failure, or a module whose default export has no `fetch` function, answers `init-err` with a `TscacheError` naming the module, so `createClient` rejects at startup. The fetcher module must load or fail: an `import()` that never settles (a module server that accepts the request and never answers, a top-level `await` that never resolves) leaves `createClient` pending, and no timeout bounds it in 0.1.0 (user decision 2026-11-10, decision 25). `context` is stored and sent with every request; `updateAuth` replaces it. A tab that joins with a context that is not the identical value takes the `updateAuth` path once the module is loaded. Every value that is not the identical one counts as other material on purpose: the generation must advance for any credential that may be new, so that a late 401 under the credential it replaces is ignored (step 11, R4-2; step 133 restated the reason, which this sentence used to give as the lack of a cheap, cycle-safe equality). One exception (step 133): a joining tab whose context is the same material as the context the last flip to invalid refused changes nothing, whatever the auth state now. Its fetcher hook does not run, the context and the generation do not switch, and auth is not restored, so auth stays invalid until the next `updateAuth` (§4.9.1 rule 4) and a refresh that took effect before the join's turn stays in place. `AuthState` remembers the refused context from the flip until the next flip replaces it; nothing else forgets it, an explicit `updateAuth` with the same material included, because a join may only ever skip what was already refused, which is safe to keep for as long as the worker runs. The join's update checks the rule when its turn in the update queue comes, so the hook never hears material refused by then, and again after the hook, just before the switch, because a fetch in flight may be refused while the hook runs. A client's own `updateAuth` is always applied, so a page may deliberately send any context again. "The same material" is decided by `sameMaterial` (`orchestrator/auth.ts`): a primitive by `Object.is`, plain arrays and plain objects member by member in any key order. Anything it cannot be sure of counts as new material: a `Map`, a `Date`, a typed array, a cycle, nesting deeper than 32 levels, or more than 10,000 members in all. The comparison runs synchronously in the worker every tab shares, so its cost is bounded: structured clone keeps shared references, and a pair of objects already proven the same is not walked again, so each pair is expanded at most once and the member budget bounds the whole walk. A joining tab with other material restores auth, and the next fetch carries its context. A tab that brings no context changes nothing. Through a SharedWorker an object context is always a clone, never the identical value, so until step 133 (2026-11-21) a tab that brought a clone of the refused context restored auth, and the next get fetched with the refused credential: a defect against §4.9.1 rule 4 and the step-11 intent that the same context changes nothing (`docs/reviews/step-11.md`, R4-2). Only the last refusal is remembered, so a tab that read its context before two refreshes can still bring a credential refused earlier; whether a different context brought by a joining tab may restore auth at all, and how a tab that joins while auth is invalid learns of it, is decision concern DC-1 of `docs/reviews/step-133.md`.
 - **Orchestrated get (N2).** With `cacheOnly` or no fetcher, `get` reads the engine and returns that. Otherwise it plans from `engine.coverage`: the request's uncovered slots, which a read would report as `'uncached'` misses, are **coalesced**: adjacent misses merge, and a miss abutting existing coverage is extended by one interval into it (locked: the one-point overlap aids range merge). What is already in flight for the cache is subtracted first, and the `get` awaits those fetches for the overlap (§4.9.1); each coalesced range of the rest becomes one `FetchRequest`; the response is applied with `engine.put(cacheId, response, { range })`, so the fetched range is authoritative (N3, clipped by the response's own watermark, N19). The engine is then read once, after the fetches the `get` awaited, its own and those of other gets (at once when it awaits none), and the result returned; `options.snapshot` is applied to that read, so the result's columns and its `snapshot` come from one state (N36). One read per `get` is an exact budget (`test/perf/counters.test.ts`). A range whose fetch threw comes back as a miss with `reason: 'fetch-failed'` and `error: { name, message }`; a range not fetched because auth is invalid comes back `'auth-pending'`; `'uncached'` is reserved for slots nobody asked to fetch (only after the fence, below).
 - **Dedup (N31).** _Replaced at step 44 by in-flight subtraction (§4.9.1)._ Until then, in-flight fetches were keyed by `(cacheId, range.start, range.end)` of the coalesced range, a second `get` from any tab that produced the same key awaited the same promise, and overlapping but different ranges fetched separately. A `get` that joins a fetch still applies nothing itself.
 - **Version fence (N29, amended 2026-10-31; companion to N19).** The orchestrator counts `cacheCleared` events per cache: the cache's generation. A response whose fetch started before the latest clear is **not applied**. A `get` whose fetches end under another generation than the one it planned them under (the cache was cleared while it waited, whether the clear dropped a response it awaited or wiped one already applied) asks for what is still missing **once** more; that second answer is final, and whatever is still missing after it, because a second clear dropped or wiped it, is returned as `'uncached'`. A fetch's `put` may itself trigger a version-mismatch clear (its `meta.version` is newer): that clear happens inside the put and does not fence the response that caused it, but the fetch then ends under a new generation, so the get asks once more for what the clear wiped. With fetches shared between gets, the fence reads as §4.9.1 rule 5 says. As first written, only a dropped response led to the second request, so a get whose awaited responses were all applied, the clearing one among them, returned the wiped slots `'uncached'` (amended by user decision #10, option B; DC-1 in `docs/reviews/step-44.md`).
@@ -1473,7 +1716,7 @@ Rules:
 - **Validation.** `persist` resolves to `false` when omitted; a value that is not a boolean throws `ConfigError` (`persist must be a boolean when set, got …`). It is structural under N20's rule (every resolved field except `version` and `finalizedUntil`): joining a live cache with another value throws `ConfigError` naming `persist`, and the live cache is untouched. There is no new error class or code: a persistence failure never rejects a call (below).
 - **Where it acts.** A persisted cache is loaded and written by the SharedWorker's persister, the only hosting that has one (N52). Everywhere else `persist: true` is accepted, validated and kept structural, and does nothing, without an event (N45): in the dedicated-worker and in-process hostings (on a browser without `SharedWorker`, after a fallback, or when `ClientOptions.mode` pins them), where the realm has no IndexedDB (Node, so every server render), and for an `Engine` used directly through `./engine`. A consumer tells the cases apart by `client.mode` (§2.1): a persisted cache persists when it is `'shared'` and the browser has IndexedDB. Where it does not, `cache()` does not wait for a load and nothing is written. `clearAll` still empties the disk from a dedicated-worker or in-process client whose realm has IndexedDB (N66, §4.10.7); without IndexedDB (Node) it clears memory only. No event is emitted, as in Node: the configuration is not a failure, and an event at every open in every such tab would only be noise.
 - **What persists.** The covered ranges below the watermark and the points inside them (§4.10.2). The volatile region never reaches the disk (starter §3.7); after a reload the provisional tail is fetched again, as in a running session. A cache opened with `persist: true` starts from the stored records, unless something changed it before they were applied (§4.10.5). A range the stored records do not cover, including one whose record the browser evicted, reads as uncached, never as a confirmed gap.
-- **When calls wait for the disk.** `cache()` of a persisted cache resolves after its records are loaded and applied, after the load gave up (5000 ms, §4.10.6), or after the load was abandoned because the cache changed meanwhile, so the first `get` through its handle sees the records. A load that gave up, or whose read failed, stops the cache's persistence (`persistStopped`) and leaves its records on disk, so a later session loads them (user decision 95, 2026-11-21). A call that removes coverage of a persisted cache resolves only once the removal is durable (N58): `invalidate`, `clear`, `clearAll`, a `setFinalizedUntil` that moves the watermark back or sets the first one, and also a `put`, `hydrate` or orchestrated `get` whose data cleared the cache for a newer version or set its first watermark. Durable means written with strict durability, or else persistence of the cache has stopped and the deletion of its records has settled. The wait is bounded by one deadline (§4.10.6): the write has `timeoutMs` (5000 ms) from the removal to land, retries included; then the cache stops, and the deletion that follows is bounded the same way. A `clearAll` pending at the removal, or called after it, settles the removal itself within the same bound (§4.10.6, `clearAll`). On a failing disk such a call therefore takes at most about 10 s, and it never rejects. Nothing else waits: additions are written behind (§4.10.6), and a persistence failure emits `persistStopped` instead of rejecting. A stop during `cache()` is emitted before the handle exists: subscribe with `client.on('persistStopped', …)` to hear it.
+- **When calls wait for the disk.** `cache()` of a persisted cache resolves after its records are loaded and applied, after the load gave up (5000 ms, §4.10.6), or after the load was abandoned because the cache changed meanwhile, so the first `get` through its handle sees the records. The 5000 ms bound the store's opening and its read (N46, amended 2026-11-21, reading (i)); applying the records follows, as it always did: one synchronous call in proportion to the stored points, and, for a calendar cache in a zone, at most one budget of offset lookups (N113; §4.10.5), about 1.5 s at the worst measured rate and 38 lookups for a full daily page of bars. So `cache()` answers within `timeoutMs`, plus the time of its points, plus at most one lookup budget. A load that gave up, or whose read failed, stops the cache's persistence (`persistStopped`) and leaves its records on disk, so a later session loads them (user decision 95, 2026-11-21). A call that removes coverage of a persisted cache resolves only once the removal is durable (N58): `invalidate`, `clear`, `clearAll`, a `setFinalizedUntil` that moves the watermark back or sets the first one, and also a `put`, `hydrate` or orchestrated `get` whose data cleared the cache for a newer version or set its first watermark. Durable means written with strict durability, or else persistence of the cache has stopped and the deletion of its records has settled. The wait is bounded by one deadline (§4.10.6): the write has `timeoutMs` (5000 ms) from the removal to land, retries included; then the cache stops, and the deletion that follows is bounded the same way. A `clearAll` pending at the removal, or called after it, settles the removal itself within the same bound (§4.10.6, `clearAll`). On a failing disk such a call therefore takes at most about 10 s, and it never rejects. Nothing else waits: additions are written behind (§4.10.6), and a persistence failure emits `persistStopped` instead of rejecting. A stop during `cache()` is emitted before the handle exists: subscribe with `client.on('persistStopped', …)` to hear it.
 - **What can outlive a removal.** Only a disk that refuses every write: when the removal's write has not landed by its deadline and the deletion that follows the stop fails or times out too, the records written before the removal stay, and a later session that can read them loads them. The same holds for a `clearAll` whose job fails at its deadline: every record stays. `persistStopped` reports the stop; nothing in a later session can tell. The worker that failed to clear loads nothing more for the rest of its life (§4.10.6), so the data a failed logout left on disk comes back only in a later worker. A failed clear-only call of a dedicated-worker or in-process client leaves every record too; that hosting never reads the disk, so here also the records come back only in a SharedWorker started later (N66).
 - **Version honesty across sessions** (§2.4). A restatement without a version signal is undetectable, and persistence carries that across reloads: a stored range is served without asking the backend in every later session. Set `CacheConfig.version` when the dataset has one, and stored records of another version are never loaded (N56). TTL stays a consumer pattern: `invalidate` or `clear` on your own clock removes stored ranges too.
 - **One writer.** Every tab of a deploy reaches one SharedWorker, so one engine writes the database, and a `clearAll` from any of those tabs clears that engine's memory and the disk together. A `clearAll` from a dedicated-worker or in-process page empties the disk but cannot reach the SharedWorker's memory: that engine writes back what it holds at its next flushes (§4.10.7). Two SharedWorkers write it only for a moment: during a deploy skew (two worker URLs), or while a worker that lost its last tab is still closing as a new tab starts the next. Each writes from its own memory, and page records are self-contained, so the overlap costs coverage, never a wrong point; what one engine removed, the other may still hold and write back once (§4.10.7).
@@ -1487,8 +1730,10 @@ One database per origin, named `tscache`, at IndexedDB version 1. Its upgrade fr
 
 ```ts
 // persist/records.ts
-/** Store 'caches': one per persisted cache. */
-interface CacheRecord {
+/** Store 'caches': one per persisted cache, in the format of its grid. */
+type CacheRecord = FixedCacheRecord | CalendarCacheRecord;
+
+interface FixedCacheRecord {
   cacheId: string;
   /** Schema version of the persisted records. */
   format: 1;
@@ -1506,6 +1751,23 @@ interface CacheRecord {
   finalizedUntil?: number;
 }
 
+/** A calendar cache's record (N114): `grid`, the resolved calendar interval,
+ *  in place of `interval` and `alignmentOffset`. Its only instant, the
+ *  watermark, names no slot, so it stores no slot index. */
+interface CalendarCacheRecord {
+  cacheId: string;
+  format: 2;
+  config: {
+    grid: ResolvedCalendarInterval;
+    fields: Record<string, Dtype>;
+    gapSplitK: number;
+    segmentSlotCap: number;
+    warnOnOverlapDiff: boolean;
+  };
+  version?: string;
+  finalizedUntil?: number;
+}
+
 /** Store 'pages': one per page that holds coverage. */
 interface PageRecord {
   cacheId: string;
@@ -1518,7 +1780,7 @@ interface PageRecord {
 
 **Canonical records.** `recordsOf(S)`, for the state `S` of a persisted cache, is what a flush writes and, with a single writer, what the disk holds after it (§4.10.6); it has the shape of a `StoredCache` (§4.10.3), pages ascending. When `S` covers nothing, it is empty (`{ cache: undefined, pages: [] }`), so a cleared cache leaves nothing on disk. Otherwise:
 
-- One cache record: `cacheId`; `format: 1`; `config`, the six fields of `S.config` (`fields` a fresh object in schema order); `version` and `finalizedUntil` as `S` reports them, each omitted when undefined.
+- One cache record: `cacheId`; `format: 1` and `config`, the six fields of `S.config`, for a fixed cache; `format: 2` and `config` with `grid` (a copy of the resolved calendar interval) in place of `interval` and `alignmentOffset`, five fields, for a calendar cache (N114); `fields` a fresh object in schema order; `version` and `finalizedUntil` as `S` reports them, each omitted when undefined.
 - One page record for each page `p` that holds coverage. Page `p` spans slots `[p · cap, p · cap + cap − 1]` with `cap = segmentSlotCap`: the pages of the segment store (§4.3, N15). Let `cov_p` be `S`'s covered slot ranges clipped to page `p`. When it is not empty, its _hull_ runs from its first slot to its last, and the record's `snapshot` is the _page snapshot_: the envelope of `S.snapshot(toMs(hull))` (§4.5) without its `finalizedUntil`, whose `segments` are the payloads of `S.snapshot(toMs(r))` for each range `r` of `cov_p`, in order. Its `range` is therefore the hull in ms, its `coverage` is `cov_p` in ms, its `segments` hold exactly the present points inside `cov_p` (one payload per store segment per covered range; a segment never crosses a page edge, N15), and its `version` is `S`'s.
 - Nothing else: a page without coverage has no record.
 
@@ -1526,7 +1788,7 @@ Consequences the tests rely on:
 
 - **A record holds exactly what a load applies.** No point outside coverage is stored: not a point whose coverage was invalidated, not one that was provisional when fetched, not one at or after the watermark (coverage never reaches the volatile region, §4.5, so no hull does). Restoring `recordsOf(S)` into a cache that knows nothing (§4.10.5) therefore gives a cache whose records are `recordsOf(S)` again.
 - A covered page without points, a confirmed gap, is a record with `segments: []`, so the gap survives a reload.
-- Equal states have equal records (§2.8: a snapshot is a function of the state and the range).
+- Equal states have equal records (§2.8: a snapshot is a function of the state and the range). A format 2 page snapshot's slot indices are those of the slots it is written from, so they are a function of the state too.
 - The buffers are fresh copies and IndexedDB clones them on write; cache-owned memory never leaves (§3.3).
 - A page record is self-contained: it names its grid, schema, version, range and coverage, so it is checked and applied on its own, whoever wrote it (§4.10.5). This is why coverage is stored per page rather than in the cache record (N55).
 
@@ -1537,10 +1799,10 @@ The page snapshot omits `finalizedUntil` so that a watermark change rewrites the
 | Layer                 | Version                                                                                                  | On a mismatch at load                                                                                                                                                          |
 | --------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Database layout       | IndexedDB version 1                                                                                      | A database at a higher version (a newer deploy) cannot be opened: persistence is `'unavailable'` for this engine. A later layout bumps the version and migrates in its upgrade |
-| Records               | `CacheRecord.format: 1`                                                                                  | The cache's records are not applied; the cache rewrites them at its next flush                                                                                                 |
+| Records               | `CacheRecord.format`: 1 for a fixed cache, 2 for a calendar cache (N114)                                 | The cache's records are not applied; the cache rewrites them at its next flush                                                                                                 |
 | Structure             | `CacheRecord.config` against the cache's N20 fields (`fields` by names and dtypes, key order irrelevant) | Not applied; rewritten                                                                                                                                                         |
 | Dataset               | `CacheRecord.version` against the cache's version (N56)                                                  | Not applied; rewritten                                                                                                                                                         |
-| Snapshot and payloads | `Snapshot.format: 1` and each payload's `format: 1` (§2.8, §3.4)                                         | That page is skipped; the cache is rewritten                                                                                                                                   |
+| Snapshot and payloads | `Snapshot.format` and each payload's `format`: those of the cache's grid (§2.8, §3.4)                    | That page is skipped; the cache is rewritten                                                                                                                                   |
 
 A mismatch clears nothing in memory and emits nothing: the cache starts without the stored records, and its own records replace them at its next flush, a full rewrite (§4.10.6).
 
@@ -1695,10 +1957,10 @@ class CacheState {
 `restore` takes the records as `unknown`, since they come from disk, and `engine/` imports no type from `persist/`. Its implementation is `engine/restore.ts`, which reaches the cache's store, coverage, version and watermark through an internal seam of `engine/cache.ts` (`cacheInternals`, exported by no entry) and which the persister installs when it is built (`installRestore`), so `index`, `engine` and the worker's initial load do not carry it (§4.10.8). Called before that, `restore` throws `TscacheError`. Its steps, in order:
 
 1. **Precondition.** The cache covers nothing and holds no point (provisional or not); otherwise `TscacheError` whose message starts with `restore:`, and nothing changes.
-2. **Cache record.** Absent (`undefined`) → nothing is applied, and `rewrite` is true when `pages` is not empty (orphans). Otherwise it must be an object whose `cacheId` is the cache's, with `format === 1`; a `config` whose six fields equal the cache's (`fields` naming exactly the schema's fields with equal dtypes, key order irrelevant); `version` absent or a non-empty string; `finalizedUntil` absent or accepted by `slotAtOrAfter`. Any failure → nothing is applied; `rewrite: true`.
+2. **Cache record.** Absent (`undefined`) → nothing is applied, and `rewrite` is true when `pages` is not empty (orphans). Otherwise it must be an object whose `cacheId` is the cache's, in the format of the cache's grid: `format === 1` and a `config` whose six fields equal the cache's for a fixed cache, `format === 2` and a `config` of five fields whose `grid` names the cache's calendar interval, field by field, for a calendar cache (`fields` naming exactly the schema's fields with equal dtypes, key order irrelevant); `version` absent or a non-empty string; `finalizedUntil` absent or accepted by `slotAtOrAfter`. Any failure → nothing is applied; `rewrite: true`. One exception, for a calendar cache (user decision 83, the design's §5.2; director's ruling B4, step 129): a stored `finalizedUntil` that is a number and that `slotAtOrAfter` rejects with `InvalidRangeError`, an instant outside the calendar's domain (`NaN` and `±Infinity` included), is _set aside_: the record is otherwise accepted, no watermark is applied, the pages are loaded as below, and `rewrite` is true, so the next flush writes a cache record without it. A fixed cache refuses such a record whole, as before.
 3. **Version (N56).** With `C` the cache's version now and `R` the record's: when `C` is set and `R !== C` (an unversioned record included) → nothing is applied; `rewrite: true`. When `C` is unset and `R` is set, the cache adopts `R` without clearing (as N18). This is stricter than `hydrate`, which applies an unversioned snapshot to a versioned cache (N35): a record written without a version may hold any version's data, while a server's snapshot is as fresh as its page.
 4. **Watermark.** The record's `finalizedUntil` advances the watermark as a put's `meta.finalizedUntil` does (N17: forwards only; a value at or below the cache's is ignored). The cache covers nothing, so the advance subtracts nothing. When the watermark after this step differs from the record's (`finalizedUntil` absent counting as a value of its own), `restore` reports a `watermark` change through `onChange` (§4.10.4), so the next flush writes the cache record; it reports nothing else.
-5. **Pages,** ascending. A page record is valid when it is an object whose `cacheId` is the cache's, whose `page` is a safe integer, and whose `snapshot` passes `hydrate`'s validation (§4.5, steps (1)–(5)) against this cache, with every slot of its `range` in page `page`, `snapshot.version` equal to `R` (both absent counts as equal), and no `snapshot.finalizedUntil` (a page snapshot never carries one, §4.10.2). An invalid page is skipped and sets `rewrite: true`; the others are still applied. Only the cache record moves the watermark (step 4): nothing a page record holds can.
+5. **Pages,** ascending. On a calendar grid in a zone other than `"UTC"`, a load first bounds its offset lookups (N113, amended 2026-11-21): the page records' charges (§4.5, rule 1b, each from the shape of its `snapshot` alone) are added newest first, after 12 for the cache record's watermark when it has one, and every page from the one that takes the sum past the context's lookup budget (524,288) is skipped, as an invalid page is, with no lookup made for it; `rewrite` is then true. A page of bars charges 72, so the budget is reached only by a cache with more than about 14,500 separate coverage ranges, which then loads its newest pages only, or by a forged record. A page record is valid when it is an object whose `cacheId` is the cache's, whose `page` is a safe integer, and whose `snapshot` passes `hydrate`'s validation (§4.5, steps (1)–(6)) against this cache, with every slot of its `range` in page `page`, `snapshot.version` equal to `R` (both absent counts as equal), and no `snapshot.finalizedUntil` (a page snapshot never carries one, §4.10.2). An invalid page is skipped and sets `rewrite: true`; the others are still applied. Only the cache record moves the watermark (step 4): nothing a page record holds can.
 6. **Parts.** For each valid page, ascending: its coverage ranges in slots, minus the slots at or after `volatileFrom` (after step 4) when the cache has a watermark, are the parts. Each part is written with the page's decoded points inside it as authority (`store.put(points, part)`, a replace, N11) and then covered, exactly as `hydrate` applies a part (§4.5, application steps (3)–(4)); since the cache covers nothing and pages are disjoint, nothing else is subtracted. A part clipped by the volatile region (a record written by a session without a watermark, under a config that sets one) sets `rewrite: true`: memory refuses coverage the record claims. Points outside every part are not written; warnings are dropped.
 7. **Result.** `applied` lists every part in ms, ascending, with adjacent ones (on neighbouring pages) merged. `rewrite` is false exactly when every record was applied in full, and then `recordsOf(S)` (§4.10.2) equals `stored`, apart from the cache record's `finalizedUntil` where step 4 reported a change.
 
@@ -1786,7 +2048,7 @@ None of these rejects for a persistence failure; failures stop the cache (below)
 - Otherwise the store is opened, once per persister (concurrent opens share the attempt; `open` never passes `ifExists`). When `openStore` rejects, or resolves `undefined`, every tracked cache and every persisted cache opened later stop with `'unavailable'`, without a cleanup, since no store is open. Every tracked cache includes the running ones: a cache opened during a `clearAll` barrier, one whose load was abandoned while the opening was pending, and every cache when a flush's attempt opens the store after a `clearAll` found no database (the writer, below).
 - Then one `store.read(id)` for every page; a rejection stops the cache with `'error'`, without a cleanup (Failures, below). On success, if the cache is still loading, `restore(stored)` in one synchronous step: the cache is _running_; `rewrite: true` sets the cache's `rewrite` flag and makes its flush due at once; a `watermark` change it reports is dirty state as any other. An error thrown by `restore` (an allocation failure, §4.3, or its precondition) stops the cache with `'error'`.
 - **A mutating call abandons the load.** The first `onChange` or `onMutate` of a loading cache (§4.10.5, rule 2) makes it _running_ at once with `rewrite` set, cancels its load timer, and resolves `open`; the changes of that call and of later ones are recorded as for a running cache. The abandonment itself makes the cache's flush due as a `write` change would, after the quiet spell; a `remove` or `clear` among the call's changes makes it due at once, strict. A read not yet issued is not issued; a pending store opening or read goes on, and its result for this cache is ignored.
-- `open` resolves after the restore, or when `timeoutMs` passes first (the store's opening and the read counted together): the cache then stops with `'unavailable'`, without a cleanup (Failures, below), and the read's result, should it come, is ignored.
+- `open` resolves after the restore, or when `timeoutMs` passes first (the store's opening and the read counted together): the cache then stops with `'unavailable'`, without a cleanup (Failures, below), and the read's result, should it come, is ignored. The timer bounds the opening and the read only (N46, amended 2026-11-21): the restore that follows a read that ended inside it is one synchronous call, which takes time in proportion to the stored points and, for a calendar cache in a zone, at most one budget of offset lookups (§4.10.5 step 5). A read that ends just inside the timer therefore lets `open` resolve after `timeoutMs` by that much.
 - A later call for the same id returns the first call's promise, so a cache is read once per persister. For a stopped cache it resolves at once.
 
 **The writer (N61).** One per persister. It runs the persister's write transactions one at a time: flushes, `clearAll`, and the cleanup that follows a stop. Each is a _job_ with a due time and a deadline `timeoutMs` after it. Jobs run in order of due time, except that a job carrying a removal (a flush whose dirty state holds a removal not yet durable, a `clearAll`, a cleanup) runs before any queued job that carries none. A pending `clearAll` job is also a barrier: from its call until it settles, no flush job starts, and the job running at the call makes a final attempt, with no retry and no stop (`clearAll`, below); the rules that follow hold apart from that. The writer takes no lock: it is the database's only writer (§4.10.7). An attempt waits for the store's opening, counted against its deadline; when the persister has no store and none is opening, which happens only after a `clearAll` found no database, a flush's attempt opens it as `open` does (Open, above). An attempt whose store call rejects puts its dirty state back and schedules a retry: a request for the same cache due `debounceMs` later, coalesced into the cache's one queued job like any other request (Scheduling, below) and keeping the failed job's deadline; when that retry would be due after the deadline, the job fails at the deadline instead. A store call still pending at the deadline is abandoned: its result is ignored, and a transaction that completes later is harmless, since the cleanup queued after it runs after it (IndexedDB runs overlapping read-write transactions in creation order). At the deadline the job fails for good: a flush or a cleanup job stops its cache, with `'error'` and the last rejection's name and message when an attempt was rejected, else `'unavailable'`; a `clearAll` job stops every tracked cache the same way. Queue wait, store calls and retries all count against the one deadline, so every job settles within `timeoutMs` of being due, and no call waits for the disk longer than two deadlines: a job, and the cleanup after its stop.
@@ -1966,17 +2228,17 @@ One line per decision: the number links to the decision's file under `docs/decis
 | #                                       | Decision               | Summary                                                                    |
 | --------------------------------------- | ---------------------- | -------------------------------------------------------------------------- |
 | [1](decisions/01-name-scope-license.md) | Name / scope / license | `tscache`, unscoped (npm name verified free), MIT. Scope superseded by N67 |
-| [2](decisions/02-default-interval.md)   | Default interval       | Required, no default                                                       |
-| [3](decisions/03-alignment-anchor.md)   | Alignment anchor       | per-cache `alignmentOffset`, default 0                                     |
+| [2](decisions/02-default-interval.md)   | Default interval       | Required, no default (ms, or a calendar interval since N109)               |
+| [3](decisions/03-alignment-anchor.md)   | Alignment anchor       | per-cache `alignmentOffset`, default 0 (fixed intervals only, N109)        |
 | [4](decisions/04-gap-split-slot-cap.md) | Gap-split / slot cap   | K = 4, cap = 32 768                                                        |
 | [5](decisions/05-changelog.md)          | Changelog              | git-cliff                                                                  |
 | [6](decisions/06-module-format.md)      | Module format          | ESM-only                                                                   |
 | [7](decisions/07-examples-mapping.md)   | Examples mapping       | starter §7 table confirmed                                                 |
 | [8](decisions/08-overlap-warning.md)    | Overlap warning        | emitted `mergeWarning` event + `console.warn` in dev builds                |
 
-## 8. New decision points — RESOLVED (N1–N8 user-confirmed 2026-06-11; later rows dated in each row, to N105 on 2026-11-16)
+## 8. New decision points — RESOLVED (N1–N8 user-confirmed 2026-06-11; later rows dated in each row, to N124 on 2026-11-21)
 
-These emerged while making the API concrete (N9–N33 later, at steps ③–⑫; N34–N44 at the post-build architecture review, `docs/architecture-review.md`, 2026-10-23; N62–N65 with in-flight subtraction at step 44, 2026-10-30, numbered after N45–N61) (working process §2.3: alternatives presented, user decided). N45–N61 cover IndexedDB persistence (§4.10, step 38, 2026-10-30) and were taken while the user was away, under the user's grant of 2026-10-30: N45–N54 are the performance plan's decision points P1–P10, settled by the director with the recommended options; N55–N60 were taken by the step 38 design with its recommended options and confirmed by the user on 2026-10-30 (`docs/reviews/step-38.md`). After design review round 2 the concurrency core was redesigned (`docs/reviews/step-38.md`, convergence check): N52, N55, N57, N58 and N59 changed in substance, N60 was amended, and N61 was added; the user was told of those changes and did not veto them (decision #7, an FYI with a veto window, 2026-10-30), then on 2026-10-31 chose to build the redesigned design's SharedWorker slice (decision #8, option A, below). On 2026-10-31 the user narrowed persistence to the SharedWorker hosting (decision #8): N52 changed, the parts of N54, N60 and N61 that served several engines were retired, and N45 widened to the hostings that no longer persist. On 2026-11-02 the user chose option (b) of decision #11 (1): those hostings' `clearAll` empties the disk too (N66, step 52), and N45, N52 and N54 say so. N68 and N69 came from the November 2026 review: the user decided them on 2026-11-10 (decisions 29 and 30; decision 38 settled N68's integer rule), and step 75 specifies them (`docs/reviews/step-75.md`). N70 records what a put that fails part-way may leave behind, the reading the library already implements; the user decided it on 2026-11-13 (decision 42, option A), and step 80 records it (`docs/reviews/step-80.md`). N71–N84 specify change events (finding M7): the user decided the design proposal's rows D1–D13 and accepted its read rule on 2026-11-16 (decision 65), including the amendments to §2.8 (N77) and to the locked §3.1 handshake (N79), and step 114 records and builds them (`docs/reviews/step-114.md`). N85 records that Effect is not adopted in this repository; the user decided it on 2026-11-15 and 2026-11-16 (decision 75), and step 115 records it (`docs/reviews/step-115.md`). N86–N105 specify memory bounds and reporting (finding M3): the user decided the design proposal's rows E1–E22 on 2026-11-16 (decision 67), each as recommended (E10 and E12 moot under E11 (b)), including E11 (b)'s amendment of the §4.10.9 eviction row and the qualification of N82 by E21; step 121 records and builds them (`docs/reviews/step-121.md`).
+These emerged while making the API concrete (N9–N33 later, at steps ③–⑫; N34–N44 at the post-build architecture review, `docs/architecture-review.md`, 2026-10-23; N62–N65 with in-flight subtraction at step 44, 2026-10-30, numbered after N45–N61) (working process §2.3: alternatives presented, user decided). N45–N61 cover IndexedDB persistence (§4.10, step 38, 2026-10-30) and were taken while the user was away, under the user's grant of 2026-10-30: N45–N54 are the performance plan's decision points P1–P10, settled by the director with the recommended options; N55–N60 were taken by the step 38 design with its recommended options and confirmed by the user on 2026-10-30 (`docs/reviews/step-38.md`). After design review round 2 the concurrency core was redesigned (`docs/reviews/step-38.md`, convergence check): N52, N55, N57, N58 and N59 changed in substance, N60 was amended, and N61 was added; the user was told of those changes and did not veto them (decision #7, an FYI with a veto window, 2026-10-30), then on 2026-10-31 chose to build the redesigned design's SharedWorker slice (decision #8, option A, below). On 2026-10-31 the user narrowed persistence to the SharedWorker hosting (decision #8): N52 changed, the parts of N54, N60 and N61 that served several engines were retired, and N45 widened to the hostings that no longer persist. On 2026-11-02 the user chose option (b) of decision #11 (1): those hostings' `clearAll` empties the disk too (N66, step 52), and N45, N52 and N54 say so. N68 and N69 came from the November 2026 review: the user decided them on 2026-11-10 (decisions 29 and 30; decision 38 settled N68's integer rule), and step 75 specifies them (`docs/reviews/step-75.md`). N70 records what a put that fails part-way may leave behind, the reading the library already implements; the user decided it on 2026-11-13 (decision 42, option A), and step 80 records it (`docs/reviews/step-80.md`). N71–N84 specify change events (finding M7): the user decided the design proposal's rows D1–D13 and accepted its read rule on 2026-11-16 (decision 65), including the amendments to §2.8 (N77) and to the locked §3.1 handshake (N79), and step 114 records and builds them (`docs/reviews/step-114.md`). N85 records that Effect is not adopted in this repository; the user decided it on 2026-11-15 and 2026-11-16 (decision 75), and step 115 records it (`docs/reviews/step-115.md`). N86–N105 specify memory bounds and reporting (finding M3): the user decided the design proposal's rows E1–E22 on 2026-11-16 (decision 67), each as recommended (E10 and E12 moot under E11 (b)), including E11 (b)'s amendment of the §4.10.9 eviction row and the qualification of N82 by E21; step 121 records and builds them (`docs/reviews/step-121.md`). N106–N124 are the calendar grid's rows G1–G19 (`docs/design/calendar-grid.md`, step 118), each with its recommended option, taken by the user on 2026-11-21 (decision 83) and recorded in step 129; the same decision amended decisions 2 and 3 and N34, N35, N38, N46, N53 and N57, each with a dated note in its file.
 
 One line per decision: the number links to the decision's file under `docs/decisions/`, which holds its full text; the summary is the resolution's first clause.
 
@@ -2087,6 +2349,25 @@ One line per decision: the number links to the decision's file under `docs/decis
 | [N103](decisions/N103-budget-before-caches.md)        | A budget for an engine that already holds a cache                    | Nothing: only an engine that holds no cache takes a budget                                                                                |
 | [N104](decisions/N104-evicted-coverage-index.md)      | How a later removal over an evicted range reaches a view             | With a budget, each cache keeps the coverage it evicted, and a removal reports its part of it                                             |
 | [N105](decisions/N105-coverage-only-pages.md)         | Whether pages that hold coverage and no point are bounded            | Not now: they count 0 bytes, are never evicted, and keep their small records                                                              |
+| [N106](decisions/N106-calendar-approach.md)           | How data on a calendar is cached                                     | Built-in calendar grids, by unit and IANA time zone                                                                                       |
+| [N107](decisions/N107-calendar-units.md)              | Which calendar units exist                                           | Day, week, month, quarter and year                                                                                                        |
+| [N108](decisions/N108-zone-rules-source.md)           | Where time-zone rules come from                                      | The runtime's `Intl`; nothing is bundled                                                                                                  |
+| [N109](decisions/N109-calendar-in-interval.md)        | Where the calendar goes in the config                                | In `interval`: `number \| CalendarInterval`; no `alignmentOffset` with a calendar                                                         |
+| [N110](decisions/N110-weekends-holidays.md)           | How weekends and holidays are modelled                               | Every calendar day is a slot; a day without a session is an empty slot                                                                    |
+| [N111](decisions/N111-skipped-repeated-local-time.md) | A slot start whose local time is skipped or repeated                 | As `Temporal`'s `"compatible"`: after the shift, or the earlier instant                                                                   |
+| [N112](decisions/N112-zone-compared-as-written.md)    | How a zone is compared                                               | As written, after checking that the runtime resolves it                                                                                   |
+| [N113](decisions/N113-anchor-slot-indices.md)         | What a reader checks against differing zone data                     | The slot index of each anchor, within a budget of 524,288 offset lookups                                                                  |
+| [N114](decisions/N114-format-2.md)                    | How snapshots, payloads and records name a calendar grid             | `format: 2`, for calendar caches only; fixed caches keep `format: 1`                                                                      |
+| [N115](decisions/N115-fetch-request-grid.md)          | How the fetch request names the grid                                 | As the config does: `interval` is a number or the resolved calendar interval                                                              |
+| [N116](decisions/N116-grid-entry.md)                  | How the page does grid arithmetic                                    | A new entry, `@anishbenji/tscache/grid`                                                                                                   |
+| [N117](decisions/N117-calendar-domain.md)             | The supported domain of a calendar grid                              | The slots whose first local date lies in the years 1 to 9999                                                                              |
+| [N118](decisions/N118-calendar-code-in-grid.md)       | Where the calendar code lives                                        | In `grid.ts`, beside the fixed-grid functions                                                                                             |
+| [N119](decisions/N119-calendar-grid-feature.md)       | How a page learns that its worker lacks calendar grids               | `'calendar-grid'` in `hello.features`; the client refuses the config itself                                                               |
+| [N120](decisions/N120-no-sub-day-units.md)            | Whether sub-day units in a zone are supported                        | Not now                                                                                                                                   |
+| [N121](decisions/N121-recipes-after-calendar.md)      | What happens to the fixed-grid recipes                               | The daily-DST and monthly recipes give way to the calendar grid; weekly (UTC) and jitter stay                                             |
+| [N122](decisions/N122-calendar-release.md)            | How the calendar grid ships                                          | In its own minor release, after M3 and before M5                                                                                          |
+| [N123](decisions/N123-skipped-local-date.md)          | The start of a day slot whose local date the zone skipped            | One millisecond before the next slot's start                                                                                              |
+| [N124](decisions/N124-slot-start-tables.md)           | How slot starts in a zone are kept between conversions               | Tables of 512 starts per descriptor, filled only when more than half is needed, 256 per engine                                            |
 
 ## 9. What happens after sign-off
 

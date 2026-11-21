@@ -10,27 +10,48 @@ import { type CacheState, cacheInternals } from "../engine/cache";
 import { pageOf, pageRange } from "../engine/merge";
 import { takeSnapshot } from "../engine/snapshot";
 import type { SlotRange } from "../grid";
-import type { Dtype, Snapshot } from "../types";
+import type { Dtype, ResolvedCalendarInterval, Snapshot } from "../types";
 import type { PageRange } from "./store";
 
-/** Store 'caches': one per persisted cache. */
-export interface CacheRecord {
+/** The structural config fields (N20) both record formats name. */
+interface RecordStructure {
+  fields: Record<string, Dtype>;
+  gapSplitK: number;
+  segmentSlotCap: number;
+  warnOnOverlapDiff: boolean;
+}
+
+/** What both record formats share. */
+interface CacheRecordBase {
   cacheId: string;
-  /** Schema version of the persisted records. */
-  format: 1;
-  /** The structural config (N20) the records were written under. */
-  config: {
-    interval: number;
-    alignmentOffset: number;
-    fields: Record<string, Dtype>;
-    gapSplitK: number;
-    segmentSlotCap: number;
-    warnOnOverlapDiff: boolean;
-  };
   /** The dataset version and the watermark when written; each omitted when unset. */
   version?: string;
   finalizedUntil?: number;
 }
+
+/** The cache record of a cache on a fixed grid. */
+interface FixedCacheRecord extends CacheRecordBase {
+  /** Schema version of the persisted records. */
+  format: 1;
+  /** The structural config (N20) the records were written under. */
+  config: RecordStructure & { interval: number; alignmentOffset: number };
+}
+
+/**
+ * The cache record of a cache on a calendar grid (N114): `grid`, the
+ * resolved calendar interval, in place of `interval` and `alignmentOffset`.
+ * Its only instant, the watermark, names no slot, so it stores no slot
+ * index.
+ */
+interface CalendarCacheRecord extends CacheRecordBase {
+  /** Schema version of the persisted records. */
+  format: 2;
+  /** The structural config (N20) the records were written under. */
+  config: RecordStructure & { grid: ResolvedCalendarInterval };
+}
+
+/** Store 'caches': one per persisted cache, in the format of its grid. */
+export type CacheRecord = FixedCacheRecord | CalendarCacheRecord;
 
 /** Store 'pages': one per page that holds coverage. */
 export interface PageRecord {
@@ -48,18 +69,28 @@ export interface PageRecord {
 export function cacheRecordOf(state: CacheState): CacheRecord | undefined {
   if (cacheInternals(state).coverage.ranges().length === 0) return undefined;
   const c = state.config;
-  const record: CacheRecord = {
-    cacheId: c.id,
-    format: 1,
-    config: {
-      interval: c.interval,
-      alignmentOffset: c.alignmentOffset,
-      fields: { ...c.fields },
-      gapSplitK: c.gapSplitK,
-      segmentSlotCap: c.segmentSlotCap,
-      warnOnOverlapDiff: c.warnOnOverlapDiff,
-    },
+  const structure = {
+    fields: { ...c.fields },
+    gapSplitK: c.gapSplitK,
+    segmentSlotCap: c.segmentSlotCap,
+    warnOnOverlapDiff: c.warnOnOverlapDiff,
   };
+  const record: CacheRecord =
+    typeof c.interval === "number"
+      ? {
+          cacheId: c.id,
+          format: 1,
+          config: {
+            interval: c.interval,
+            alignmentOffset: c.alignmentOffset,
+            ...structure,
+          },
+        }
+      : {
+          cacheId: c.id,
+          format: 2,
+          config: { grid: { ...c.interval }, ...structure },
+        };
   if (state.version !== undefined) record.version = state.version;
   if (state.finalizedUntil !== undefined) {
     record.finalizedUntil = state.finalizedUntil;
@@ -140,6 +171,7 @@ function pageRecordOf(
   const snapshot = takeSnapshot(
     {
       config: state.config,
+      grid: state.grid,
       segments: store.segments,
       coverage,
       version: state.version,

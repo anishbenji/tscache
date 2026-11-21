@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReaderChange } from "../src/engine/cache";
-import { engineMemoryInternals, observeCaches } from "../src/engine/engine";
+import {
+  cacheGridOf,
+  engineMemoryInternals,
+  observeCaches,
+} from "../src/engine/engine";
 import { toMs } from "../src/grid";
 import { RpcServer } from "../src/rpc/server";
 import type { ClientEvents, Range } from "../src/types";
@@ -35,7 +39,7 @@ function observed(readers = true) {
     evicted?: Range[];
   }[] = [];
   const report = vi.fn((cacheId: string, change: Report) => {
-    const grid = engine.configOf(cacheId);
+    const grid = cacheGridOf(engine, cacheId);
     reports.push({
       cacheId,
       written: change.written.map((r) => toMs(r, grid)),

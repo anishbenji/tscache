@@ -681,7 +681,7 @@ describe("lifetime lock and transport loss (N32)", () => {
         lib: "0.0.0",
         clientId: "c1",
         lock,
-        features: ["cacheChanged", "memoryBudget"],
+        features: ["cacheChanged", "memoryBudget", "calendar-grid"],
       },
     );
     expect(

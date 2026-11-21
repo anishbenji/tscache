@@ -140,7 +140,7 @@ describe("DenseSegment payload layout — architecture §3.4, §4.2", () => {
     );
   });
 
-  it("emits fields in schema declaration order regardless of input field order", () => {
+  it("emits fields in schema key order regardless of input field order", () => {
     const segment = new DenseSegment({
       ...options,
       fields: { zeta: "i16", alpha: "f64", middle: "u8" },
@@ -161,6 +161,31 @@ describe("DenseSegment payload layout — architecture §3.4, §4.2", () => {
       { name: "zeta", dtype: "i16" },
       { name: "alpha", dtype: "f64" },
       { name: "middle", dtype: "u8" },
+    ]);
+  });
+
+  it("emits canonical array-index field names first, ascending, then the others in insertion order", () => {
+    // JavaScript key order (Object.entries), not declaration order (§4.2).
+    const schema: Record<string, Dtype> = {};
+    schema.b = "f64";
+    schema["1"] = "i16";
+    schema.a = "u8";
+    schema["0"] = "f64";
+    const segment = new DenseSegment({ ...options, fields: schema });
+    segment.mergeFrom({
+      slots: new Float64Array([0]),
+      fields: {
+        b: new Float64Array([1]),
+        "1": new Int16Array([2]),
+        a: new Uint8Array([3]),
+        "0": new Float64Array([4]),
+      },
+    });
+    expect(segment.transferPayload().fields.map(({ name }) => name)).toEqual([
+      "0",
+      "1",
+      "b",
+      "a",
     ]);
   });
 

@@ -412,15 +412,32 @@ export class DenseSegment implements Segment {
         data: data.buffer as ArrayBuffer,
       };
     });
-    return {
-      format: 1,
-      layout: "dense",
-      start: msOf(extent.start, this.#grid),
-      count,
-      interval: this.#grid.interval,
-      alignmentOffset: this.#grid.alignmentOffset,
-      mask,
-      fields,
-    };
+    const grid = this.#grid;
+    const start = msOf(extent.start, grid);
+    // The key order is part of the format: a page's snapshot text, and any
+    // hash of it, must not change for the same data. A calendar grid writes
+    // format 2 (§3.4): its descriptor in place of `interval` and
+    // `alignmentOffset`, and the slot index of `start`.
+    return grid.calendar === undefined
+      ? {
+          format: 1,
+          layout: "dense",
+          start,
+          count,
+          interval: grid.interval,
+          alignmentOffset: grid.alignmentOffset,
+          mask,
+          fields,
+        }
+      : {
+          format: 2,
+          layout: "dense",
+          start,
+          count,
+          grid: { ...grid.interval },
+          startSlot: extent.start,
+          mask,
+          fields,
+        };
   }
 }

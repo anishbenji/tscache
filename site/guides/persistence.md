@@ -54,6 +54,13 @@ keeps only its newest pages. Ranges that are covered but hold no bar (confirmed 
 never evicted and keep their small records. Records written under another structure or
 another `version` are not loaded, and the cache writes its own over them.
 
+A cache with a [calendar interval](/concepts/grid#calendar-intervals) in a zone checks its stored
+pages as it checks a server's snapshot ([Server rendering](/guides/ssr#calendar-caches)): after a
+browser update that changed the zone's rules, a page whose range or coverage ends now fall in other
+slots is skipped and fetched again. The five seconds bound the disk read; applying the records comes
+after it, and for a very fragmented calendar cache (more than about 14,500 separate coverage ranges)
+only the newest pages are applied.
+
 ## Failures
 
 A persistence failure never rejects a call. The cache stops persisting and goes on in memory, and every
