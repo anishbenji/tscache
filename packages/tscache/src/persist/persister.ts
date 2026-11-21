@@ -97,6 +97,12 @@ interface Tracked {
    * later removal, which clears this (user decision 113 A).
    */
   deferred: boolean;
+  /**
+   * Its deferred cleanup was queued by a `clear` change and no removal came
+   * since: the one a clearAll()'s engine clear, run just before the call,
+   * queues. Such a cleanup is absorbed by that clear (user decision 113 A).
+   */
+  absorbable: boolean;
 }
 
 /** What a flush attempt took from its cache, put back if the attempt fails. */
@@ -187,11 +193,6 @@ export class Persister {
   #current: Job | undefined;
   /** The pending clearAll job: the barrier (N54). */
   #barrier: Job | undefined;
-  /**
-   * Caches whose deferred cleanup was queued in the current synchronous
-   * step: by the engine's clear of a clearAll() that follows in it.
-   */
-  #fresh: Tracked[] = [];
   #seq = 0;
   /** The writer is being stepped; a nested #pump only asks for another step. */
   #pumping = false;
@@ -341,12 +342,13 @@ export class Persister {
     // A second call joins the pending job and takes over what changed since.
     for (const cache of this.#tracked.values()) {
       if (cache.status === "stopped") {
-        // A deferred cleanup the engine's clear queued just before, in this
-        // step: the clear deletes its records and releases its durable()
-        // calls (user decision 113 A). One queued earlier runs first.
+        // A deferred cleanup the engine's clear queued just before: the
+        // clear deletes its records and releases its durable() calls (user
+        // decision 113 A). One queued before that clear runs first.
         const cleanup =
-          this.#fresh.includes(cache) &&
+          cache.absorbable &&
           this.#queue.find((j) => j.kind === "cleanup" && j.cache === cache);
+        cache.absorbable = false;
         if (cleanup) {
           this.#unqueue(cleanup);
           job.waiters.push(() => this.#cleaned(cache));
@@ -409,6 +411,7 @@ export class Persister {
       running: undefined,
       cleaned: false,
       deferred: false,
+      absorbable: false,
     };
     this.#tracked.set(id, cache);
     return cache;
@@ -458,14 +461,12 @@ export class Persister {
     if (!cache || this.#closed || !REMOVALS.has(kind)) return;
     if (cache.deferred) {
       cache.deferred = cache.cleaned = false;
+      cache.absorbable = kind === "clear";
       this.#queueCleanup(cache);
-      if (!this.#fresh.length) {
-        queueMicrotask(() => {
-          this.#fresh = [];
-        });
-      }
-      this.#fresh.push(cache);
       this.#arm();
+    } else {
+      // A later removal: the cleanup was queued before it, and runs first.
+      cache.absorbable = false;
     }
     if (!cache.cleaned) cache.removals++;
   }

@@ -94,6 +94,31 @@ describe("a clearAll after a load stop (user decision 113 A)", () => {
   });
 });
 
+describe("a cleanup queued earlier in the same turn (Codex gate round 1, R1-1)", () => {
+  it("runs ahead of a clearAll that fails, deleting the removed records", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    h.store.seed("persist", fixture({}, [0, 4]));
+    h.store.fail("read");
+    await h.persister.open("persist");
+
+    h.engine.invalidate("persist", { start: 0, end: 0 });
+    const durable = tracked(h.persister.durable("persist"));
+    h.store.fail("clearAll", Infinity);
+    const clearing = clearAll(h);
+    await tick();
+    await tick(5000);
+    await finish(
+      Promise.all([clearing, durable.promise]).then(() => undefined),
+    );
+
+    expect(writes(h.store)).toMatchObject([
+      { cacheId: "persist", settled: true, plan: { strict: true } },
+    ]);
+    expect(h.store.records("persist")).toEqual({ cache: undefined, pages: [] });
+  });
+});
+
 describe("an op whose removal comes after an await (security lane 2, S2.1)", () => {
   it("answers through durably once the deferred cleanup settled", async () => {
     const h = harness();
