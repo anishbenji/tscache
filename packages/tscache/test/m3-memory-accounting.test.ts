@@ -226,3 +226,85 @@ describe("M3 accounting with a budget (implementer's tests)", () => {
     expect([...engine.get("b", span(0, 15)).timestamps]).toEqual([0, 4]);
   });
 });
+
+describe("M3 restore-trimmed coverage (step 131)", () => {
+  function threePageDonor(): Engine {
+    const donor = new Engine();
+    donor.cache(config());
+    donor.put("a", batch([0, 4, 8]), { range: span(0, 11) });
+    return donor;
+  }
+
+  function recordReaderChanges(engine: Engine): [string, ReaderChange][] {
+    const reports: [string, ReaderChange][] = [];
+    observeCaches(engine, {
+      onChange: () => {},
+      onMutate: () => {},
+      hasReaders: () => true,
+      onReaderChange: (cacheId, change) => reports.push([cacheId, change]),
+    });
+    return reports;
+  }
+
+  it("keeps a restore's own trimmed page out of the evicted index and later reader changes", () => {
+    const engine = new Engine({ memoryBudget: 2 * PAGE_BYTES });
+    engine.cache(config());
+    const reports = recordReaderChanges(engine);
+    restore(engine, "a", recordsOf(threePageDonor(), "a"));
+    expect(engine.coverage("a", span(0, 11))).toEqual([span(4, 11)]);
+    const evictedCoverage = engineMemoryInternals(engine)
+      .evictedIndex("a")
+      ?.ranges();
+
+    // The first call touches only trimmed slots. The second also withdraws
+    // one surviving slot, so readers should hear exactly that withdrawal.
+    engine.invalidate("a", span(0, 2));
+    engine.invalidate("a", span(3, 4));
+    expect({ evictedCoverage, reports }).toStrictEqual({
+      evictedCoverage: [],
+      reports: [["a", { written: [], removed: [span(4)], cleared: false }]],
+    });
+  });
+
+  it("remembers another cache's page evicted during restore and reports it on removal", () => {
+    const engine = new Engine({ memoryBudget: 2 * PAGE_BYTES });
+    engine.cache(config({ id: "old" }));
+    engine.cache(config());
+    const otherPage = span(40, 43);
+    engine.put("old", batch([40]), { range: otherPage });
+    const reports = recordReaderChanges(engine);
+
+    restore(engine, "a", recordsOf(threePageDonor(), "a"));
+    expect(engineMemoryInternals(engine).evictedIndex("old")?.ranges()).toEqual(
+      [otherPage],
+    );
+    engine.invalidate("old", otherPage);
+    expect(reports).toEqual([
+      [
+        "old",
+        { written: [], removed: [], cleared: false, evicted: [otherPage] },
+      ],
+      ["old", { written: [], removed: [otherPage], cleared: false }],
+    ]);
+  });
+
+  it("reports the page hydrate trims in its own reader change", () => {
+    const engine = new Engine({ memoryBudget: 2 * PAGE_BYTES });
+    engine.cache(config());
+    const reports = recordReaderChanges(engine);
+    const range = span(0, 11);
+
+    engine.hydrate("a", threePageDonor().snapshot("a", range));
+    expect(reports).toEqual([
+      [
+        "a",
+        {
+          written: [range],
+          removed: [],
+          cleared: false,
+          evicted: [span(0, 3)],
+        },
+      ],
+    ]);
+  });
+});
