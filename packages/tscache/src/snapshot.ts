@@ -19,6 +19,16 @@ function fail(message: string): never {
   throw new TscacheError(`invalid encoded snapshot: ${message}`);
 }
 
+/**
+ * Field bytes are copied in the host's order, and the format's are
+ * little-endian (docs/architecture.md §3.4): a big-endian host throws.
+ */
+function requireLittleEndian(): void {
+  if (new Uint8Array(new Uint16Array([1]).buffer)[0] !== 1) {
+    throw new TscacheError("snapshots need a little-endian host");
+  }
+}
+
 function fromBase64(text: unknown, what: string): Uint8Array<ArrayBuffer> {
   if (typeof text !== "string") fail(`${what} must be a base64 string`);
   try {
@@ -68,9 +78,11 @@ function encodePayload(p: DenseSegmentPayload): EncodedSegmentPayload {
 /**
  * The snapshot with each payload's mask and field data as base64 strings:
  * a plain JSON value to serialise with `JSON.stringify`, next to the app's
- * own data. Escaping for a `<script>` element stays with the app.
+ * own data. Escaping for a `<script>` element stays with the app. Throws
+ * TscacheError on a big-endian host.
  */
 export function encodeSnapshot(snapshot: Snapshot): EncodedSnapshot {
+  requireLittleEndian();
   const { segments, ...envelope } = snapshot;
   const copies = {
     range: { ...envelope.range },
@@ -196,9 +208,10 @@ function decodePayload(value: unknown, i: number): DenseSegmentPayload {
  * (every array position, holes included) and the base64 only, and leaves
  * its input unchanged; whether the snapshot fits a cache (lengths, ordering,
  * alignment, schema) is `hydrate`'s check. Throws TscacheError for anything
- * else.
+ * else, and on a big-endian host.
  */
 export function decodeSnapshot(encoded: EncodedSnapshot): Snapshot {
+  requireLittleEndian();
   const e: unknown = encoded;
   if (!isObject(e)) fail(`must be an object, got ${show(e)}`);
   const format = checkFormat(e.format, "format");

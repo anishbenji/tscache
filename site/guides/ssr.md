@@ -36,6 +36,8 @@ the same value, and leaves the parser nothing to end the element with. tscache d
 
 - **One client per server process**, created at startup and shared by every render, so a render reads
   what earlier renders fetched. Every visitor then reads the same cache: use it for public data only.
+- **The server must be little-endian**, as snapshot field bytes are: on a big-endian host (s390x, for
+  example) `encodeSnapshot` and `decodeSnapshot` throw `TscacheError`.
 - **The fetcher URL must be one the server can `import()`.** With Vite, `?fetcher` gives server code a
   file URL in a build and a path the module runner resolves in dev ([The Vite plugin](/guides/vite)).
 - **A server has no page origin**, so a fetcher that requests relative paths needs the backend's origin

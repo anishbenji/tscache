@@ -10,7 +10,7 @@
     "site"
   ],
   "engines": {
-    "node": ">=22.12"
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
   },
   "scripts": {
     "check": "biome check .",
