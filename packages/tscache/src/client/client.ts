@@ -244,12 +244,15 @@ class Client implements TscacheClient {
     // macrotask, after the awaiting caller has had its turn: the chain's
     // steps, then a superseded event that arrived early. Every one is
     // delivered even if a listener throws; the first error surfaces
-    // afterwards.
+    // afterwards. Nothing is delivered once the client has ended (§2.7):
+    // the worker was lost or the client disposed before the timer ran, or
+    // a listener of an earlier step disposed it.
     const superseded = early === undefined ? undefined : this.#superseded;
     if (fallbacks.length > 0 || superseded !== undefined) {
       setTimeout(() => {
         let failure: { error: unknown } | undefined;
         const deliver = (emit: () => void) => {
+          if (this.#ended !== undefined) return;
           try {
             emit();
           } catch (error) {

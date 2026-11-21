@@ -26,6 +26,7 @@ const payload = { lib: "9.9.9" };
 const open: TscacheClient[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   for (const client of open.splice(0)) await client.dispose();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -292,6 +293,63 @@ describe("30: the superseded event before the client exists (DC4 option (a))", (
       "evt:superseded",
     ]);
     await deliveredOnce(client, heard);
+  });
+
+  // Architecture §2.7: after workerLost or dispose() no event arrives. The
+  // kept event waits for a 0 ms timer, so these tests fake setTimeout and
+  // run it only once the client has ended. A promise waits for workerLost:
+  // vi.waitFor advances fake timers and would run the delivery first.
+  it("a worker lost before the delivery: workerLost is heard, and the kept event never is", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = new RpcServer(new Engine(), LIB_VERSION);
+    server.supersede(payload);
+    const { taps } = installSharedWorker(server);
+    const client = await make({ workerUrl, memoryBudget: 4 * PAGE_BYTES });
+    expect(client.superseded).toEqual(payload);
+    const order: string[] = [];
+    const lost = new Promise<void>((resolve) =>
+      client.on("workerLost", () => {
+        order.push("workerLost");
+        resolve();
+      }),
+    );
+    client.on("superseded", () => order.push("superseded"));
+    taps[0]?.wrapped.postMessage({ t: "bye" });
+    await lost;
+    vi.runAllTimers();
+    vi.useRealTimers();
+    expect(order).toEqual(["workerLost"]);
+  });
+
+  it("a client disposed right after createClient never delivers the kept event", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = new RpcServer(new Engine(), LIB_VERSION);
+    server.supersede(payload);
+    installSharedWorker(server);
+    const client = await make({ workerUrl, memoryBudget: 4 * PAGE_BYTES });
+    const heard = listen(client);
+    await client.dispose();
+    vi.runAllTimers();
+    vi.useRealTimers();
+    expect(heard).toEqual([]);
+  });
+
+  it("a modeFallback listener that disposes the client stops the kept event", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = new RpcServer(new Engine(), LIB_VERSION);
+    server.supersede(payload);
+    installDedicatedWorker(server);
+    const client = await make({ workerUrl, memoryBudget: 4 * PAGE_BYTES });
+    expect(client.mode).toBe("dedicated");
+    const order: string[] = [];
+    client.on("modeFallback", (step: ClientEvents["modeFallback"]) => {
+      order.push(`modeFallback:${step.to}`);
+      void client.dispose();
+    });
+    client.on("superseded", () => order.push("superseded"));
+    vi.runAllTimers();
+    vi.useRealTimers();
+    expect(order).toEqual(["modeFallback:dedicated"]);
   });
 
   it("a worker that is never superseded delivers nothing", async () => {
