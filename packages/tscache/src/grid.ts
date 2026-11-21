@@ -550,8 +550,11 @@ export function keepGrid(g: Grid): void {
  */
 export function resolveGrid(interval: unknown, alignmentOffset: unknown): Grid {
   if (typeof interval === "object" && interval !== null) {
-    const grid = createCalendarGrid(interval);
+    // A grid this call makes is held only once the whole call is valid: a
+    // rejected one must not push another view's grid out of the context.
+    const grid = createCalendarGrid(interval, undefined, false);
     assertNoOffset(alignmentOffset);
+    keepGrid(grid);
     return grid;
   }
   return gridOf(resolveGridFields(interval, alignmentOffset));
