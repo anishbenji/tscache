@@ -106,7 +106,9 @@ every cache and the database:
 It does not reach the records a still-running worker of another deploy writes back. If a `clearAll` cannot
 empty the disk within five seconds, every persisted cache stops, and that worker persists nothing more
 until it ends. When the worker's persistence module failed to load, `clearAll` still tries once to empty
-the database, within five seconds; when that fails as well, the records stay.
+the database, within five seconds; when that fails as well, the records stay. When the logout is the
+worker's first use of persistence, the module's loading counts first, so the call can take up to ten
+seconds. A database that opens only after the call has answered is still emptied then.
 
 A client hosted in a dedicated worker or in-process persists nothing, but its `clearAll` empties the
 database too, so a logout from any page removes what a SharedWorker session stored. It loads the

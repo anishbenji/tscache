@@ -657,9 +657,9 @@ export class Persister {
   /**
    * Stops a cache's persistence for good (N59): its dirty state and jobs go,
    * `onStopped` is called once, and, when a store is open and `cleanup` is
-   * 'now', one cleanup job deletes its records. 'deferred' (a stop that
+   * true, one cleanup job deletes its records. "deferred" (a stop that
    * ended the load) queues that job at the first later removal instead,
-   * opening the store if need be (user decision 113 A); 'none' has none.
+   * opening the store if need be (user decision 113 A); false has none.
    */
   #stop(
     cache: Tracked,
