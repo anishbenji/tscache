@@ -93,7 +93,10 @@ function seeder(
  * data (N39). Each seed is applied once per client, when its cache is
  * first asked for, into the cache opened with the seed's own config: a
  * reader asking for a conflicting config is refused by the client's check,
- * rather than handed coverage read on another grid.
+ * rather than handed coverage read on another grid. A seeding that fails
+ * stays failed for its client: every later `cache()` call for that cache
+ * rejects with the same error until a replacement client seeds afresh
+ * (`hydrateRead` counts only a worker without `hydrate` as not seeded).
  */
 export function connect(
   open: () => Promise<TscacheClient>,
