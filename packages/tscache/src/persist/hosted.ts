@@ -19,11 +19,16 @@
  * it started, turns persistence off for the worker's life, as a store that
  * fails to open does (§4.10.6): every waiting and later open stops with
  * `'unavailable'`.
+ *
+ * Deploy skew (§4.10.7, step 135): `supersede()` stops the persister, or is
+ * remembered until the chunk has loaded (N110), and `clearAll` is posted to
+ * the other workers of the origin through the injected `post` (N116).
  */
 
 import type { Engine } from "../engine/engine";
 import type { Persistence } from "../rpc/server";
 import type { ClientEvents } from "../types";
+import { type ClearPostOptions, ClearPosts } from "./clear-posts";
 import type { durably, Persister, PersisterOptions } from "./persister";
 import type { PersistStore } from "./store";
 
@@ -68,25 +73,34 @@ export class HostedPersistence implements Persistence {
   readonly #pending = new Set<string>();
   /** Ops and clears among the waiting calls. */
   #held = 0;
-  /** Caches stopped because the chunk did not load: each is reported once. */
+  /** Caches stopped without a persister: each is reported once (N59). */
   readonly #stopped = new Set<string>();
+  /** The worker was superseded (N110); kept for its life. */
+  #superseded = false;
+  readonly #posts: ClearPosts;
 
   /**
    * `load` imports the chunk; it is called once, at the first open or
-   * clearAll. `options` are the persister's; `timeoutMs` also bounds the
-   * import.
+   * clearAll. `options` are the persister's, and `timeoutMs` also bounds
+   * the import; `post` and `nextClearId` carry `clearAll` to the other
+   * workers of the origin (N116).
    */
   constructor(
     engine: Engine,
     load: () => Promise<LazyPersist>,
     openStore: OpenStore,
-    options: PersisterOptions = {},
+    options: PersisterOptions & ClearPostOptions = {},
   ) {
+    const { post, nextClearId, ...persister } = options;
     this.#engine = engine;
     this.#load = load;
     this.#openStore = openStore;
-    this.#options = options;
+    this.#options = persister;
     this.#timeoutMs = options.timeoutMs ?? 5000;
+    this.#posts = new ClearPosts({
+      ...(post === undefined ? {} : { post }),
+      ...(nextClearId === undefined ? {} : { nextClearId }),
+    });
   }
 
   /** The persister once its chunk has loaded (for tests and diagnostics). */
@@ -95,9 +109,12 @@ export class HostedPersistence implements Persistence {
   }
 
   open(cacheId: string): Promise<void> {
+    // Stopped without a persister, for the worker's life: reported once.
+    if (this.#stopped.has(cacheId)) return Promise.resolve();
     const persister = this.#persister;
     if (persister !== undefined) return persister.open(cacheId);
-    if (this.#state === "failed") {
+    // Nothing would be read: no reason to import the chunk, or to wait for it.
+    if (this.#superseded || this.#state === "failed") {
       this.#stopUnloaded(cacheId);
       return Promise.resolve();
     }
@@ -121,10 +138,19 @@ export class HostedPersistence implements Persistence {
     return this.#later(() => this.durably(cacheId, op));
   }
 
-  clearAll(clearMemory: () => void = () => this.#engine.clearAll()): unknown {
+  /**
+   * `fromClearId`: the clear id of the channel message this clear runs for
+   * (N116); without it the clear is this worker's own. An own clear is
+   * posted when it runs, right after its memory clear, and again when its
+   * disk clear has settled; a clear for a message is relayed once, then.
+   */
+  clearAll(
+    clearMemory: () => void = () => this.#engine.clearAll(),
+    fromClearId?: string,
+  ): unknown {
     if (this.#state === "loading" && this.#held > 0) {
       this.#held++;
-      return this.#later(() => this.clearAll(clearMemory));
+      return this.#later(() => this.clearAll(clearMemory, fromClearId));
     }
     let failure: { error: unknown } | undefined;
     try {
@@ -133,6 +159,7 @@ export class HostedPersistence implements Persistence {
       // Every cache was cleared anyway (N22); the disk must follow.
       failure = { error };
     }
+    const settled = this.#posts.begin(fromClearId);
     const persister = this.#persister;
     let cleared: Promise<unknown>;
     if (persister !== undefined) cleared = persister.clearAll();
@@ -140,8 +167,21 @@ export class HostedPersistence implements Persistence {
     // Earlier sessions may have persisted: the chunk loads to empty the disk.
     else cleared = this.#later((loaded) => loaded?.clearAll());
     return cleared.then(() => {
+      settled();
       if (failure !== undefined) throw failure.error;
     });
+  }
+
+  /**
+   * The worker is superseded (N110): the persister stops for its life, now
+   * or as soon as its chunk has loaded. Before that, a persisted cache
+   * opened later stops at once without the import, and one whose open waits
+   * for the chunk stops when it arrives. Idempotent.
+   */
+  supersede(): void {
+    if (this.#superseded) return;
+    this.#superseded = true;
+    this.#persister?.supersede();
   }
 
   flush(): void {
@@ -197,6 +237,8 @@ export class HostedPersistence implements Persistence {
           this.#options,
         );
         this.#durably = chunk.durably;
+        // Before any waiting open reaches it: that open reads nothing.
+        if (this.#superseded) this.#persister.supersede();
       } catch (thrown) {
         failure = failureOf(thrown);
       }
@@ -212,15 +254,19 @@ export class HostedPersistence implements Persistence {
     for (const run of this.#waiting.splice(0)) run(this.#persister);
   }
 
-  /** A persisted cache opened without the chunk: its persistence stops. */
+  /**
+   * A persisted cache opened without a persister: its persistence stops,
+   * with 'superseded' once the worker is (N112), else because the chunk did
+   * not load.
+   */
   #stopUnloaded(cacheId: string): void {
     if (this.#stopped.has(cacheId)) return;
     this.#stopped.add(cacheId);
     const error = this.#failure;
-    const event: StopEvent =
-      error === undefined
-        ? { cacheId, reason: "unavailable" }
-        : { cacheId, reason: "unavailable", error };
+    let event: StopEvent;
+    if (this.#superseded) event = { cacheId, reason: "superseded" };
+    else if (error === undefined) event = { cacheId, reason: "unavailable" };
+    else event = { cacheId, reason: "unavailable", error };
     this.#options.onStopped?.(event);
   }
 }

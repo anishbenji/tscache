@@ -112,8 +112,15 @@ export interface Persistence {
    * every persisted cache has then stopped; N66 for the other hostings).
    * `clearMemory` empties the caches (default `Engine.clearAll`): the
    * server passes its own, so a deferred clear still names its request.
+   * `fromClearId` is the clear id of the channel message the clear runs
+   * for, when another worker's `clearAll` caused it (N116).
    */
-  clearAll(clearMemory?: () => void): unknown;
+  clearAll(clearMemory?: () => void, fromClearId?: string): unknown;
+  /**
+   * The worker is superseded (N110): nothing persists any more. Absent
+   * where a hosting is never superseded (N119).
+   */
+  supersede?(): void;
   /** The last connection went: writes what the debounce still holds. */
   flush(): void;
 }

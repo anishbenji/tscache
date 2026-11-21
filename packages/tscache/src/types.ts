@@ -354,10 +354,14 @@ export interface ClientEvents {
    * never rejects a call; this event reports it. A stop while `cache()`
    * loads is emitted before the handle exists, so subscribe with
    * `client.on` to hear it.
+   *
+   * `'superseded'` (N112) is not a failure: a worker of a newer generation
+   * of the application runs in the origin and owns the stored records now.
+   * Nothing was deleted, and a reload joins that worker.
    */
   persistStopped: {
     cacheId: string;
-    reason: "quota-exceeded" | "unavailable" | "error";
+    reason: "quota-exceeded" | "unavailable" | "error" | "superseded";
     /** The underlying failure, when there is one. */
     error?: { name: string; message: string };
   };

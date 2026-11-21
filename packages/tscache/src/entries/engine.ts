@@ -11,7 +11,7 @@
 
 export type { EngineEvents, EngineOptions } from "../engine/engine";
 export { Engine } from "../engine/engine";
-export type { PutErrorCode } from "../errors";
+export type { ConfigErrorCode, PutErrorCode } from "../errors";
 export {
   ConfigError,
   InvalidRangeError,

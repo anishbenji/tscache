@@ -1,6 +1,6 @@
 /**
  * The persister (docs/architecture.md §4.10.6; N46, N49, N50, N54, N58, N59,
- * N61): loads persisted caches into an engine and writes their changes
+ * N61, N110): loads persisted caches into an engine and writes their changes
  * behind, through one writer that runs one job at a time under one deadline
  * per job. Memory is canonical: a load applies only into a cache that knows
  * nothing, and a flush writes what memory holds without reading the disk.
@@ -162,7 +162,11 @@ export class Persister {
   /** The store's opening in progress; `#openingIfExists` when a clear started it. */
   #opening: Promise<PersistStore | undefined> | undefined;
   #openingIfExists = false;
-  /** Set when the store failed to open or a clearAll failed: nothing persists any more. */
+  /**
+   * Set when the store failed to open, a clearAll failed or the worker was
+   * superseded: nothing persists any more. 'superseded' is kept once set
+   * (N112).
+   */
   #failure: { reason: Reason; error: Failure | undefined } | undefined;
 
   /** Queued jobs, and the one whose attempt is running. */
@@ -226,7 +230,8 @@ export class Persister {
     if (!state.config.persist || this.#closed) return Promise.resolve();
     const cache = this.#track(cacheId, state);
     if (this.#failure !== undefined) {
-      // A failed opening or clearAll: nothing loads or persists any more.
+      // A failed opening or clearAll, or a superseded worker: nothing loads
+      // or persists any more.
       this.#stop(cache, this.#failure.reason, this.#failure.error, false);
     } else if (this.#barrier !== undefined) {
       // No load during a clearAll (§4.10.5 rule 3): cold, rewritten after it.
@@ -319,6 +324,25 @@ export class Persister {
     const settled = this.#settles(job);
     this.#arm();
     return settled;
+  }
+
+  /**
+   * This worker is superseded (N110, §4.10.6): a newer generation's worker
+   * owns the stored records now. Every tracked cache stops with
+   * 'superseded' and without a cleanup, every persisted cache opened later
+   * stops the same way and reads nothing, and no write starts for any
+   * cache again. The engine is not touched. `clearAll` still empties the
+   * disk, and a clear pending now runs to its end. Idempotent.
+   */
+  supersede(): void {
+    if (this.#closed || this.#failure?.reason === "superseded") return;
+    this.#atomically(() => {
+      this.#failure = { reason: "superseded", error: undefined };
+      for (const cache of this.#tracked.values()) {
+        this.#stop(cache, "superseded", undefined, false);
+      }
+      this.#dropCleanups();
+    });
   }
 
   /** Flushes, then closes the store. */
@@ -624,6 +648,26 @@ export class Persister {
     cache.running = undefined;
   }
 
+  /**
+   * The cleanups of caches that stopped before the worker was superseded
+   * never run, and one that is running is abandoned: a cleanup deletes every
+   * record of its cache, and those may be the current generation's by now.
+   * Their `durable` waiters are released, as a settled cleanup does.
+   */
+  #dropCleanups(): void {
+    const current = this.#current;
+    const cleanups = this.#queue.filter((job) => job.kind === "cleanup");
+    if (current?.kind === "cleanup") {
+      this.#current = undefined;
+      cleanups.push(current);
+    }
+    for (const job of cleanups) {
+      this.#unqueue(job);
+      this.#cleaned(job.cache as Tracked);
+      this.#settle(job);
+    }
+  }
+
   #report(event: StopEvent): void {
     try {
       this.#onStopped?.(event);
@@ -684,14 +728,18 @@ export class Persister {
 
   /**
    * A failed clear stops every tracked cache, without a cleanup: it was
-   * their cleanup. Nothing persists any more (D27).
+   * their cleanup. Nothing persists any more (D27). After `supersede()`
+   * none is left running, so it stops nothing more.
    */
   #clearFailed(job: Job, reason: Reason, error: Failure | undefined): void {
     this.#atomically(() => {
       this.#barrier = undefined;
       this.#unqueue(job);
       if (this.#current === job) this.#current = undefined;
-      this.#failure = { reason, error };
+      // A superseded persister keeps that reason for later opens (N112).
+      if (this.#failure?.reason !== "superseded") {
+        this.#failure = { reason, error };
+      }
       for (const cache of this.#tracked.values()) {
         this.#stop(cache, reason, error, false);
       }

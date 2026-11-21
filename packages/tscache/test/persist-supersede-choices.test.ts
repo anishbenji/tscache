@@ -1,0 +1,153 @@
+// The choices step 135 made where the M5 proposal says nothing
+// (docs/reviews/step-135.md, "Choices made without a decision row"): a
+// cleanup pending at supersede(), how many clear ids are kept, and a post
+// that throws. The contract tests are persister-supersede.test.ts and
+// persist-deploy-skew.test.ts.
+
+import { describe, expect, it, vi } from "vitest";
+import { ClearPosts } from "../src/persist/clear-posts";
+import { fakeTime, harness, tick, writes } from "./persist-harness";
+import { batch, config, fixture, tracked } from "./persist-test-helpers";
+
+fakeTime();
+
+describe("a cleanup pending when the worker is superseded", () => {
+  it("drops a queued cleanup: the stopped cache's records stay", async () => {
+    const h = harness({ debounceMs: 10, timeoutMs: 25 });
+    const other = fixture({ id: "other" });
+    h.store.seed("other", other);
+    h.engine.cache(config());
+    h.engine.cache(config({ id: "other" }));
+    await h.persister.open("persist");
+
+    // "other" stays loading behind its read, so it stops at its deadline.
+    const read = h.store.gate("read");
+    const opening = h.persister.open("other");
+    await tick();
+    await read.entered;
+    await tick(10);
+    // The writer is busy with this flush when "other" stops.
+    const write = h.store.gate("write");
+    h.engine.put("persist", batch([0]));
+    const flushing = h.persister.flush();
+    await tick();
+    await write.entered;
+    await tick(15);
+    await opening;
+    expect(h.stopped).toEqual([{ cacheId: "other", reason: "unavailable" }]);
+    const waiting = tracked(h.persister.durable("other"));
+    await Promise.resolve();
+    expect(waiting.done).toBe(false);
+
+    h.persister.supersede();
+    await waiting.promise;
+    await flushing;
+    read.release();
+    write.release();
+    await tick(10_000);
+
+    expect(h.stopped).toEqual([
+      { cacheId: "other", reason: "unavailable" },
+      { cacheId: "persist", reason: "superseded" },
+    ]);
+    // The one write is the flush abandoned at supersede(); no cleanup ran.
+    expect(writes(h.store).map(({ cacheId }) => cacheId)).toEqual(["persist"]);
+    expect(h.store.records("other")).toEqual(other);
+  });
+
+  it("abandons a running cleanup and releases its waiters at once", async () => {
+    const h = harness({ debounceMs: 10, timeoutMs: 25 });
+    h.engine.cache(config());
+    await h.persister.open("persist");
+    h.store.fail("write", 1, "QuotaExceededError");
+    const flush = h.store.gate("write");
+    const cleanup = h.store.gate("write");
+    h.engine.put("persist", batch([0]));
+    const flushing = h.persister.flush();
+    await tick();
+    await flush.entered;
+    flush.release();
+    await flushing;
+    await cleanup.entered;
+    expect(h.stopped).toMatchObject([
+      { cacheId: "persist", reason: "quota-exceeded" },
+    ]);
+    const waiting = tracked(h.persister.durable("persist"));
+    await Promise.resolve();
+    expect(waiting.done).toBe(false);
+
+    h.persister.supersede();
+    await waiting.promise;
+    expect(writes(h.store).at(-1)?.settled).toBe(false);
+    cleanup.release();
+    await tick(10_000);
+
+    // Reported once, with its first reason; nothing follows the cleanup.
+    expect(h.stopped).toHaveLength(1);
+    expect(writes(h.store)).toHaveLength(2);
+  });
+});
+
+describe("ClearPosts", () => {
+  it("posts nothing and takes no id without a post", () => {
+    const nextClearId = vi.fn(() => "own");
+    const posts = new ClearPosts({ nextClearId });
+    posts.begin()();
+    posts.begin("remote")();
+    expect(nextClearId).not.toHaveBeenCalled();
+  });
+
+  it("gives each own clear a random id by default", () => {
+    const post = vi.fn<(clearId: string) => void>();
+    const posts = new ClearPosts({ post });
+    posts.begin()();
+    posts.begin()();
+    const ids = post.mock.calls.map(([id]) => id);
+    expect(ids).toHaveLength(4);
+    expect(ids[0]).toMatch(/^[0-9a-f]{32}$/);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[3]).toBe(ids[2]);
+    expect(ids[2]).not.toBe(ids[0]);
+  });
+
+  it("ignores a post that throws, at the start and at the settling", () => {
+    const post = vi.fn(() => {
+      throw new Error("channel closed");
+    });
+    const posts = new ClearPosts({ post, nextClearId: () => "own" });
+    const settled = posts.begin();
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(settled).not.toThrow();
+    expect(post).toHaveBeenCalledTimes(2);
+    // A relay whose post throws is still its one relay.
+    expect(posts.begin("remote")).not.toThrow();
+    expect(post).toHaveBeenCalledTimes(3);
+    posts.begin("remote")();
+    expect(post).toHaveBeenCalledTimes(3);
+  });
+
+  it("remembers the 64 clear ids seen last, own ones included", () => {
+    const post = vi.fn<(clearId: string) => void>();
+    const posts = new ClearPosts({ post, nextClearId: () => "own" });
+    posts.begin("first")();
+    posts.begin()();
+    for (let i = 0; i < 62; i++) posts.begin(`filler-${i}`)();
+    post.mockClear();
+    // 64 ids are held: none of them is relayed again.
+    posts.begin("first")();
+    posts.begin("own")();
+    posts.begin("filler-61")();
+    expect(post).not.toHaveBeenCalled();
+
+    // One more id pushes the oldest out; it is relayed once more.
+    posts.begin("newest")();
+    expect(post.mock.calls).toEqual([["newest"]]);
+    post.mockClear();
+    posts.begin("first")();
+    expect(post.mock.calls).toEqual([["first"]]);
+    post.mockClear();
+    posts.begin("first")();
+    posts.begin("newest")();
+    expect(post).not.toHaveBeenCalled();
+  });
+});

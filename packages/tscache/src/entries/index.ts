@@ -11,7 +11,7 @@ export type { CacheHandle } from "../client/cache";
 export type { TscacheClient } from "../client/client";
 export { createClient } from "../client/client";
 
-export type { PutErrorCode } from "../errors";
+export type { ConfigErrorCode, PutErrorCode } from "../errors";
 export {
   AUTH_INVALID_CODE,
   AuthInvalidError,
