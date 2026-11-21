@@ -8,6 +8,10 @@ updates:
       interval: monthly
     commit-message:
       prefix: ci
+    # The same release age as the bun entry below, for the same reason.
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
     groups:
       actions:
         patterns: ["*"]
