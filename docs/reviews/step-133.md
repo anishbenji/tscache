@@ -220,3 +220,7 @@ None. No test on `main` changed. On this branch, the step-133 test from `0cf9fbc
 ## Not verified
 
 - (f) in Chromium: the claim that both routes reach the window's `error` event rests on the HTML standard's "report the exception" for event listeners and `reportError`; only the Node behaviour was run.
+
+## Round 2 (Codex) — reviewer verdict: merge
+
+Head `8183455`. No findings; the reviewer confirmed R1-1's two-page SharedWorker regression test and every earlier fix. `bun run ci` exited 0 on `8b1ed7d`. The review settles at round 2. The user merges (`docs/architecture.md`). Open with the user: DC-1 to DC-3 (#106–#108).
