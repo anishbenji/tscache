@@ -99,6 +99,11 @@ export class HostedPersistence implements Persistence {
   readonly #cleanups = new Map<string, Cleanup>();
   /** The store's opening for the cleanups, kept once it opened. */
   #store: Promise<PersistStore | undefined> | undefined;
+  /**
+   * The whole-store clear of a clearAll() after the chunk failed, while its
+   * engine clear runs: the cleanups that clear starts are this clear.
+   */
+  #clearing: Promise<void> | undefined;
 
   /**
    * `load` imports the chunk; it is called once, at the first open or
@@ -156,24 +161,37 @@ export class HostedPersistence implements Persistence {
       this.#held++;
       return this.#later(() => this.clearAll(clearMemory));
     }
+    // After a chunk failure the whole store is emptied once, through the
+    // store opener (user decision 123 A); the cleanups the engine's clear
+    // starts are that clear.
+    const store = this.#state === "failed" ? this.#clearStore() : undefined;
+    this.#clearing = store;
     let failure: { error: unknown } | undefined;
     try {
       clearMemory();
     } catch (error) {
       // Every cache was cleared anyway (N22); the disk must follow.
       failure = { error };
+    } finally {
+      this.#clearing = undefined;
     }
     const persister = this.#persister;
     let cleared: Promise<unknown>;
     if (persister !== undefined) cleared = persister.clearAll();
-    else if (this.#state === "failed") {
-      // The clear was a removal of every cache whose cleanup it deferred.
-      cleared = Promise.all(
-        [...this.#cleanups.values()].map((cleanup) => cleanup.settled),
+    else if (store !== undefined) {
+      // Cleanups started before the call are waited for too.
+      cleared = Promise.all([
+        store,
+        ...[...this.#cleanups.values()].map((cleanup) => cleanup.settled),
+      ]);
+    }
+    // Earlier sessions may have persisted: the chunk loads to empty the disk,
+    // or, when it fails to load, the store opener does.
+    else {
+      cleared = this.#later((loaded) =>
+        loaded === undefined ? this.#clearStore() : loaded.clearAll(),
       );
     }
-    // Earlier sessions may have persisted: the chunk loads to empty the disk.
-    else cleared = this.#later((loaded) => loaded?.clearAll());
     return cleared.then(() => {
       if (failure !== undefined) throw failure.error;
     });
@@ -304,19 +322,27 @@ export class HostedPersistence implements Persistence {
     if (!this.#stopped.has(cacheId)) return;
     const cleanup: Cleanup = {
       removals: 1,
-      settled: this.#cleanup(cacheId).then(() => {
+      settled: (
+        this.#clearing ??
+        this.#bounded((store) => store.write(cacheId, CLEANUP))
+      ).then(() => {
         cleanup.settled = undefined;
       }),
     };
     this.#cleanups.set(cacheId, cleanup);
   }
 
+  /** Empties the whole store, strict, as `#bounded` runs it (user decision 123 A). */
+  #clearStore(): Promise<void> {
+    return this.#bounded((store) => store.clearAll());
+  }
+
   /**
-   * One strict deletion of the cache's records, through a store that exists,
-   * with the persister's deadline and no retry; never rejects: a failure
-   * leaves the records (§4.10.6, Failures).
+   * Runs one strict deletion through a store that exists, with the
+   * persister's deadline and no retry; never rejects: a failure leaves the
+   * records (§4.10.6, Failures).
    */
-  #cleanup(cacheId: string): Promise<void> {
+  #bounded(run: (store: PersistStore) => Promise<void>): Promise<void> {
     this.#store ??= this.#openStore({ ifExists: true });
     const opening = this.#store;
     // A failed opening is tried again by the next cleanup.
@@ -332,7 +358,7 @@ export class HostedPersistence implements Persistence {
       opening
         .then((store) => {
           if (store === undefined) forget();
-          return store?.write(cacheId, CLEANUP);
+          return store && run(store);
         }, forget)
         .then(done, done);
     });

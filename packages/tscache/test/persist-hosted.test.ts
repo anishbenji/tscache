@@ -217,7 +217,9 @@ describe("lazily loaded persistence (§4.10.8)", () => {
     // Persistence is off for the worker: ops run as they come. A cache's
     // first removal runs the cleanup its stop deferred, through the store
     // opener, and answers once that settled (user decision 113 A); a later
-    // removal answers at once, and clearAll waits for the cleanups it started.
+    // removal answers at once. clearAll empties the whole store once, and that
+    // clear is the cleanup of every cache its engine clear removed from (user
+    // decision 123 A).
     const removal = h.persistence.durably("persist", () =>
       h.engine.invalidate("persist", all),
     );
@@ -237,8 +239,8 @@ describe("lazily loaded persistence (§4.10.8)", () => {
     };
     expect(writes(h.store)).toMatchObject([
       { cacheId: "persist", settled: true, plan: cleanup },
-      { cacheId: "later", settled: true, plan: cleanup },
     ]);
+    expect(h.store.log.at(-1)?.kind).toBe("clearAll");
     expect(h.load).toHaveBeenCalledTimes(1);
   });
 
@@ -379,5 +381,88 @@ describe("lazily loaded persistence (§4.10.8)", () => {
       () => expect(h.store.records("persist")).toEqual(recordsOf(h.engine)),
       { timeout: 4000, interval: 1 },
     );
+  });
+});
+
+// Implementer tests, written before the code (user decision 123 A; Codex
+// is limited to gate rounds, docs/reviews/step-132.md): after a chunk
+// failure, clearAll also empties the whole store once through the store
+// opener, bounded by timeoutMs, its failure ignored.
+describe("clearAll after a chunk failure (user decision 123 A)", () => {
+  /**
+   * A hosting whose chunk failed at the open of `stopped`, over
+   * `openStore`; the engine holds `persist` and `mem`, which does not
+   * persist.
+   */
+  async function failedWith(
+    openStore: (options?: {
+      ifExists?: boolean;
+    }) => Promise<MemoryStore | undefined>,
+    stopped = "persist",
+  ) {
+    const engine = new Engine();
+    const open = vi.fn(openStore);
+    const persistence = new HostedPersistence(
+      engine,
+      () => Promise.reject(new TypeError("chunk 404")),
+      open,
+    );
+    engine.cache(config());
+    engine.cache(config({ id: "mem", persist: false }));
+    await persistence.open(stopped);
+    return { engine, open, persistence };
+  }
+
+  it("empties a never-opened cache's records, the opened cache's cleanup absorbed", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const store = new MemoryStore();
+    store.seed("persist", fixture({}, [0, 4]));
+    store.seed("never", fixture({ id: "never" }, [0, 4]));
+    const h = await failedWith(async () => store);
+    await h.persistence.clearAll();
+    const empty = { cache: undefined, pages: [] };
+    expect(store.records("never")).toEqual(empty);
+    expect(store.records("persist")).toEqual(empty);
+    expect(writes(store)).toEqual([]);
+    expect(h.open.mock.calls).toEqual([[{ ifExists: true }]]);
+  });
+
+  it("resolves at timeoutMs when the store opener hangs", async () => {
+    vi.useFakeTimers({ now: 0 });
+    // The stopped cache is not the engine's, so no deferred cleanup runs:
+    // only the whole-store clear reaches the opener.
+    const h = await failedWith(() => new Promise(() => {}), "gone");
+    h.engine.put("mem", batch([1]));
+    const cleared = tracked(
+      Promise.resolve(h.persistence.clearAll()).then(() => undefined),
+    );
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(cleared.done).toBe(false);
+    expect(h.open.mock.calls).toEqual([[{ ifExists: true }]]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(cleared.done).toBe(true);
+    expect(h.engine.coverage("mem", all)).toEqual([]);
+  });
+
+  it("resolves with memory cleared when the store opener rejects", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = await failedWith(
+      () => Promise.reject(new DOMException("open failed", "UnknownError")),
+      "gone",
+    );
+    h.engine.put("mem", batch([1]));
+    await h.persistence.clearAll();
+    expect(h.open.mock.calls).toEqual([[{ ifExists: true }]]);
+    expect(h.engine.coverage("mem", all)).toEqual([]);
+  });
+
+  it("empties the store when the clearAll's own import of the chunk fails", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = hosted();
+    h.store.seed("never", fixture({ id: "never" }, [0, 4]));
+    const cleared = h.persistence.clearAll();
+    h.fail(new TypeError("chunk 404"));
+    await cleared;
+    expect(h.store.records("never")).toEqual({ cache: undefined, pages: [] });
   });
 });
