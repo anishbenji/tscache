@@ -14,8 +14,8 @@
     "@anishbenji/tscache": "workspace:*"
   },
   "devDependencies": {
-    "@angular/common": "^22.2.4",
-    "@angular/core": "^22.2.4",
+    "@angular/common": "^22.2.6",
+    "@angular/core": "^22.2.6",
     "@solidjs/web": "2.0.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -24,6 +24,6 @@
     "rxjs": "^7.8.2",
     "solid-js": "2.0.3",
     "svelte": "^5.57.3",
-    "vue": "^3.5.44"
+    "vue": "^3.5.45"
   }
 }
