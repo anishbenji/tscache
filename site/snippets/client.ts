@@ -6,6 +6,11 @@ import {
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "./fetcher.ts?fetcher";
 
+/** The application's own banner; here it only logs. */
+function showReloadPrompt(message: string): void {
+  console.info(message);
+}
+
 // #region options
 const options: ClientOptions = {
   workerUrl,
@@ -23,6 +28,15 @@ client.on("modeFallback", ({ from, to, reason }) => {
   console.warn(`tscache: ${from} failed (${reason}); using ${to}`);
 });
 // #endregion fallback
+
+// #region superseded
+// A newer deploy's worker is running. This tab keeps working, but its
+// worker persists nothing more: ask the user to reload, never reload for
+// them. Code that runs later reads `client.superseded` instead.
+client.on("superseded", ({ lib }) => {
+  showReloadPrompt(`A new version is available (tscache ${lib}).`);
+});
+// #endregion superseded
 
 // #region in-process
 // No worker at all: server code, Node, tests. Each such client has an

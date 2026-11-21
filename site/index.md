@@ -57,11 +57,12 @@ The limits of 0.2.0 that an application has to design around:
   preparation) `memoryBudget` bounds it by evicting the least recently used pages, and `memoryStats()`
   reports it; there is still no default budget. [Memory](/guides/patterns#memory) says how to keep it
   in check.
-- **A deploy can leave tabs on two versions.** With a hashed worker URL, a deploy that changes the
-  worker gives old and new tabs separate SharedWorkers that share no memory, silently, and both write
-  the origin's IndexedDB database. A deploy that changes only the fetcher keeps the worker URL, and
-  `createClient` in a new tab rejects with `ConfigError` until the old tabs close; so does a new fetcher
-  with a fixed worker URL, and a protocol change there rejects with `ProtocolMismatchError`.
+- **A deploy can leave tabs on two versions.** In 0.2.0, with a hashed worker URL, a deploy that
+  changes the worker gives old and new tabs separate SharedWorkers that share no memory, silently, and
+  both write the origin's IndexedDB database; a deploy that changes only the fetcher is refused with
+  `ConfigError` in every new tab until the old tabs close. From 0.3.0 (in preparation) each such deploy
+  has a worker of its own, the older worker stops persisting and its tabs hear `superseded`, and a
+  logout's `clearAll` reaches every worker.
   [Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy) has the details.
 - **Change events reach other tabs only through a SharedWorker.** Since 0.2.0 `cacheChanged` tells a
   view where a read's result may have changed ([Change events](/concepts/events#change-events)). With a

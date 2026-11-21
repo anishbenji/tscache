@@ -5,15 +5,16 @@ event of that type, or with `cache.on(event, fn)`, which hears the cache- and re
 that cache only. Both return the unsubscribe function; `client.off(event, fn)` also works. Listeners run
 on the page; one that throws does not stop the others.
 
-| Event            | Scope   | Payload                                                        | When                                                                                                                                                                 |
-| ---------------- | ------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `authInvalid`    | client  | `{ error: { name, message }, context }`                        | the fetcher threw `AuthInvalidError`; sent to every tab, with the fetcher context the refused fetch was issued with                                                  |
-| `modeFallback`   | client  | `{ from, to, reason }`                                         | a hosting failed while connecting and the chain stepped down                                                                                                         |
-| `workerLost`     | client  | `{ reason }`                                                   | the worker behind this client is gone; at most once per client, never after `dispose()`                                                                              |
-| `cacheCleared`   | cache   | `{ cacheId, reason }`                                          | the cache was emptied: `'manual'`, `'clear-all'` or `'version-mismatch'`                                                                                             |
-| `persistStopped` | cache   | `{ cacheId, reason, error? }`                                  | a persisted cache stopped persisting: `'quota-exceeded'`, `'unavailable'` or `'error'` (with the failure); it goes on in memory ([Persistence](/guides/persistence)) |
-| `cacheChanged`   | cache   | `{ cacheId, written, removed, cleared, evicted?, requestId? }` | what a read of the cache returns may have changed: a put, a fetch, a hydrate, an invalidate, a moved watermark or a clear ([Change events](#change-events))          |
-| `mergeWarning`   | request | `{ cacheId, requestId, range, fields }`                        | with `warnOnOverlapDiff`, a write changed values the cache already held outside the volatile region                                                                  |
+| Event            | Scope   | Payload                                                        | When                                                                                                                                                                                                                                   |
+| ---------------- | ------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authInvalid`    | client  | `{ error: { name, message }, context }`                        | the fetcher threw `AuthInvalidError`; sent to every tab, with the fetcher context the refused fetch was issued with                                                                                                                    |
+| `modeFallback`   | client  | `{ from, to, reason }`                                         | a hosting failed while connecting and the chain stepped down                                                                                                                                                                           |
+| `workerLost`     | client  | `{ reason }`                                                   | the worker behind this client is gone; at most once per client, never after `dispose()`                                                                                                                                                |
+| `superseded`     | client  | `{ lib }`                                                      | a newer deploy's worker runs in the origin, with tscache version `lib`: this tab's worker no longer persists, and a reload joins the newer one; at most once per client ([Workers](/guides/workers#older-tabs-are-told-superseded))    |
+| `cacheCleared`   | cache   | `{ cacheId, reason }`                                          | the cache was emptied: `'manual'`, `'clear-all'` or `'version-mismatch'`                                                                                                                                                               |
+| `persistStopped` | cache   | `{ cacheId, reason, error? }`                                  | a persisted cache stopped persisting: `'quota-exceeded'`, `'unavailable'` or `'error'` (with the failure), or `'superseded'` (a newer deploy's worker owns the records now); it goes on in memory ([Persistence](/guides/persistence)) |
+| `cacheChanged`   | cache   | `{ cacheId, written, removed, cleared, evicted?, requestId? }` | what a read of the cache returns may have changed: a put, a fetch, a hydrate, an invalidate, a moved watermark or a clear ([Change events](#change-events))                                                                            |
+| `mergeWarning`   | request | `{ cacheId, requestId, range, fields }`                        | with `warnOnOverlapDiff`, a write changed values the cache already held outside the volatile region                                                                                                                                    |
 
 ## Change events
 
@@ -35,7 +36,8 @@ grid, ascending and disjoint:
   them; a fetching read fetches it again. Absent when the call evicted nothing. With a budget, a later `invalidate`
   or watermark moved back over an evicted range still lists it in `removed`, so a view that shows it
   hears the change.
-- `requestId`: the call that made the change, or for a fetch the `get` that started it.
+- `requestId`: the call that made the change, or for a fetch the `get` that started it. Absent when no
+  call of this worker made it: a `clearAll` that reached this worker from another one (below).
 
 One event is sent per call that changed the cache, before that call resolves: a put's event arrives
 before the put's promise settles. For one call the order is `cacheCleared` (when it cleared), then
@@ -65,6 +67,15 @@ fetch forever. Under the rule, no event a fetch caused starts a fetch. The cost:
 new dataset version, other tabs show misses outside the range that fetch wrote until their next ordinary
 read. Coalesce bursts, for example one read per animation frame, as the
 [integrations](https://github.com/anishbenji/tscache/blob/main/integrations/shared/changes.ts) do.
+
+### A `clearAll` from another worker
+
+From 0.3.0 a `clearAll` reaches every SharedWorker of the origin, whichever tab or hosting called it:
+tabs of two deploys have a worker each for a while
+([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)). A worker that clears
+for another worker's call sends its tabs `cacheCleared` with `'clear-all'` and `cacheChanged` with
+`cleared: true` and no `requestId`, for every cache, once each time it clears, which can be more than
+once for one call. Read again as the rule says: a fetching read.
 
 ### Hostings and older workers
 

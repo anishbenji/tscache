@@ -18,9 +18,15 @@ handshake passed. Create one per page, at startup, and keep it for the page's li
 
 Without `fetcher`, the cache holds only what you `put`.
 
-`createClient` rejects with `ProtocolMismatchError` when the worker speaks another protocol version (a
-stale cached script, or two package versions), which never falls back, and with `TscacheError` when the
-fetcher module fails to load or has no default export with a `fetch` function.
+`createClient` rejects with `ProtocolMismatchError` when the worker script speaks another protocol
+version (a stale cached script, [after a deploy](/guides/workers#a-stale-worker-script)), which never
+falls back, and with `TscacheError` when the fetcher module fails to load or has no default export with
+a `fetch` function.
+
+The fetcher module's URL and the tscache version name the SharedWorker: tabs that agree on both, and on
+the worker URL, share one worker, and a deploy that changes any of them starts a worker of its own
+([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)). Pass the same
+`fetcher.module` string on every page.
 
 ## client.mode
 
@@ -52,6 +58,11 @@ Empties every cache, keeping their configs ([Invalidation and clearing](/concept
 the browser has IndexedDB it also empties the [persisted](/guides/persistence) records, from a client of
 any hosting, and resolves once they are gone or the clear gave up; it never rejects for a disk failure.
 
+From 0.3.0 it also reaches every other SharedWorker of the origin, such as an older deploy's that tabs
+left open still use: each clears its caches and the disk too, so a logout leaves no tab with the data.
+The promise does not wait for those workers, and their tabs can hear `cacheCleared` more than once for
+one call ([Sensitive data and logout](/guides/persistence#sensitive-data-and-logout)).
+
 <<< @/snippets/client.ts#clear-all{ts}
 
 ## client.memoryStats()
@@ -65,6 +76,16 @@ one row per cache, ascending by id. In a SharedWorker it covers every tab's cach
 ```ts
 const { budget, bytes, evictedPages } = await client.memoryStats();
 ```
+
+## client.superseded
+
+`undefined`, until a worker of a newer generation of the application (another tscache version, fetcher
+module or worker build) runs in the origin; then `{ lib }`, with that worker's tscache version. The
+`superseded` event fires when it is set. This tab's worker no longer persists, the tab keeps working
+from memory and its fetcher, and a reload joins the newer worker
+([Stale scripts after a deploy](/guides/workers#older-tabs-are-told-superseded)).
+
+<<< @/snippets/client.ts#superseded{ts}
 
 ## client.on(event, fn) and client.off(event, fn)
 

@@ -208,8 +208,12 @@ The trade-offs:
   it in dev.
 - Your app's aliases, `define` values and plugins do not apply unless you
   repeat them in that build.
-- The file name carries no content hash, so serve it with revalidation
-  or put a version in its path.
+- The file name carries no content hash, so give its URL a version that
+  changes with its contents: a versioned path, or a query such as
+  `?v=3`. tscache starts a new SharedWorker for a new fetcher URL, while
+  a worker that is already running keeps the module it loaded from an
+  unchanged URL, whatever the file is replaced with
+  (`docs/architecture.md` §2.7, Deploy skew).
 - This path works with any bundler, or none, since the output is a plain
   ES module.
 

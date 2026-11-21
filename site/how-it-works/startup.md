@@ -62,7 +62,7 @@ sequenceDiagram
   participant L as Web Locks
   participant W as SharedWorker
   participant O as Orchestrator
-  P->>W: new SharedWorker(url, type module, extendedLifetime)
+  P->>W: new SharedWorker(url, type module, extendedLifetime, name)
   Note over P,L: handshake timer starts (handshakeTimeoutMs, default 5000 ms)
   W->>L: holdLifetimeLock: exclusive lock tscache-worker:uuid, held for the worker's life
   Note over W,O: ports that connect meanwhile wait for the lock
@@ -88,8 +88,9 @@ sequenceDiagram
   end
 ```
 
-1. **The worker starts.** The page creates the SharedWorker with `type: 'module'` and
-   `extendedLifetime: true`. The worker script (`./worker`) listens for `connect` at once, but attaches
+1. **The worker starts.** The page creates the SharedWorker with `type: 'module'`,
+   `extendedLifetime: true` and a `name`, its generation key (the tscache version and the fetcher
+   module URL), so a tab reaches a running worker only when both would run the same code. The worker script (`./worker`) listens for `connect` at once, but attaches
    each port only after it holds its lifetime lock, so every `hello` can name the lock. Without Web
    Locks the lock is `undefined` and `hello` names none.
 2. **`hello` and the timer.** The server greets each port with its protocol version, the package version

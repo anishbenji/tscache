@@ -89,5 +89,5 @@ const client = await createClient({
 
 This works when `base` is an absolute path; with a relative `base`, give the deployed path yourself. The
 step runs outside your app's build: rebuild the fetcher when it changes, repeat any aliases or `define`
-values it needs, and serve it with revalidation, since its name carries no hash. The
+values it needs, and give its URL a version that changes with its contents (a query such as `?v=3`, or a versioned path), since its name carries no hash: tscache starts a new worker for a new fetcher URL, while a running worker keeps the module it loaded from an unchanged one ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)). The
 [worker setup guide](https://github.com/anishbenji/tscache/blob/main/docs/guides/worker-setup.md) has the Vite library-mode config.
