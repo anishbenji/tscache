@@ -32,7 +32,9 @@ client.on("modeFallback", ({ from, to, reason }) => {
 // #region superseded
 // A newer deploy's worker is running. This tab keeps working, but its
 // worker persists nothing more: ask the user to reload, never reload for
-// them. Code that runs later reads `client.superseded` instead.
+// them. Attached right after createClient, the listener also hears of a
+// worker that was superseded before this tab connected. Code that runs
+// later reads `client.superseded` instead.
 client.on("superseded", ({ lib }) => {
   showReloadPrompt(`A new version is available (tscache ${lib}).`);
 });
