@@ -13,7 +13,7 @@ Add one table per round; keep earlier rounds unchanged. Number findings across r
 ```markdown
 # Step NN — <name>
 
-Branch: `feat/NN-slug` · Reviewer: GPT-6.1 Sol (<effort>) · Rounds: <n> · Status: <settled | escalated> · Verdict after triage: <merge | blocked>
+Branch: `feat/NN-slug` · Reviewer: GPT-6.2 Sol (<effort>) · Rounds: <n> · Status: <settled | escalated> · Verdict after triage: <merge | blocked>
 
 ## Round 1 — reviewer verdict: <block | merge after fixes | merge>
 

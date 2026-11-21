@@ -13,7 +13,7 @@ The primary driver is **T3 Code**. When a director thread runs the project, it d
 | `CLAUDE.md`                                    | Claude                                                      | Imports `AGENTS.md`, plus Claude-only notes                                                                                                                     |
 | `.claude/settings.json`                        | Claude Code, and Agent SDK hosts that load project settings | Permissions, Bash guard hook, Codex plugin                                                                                                                      |
 | `.claude/hooks/guard-bash.sh`, `guard-bash.ts` | Claude                                                      | Tripwire for literal `bun test` and git-hook bypasses; threat model in the `.ts` header, regression cases in `guard-bash.test.sh`. `bun run ci` is the backstop |
-| `.codex/config.toml`                           | Codex, once the project is trusted                          | Pins `gpt-6.1-sol` at high effort                                                                                                                               |
+| `.codex/config.toml`                           | Codex, once the project is trusted                          | Pins `gpt-6.2-sol` at high effort                                                                                                                               |
 | `docs/review-checklist.md`                     | Reviewer                                                    | Invariants every review checks, and the findings format                                                                                                         |
 | `docs/testing.md`                              | Everyone                                                    | Rules for clocks, waiting, timing and shared state in tests; `scripts/flake-hunt.sh` and the `Flake hunt` workflow                                              |
 | `scripts/codex-review.sh`                      | Claude                                                      | Runs `bun run ci`, then a headless read-only Codex review (prompts C and D live here)                                                                           |
@@ -31,7 +31,7 @@ Do steps 1–2 yourself; T3 Code (a Claude thread) can do the rest with your app
 4. **Git hooks** are installed by Lefthook. If they go missing: `bunx lefthook install`. Exercise the pre-push set without pushing: `bunx lefthook run pre-push --force` (without `--force`, every job is skipped when there is nothing to push).
 5. **Codex plugin for the Claude Code CLI (fallback only):** `claude plugin marketplace add openai/codex-plugin-cc`, then `claude plugin install codex@openai-codex`; confirm with `claude plugin list`, then run `/codex:setup` once inside Claude Code.
 6. **Before step ⑨** (first browser tests): `bunx playwright install chromium`.
-7. **T3 Code:** open threads at the repository root. Check that Codex threads offer GPT-6.1 Sol and that Claude threads load the project settings — asking a Claude thread to run `bun test --help` must be blocked. If it runs, T3 is not loading `.claude/settings.json`; the rule still applies through `AGENTS.md`.
+7. **T3 Code:** open threads at the repository root. Check that Codex threads offer GPT-6.2 Sol and that Claude threads load the project settings — asking a Claude thread to run `bun test --help` must be blocked. If it runs, T3 is not loading `.claude/settings.json`; the rule still applies through `AGENTS.md`.
 8. **Final check:** `bun run ci` passes.
 
 ## Per-step loop
@@ -131,4 +131,4 @@ The Bash guard (`.claude/hooks/guard-bash.ts`) is frozen and excluded from adver
 ## Model choice
 
 - **Claude threads:** when a director runs the project, its brief sets the model and effort for each task. Otherwise use Opus 5.5 by default, and the most capable model your plan offers only for the hardest design or concurrency work.
-- **Codex:** GPT-6.1 Sol at high effort for prompts A and C; xhigh for prompt D (the review script sets this). Avoid Ultrafast for reviews: it uses the subscription limit about 8× faster.
+- **Codex:** GPT-6.2 Sol at high effort for prompts A and C; xhigh for prompt D (the review script sets this). Avoid Ultrafast for reviews: it uses the subscription limit about 8× faster.

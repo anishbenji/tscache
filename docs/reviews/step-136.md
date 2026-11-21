@@ -1,6 +1,6 @@
-# Step 136 — small follow-ups from user decisions 105 and 109
+# Step 136 — small follow-ups from user decisions 105, 109 and 125
 
-Branch: `chore/136-small-follow-ups` · Status: built, awaiting review · It touches two Never paths, `.github/dependabot.yml` and `packages/tscache/src/snapshot.ts` (Never from 0.1.0), so the user merges this step. Notify paths: `packages/tscache/src/snapshot.ts`, root `package.json` (its `engines` field; `scripts` is unchanged) and `AGENTS.md`.
+Branch: `chore/136-small-follow-ups` · Status: built, awaiting review · It touches three Never paths, `.github/dependabot.yml`, `.codex/config.toml` and `packages/tscache/src/snapshot.ts` (Never from 0.1.0), so the user merges this step. Notify paths: `packages/tscache/src/snapshot.ts`, root `package.json` (its `engines` field; `scripts` is unchanged) and `AGENTS.md`.
 
 ## User answers (2026-11-21)
 
@@ -8,6 +8,7 @@ Branch: `chore/136-small-follow-ups` · Status: built, awaiting review · It tou
 - **#109 c, option B (finding M8).** An endianness probe makes `encodeSnapshot` and `decodeSnapshot` throw an existing error class on a big-endian host, with option A's sentence in the server-rendering guide.
 - **#109 g, option A (finding M16).** The root `engines.node` becomes tsdown's range, `^22.18.0 || ^24.11.0 || >=26.0.0`; the published package's `engines` stays as decision 27 A set it.
 - **#109 a, d, e and f, option A each.** Knip's `.svelte` and `.vue` hints are expected (L10); the size-budget headroom is by design (L7); `merge-failures.test.ts` keeps its call counts (L9); one line in `docs/reviews/README.md` names the changes merged without a review file before the numbering rule (L4).
+- **#125 (about 14:50 IST).** The Codex model for the review gate, contract tests and the adversarial security lane moves from GPT-6.1 Sol to GPT-6.2 Sol: `.codex/config.toml` and the documents that name the current model.
 
 ## Scope
 
@@ -22,6 +23,8 @@ One commit per decision, then this file, then the fixes from the reviews.
 | `docs(review): close m8, m16, l4, l7, l9 and l10 by the user's answers`  | `docs/reviews/2026-11-review-update.md`: six rows, a dated note above the table that also records #105, and the counts line; `docs/reviews/README.md`: the L4 line; the update file's size in `docs/INDEX.md`                                                                                                                                                                                                          |
 | `docs: restore step 127's m5 wording in the docs/design index row`       | `docs/INDEX.md`: the `docs/design/` row again says that `m5-deploy-skew.md` was reconciled with M7 and M3 as built in step 127, lists four decision concerns in its §8, and has contract tests next                                                                                                                                                                                                                    |
 | `docs(review): step 136 scope and verification`                          | This file                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `chore(codex): move the review model to gpt-6.2-sol`                     | `.codex/config.toml`: `model = "gpt-6.2-sol"`; nothing else in the file changed                                                                                                                                                                                                                                                                                                                                        |
+| `docs: name gpt-6.2-sol as the codex review model`                       | `docs/workflow.md` (the `.codex/config.toml` row, the T3 Code check and the Codex model line) and the reviewer in the `docs/reviews/README.md` template; this file                                                                                                                                                                                                                                                     |
 
 No dependency was added or changed. No contract test was changed.
 
@@ -40,6 +43,10 @@ The error is `TscacheError`, the class `decodeSnapshot` already throws for an in
 - L10 is `fixed`. Besides decision 109 a, its other parts were done elsewhere: the tsup wording in `AGENTS.md` by #155 (`c5ef24fa`, step 126) and the Biome warning by #154 (step 130); the empty `~/code/tscache-vitewarn54/` folder no longer exists (`ls` on 2026-11-21: "No such file or directory"). This step did not delete it.
 - #105 has no row in the findings table; the note above the table records it.
 - Counts: 28 fixed, 2 partly (M4, M5), 0 open, 0 parked, 2 won't fix, 32 in all (`awk` over the Status column).
+
+### The review model (decision 125)
+
+`git grep -i -E "6\.1-sol|gpt-6\.1|6\.1 sol"` over `docs/`, `site/`, `AGENTS.md`, `CLAUDE.md`, `scripts/` and `.codex/` found the current model named in `.codex/config.toml:4`, `docs/workflow.md:16`, `:34` and `:134`, and the `docs/reviews/README.md` template's reviewer line; all now name GPT-6.2 Sol. `scripts/`, `site/`, `AGENTS.md` and `CLAUDE.md` name no model. Left as they are, because they record the past: `docs/benchmarking.md:236` (the three designers of an earlier experiment), `docs/reviews/2026-11-review-update.md:71` (the rounds of 2026-11-11) and the step files' past rounds.
 
 ### The Node floor
 
