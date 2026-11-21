@@ -695,7 +695,8 @@ export class CacheState {
   /**
    * Evicts page `page` (§2.9, §4.5; N96), in one synchronous step: drops its
    * segments and withdraws its whole slot range from coverage, keeping
-   * what was covered in the evicted index (N104). Reports through `onEvict`
+   * what was covered in the evicted index (N104), except for a page that
+   * `restore` trims from this cache (decision 96). Reports through `onEvict`
    * and the running reader change, never `onChange` or `onMutate`; the
    * version and the watermark stay. Returns the bytes freed.
    */
@@ -707,7 +708,8 @@ export class CacheState {
     const reader = this.#reader;
     if (reader !== undefined && covered.length > 0) reader.evicted ??= [];
     for (const range of covered) {
-      this.#evicted?.add(range);
+      // A restore's own trimmed pages: no reader has seen them (decision 96).
+      if (!this.#restoring) this.#evicted?.add(range);
       if (reader?.evicted !== undefined) includeRange(reader.evicted, range);
       else if (!this.#restoring) this.#pendingEvicted.push(range);
     }

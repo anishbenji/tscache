@@ -193,9 +193,10 @@ function decodePayload(value: unknown, i: number): DenseSegmentPayload {
 
 /**
  * The snapshot an {@link encodeSnapshot} value carries. Checks the shape
- * (every array position, holes included) and the base64 only, and leaves its input unchanged; whether the snapshot
- * fits a cache (lengths, ordering, alignment, schema) is `hydrate`'s check.
- * Throws TscacheError for anything else.
+ * (every array position, holes included) and the base64 only, and leaves
+ * its input unchanged; whether the snapshot fits a cache (lengths, ordering,
+ * alignment, schema) is `hydrate`'s check. Throws TscacheError for anything
+ * else.
  */
 export function decodeSnapshot(encoded: EncodedSnapshot): Snapshot {
   const e: unknown = encoded;

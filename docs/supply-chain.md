@@ -99,6 +99,7 @@ No step uses an npm token.
 
 - [ ] Every workflow sets top-level `permissions` to read-only or `{}`, and each job asks only for what it needs.
 - [ ] Every third-party action is pinned to a full commit SHA, with its version in a comment. Dependabot proposes updates monthly; each one is reviewed by hand.
+- [ ] `.github/dependabot.yml` sets a `cooldown` on the `bun` entry (`default-days: 3`, `semver-major-days: 7`): Dependabot proposes a package version only once it is 3 days old, or 7 for a major, so a bad release has time to be caught first. Security updates are not delayed, and an upgrade approved by hand can take any version.
 - [ ] No workflow runs on `pull_request_target` or `workflow_run`, and none interpolates untrusted event fields (pull request titles, branch names, commit messages) into a `run:` script.
 - [ ] Checkouts set `persist-credentials: false` unless a later step must push.
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClient } from "../src/client/client";
 import { Engine } from "../src/engine/engine";
 import { TscacheError } from "../src/errors";
+import { sameMaterial } from "../src/orchestrator/auth";
 import { coalesce, Orchestrator } from "../src/orchestrator/orchestrator";
 import { PortClient } from "../src/rpc/port-client";
 import type { Evt, MessagePortLike } from "../src/rpc/protocol";
@@ -1239,5 +1240,310 @@ describe("round 10 and 11 regressions", () => {
       "auth-pending",
     ]);
     stalled?.();
+  });
+});
+
+// Step 133, report (d): a tab that opens while auth is invalid (§4.9 Auth
+// and Loading). A joining tab whose context is the same material as the
+// refused one (sameMaterial), or that brings no context, changes nothing:
+// auth stays invalid until the next updateAuth (§4.9.1 rule 4). One with
+// other material takes the updateAuth path and restores auth. The same
+// holds when auth flips to invalid while the join's own hook is running.
+describe("a tab joining while auth is invalid (step 133)", () => {
+  /** Connects one more tab to `server`, with `context` if one is given. */
+  async function join(server: RpcServer, context?: unknown) {
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const client = await PortClient.connect(channel.port2 as MessagePortLike, {
+      fetcher: {
+        module: fetcherModule,
+        ...(context !== undefined ? { context } : {}),
+      },
+    });
+    open.push(client);
+    return client;
+  }
+
+  /** A worker whose first tab has had its fetch refused: auth is invalid. */
+  async function invalidated(context: unknown) {
+    resetLog("auth");
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const a = await join(server, context);
+    await a.request("cache", config);
+    const seen: Evt[] = [];
+    a.on((e) => seen.push(e));
+    expect((await get(a, { start: 3, end: 13 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    const refusals = () => seen.filter((e) => e.event === "authInvalid");
+    await eventually(() => expect(refusals()).toHaveLength(1));
+    expect(log().requests).toHaveLength(1);
+    return { server, a, refusals };
+  }
+
+  it("a tab without a context leaves auth invalid: nothing is fetched for any tab", async () => {
+    const { server, a, refusals } = await invalidated({ token: "old" });
+    const c = await join(server);
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([
+      { range: { start: 23, end: 33 }, reason: "auth-pending" },
+    ]);
+    expect((await get(a, { start: 43, end: 53 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(1);
+    expect(log().auth).toEqual([]);
+    // A second refusal would be broadcast before the barrier's answer on a.
+    await barrier(a);
+    expect(refusals()).toHaveLength(1);
+  });
+
+  it("a tab with the identical context leaves auth invalid: nothing is fetched for any tab", async () => {
+    // A primitive survives the structured clone as the identical value.
+    const { server, a } = await invalidated("old-token");
+    const c = await join(server, "old-token");
+    expect((await get(c, { start: 23, end: 33 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect((await get(a, { start: 43, end: 53 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(1);
+    expect(log().auth).toEqual([]);
+  });
+
+  it("a tab with other material restores auth through the hook, and fetches carry its context", async () => {
+    const { server, a } = await invalidated({ token: "old" });
+    log().mode = "ok";
+    const c = await join(server, { token: "fresh" });
+    // The fetcher heard the material before auth was restored (§4.9 Auth).
+    expect(log().auth).toEqual([{ token: "fresh" }]);
+    expect((await get(a, { start: 3, end: 13 })).misses).toEqual([]);
+    expect(log().requests.at(-1)?.context).toEqual({ token: "fresh" });
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
+  });
+
+  it("a clone of the refused context leaves auth invalid: nothing is fetched and nothing is reported again", async () => {
+    // Through a SharedWorker an object context is always a clone, never the
+    // identical value: a tab that read the same expired token at startup.
+    const { server, a, refusals } = await invalidated({ token: "old" });
+    const c = await join(server, { token: "old" });
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([
+      { range: { start: 23, end: 33 }, reason: "auth-pending" },
+    ]);
+    expect((await get(a, { start: 43, end: 53 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(1);
+    // Same material: the fetcher's hook does not hear it again.
+    expect(log().auth).toEqual([]);
+    // A second refusal would be broadcast before the barrier's answer on a.
+    await barrier(a);
+    expect(refusals()).toHaveLength(1);
+    // New material from any tab still restores auth.
+    log().mode = "ok";
+    await c.request("updateAuth", { context: { token: "new" } });
+    expect((await get(a, { start: 43, end: 53 })).misses).toEqual([]);
+    expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
+  });
+
+  it("a clone of a nested refused context, keys in another order, leaves auth invalid too", async () => {
+    const { server } = await invalidated({
+      token: "old",
+      scopes: ["read", "write"],
+      user: { id: 7, tags: [] },
+    });
+    const c = await join(server, {
+      user: { tags: [], id: 7 },
+      scopes: ["read", "write"],
+      token: "old",
+    });
+    expect((await get(c, { start: 23, end: 33 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(1);
+    expect(log().auth).toEqual([]);
+  });
+
+  it("a context that differs anywhere, even deep inside, is new material and restores auth", async () => {
+    const { server } = await invalidated({ token: "old", user: { id: 7 } });
+    log().mode = "ok";
+    const c = await join(server, { token: "old", user: { id: 8 } });
+    expect(log().auth).toEqual([{ token: "old", user: { id: 8 } }]);
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
+  });
+
+  it("a cyclic context is new material, and the join completes", async () => {
+    const cyclic = (): { token: string; self?: unknown } => {
+      const value: { token: string; self?: unknown } = { token: "old" };
+      value.self = value;
+      return value;
+    };
+    const { server } = await invalidated(cyclic());
+    log().mode = "ok";
+    const c = await join(server, cyclic());
+    expect(log().auth).toHaveLength(1);
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
+  });
+
+  it("a join queued while auth is valid does not restore auth that a refusal flipped during its hook", async () => {
+    // Pre-review P1, security S1.2: the check at load time is not enough.
+    resetLog("slow");
+    const server = new RpcServer(new Engine(), "0.0.0");
+    const a = await join(server, { token: "old" });
+    await a.request("cache", config);
+    const seen: Evt[] = [];
+    a.on((e) => seen.push(e));
+    const refusals = () => seen.filter((e) => e.event === "authInvalid");
+    const releases = captureReleases();
+    const stalled = get(a, { start: 3, end: 13 });
+    await eventually(() => expect(releases).toHaveLength(1));
+    const authReleases = captureAuthReleases();
+    // C joins with a clone while auth is still valid: its hook stalls.
+    const joining = join(server, { token: "old" });
+    await eventually(() => expect(authReleases).toHaveLength(1));
+    // A's fetch is refused under the unchanged generation: auth flips.
+    log().afterRelease = "auth";
+    releases[0]?.();
+    expect((await stalled).misses[0]?.reason).toBe("auth-pending");
+    await eventually(() => expect(refusals()).toHaveLength(1));
+    // The hook ends; the refused material must not switch back in.
+    authReleases[0]?.();
+    const c = await joining;
+    log().mode = "auth";
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([
+      { range: { start: 23, end: 33 }, reason: "auth-pending" },
+    ]);
+    expect(log().requests).toHaveLength(1);
+    // A second refusal would be broadcast before the barrier's answer on a.
+    await barrier(a);
+    expect(refusals()).toHaveLength(1);
+  });
+
+  it("a join queued behind a refresh does not switch the refused material back in", async () => {
+    // Pre-review 2 P1: auth is valid again by the join's turn, so a check of
+    // the current state let the refused context replace the new one.
+    const { server, a, refusals } = await invalidated({ token: "old" });
+    const authReleases = captureAuthReleases();
+    // A's refresh: its hook stalls.
+    const updating = a.request("updateAuth", { context: { token: "new" } });
+    await eventually(() => expect(authReleases).toHaveLength(1));
+    // Any later hook runs at once, so a wrong switch shows in the log.
+    log().slowAuth = false;
+    // C opens with the token it read before the refresh; its join queues.
+    const channel = new MessageChannel();
+    server.attach(channel.port1 as MessagePortLike);
+    const arrived = initOn(channel.port1);
+    const joining = PortClient.connect(channel.port2 as MessagePortLike, {
+      fetcher: { module: fetcherModule, context: { token: "old" } },
+    });
+    await arrived;
+    await barrier(a);
+    authReleases[0]?.();
+    await updating;
+    const c = await joining;
+    open.push(c);
+    // The fetcher heard only the refresh, and fetches carry it.
+    expect(log().auth).toEqual([{ token: "new" }]);
+    log().mode = "ok";
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
+    expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
+    expect(refusals()).toHaveLength(1);
+  });
+
+  it("the remembered material is the last refusal's: a later refusal replaces it", async () => {
+    const { server, a, refusals } = await invalidated({ token: "old" });
+    await a.request("updateAuth", { context: { token: "new" } });
+    // The refresh is refused too: "new" is now the refused material.
+    expect((await get(a, { start: 23, end: 33 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    await eventually(() => expect(refusals()).toHaveLength(2));
+    const c = await join(server, { token: "new" });
+    expect((await get(c, { start: 43, end: 53 })).misses[0]?.reason).toBe(
+      "auth-pending",
+    );
+    expect(log().requests).toHaveLength(2);
+    expect(log().auth).toEqual([{ token: "new" }]);
+  });
+
+  it("an explicit re-send of the refused material does not make a later join with it new", async () => {
+    const { server, a } = await invalidated({ token: "old" });
+    log().mode = "ok";
+    // The client vouches for "old" again, then refreshes to "new".
+    await a.request("updateAuth", { context: { token: "old" } });
+    await a.request("updateAuth", { context: { token: "new" } });
+    const c = await join(server, { token: "old" });
+    expect(log().auth).toEqual([{ token: "old" }, { token: "new" }]);
+    expect((await get(c, { start: 23, end: 33 })).misses).toEqual([]);
+    expect(log().requests.at(-1)?.context).toEqual({ token: "new" });
+  });
+
+  it("an explicit updateAuth with the refused material still restores auth, as §4.9 Auth says", async () => {
+    // Only a join compares material; a client's updateAuth is always applied.
+    const { a } = await invalidated({ token: "old" });
+    log().mode = "ok";
+    await a.request("updateAuth", { context: { token: "old" } });
+    expect(log().auth).toEqual([{ token: "old" }]);
+    expect((await get(a, { start: 23, end: 33 })).misses).toEqual([]);
+  });
+});
+
+describe("sameMaterial (step 133)", () => {
+  it("is true only when it is sure: plain values, member by member", () => {
+    expect(sameMaterial("t", "t")).toBe(true);
+    expect(sameMaterial(Number.NaN, Number.NaN)).toBe(true);
+    expect(sameMaterial({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] })).toBe(true);
+    expect(sameMaterial({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(true);
+    expect(sameMaterial(Object.create(null), {})).toBe(true);
+  });
+
+  it("answers false for anything it cannot be sure of", () => {
+    expect(sameMaterial({ a: 1 }, { a: 1, b: undefined })).toBe(false);
+    expect(sameMaterial([1], [1, 2])).toBe(false);
+    // A hole and an undefined element clone differently: not the same.
+    const holed = [1, 2, 3];
+    delete holed[1];
+    expect(sameMaterial(holed, [1, undefined, 3])).toBe(false);
+    expect(sameMaterial([], {})).toBe(false);
+    expect(sameMaterial(0, -0)).toBe(false);
+    expect(sameMaterial(new Map([["t", 1]]), new Map([["t", 1]]))).toBe(false);
+    expect(sameMaterial(new Date(0), new Date(0))).toBe(false);
+    expect(sameMaterial(new Uint8Array([1]), new Uint8Array([1]))).toBe(false);
+    const deep = (n: number): unknown => (n === 0 ? 1 : { d: deep(n - 1) });
+    expect(sameMaterial(deep(10), deep(10))).toBe(true);
+    expect(sameMaterial(deep(40), deep(40))).toBe(false);
+    const a: Record<string, unknown> = {};
+    a.self = a;
+    const b: Record<string, unknown> = {};
+    b.self = b;
+    expect(sameMaterial(a, b)).toBe(false);
+  });
+
+  it("compares a context that shares references once per pair, so a deep DAG finishes", () => {
+    // Pre-review P2, security S1.1: structured clone keeps shared
+    // references, and a walk that follows every path is exponential (2^30
+    // paths here). Only a walk linear in the pairs it compares returns.
+    const dag = (levels: number, leaf: unknown): unknown => {
+      let node: unknown = { leaf };
+      for (let i = 0; i < levels; i++) node = { l: node, r: node };
+      return node;
+    };
+    expect(sameMaterial(dag(30, "t"), dag(30, "t"))).toBe(true);
+    expect(sameMaterial(dag(30, "t"), dag(30, "u"))).toBe(false);
+    // Shared on one side, separate equal copies on the other.
+    const shared = { token: "t" };
+    expect(
+      sameMaterial(
+        { x: shared, y: shared },
+        { x: { token: "t" }, y: { token: "t" } },
+      ),
+    ).toBe(true);
+  });
+
+  it("gives up, answering false, past its member budget", () => {
+    const wide = (n: number) =>
+      Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, i]));
+    expect(sameMaterial(wide(1000), wide(1000))).toBe(true);
+    expect(sameMaterial(wide(20_000), wide(20_000))).toBe(false);
   });
 });

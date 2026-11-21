@@ -55,12 +55,19 @@ sequenceDiagram
 
 A tab that joins with `createClient({ fetcher: { module, context } })` while another tab's context is in
 place sends its context in `init`. When it is not the identical value, the worker applies it through
-the same `updateAuth` path ([Sharing across tabs](./tabs#later-tabs)).
+the same `updateAuth` path ([Sharing across tabs](./tabs#later-tabs)), with one exception: a context
+that is the same material (`sameMaterial`) as the one the last refusal named changes nothing, whatever
+the auth state. A tab that read the expired token at startup therefore neither reopens fetching nor
+undoes a refresh that took effect before its turn. The worker remembers the refused context until the
+next refusal replaces it, and checks the rule when the update's turn comes and again after the
+fetcher's hook, in case a refusal lands while the hook runs. A tab's own `updateAuth` call is always
+applied.
 
 Drawn from:
 
 - [`packages/tscache/src/orchestrator/orchestrator.ts#Orchestrator`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/orchestrator.ts)
 - [`packages/tscache/src/orchestrator/auth.ts#AuthState`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/auth.ts)
+- [`packages/tscache/src/orchestrator/auth.ts#sameMaterial`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/orchestrator/auth.ts)
 - [`packages/tscache/src/errors.ts#AuthInvalidError`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/errors.ts)
 - [`packages/tscache/src/errors.ts#isAuthInvalidError`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/errors.ts)
 - [`packages/tscache/src/errors.ts#AUTH_INVALID_CODE`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/errors.ts)
