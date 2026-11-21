@@ -22,19 +22,18 @@ export interface ClearPostOptions {
   nextClearId?: () => string;
 }
 
-/**
- * How many clear ids a hosting remembers. Forgetting one costs at most one
- * more relay post for it, and it is forgotten only after this many other
- * `clearAll` calls reached the hosting, so relays cannot sustain themselves.
- */
-const SEEN_CLEAR_IDS = 64;
-
 const nothing = (): void => {};
 
 export class ClearPosts {
   readonly #post: ((clearId: string) => void) | undefined;
   readonly #nextClearId: () => string;
-  /** The clear ids seen last, this hosting's own included; oldest first. */
+  /**
+   * Every clear id this hosting has seen, its own included, kept for the
+   * hosting's life: one id string per `clearAll` it hears. An id is never
+   * forgotten, because a forgotten id that is still circulating between two
+   * workers is relayed again by each of them on every lap, with no new call
+   * by the application, and no count bound prevents that.
+   */
   readonly #seen = new Set<string>();
 
   constructor(options: ClearPostOptions) {
@@ -54,20 +53,10 @@ export class ClearPosts {
     const own = fromClearId === undefined;
     const clearId = own ? this.#nextClearId() : fromClearId;
     const relayed = this.#seen.has(clearId);
-    this.#remember(clearId);
+    this.#seen.add(clearId);
     if (own) this.#send(clearId);
     else if (relayed) return nothing;
     return () => this.#send(clearId);
-  }
-
-  #remember(clearId: string): void {
-    if (this.#seen.has(clearId)) return;
-    this.#seen.add(clearId);
-    if (this.#seen.size <= SEEN_CLEAR_IDS) return;
-    for (const oldest of this.#seen) {
-      this.#seen.delete(oldest);
-      return;
-    }
   }
 
   /** A channel that fails must not fail or delay this hosting's clear. */

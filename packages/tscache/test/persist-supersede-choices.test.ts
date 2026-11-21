@@ -1,6 +1,6 @@
 // The choices step 135 made where the M5 proposal says nothing
 // (docs/reviews/step-135.md, "Choices made without a decision row"): a
-// cleanup pending at supersede(), how many clear ids are kept, and a post
+// cleanup pending at supersede(), how long clear ids are kept, and a post
 // that throws. The contract tests are persister-supersede.test.ts and
 // persist-deploy-skew.test.ts.
 
@@ -192,28 +192,24 @@ describe("ClearPosts", () => {
     expect(post).toHaveBeenCalledTimes(3);
   });
 
-  it("remembers the 64 clear ids seen last, own ones included", () => {
+  it("never relays a seen clear id again, however many others pass after it", () => {
     const post = vi.fn<(clearId: string) => void>();
     const posts = new ClearPosts({ post, nextClearId: () => "own" });
     posts.begin("first")();
     posts.begin()();
-    for (let i = 0; i < 62; i++) posts.begin(`filler-${i}`)();
+    for (let i = 0; i < 500; i++) posts.begin(`filler-${i}`)();
     post.mockClear();
-    // 64 ids are held: none of them is relayed again.
+
+    // The first ids seen, foreign and own, are still known after 500 more.
     posts.begin("first")();
     posts.begin("own")();
-    posts.begin("filler-61")();
+    posts.begin("filler-0")();
+    posts.begin("filler-499")();
     expect(post).not.toHaveBeenCalled();
 
-    // One more id pushes the oldest out; it is relayed once more.
+    // A new id is still relayed once, and only once.
+    posts.begin("newest")();
     posts.begin("newest")();
     expect(post.mock.calls).toEqual([["newest"]]);
-    post.mockClear();
-    posts.begin("first")();
-    expect(post.mock.calls).toEqual([["first"]]);
-    post.mockClear();
-    posts.begin("first")();
-    posts.begin("newest")();
-    expect(post).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Engine, observeCaches } from "../src/engine/engine";
 import { ClearOnlyPersistence } from "../src/persist/clear-only";
+import { ClearPosts } from "../src/persist/clear-posts";
 import { HostedPersistence } from "../src/persist/hosted";
 import * as lazy from "../src/persist/lazy";
 import type { ClientEvents } from "../src/types";
@@ -372,6 +373,125 @@ it("8: duplicate channel deliveries during one disk clear relay only once", asyn
 
   expect(store.log.map(({ kind }) => kind)).toEqual(["clearAll"]);
   expect(post.mock.calls).toEqual([["remote-clear"]]);
+});
+
+describe("N135: clear relay across queued workers", () => {
+  function queuedClearChannel() {
+    const workers: { inbox: string[]; clears: ClearPosts }[] = [];
+
+    function post(clearId: string, sender?: string[]) {
+      for (const { inbox } of workers) {
+        if (inbox !== sender) inbox.push(clearId);
+      }
+    }
+
+    return {
+      post,
+      join(name: string) {
+        const inbox: string[] = [];
+        const sent: string[] = [];
+        let nextId = 0;
+        const clears = new ClearPosts({
+          nextClearId: () => `${name}-${nextId++}`,
+          post(clearId) {
+            sent.push(clearId);
+            post(clearId, inbox);
+          },
+        });
+        workers.push({ inbox, clears });
+        return { clears, sent };
+      },
+      drain() {
+        // A 200-id burst to three workers needs 1,800 deliveries if each
+        // worker relays each id once.
+        const deliveryCap = 2_000;
+        let delivered = 0;
+        while (delivered < deliveryCap) {
+          const before = delivered;
+          for (const { inbox, clears } of workers) {
+            const clearId = inbox.shift();
+            if (clearId === undefined) continue;
+            clears.begin(clearId)();
+            delivered++;
+            if (delivered === deliveryCap) break;
+          }
+          if (delivered === before) break;
+        }
+
+        const pending = workers.reduce(
+          (total, { inbox }) => total + inbox.length,
+          0,
+        );
+        expect(
+          pending,
+          `queued clear messages after ${delivered} deliveries`,
+        ).toBe(0);
+      },
+    };
+  }
+
+  function clearIds(name: string, count: number): string[] {
+    return Array.from({ length: count }, (_, index) => `${name}-${index}`);
+  }
+
+  it.each([65, 200])(
+    "two workers each relay a burst of %i foreign clear ids once",
+    (count) => {
+      const bus = queuedClearChannel();
+      const first = bus.join("first");
+      const second = bus.join("second");
+      const ids = clearIds("poster", count);
+      for (const id of ids) bus.post(id);
+
+      bus.drain();
+
+      expect(first.sent).toEqual(ids);
+      expect(second.sent).toEqual(ids);
+    },
+  );
+
+  it("two workers drain a burst of 65 unsettled clears from one worker", () => {
+    const bus = queuedClearChannel();
+    const origin = bus.join("origin");
+    const receiver = bus.join("receiver");
+    const ids = clearIds("origin", 65);
+    const settles = ids.map(() => origin.clears.begin());
+
+    bus.drain();
+    expect(origin.sent).toEqual(ids);
+    expect(receiver.sent).toEqual(ids);
+
+    for (const settle of settles) settle();
+    bus.drain();
+    expect(origin.sent).toEqual([...ids, ...ids]);
+    expect(receiver.sent).toEqual(ids);
+  });
+
+  it("three workers drain a burst of 200 foreign clear ids", () => {
+    const bus = queuedClearChannel();
+    const workers = ["first", "second", "third"].map((name) => bus.join(name));
+    const ids = clearIds("poster", 200);
+    for (const id of ids) bus.post(id);
+
+    bus.drain();
+
+    for (const worker of workers) expect(worker.sent).toEqual(ids);
+  });
+
+  it("two workers drain 200 sequential clears one at a time", () => {
+    const bus = queuedClearChannel();
+    const first = bus.join("first");
+    const second = bus.join("second");
+    const ids = clearIds("poster", 200);
+
+    for (const id of ids) {
+      bus.post(id);
+      bus.drain();
+    }
+
+    expect(first.sent).toEqual(ids);
+    expect(second.sent).toEqual(ids);
+  });
 });
 
 /** FIFO delivery to the subscribers present at post, excluding the sender.
