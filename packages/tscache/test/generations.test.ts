@@ -205,6 +205,16 @@ describe("14: announce and present (N127)", () => {
     expect(bus.posts).toEqual([
       { t: "announce", v: 1, id: "a", lib: "0.3.0", url, startedAt: 1000 },
     ]);
+    // No key at all, not one holding undefined, which a worker of this
+    // release would take as malformed.
+    expect(Object.keys(bus.posts[0] as object).sort()).toEqual([
+      "id",
+      "lib",
+      "startedAt",
+      "t",
+      "url",
+      "v",
+    ]);
   });
 
   it("answers another worker's announce with one present, and never its own messages", () => {
@@ -300,9 +310,13 @@ describe("14: announce and present (N127)", () => {
         { fetcher: 123 },
         { fetcher: { href: "/fetcher.js" } },
         { fetcher: null },
+        // A present key holds a string: structured clone keeps an undefined
+        // property, and it is not an absent one (gate round 4, R4-1).
+        { fetcher: undefined },
         { name: 7 },
         { name: ["tscache:9.0.0:"] },
         { name: null },
+        { name: undefined },
       ].map((malformed) => ({ t, malformed })),
     ),
   )("ignores a $t with $malformed", ({ t, malformed }) => {
