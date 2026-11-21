@@ -131,7 +131,9 @@ const candles = await client.cache({
   written behind about a second after the last change (at most five seconds). The provisional tail is
   never stored, so a reload fetches it again. A removal (`invalidate`, `clear`, a watermark moved back, a
   version change) is written at once, and its call resolves only once the removal is durable, or once
-  persistence of the cache has stopped and its records were deleted.
+  persistence of the cache has stopped and its records were deleted, except after `'superseded'`
+  (a newer deploy's worker owns the records, architecture §4.10.6), when the call resolves and the
+  records stay; use `clearAll()` to remove data from the disk.
 - **Loading.** `cache()` of a persisted cache resolves once its records are loaded (at most five seconds),
   so the first `get` sees them. A range the records do not cover reads as uncached, never as a gap.
 - **Failures never reject.** When the disk refuses, persistence of that cache stops, its records are
