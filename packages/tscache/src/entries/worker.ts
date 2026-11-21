@@ -25,7 +25,11 @@ import {
   type WorkersChannel,
 } from "../rpc/generations";
 import { holdLifetimeLock, lockManager } from "../rpc/lifetime";
-import { LIB_VERSION, type MessagePortLike } from "../rpc/protocol";
+import {
+  LIB_VERSION,
+  type MessagePortLike,
+  WORKER_FEATURES,
+} from "../rpc/protocol";
 import { RpcServer } from "../rpc/server";
 
 /** The dedicated-worker global, when this module runs inside one. */
@@ -68,7 +72,8 @@ export interface SharedIdentity {
  * the SharedWorkers of the origin (N116). With `shared`, the SharedWorker's
  * server takes part in the workers' channel: it announces itself after its
  * first init under `lock` as its id (a random id without one), reports a
- * newer generation, posts its own clearAll and clears for another's.
+ * newer generation, which its hello announces with the 'superseded'
+ * feature, posts its own clearAll and clears for another's.
  */
 export function createServer(
   lock?: string,
@@ -126,7 +131,11 @@ export function createServer(
     persistence,
     generations === undefined
       ? {}
-      : { onFirstInit: (fetcher) => generations.announce(fetcher) },
+      : {
+          // It can report a newer generation, so its hello says so (N113).
+          features: WORKER_FEATURES,
+          onFirstInit: (fetcher) => generations.announce(fetcher),
+        },
   );
   return server;
 }

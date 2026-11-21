@@ -64,8 +64,10 @@ describe("the SharedWorker entry among the workers of its origin", () => {
     });
     expect(bus.posts).toEqual([]);
 
+    const first = await tab(fetcherModule);
     await tab(fetcherModule);
-    await tab(fetcherModule);
+    // It can report a newer generation, and its hello says so (DC2 (a)).
+    expect(first.features.has("superseded")).toBe(true);
     expect(bus.posts).toHaveLength(1);
     expect(bus.posts[0]).toEqual({
       t: "announce",
@@ -82,6 +84,7 @@ describe("the SharedWorker entry among the workers of its origin", () => {
   it("without BroadcastChannel it serves as before and announces nothing", async () => {
     const tab = await sharedWorker("https://app.example/worker.js", "");
     const client = await tab();
+    expect(client.features.has("superseded")).toBe(false);
     await expect(
       client.request("cache", { id: "c", interval: 1, fields: { v: "f64" } }),
     ).resolves.toMatchObject({ id: "c" });

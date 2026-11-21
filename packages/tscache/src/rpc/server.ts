@@ -137,6 +137,13 @@ export interface Persistence {
 
 export interface ServerOptions {
   /**
+   * The optional features this server lists in its hello (N79). Default:
+   * `'cacheChanged'` and `'memoryBudget'`, which every hosting offers. A
+   * SharedWorker that takes part in finding newer generations adds
+   * `'superseded'` (N113): only such a worker can ever send that event.
+   */
+  features?: readonly WorkerFeature[];
+  /**
    * Called once, right after the first `init-ok`, with the fetcher module
    * that connection named, if any: the SharedWorker announces itself to the
    * other workers then (N108).
@@ -150,6 +157,7 @@ export class RpcServer {
   readonly #lib: string;
   readonly #lock: string | undefined;
   readonly #persistence: Persistence | undefined;
+  readonly #features: readonly WorkerFeature[];
   #onFirstInit: ServerOptions["onFirstInit"];
   /** Set once this worker is superseded (N113): sent to later connections. */
   #superseded: ClientEvents["superseded"] | undefined;
@@ -181,6 +189,7 @@ export class RpcServer {
     this.#lib = lib;
     this.#lock = lock;
     this.#persistence = persistence;
+    this.#features = options.features ?? HELLO_FEATURES;
     this.#onFirstInit = options.onFirstInit;
     this.#orchestrator = new Orchestrator(
       engine,
@@ -224,7 +233,7 @@ export class RpcServer {
       protocol: PROTOCOL_VERSION,
       lib: this.#lib,
       clientId: connection.clientId,
-      features: [...HELLO_FEATURES],
+      features: [...this.#features],
     };
     if (this.#lock !== undefined) hello.lock = this.#lock;
     this.#send(connection, hello);

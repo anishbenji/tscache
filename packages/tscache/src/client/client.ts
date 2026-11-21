@@ -59,8 +59,10 @@ export interface TscacheClient {
    * no longer persists; the tab keeps working from memory and its fetcher,
    * and a reload joins the newer worker. Undefined until then. The
    * `superseded` event fires when it is set; read this in code that may
-   * run after the event. A worker reports it only when
-   * `client.features.has('superseded')`.
+   * run after the event. Only a worker that lists the feature can report
+   * it: where `client.features.has('superseded')` is false (a dedicated
+   * worker, the in-process hosting, an older worker script), this stays
+   * undefined for good and means "not known", not "current".
    */
   readonly superseded: ClientEvents["superseded"] | undefined;
   /** Get-or-create (N4). */

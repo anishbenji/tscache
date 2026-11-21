@@ -314,6 +314,9 @@ export type RequestId = string;
  * An optional feature a worker may offer, listed in its hello (N79) and
  * exposed as `TscacheClient.features`. `'superseded'` (N113): the worker
  * can report that a worker of a newer generation of the application runs.
+ * Only a SharedWorker that can find the other workers of its origin lists
+ * it: a dedicated worker and the in-process hosting never do, and neither
+ * does a worker script from before the feature.
  */
 export type WorkerFeature = "cacheChanged" | "memoryBudget" | "superseded";
 
