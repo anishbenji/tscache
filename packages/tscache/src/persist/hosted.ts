@@ -69,8 +69,8 @@ export class HostedPersistence implements Persistence {
   #failure: Failure | undefined;
   /** Calls waiting for the chunk, in arrival order. */
   readonly #waiting: ((persister: Persister | undefined) => void)[] = [];
-  /** Caches whose open waits for the chunk. */
-  readonly #pending = new Set<string>();
+  /** The opens that wait for the chunk, by cache: a second open joins the first. */
+  readonly #pending = new Map<string, Promise<void>>();
   /** Ops and clears among the waiting calls. */
   #held = 0;
   /** Caches stopped without a persister: each is reported once (N59). */
@@ -113,18 +113,24 @@ export class HostedPersistence implements Persistence {
     if (this.#stopped.has(cacheId)) return Promise.resolve();
     const persister = this.#persister;
     if (persister !== undefined) return persister.open(cacheId);
+    // Already waiting for the chunk: that open settles this one too, and
+    // reports the cache when it stops, once (N59), also when the worker was
+    // superseded meanwhile.
+    const waiting = this.#pending.get(cacheId);
+    if (waiting !== undefined) return waiting;
     // Nothing would be read: no reason to import the chunk, or to wait for it.
     if (this.#superseded || this.#state === "failed") {
       this.#stopUnloaded(cacheId);
       return Promise.resolve();
     }
     const startedAt = performance.now();
-    this.#pending.add(cacheId);
-    return this.#later((loaded) => {
+    const opened = this.#later((loaded) => {
       if (loaded !== undefined) return loaded.open(cacheId, startedAt);
       this.#stopUnloaded(cacheId);
       return undefined;
     });
+    this.#pending.set(cacheId, opened);
+    return opened;
   }
 
   durably(cacheId: string, op: () => unknown): unknown {
