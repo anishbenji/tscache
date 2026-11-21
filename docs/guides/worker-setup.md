@@ -31,6 +31,13 @@ plugin, `fetcherUrl()`, warns once in `vite build` when the format is
 `'iife'`; it never changes the format itself. Pass the URL as Vite
 gives it: the worker's chunks import the worker file by that URL, so a query
 or fragment added to it would load the worker's code a second time.
+This repository's benchmarks and tests add a query on purpose, for a fresh
+SharedWorker per run (there is one per script URL), and can because nothing
+there loads the persistence chunk from a Vite-built worker: the Vite-built
+benchmark (`examples/benchmark`) persists no cache and never calls
+`clearAll`, and the other suites load the package's own build, whose chunks
+never import the worker file. A test of your own that persists a cache in a
+Vite-built worker under such a query loads the worker twice.
 
 ## webpack 5 (and Rspack)
 
