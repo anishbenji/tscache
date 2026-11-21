@@ -74,6 +74,7 @@ test("18: tabs with different fetcher URLs both connect, each to a worker of its
   for (const tab of [a, b]) {
     expect(await featuresOf(tab)).toEqual([
       "cacheChanged",
+      "calendar-grid",
       "memoryBudget",
       "superseded",
     ]);
