@@ -61,4 +61,34 @@ describe("a clearAll after a load stop (user decision 113 A)", () => {
     expect(writes(h.store)).toEqual([]);
     expect(h.store.records("persist")).toEqual(seeded);
   });
+
+  it("runs a deferred cleanup queued before the call ahead of the clear", async () => {
+    const h = harness();
+    h.engine.cache(config());
+    h.engine.cache(config({ id: "running" }));
+    h.store.seed("persist", fixture({}, [0, 4]));
+    h.store.seed("running", fixture({ id: "running" }, [0, 4]));
+    h.store.fail("read");
+    await h.persister.open("persist");
+    await h.persister.open("running");
+
+    const flush = h.store.gate("write");
+    h.engine.invalidate("running", { start: 0, end: 0 });
+    await tick();
+    await flush.entered;
+    h.engine.invalidate("persist", { start: 0, end: 0 });
+    const durable = tracked(h.persister.durable("persist"));
+    await tick();
+    const clearing = clearAll(h);
+    flush.release();
+    await finish(
+      Promise.all([clearing, durable.promise]).then(() => undefined),
+    );
+
+    const order = h.store.log
+      .filter((call) => call.kind === "write" || call.kind === "clearAll")
+      .map((call) => (call.kind === "write" ? call.cacheId : call.kind));
+    expect(order).toEqual(["running", "persist", "clearAll"]);
+    expect(h.store.records("persist")).toEqual({ cache: undefined, pages: [] });
+  });
 });

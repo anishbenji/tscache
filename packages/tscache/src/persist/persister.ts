@@ -182,6 +182,11 @@ export class Persister {
   #current: Job | undefined;
   /** The pending clearAll job: the barrier (N54). */
   #barrier: Job | undefined;
+  /**
+   * Caches whose deferred cleanup was queued in the current synchronous
+   * step: by the engine's clear of a clearAll() that follows in it.
+   */
+  #fresh: Tracked[] = [];
   #seq = 0;
   /** The writer is being stepped; a nested #pump only asks for another step. */
   #pumping = false;
@@ -443,6 +448,12 @@ export class Persister {
       cache.cleaned = false;
       const now = this.#now();
       this.#queue.push(this.#job("cleanup", cache, now, now + this.#timeoutMs));
+      if (this.#fresh.length === 0) {
+        queueMicrotask(() => {
+          this.#fresh = [];
+        });
+      }
+      this.#fresh.push(cache);
       this.#arm();
     }
     if (cache.deferred === "queued") cache.removals++;
@@ -716,12 +727,13 @@ export class Persister {
   }
 
   /**
-   * A deferred cleanup not yet started, queued by the engine's clear just
-   * before: the clear deletes its records, so its settling releases the
-   * cache's durable() calls (user decision 113 A).
+   * A deferred cleanup queued by the engine's clear just before, in the same
+   * step: the clear deletes its records, so its settling releases the
+   * cache's durable() calls (user decision 113 A). A cleanup queued before
+   * the call runs first, as any other.
    */
   #absorbCleanup(cache: Tracked, clear: Job): void {
-    if (cache.deferred !== "queued") return;
+    if (cache.deferred !== "queued" || !this.#fresh.includes(cache)) return;
     const cleanup = this.#queue.find(
       (job) => job.kind === "cleanup" && job.cache === cache,
     );
