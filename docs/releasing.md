@@ -9,16 +9,21 @@ Staging uses npm trusted publishing: GitHub mints a short-lived OIDC token for t
 exchanges it for a token that may only stage this package, and the same OIDC identity signs the
 provenance statement. No npm token is ever created or stored, and the workflow reads no secret.
 
-## Current state (17 November 2026)
+## Current state (20 November 2026)
 
 - The npm account `anishbenji` exists, with two-factor authentication through a security key.
-- `@anishbenji/tscache@0.1.0` is live on npm as `latest`, released on 13 November 2026 through the
-  flow below. It carries an SLSA v1 provenance statement; `npm audit signatures` in a project that
-  installs it verifies one registry signature and one attestation.
-- The annotated tag `v0.1.0` points at `b2e1f06`, the merge commit of the release preparation on
-  `main`. The release run it started (run 43470043079) succeeded, the maintainer approved the staged
-  version with 2FA, and the GitHub release `v0.1.0` was published on 13 November 2026 at
-  17:21:12 UTC.
+- `@anishbenji/tscache@0.2.0` is live on npm as `latest`, released on 20 November 2026 through the
+  flow below. It carries an SLSA v1 provenance statement; the package has 27 files and 271,386 bytes
+  unpacked.
+- The annotated tag `v0.2.0` points at `43393f3`, the merge commit of the release preparation
+  (pull request #149) on `main`, and was pushed on 20 November 2026 at 17:55 UTC. The release run it
+  started (run 44787821712) succeeded. The GitHub release `v0.2.0` was published at 18:18:23 UTC,
+  before the approval: the maintainer's npm token had expired, so the first approval failed. After a
+  new login the maintainer approved the staged version (stage id
+  `5a52992d-6750-4538-a92a-3b8f2e4c99cc`) with 2FA, and npm published 0.2.0 at 18:20:44 UTC
+  (`npm view @anishbenji/tscache time`).
+- 0.1.0 was released the same way on 13 November 2026: tag `v0.1.0` on `b2e1f06`, run 43470043079,
+  GitHub release published at 17:21:12 UTC.
 - The trusted publisher (GitHub Actions, `anishbenji/tscache`, workflow `release.yml`, environment
   `npm-publish`) was re-created on 13 November 2026 and validated by the 0.1.0 stage. It allows only
   `npm stage publish`; `npm publish` and `npm dist-tag` are not allowed through it. Publishing access
@@ -26,10 +31,9 @@ provenance statement. No npm token is ever created or stored, and the workflow r
 - Since 13 November 2026 the `npm-publish` environment has the maintainer as required reviewer, so
   the `stage` job waits for an approval on GitHub before it runs. With the 2FA approval of the staged
   version on npm, a release has two human approvals.
-- From the merge of the 0.2.0 release preparation (step 120), `main` carries version 0.2.0, with its
-  changelog section and `docs/releases/0.2.0.md`. That version is not on npm until the maintainer
-  tags the merge commit and approves the staged version (steps 3 to 11 of
-  [Cutting a release](#cutting-a-release)); until then `latest` is still 0.1.0.
+- `main` now carries the 0.3.0 work in preparation, collected in `docs/releases/0.3.0.md`. The
+  package version on `main` stays 0.2.0 until a release-preparation step bumps it (step 1 of
+  [Cutting a release](#cutting-a-release)).
 
 Before every release, check that nothing is left in the staging area for the version you are about
 to release: staged and published versions share one version index, so a pending stage of a version
@@ -136,14 +140,19 @@ that each protection on the path from `main` to npm is still in place.
    git push origin vX.Y.Z
    ```
 
+   The ruleset `protect-release-tags` restricts creating a `v*` tag to the repository admin (see
+   [`docs/supply-chain.md`](supply-chain.md)), so for the maintainer the push prints a "Bypassed rule
+   violations" notice about creations being restricted. That notice is expected.
+
 6. Follow the run with `gh run watch`. After `plan`, `ci` and `pack` pass, the `stage` job waits for
    the required reviewer of the `npm-publish` environment. Open the run on GitHub, choose
    **Review deployments**, tick `npm-publish` and **Approve and deploy**. Approve only a run started by
    the tag you pushed, on the commit you tagged.
 7. When the run succeeds, the `stage` job summary shows
    `+ @anishbenji/tscache@X.Y.Z (staged with id <stage-id>)`, and a draft GitHub release exists.
-8. Review the staged package. The stage commands need your own login (`npm login`); the workflow's
-   OIDC token cannot run them.
+8. Review the staged package. The stage commands need your own login; the workflow's OIDC token
+   cannot run them. First run `npm whoami`, and if it fails, sign in again with `npm login`: with an
+   expired login token the stage commands fail with `E401`.
 
    ```sh
    npm stage list @anishbenji/tscache   # find the stage id
@@ -152,6 +161,9 @@ that each protection on the path from `main` to npm is still in place.
    ```
 
    On npmjs.com the same is under the package's **Staged Packages** tab.
+
+   Run steps 9 and 10 one at a time, never as one chained block: step 10 starts only after step 9
+   has succeeded.
 9. Approve it, with your security key: **Approve** in the Staged Packages tab, or
 
    ```sh
@@ -160,11 +172,13 @@ that each protection on the path from `main` to npm is still in place.
 
    This publishes the version under `latest`. The provenance statement, signed during the OIDC stage
    publish, is published with it.
-10. Publish the draft GitHub release: `gh release edit vX.Y.Z --draft=false`, or **Publish release** on
-    the draft.
-11. Check the result: `npm view @anishbenji/tscache@X.Y.Z`, the provenance badge on the npmjs.com
-    package page, and the GitHub release. In a project that installs the package,
-    `npm audit signatures` verifies the signature and the provenance attestation.
+10. Check that `npm view @anishbenji/tscache version` prints the new `X.Y.Z`, which shows it is
+    `latest` on npm. Only then publish the draft GitHub release:
+    `gh release edit vX.Y.Z --draft=false`, or **Publish release** on the draft.
+11. Check the rest of the result: `npm view @anishbenji/tscache@X.Y.Z` for the version's details, the
+    provenance badge on the npmjs.com package page, and the published GitHub release. In a project
+    that installs the package, `npm audit signatures` verifies the signature and the provenance
+    attestation.
 
 If the tag does not match the package version, the `plan` job fails before anything is built. Delete
 the tag (`git push origin :refs/tags/vX.Y.Z` and `git tag -d vX.Y.Z`), fix the version, and tag again.
@@ -186,12 +200,15 @@ checks, which would otherwise fail every dry run whose version is not above the 
 job makes the same check against `npm view @anishbenji/tscache versions` instead, ignoring
 prereleases: a dry run reports a version that is not above the highest published one as a warning,
 and a tag run fails on it before CI. So between two releases a dry run on `main` passes with that
-warning until the next release preparation bumps the version. Today `main` says `0.2.0` and `latest`
-is still `0.1.0`, so a dry run on `main` passes without it, as step 3 of [Cutting a
-release](#cutting-a-release) expects. A dry run also warns, but does not fail, when
+warning until the next release preparation bumps the version. Today `main` and `latest` both say
+`0.2.0`, so a dry run on `main` passes with that warning. A dry run also warns, but does not fail, when
 `docs/releases/<version>.md` is missing, and when the commit is not on `main`. Staged versions are
 not public, so neither check sees a pending stage; `npm stage list` does (see [Current
-state](#current-state-17-november-2026)).
+state](#current-state-20-november-2026)).
+
+A job that fails while installing system packages (for example apt mirrors returning 503 while
+Chromium is installed) is an infrastructure failure: retry it with **Re-run failed jobs** on the run;
+the result that counts is a passing attempt.
 
 ## Retrying a failed stage
 
