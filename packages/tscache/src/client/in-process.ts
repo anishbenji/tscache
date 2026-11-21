@@ -5,11 +5,13 @@
  * by a worker never downloads or parses the engine. It persists nothing
  * (N52), but where the realm has IndexedDB its clearAll empties the
  * database too, with the clear-only call of the persistence chunk, loaded
- * at the first clearAll (§4.10.7, N66).
+ * at the first clearAll (§4.10.7, N66), and that clear is posted to the
+ * SharedWorkers of the origin (N116).
  */
 
 import { Engine } from "../engine/engine";
 import { ClearOnlyPersistence, lazyIdbStore } from "../persist/clear-only";
+import { clearPoster } from "../rpc/generations";
 import { PortClient } from "../rpc/port-client";
 import {
   type FetcherConfig,
@@ -29,13 +31,20 @@ export async function connectInProcess(
   const channel = new MessageChannel();
   const engine = new Engine();
   const openStore = lazyIdbStore(lazyPersist);
+  // Without IndexedDB there is no persistence, and nothing is posted.
+  const post = openStore === undefined ? undefined : clearPoster();
   const server = new RpcServer(
     engine,
     LIB_VERSION,
     undefined,
     openStore === undefined
       ? undefined
-      : new ClearOnlyPersistence(engine, lazyPersist, openStore),
+      : new ClearOnlyPersistence(
+          engine,
+          lazyPersist,
+          openStore,
+          post === undefined ? {} : { post },
+        ),
   );
   server.attach(channel.port1 as MessagePortLike);
   const client = await PortClient.connect(

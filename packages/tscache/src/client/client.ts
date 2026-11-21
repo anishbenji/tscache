@@ -6,7 +6,7 @@
 
 import { ConfigError, TscacheError } from "../errors";
 import type { PortClient } from "../rpc/port-client";
-import type { Evt, FetcherConfig } from "../rpc/protocol";
+import { type Evt, type FetcherConfig, LIB_VERSION } from "../rpc/protocol";
 import type {
   CacheConfig,
   ClientEvents,
@@ -18,7 +18,7 @@ import type {
 } from "../types";
 import { CacheHandle } from "./cache";
 import { ChangeSubscriptions } from "./changes";
-import { warnBudget, warnMerges } from "./dev";
+import { noteSuperseded, warnBudget, warnMerges, warnWorkerLib } from "./dev";
 import { ClientEmitter } from "./events";
 import {
   type Hosting,
@@ -52,6 +52,17 @@ export interface TscacheClient {
    * Without `'cacheChanged'`, its listeners are never called.
    */
   readonly features: ReadonlySet<WorkerFeature>;
+  /**
+   * Set once a worker of a newer generation of this application (another
+   * tscache version, fetcher module or worker build) is running in the
+   * origin (N113): `lib` is that worker's tscache version. This tab's worker
+   * no longer persists; the tab keeps working from memory and its fetcher,
+   * and a reload joins the newer worker. Undefined until then. The
+   * `superseded` event fires when it is set; read this in code that may
+   * run after the event. A worker reports it only when
+   * `client.features.has('superseded')`.
+   */
+  readonly superseded: ClientEvents["superseded"] | undefined;
   /** Get-or-create (N4). */
   cache(config: CacheConfig): Promise<CacheHandle>;
   /**
@@ -59,6 +70,9 @@ export interface TscacheClient {
    * the browser has IndexedDB it also empties the persisted records, from
    * any hosting (N54, N66), and resolves once the disk is empty or the
    * clear gave up at its deadline; it never rejects for a disk failure.
+   * It also reaches the other SharedWorkers of the origin (N116), which
+   * clear their caches and the disk too; the promise does not wait for
+   * them. Their tabs hear `cacheCleared`, possibly more than once.
    */
   clearAll(): Promise<void>;
   /** Delivers new auth material to the fetcher (step ⑪). */
@@ -195,6 +209,7 @@ class Client implements TscacheClient {
   >();
   /** Why calls reject from now on: disposed, or the worker was lost. */
   #ended: string | undefined;
+  #superseded: ClientEvents["superseded"] | undefined;
 
   constructor(hosting: Hosting, fallbacks: ClientEvents["modeFallback"][]) {
     this.#hosting = hosting;
@@ -202,9 +217,13 @@ class Client implements TscacheClient {
     this.mode = hosting.mode;
     this.features = this.#port.features;
     this.#changes = new ChangeSubscriptions(this.#port);
+    // A worker script of another library version (N117): development only.
+    warnWorkerLib(LIB_VERSION, this.#port.lib);
     this.#port.on((evt) => {
       this.#warnFetched(evt);
-      this.#events.receive(evt);
+      if (evt.scope === "client" && evt.event === "superseded") {
+        this.#supersede(evt);
+      } else this.#events.receive(evt);
     });
     this.#port.onLost((error) => this.#lose(error));
     // The chain ran before anyone could subscribe: deliver its steps on the
@@ -239,6 +258,23 @@ class Client implements TscacheClient {
         page.removeEventListener?.("pagehide", this.#onPageHide);
       page.addEventListener("pagehide", this.#onPageHide);
     }
+  }
+
+  get superseded(): ClientEvents["superseded"] | undefined {
+    return this.#superseded;
+  }
+
+  /**
+   * The worker is superseded (N113): the property is set before the
+   * listeners run, and only the first event counts.
+   */
+  #supersede(evt: Evt): void {
+    if (this.#superseded !== undefined) return;
+    const payload = evt.payload as Partial<ClientEvents["superseded"]> | null;
+    const lib = typeof payload?.lib === "string" ? payload.lib : "";
+    this.#superseded = { lib };
+    noteSuperseded(lib, this.#port.lib);
+    this.#events.receive({ ...evt, payload: this.#superseded });
   }
 
   readonly #onPageHide = (event: PageHide) => {

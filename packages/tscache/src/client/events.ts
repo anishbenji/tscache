@@ -8,43 +8,21 @@ import { Emitter } from "../engine/emitter";
 import type { Evt } from "../rpc/protocol";
 import type { ClientEvents } from "../types";
 
+/** The event names of each wire scope that this client re-emits (§2.7). */
+const NAMES: Record<Evt["scope"], readonly (keyof ClientEvents)[]> = {
+  cache: ["cacheCleared", "persistStopped", "cacheChanged"],
+  request: ["mergeWarning"],
+  // `superseded` reaches here through the client, at most once and with
+  // its property already set (N113).
+  client: ["authInvalid", "superseded"],
+};
+
 export class ClientEmitter extends Emitter<ClientEvents> {
   /** Re-emits a wire event under its typed name; unknown names are ignored. */
   receive(evt: Evt): void {
-    switch (evt.scope) {
-      case "cache":
-        if (evt.event === "cacheCleared") {
-          this.emit(
-            "cacheCleared",
-            evt.payload as ClientEvents["cacheCleared"],
-          );
-        } else if (evt.event === "persistStopped") {
-          this.emit(
-            "persistStopped",
-            evt.payload as ClientEvents["persistStopped"],
-          );
-        } else if (evt.event === "cacheChanged") {
-          this.emit(
-            "cacheChanged",
-            evt.payload as ClientEvents["cacheChanged"],
-          );
-        }
-        return;
-      case "request":
-        if (evt.event === "mergeWarning") {
-          this.emit(
-            "mergeWarning",
-            evt.payload as ClientEvents["mergeWarning"],
-          );
-        }
-        return;
-      case "client":
-        if (evt.event === "authInvalid") {
-          this.emit("authInvalid", evt.payload as ClientEvents["authInvalid"]);
-        }
-        return;
-      default:
-        return;
-    }
+    // Own properties only: a scope from another release names no list.
+    const names = Object.hasOwn(NAMES, evt.scope) ? NAMES[evt.scope] : [];
+    const name = names.find((known) => known === evt.event);
+    if (name !== undefined) this.emit(name, evt.payload as never);
   }
 }

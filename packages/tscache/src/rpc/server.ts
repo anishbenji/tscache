@@ -4,6 +4,10 @@
  * with a matching init, and from then on its requests are dispatched to the
  * engine while events fan out to every ready port, except cacheChanged,
  * which goes only to the ports subscribed to its cache (N74).
+ *
+ * Two calls come from the worker's entry, for what it hears on the workers'
+ * channel (§4.7, step 135): `supersede`, when a newer generation's worker
+ * runs, and `channelClear`, for another worker's clearAll.
  */
 
 import type { ReaderChange } from "../engine/cache";
@@ -25,6 +29,7 @@ import type {
   PutResult,
   Range,
   Snapshot,
+  WorkerFeature,
 } from "../types";
 import {
   type Bye,
@@ -43,8 +48,13 @@ import {
   toWireError,
   transferablesOf,
   type WireError,
-  WORKER_FEATURES,
 } from "./protocol";
+
+/** The optional features every server offers, listed in its hello (N79). */
+const HELLO_FEATURES: readonly WorkerFeature[] = [
+  "cacheChanged",
+  "memoryBudget",
+];
 
 interface Connection {
   port: MessagePortLike;
@@ -125,12 +135,24 @@ export interface Persistence {
   flush(): void;
 }
 
+export interface ServerOptions {
+  /**
+   * Called once, right after the first `init-ok`, with the fetcher module
+   * that connection named, if any: the SharedWorker announces itself to the
+   * other workers then (N108).
+   */
+  onFirstInit?: (fetcher: string | undefined) => void;
+}
+
 export class RpcServer {
   readonly #engine: Engine;
   readonly #orchestrator: Orchestrator;
   readonly #lib: string;
   readonly #lock: string | undefined;
   readonly #persistence: Persistence | undefined;
+  #onFirstInit: ServerOptions["onFirstInit"];
+  /** Set once this worker is superseded (N113): sent to later connections. */
+  #superseded: ClientEvents["superseded"] | undefined;
   readonly #connections = new Set<Connection>();
   #nextClient = 0;
   /** Per cache, the connections subscribed to its cacheChanged (N74). */
@@ -153,11 +175,13 @@ export class RpcServer {
     lib: string,
     lock?: string,
     persistence?: Persistence,
+    options: ServerOptions = {},
   ) {
     this.#engine = engine;
     this.#lib = lib;
     this.#lock = lock;
     this.#persistence = persistence;
+    this.#onFirstInit = options.onFirstInit;
     this.#orchestrator = new Orchestrator(
       engine,
       (evt) => this.#broadcast(evt),
@@ -200,7 +224,7 @@ export class RpcServer {
       protocol: PROTOCOL_VERSION,
       lib: this.#lib,
       clientId: connection.clientId,
-      features: [...WORKER_FEATURES],
+      features: [...HELLO_FEATURES],
     };
     if (this.#lock !== undefined) hello.lock = this.#lock;
     this.#send(connection, hello);
@@ -218,6 +242,48 @@ export class RpcServer {
       event: "persistStopped",
       payload,
     });
+  }
+
+  /**
+   * This worker is superseded (N113): a worker of a newer generation runs
+   * in the origin, with library version `payload.lib`. Tells every ready
+   * connection, and each later one right after its init-ok, then stops the
+   * persistence (N110), so the stop's persistStopped events follow the
+   * superseded event on every port. No cache changes. Only the first call
+   * acts.
+   */
+  supersede(payload: ClientEvents["superseded"]): void {
+    if (this.#superseded !== undefined) return;
+    this.#superseded = { lib: payload.lib };
+    this.#broadcast(this.#supersededEvt(this.#superseded));
+    this.#persistence?.supersede?.();
+  }
+
+  #supersededEvt(payload: ClientEvents["superseded"]): Evt {
+    return { t: "evt", scope: "client", event: "superseded", payload };
+  }
+
+  /**
+   * A clearAll heard from another worker (N116): empties every cache, and
+   * with persistence the disk, as the clearAll op does, but under no
+   * request, so the events it causes carry no requestId. The persistence
+   * relays it once for `clearId`. Nobody awaits it: a listener error the
+   * memory clear rethrows (N22) has no caller to reach.
+   */
+  channelClear(clearId: string): void {
+    const clearMemory = () =>
+      this.#caused(undefined, () => this.#engine.clearAll());
+    const persistence = this.#persistence;
+    try {
+      if (persistence === undefined) clearMemory();
+      else {
+        void Promise.resolve(persistence.clearAll(clearMemory, clearId)).catch(
+          () => {},
+        );
+      }
+    } catch {
+      // Every cache was cleared anyway (N22).
+    }
   }
 
   /** Attached ports still alive (for tests and diagnostics). */
@@ -326,6 +392,23 @@ export class RpcServer {
     connection.ready = true;
     const reply: InitResult = { t: "init-ok" };
     this.#send(connection, reply);
+    this.#afterInit(connection, fetcher);
+  }
+
+  /**
+   * What follows an init-ok (step 135): a connection that joins a
+   * superseded worker is told right away, and the server's first init is
+   * reported to its entry, with the fetcher module it named.
+   */
+  #afterInit(connection: Connection, fetcher: FetcherConfig | undefined): void {
+    if (this.#superseded !== undefined) {
+      this.#send(connection, this.#supersededEvt(this.#superseded));
+    }
+    const onFirstInit = this.#onFirstInit;
+    if (onFirstInit === undefined) return;
+    this.#onFirstInit = undefined;
+    const named = isObject(fetcher) && typeof fetcher.module === "string";
+    onFirstInit(named ? fetcher.module : undefined);
   }
 
   async #request(connection: Connection, req: Req): Promise<void> {

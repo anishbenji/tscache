@@ -53,7 +53,7 @@ export class ConfigError extends TscacheError {
    * every other ConfigError. Recognise that refusal by this code, not by
    * the message.
    */
-  readonly code?: ConfigErrorCode;
+  declare readonly code?: ConfigErrorCode;
 
   constructor(message: string, code?: ConfigErrorCode) {
     super(message);

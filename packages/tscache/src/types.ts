@@ -312,9 +312,10 @@ export type RequestId = string;
 
 /**
  * An optional feature a worker may offer, listed in its hello (N79) and
- * exposed as `TscacheClient.features`.
+ * exposed as `TscacheClient.features`. `'superseded'` (N113): the worker
+ * can report that a worker of a newer generation of the application runs.
  */
-export type WorkerFeature = "cacheChanged" | "memoryBudget";
+export type WorkerFeature = "cacheChanged" | "memoryBudget" | "superseded";
 
 /** Three scopes, one channel (N5, §2.7). */
 export interface ClientEvents {
@@ -332,7 +333,21 @@ export interface ClientEvents {
    * a new worker). At most once per client; never after dispose().
    */
   workerLost: { reason: string };
-  /** A cache was cleared; in SharedWorker mode one tab's clear affects all. */
+  /**
+   * A worker of a newer generation of this application (another tscache
+   * version, fetcher module or worker build) is running in the origin
+   * (N113). This tab's worker no longer persists; the tab keeps working
+   * from memory and its fetcher. Reload the tab to join the newer worker:
+   * show the user a prompt, since the library never reloads a page. `lib`
+   * is the newer worker's tscache version. At most once per client;
+   * `client.superseded` holds the payload afterwards.
+   */
+  superseded: { lib: string };
+  /**
+   * A cache was cleared; in SharedWorker mode one tab's clear affects all,
+   * and a `clearAll` reaches the other SharedWorkers of the origin too
+   * (N116), so one call can be heard more than once.
+   */
   cacheCleared: {
     cacheId: string;
     reason: "manual" | "clear-all" | "version-mismatch";

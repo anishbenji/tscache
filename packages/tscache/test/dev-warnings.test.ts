@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClient, type TscacheClient } from "../src/client/client";
 import { warnMerges } from "../src/client/dev";
 import { Engine } from "../src/engine/engine";
-import type { MessagePortLike } from "../src/rpc/protocol";
+import { LIB_VERSION, type MessagePortLike } from "../src/rpc/protocol";
 import { RpcServer } from "../src/rpc/server";
 import type { ClientEvents, PutBatch } from "../src/types";
 
@@ -36,7 +36,7 @@ const fetcherModule = `data:text/javascript,${encodeURIComponent(`
 
 /** Two tabs on one SharedWorker: every client connects to the same server. */
 function installSharedWorker(): void {
-  const server = new RpcServer(new Engine(), "0.0.0");
+  const server = new RpcServer(new Engine(), LIB_VERSION);
   vi.stubGlobal(
     "SharedWorker",
     class {

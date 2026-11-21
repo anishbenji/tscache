@@ -2,6 +2,9 @@
  * Development-only console output (docs/architecture.md §2.7, resolved
  * decision #8): merge warnings are printed in the page that made the write,
  * once per put, in addition to the put result and the mergeWarning event.
+ * Also the warnings for a worker without a feature (N80, N101), for a worker
+ * script of another library version (N117), and the note that a newer
+ * generation's worker is running (N113).
  */
 
 import type { MergeWarning, WorkerFeature } from "../types";
@@ -81,5 +84,38 @@ export function warnBudget(
         : `the worker keeps the first budget it received, ${inForce} bytes, until it restarts`;
   console.warn(
     `tscache: memoryBudget ${requested} is not in force: ${why}. client.memoryStats() reports the budget in force; printed in development builds only.`,
+  );
+}
+
+/**
+ * Prints one console.warn that the worker script is not of this page's
+ * library version (N117): `hello.lib` differs from the client's, in either
+ * direction, or the worker sent none. Development builds only; nothing is
+ * refused, and nothing else depends on the version.
+ */
+export function warnWorkerLib(
+  clientLib: string,
+  workerLib: string | undefined,
+): void {
+  if (workerLib === clientLib || !development()) return;
+  const worker =
+    workerLib === undefined ? "reports no version" : `is tscache ${workerLib}`;
+  console.warn(
+    `tscache: this page runs tscache ${clientLib}, and the worker script it reached ${worker}. The script at the worker URL is not this page's build (served stale, or replaced under an open page): reload with the HTTP cache revalidated, and serve the worker script with revalidation. Printed in development builds only.`,
+  );
+}
+
+/**
+ * Prints one console.info that this tab's worker is superseded (N113):
+ * `newerLib` is the newer worker's library version, `workerLib` this tab's
+ * worker's (`hello.lib`). Development builds only.
+ */
+export function noteSuperseded(
+  newerLib: string,
+  workerLib: string | undefined,
+): void {
+  if (!development()) return;
+  console.info(
+    `tscache: a worker of a newer generation of this application is running (tscache ${newerLib}; this tab's worker is tscache ${workerLib ?? "of an unknown version"}). This tab's worker no longer persists; reload the tab to join the newer one. client.superseded holds this; printed in development builds only.`,
   );
 }

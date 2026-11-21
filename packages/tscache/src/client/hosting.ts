@@ -7,7 +7,11 @@
 import { nameFor, TscacheError } from "../errors";
 import { lockManager, watchLifetimeLock } from "../rpc/lifetime";
 import { PortClient } from "../rpc/port-client";
-import type { FetcherConfig, MessagePortLike } from "../rpc/protocol";
+import {
+  type FetcherConfig,
+  LIB_VERSION,
+  type MessagePortLike,
+} from "../rpc/protocol";
 import type { HostingMode } from "../types";
 
 /** A hosting could not be established; the chain may step down (N25). */
@@ -29,7 +33,7 @@ export interface Hosting {
 interface WorkerGlobals {
   SharedWorker?: new (
     url: string | URL,
-    options?: { type?: "module"; extendedLifetime?: boolean },
+    options?: { type?: "module"; extendedLifetime?: boolean; name?: string },
   ) => { port: MessagePortLike } & ErrorSource;
   Worker?: new (
     url: string | URL,
@@ -105,9 +109,24 @@ function globals(): WorkerGlobals {
   return globalThis as unknown as WorkerGlobals;
 }
 
-/** A new SharedWorker on `url`; HostingError when none can be created. */
+/**
+ * The page's generation key (N106, N107): the SharedWorker's name. A
+ * SharedWorker is found by its URL and its name together, so pages that
+ * differ in the library version or in the fetcher module string never share
+ * a worker, and a deploy that changes either starts a worker of its own.
+ * `module` is the string that crosses the wire, as the worker compares it.
+ */
+function generationKey(fetcher: FetcherConfig | undefined): string {
+  return `tscache:${LIB_VERSION}:${fetcher?.module ?? ""}`;
+}
+
+/**
+ * A SharedWorker on `url` under `name`, the running one when a page already
+ * created it with both; HostingError when none can be created.
+ */
 function createSharedWorker(
   url: string | URL,
+  name: string,
 ): InstanceType<NonNullable<WorkerGlobals["SharedWorker"]>> {
   const Ctor = globals().SharedWorker;
   if (typeof Ctor !== "function") {
@@ -116,8 +135,9 @@ function createSharedWorker(
   try {
     // extendedLifetime keeps the worker about 30 s after its last tab, so the
     // final flush can land (§4.10.8, N50); a browser without the option
-    // ignores it. Every tab passes the same options, so they reach one worker.
-    return new Ctor(url, { type: "module", extendedLifetime: true });
+    // ignores it. Every tab of a generation passes the same options and the
+    // same name, so they reach one worker.
+    return new Ctor(url, { type: "module", extendedLifetime: true, name });
   } catch (error) {
     throw new HostingError(
       `SharedWorker could not be created: ${String(error)}`,
@@ -130,7 +150,7 @@ export async function openShared(
   fetcher: FetcherConfig | undefined,
   timeoutMs: number,
 ): Promise<Hosting> {
-  const worker = createSharedWorker(url);
+  const worker = createSharedWorker(url, generationKey(fetcher));
   // The worker can die with the tab hosting it and nothing else would tell
   // this one (N32): queue on its lifetime lock, granted only once it is gone.
   // The watch starts at hello, because the time to init-ok (the fetcher

@@ -113,6 +113,11 @@ export class PortClient {
   readonly lock: string | undefined;
   /** hello.features this client knows (N79); empty for an older worker. */
   readonly features: ReadonlySet<WorkerFeature>;
+  /**
+   * hello.lib, the worker script's library version, when it is a string
+   * (N117). The handshake never acts on it.
+   */
+  readonly lib: string | undefined;
   readonly #port: MessagePortLike;
   readonly #pending = new Map<number, Pending>();
   readonly #listeners = new Set<(evt: Evt) => void>();
@@ -127,11 +132,13 @@ export class PortClient {
     clientId: string,
     lock: string | undefined,
     features: ReadonlySet<WorkerFeature>,
+    lib: string | undefined,
   ) {
     this.#port = port;
     this.clientId = clientId;
     this.lock = lock;
     this.features = features;
+    this.lib = lib;
     this.#unlisten = listen(port, {
       onMessage: (data) => this.#receive(data),
       // The other side went away (worker died, server detached): nothing
@@ -160,6 +167,7 @@ export class PortClient {
       let clientId = "";
       let lock: string | undefined;
       let features: ReadonlySet<WorkerFeature> = new Set();
+      let lib: string | undefined;
       let unlisten = () => {};
       // Cancelled by the caller (handshake timeout, worker error): stop
       // listening and close this side's port, so a late hello completes
@@ -186,6 +194,8 @@ export class PortClient {
         // Only a name can be queued on; anything else watches nothing.
         lock = typeof message.lock === "string" ? message.lock : undefined;
         features = featuresOf(message.features);
+        // Kept for a development warning (N117); no value of it is refused.
+        lib = typeof message.lib === "string" ? message.lib : undefined;
         stage = "init";
         afterHello?.(lock);
         try {
@@ -200,7 +210,7 @@ export class PortClient {
         ok: () => {
           signal?.removeEventListener("abort", onAbort);
           unlisten();
-          resolve(new PortClient(port, clientId, lock, features));
+          resolve(new PortClient(port, clientId, lock, features, lib));
         },
         fail: finish,
       };
