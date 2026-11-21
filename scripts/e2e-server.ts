@@ -85,19 +85,32 @@ function generatedFor(pathname: string) {
   return Object.hasOwn(generated, pathname) ? generated[pathname] : undefined;
 }
 
-async function serve(request: Request): Promise<Response> {
-  const url = new URL(request.url);
-  const { pathname } = url;
-  const answer = generatedFor(pathname);
-  if (answer !== undefined) return answer();
-  if (pathname.startsWith("/backend/")) return backend(request, url);
-  if (pathname.startsWith("/dist-next/")) return nextLibrary(pathname);
+/** Path prefixes answered by code: the mock backend, the later library. */
+const prefixed: [
+  string,
+  (request: Request, url: URL) => Response | Promise<Response>,
+][] = [
+  ["/backend/", backend],
+  ["/dist-next/", (_request, url) => nextLibrary(url.pathname)],
+];
+
+/** A file of dist/ or of the fixture pages, or 404. */
+async function staticFile(pathname: string): Promise<Response> {
   const path = fileFor(pathname);
   const file = Bun.file(new URL(path, root));
   if (!(await file.exists())) {
     return new Response("not found", { status: 404 });
   }
   return new Response(file, { headers: { "content-type": contentType(path) } });
+}
+
+function serve(request: Request): Response | Promise<Response> {
+  const url = new URL(request.url);
+  const { pathname } = url;
+  const answer =
+    generatedFor(pathname) ??
+    prefixed.find(([prefix]) => pathname.startsWith(prefix))?.[1];
+  return answer === undefined ? staticFile(pathname) : answer(request, url);
 }
 
 // The backend holds requests until a test releases them; Bun's default idle
