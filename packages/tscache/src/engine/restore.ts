@@ -8,7 +8,8 @@
  */
 
 import { InvalidRangeError, TscacheError } from "../errors";
-import { type SlotRange, slotAtOrAfter, toMs } from "../grid";
+import { lookupBudgetOf, type SlotRange, slotAtOrAfter, toMs } from "../grid";
+import { gridMismatch } from "../segment/payload";
 import type { Range } from "../types";
 import {
   below,
@@ -20,12 +21,10 @@ import {
 } from "./cache";
 import { pageOf } from "./merge";
 import { collect } from "./read";
-import { type ValidSnapshot, validateSnapshot } from "./snapshot";
+import { chargeOf, type ValidSnapshot, validateSnapshot } from "./snapshot";
 
-/** The structural config fields a cache record names (§4.10.2). */
+/** The structural config fields every cache record names (§4.10.2). */
 const RECORD_CONFIG = [
-  "interval",
-  "alignmentOffset",
   "gapSplitK",
   "segmentSlotCap",
   "warnOnOverlapDiff",
@@ -42,6 +41,8 @@ type Watermark = { t: number; slot: number };
 interface StoredMeta {
   version: string | undefined;
   watermark: Watermark | undefined;
+  /** The record held a watermark outside the calendar's domain, set aside (§4.10.5 step 2). */
+  setAside: boolean;
 }
 
 /** Absent, or a non-empty string. */
@@ -124,7 +125,8 @@ export function restore(
     inner.adoptVersion(record.version);
   }
   restoreWatermark(state, inner, record.watermark);
-  return restorePages(state, inner, pages, record.version);
+  const result = restorePages(state, inner, pages, record);
+  return record.setAside ? { ...result, rewrite: true } : result;
 }
 
 /**
@@ -141,17 +143,45 @@ function restoreWatermark(
   if (state.finalizedUntil !== wm?.t) inner.report({ kind: "watermark" });
 }
 
+/**
+ * The index of the first page a load may validate (§4.10.5 step 5, N113):
+ * on a grid that looks offsets up, the page records' charges are added
+ * newest first, after 12 for a stored watermark, and every page from the
+ * one that takes the sum past the budget is skipped, with no lookup.
+ */
+function firstWithinBudget(
+  state: CacheState,
+  pages: readonly unknown[],
+  record: StoredMeta,
+): number {
+  const budget = lookupBudgetOf(state.grid);
+  if (budget === undefined) return 0;
+  // A stored watermark is converted once, whether it is applied or set aside.
+  let sum = record.watermark === undefined && !record.setAside ? 0 : 12;
+  let first = pages.length;
+  while (first > 0) {
+    const page = pages[first - 1];
+    const snapshot = isRecord(page) ? page.snapshot : undefined;
+    sum += chargeOf(isRecord(snapshot) ? snapshot : {});
+    if (sum > budget) break;
+    first--;
+  }
+  return first;
+}
+
 /** Applies every valid page, ascending (§4.10.5 steps 5–7). */
 function restorePages(
   state: CacheState,
   inner: CacheInternals,
   pages: readonly unknown[],
-  version: string | undefined,
+  record: StoredMeta,
 ): RestoreResult {
+  const { version } = record;
   const parts: SlotRange[] = [];
-  let rewrite = false;
+  const first = firstWithinBudget(state, pages, record);
+  let rewrite = first > 0;
   let last: number | undefined;
-  for (const page of pages) {
+  for (const page of pages.slice(first)) {
     const valid = acceptPage(state, page, version, last);
     if (valid === undefined) {
       rewrite = true;
@@ -175,23 +205,51 @@ function acceptRecord(
   if (
     !isRecord(record) ||
     record.cacheId !== state.config.id ||
-    record.format !== 1 ||
-    !sameStructure(state, record.config)
+    !sameStructure(state, record.format, record.config)
   ) {
     return undefined;
   }
   const { version, finalizedUntil } = record;
   if (!isStoredVersion(version)) return undefined;
-  if (finalizedUntil === undefined) return { version, watermark: undefined };
-  const watermark = storedWatermark(state, finalizedUntil);
-  return watermark === undefined ? undefined : { version, watermark };
+  return storedMeta(state, version, finalizedUntil);
 }
 
-/** Whether a stored config names exactly this cache's structural fields (N20). */
-function sameStructure(state: CacheState, config: unknown): boolean {
+/**
+ * A record's version with its watermark, or undefined for a watermark that
+ * refuses the record. A calendar cache sets aside a stored watermark its
+ * grid rejects and keeps the record (§4.10.5 step 2); a fixed cache
+ * refuses the record.
+ */
+function storedMeta(
+  state: CacheState,
+  version: string | undefined,
+  finalizedUntil: unknown,
+): StoredMeta | undefined {
+  const none = { version, watermark: undefined, setAside: false };
+  if (finalizedUntil === undefined) return none;
+  const watermark = storedWatermark(state, finalizedUntil);
+  if (watermark !== undefined) return { version, watermark, setAside: false };
+  const calendar = typeof state.config.interval !== "number";
+  return calendar && typeof finalizedUntil === "number"
+    ? { ...none, setAside: true }
+    : undefined;
+}
+
+/**
+ * Whether a stored config names exactly this cache's structural fields
+ * (N20): the grid as its format names it (`interval` and `alignmentOffset`
+ * in format 1, `grid` in format 2), the schema and the three others.
+ */
+function sameStructure(
+  state: CacheState,
+  format: unknown,
+  config: unknown,
+): boolean {
+  if (!isRecord(config)) return false;
+  const gridFields = typeof state.config.interval === "number" ? 2 : 1;
   return (
-    isRecord(config) &&
-    Object.keys(config).length === RECORD_CONFIG.length + 1 &&
+    gridMismatch({ ...config, format }, state.config) === undefined &&
+    Object.keys(config).length === RECORD_CONFIG.length + gridFields + 1 &&
     RECORD_CONFIG.every((field) => config[field] === state.config[field]) &&
     sameSchema(config.fields, state.config.fields)
   );
@@ -201,7 +259,7 @@ function sameStructure(state: CacheState, config: unknown): boolean {
 function storedWatermark(state: CacheState, t: unknown): Watermark | undefined {
   if (typeof t !== "number") return undefined;
   try {
-    return { t, slot: slotAtOrAfter(t, state.config) };
+    return { t, slot: slotAtOrAfter(t, state.grid) };
   } catch (error) {
     if (!(error instanceof InvalidRangeError)) throw error;
     return undefined;
@@ -241,7 +299,7 @@ function pageSnapshotOf(
 ): ValidSnapshot | undefined {
   let snapshot: ValidSnapshot;
   try {
-    snapshot = validateSnapshot(input, state.config);
+    snapshot = validateSnapshot(input, state.config, state.grid);
   } catch {
     // Untrusted bytes: whatever fails to decode is a page to skip.
     return undefined;
@@ -306,5 +364,5 @@ function merged(state: CacheState, parts: readonly SlotRange[]): Range[] {
     if (last !== undefined && last.end + 1 === part.start) last.end = part.end;
     else out.push({ ...part });
   }
-  return out.map((part) => toMs(part, state.config));
+  return out.map((part) => toMs(part, state.grid));
 }

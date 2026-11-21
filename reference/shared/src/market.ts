@@ -4,12 +4,15 @@
 // the interval in the id keeps another resolution's cache apart.
 
 import type { CacheConfig, GetResult, Range } from "@anishbenji/tscache";
+import { nextSlotStart, slotStart } from "@anishbenji/tscache/grid";
 import { datasets } from "@examples/mock-backend/datasets";
 
 export const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
-export const market: CacheConfig = {
+// The market's interval is a fixed one: the type says so, so the chart
+// adapters, which step by whole intervals, take it without narrowing.
+export const market: CacheConfig & { interval: number } = {
   id: "crypto/BTC/1m",
   interval: MINUTE,
   fields: datasets.crypto.fields,
@@ -41,9 +44,25 @@ export function openingRange(now: number): Range {
  */
 export function formingBar(
   now: number,
-  { interval, alignmentOffset = 0 }: CacheConfig = market,
+  { interval, alignmentOffset }: CacheConfig = market,
 ): number {
-  return now - ((((now - alignmentOffset) % interval) + interval) % interval);
+  return slotStart(now, interval, alignmentOffset);
+}
+
+/**
+ * One bar past `t` on the grid of `config` (the market's by default): `t`
+ * plus the length of the slot that holds it, which on a calendar grid
+ * differs from slot to slot.
+ */
+export function oneBarPast(
+  t: number,
+  { interval, alignmentOffset }: CacheConfig = market,
+): number {
+  return (
+    t +
+    nextSlotStart(t, interval, alignmentOffset) -
+    slotStart(t, interval, alignmentOffset)
+  );
 }
 
 /**

@@ -13,7 +13,14 @@ import {
   show,
   TscacheError,
 } from "../errors";
-import { type SlotRange, slotAtOrAfter, snapOut, toMs } from "../grid";
+import {
+  type Grid,
+  type SlotRange,
+  slotAtOrAfter,
+  snapOut,
+  toMs,
+  withGrid,
+} from "../grid";
 import { getOwn, setOwn } from "../segment/own";
 import type { Columns } from "../segment/types";
 import type {
@@ -256,6 +263,11 @@ export interface CacheStateHooks {
    * in slots (§4.5, N96); never `onChange` or `onMutate`.
    */
   onEvict?: (covered: SlotRange[]) => void;
+  /**
+   * The cache's grid (§4.1). The engine passes it, so that its calendar
+   * caches share one context; default: the grid of the config.
+   */
+  grid?: Grid;
 }
 
 /** What `restore` applied (§4.10.5). */
@@ -326,8 +338,27 @@ export function installRestore(impl: Restore): void {
   restoreImpl = impl;
 }
 
+/**
+ * The first provisional slot a config's watermark gives, or undefined
+ * without one. Throws ConfigError for a watermark the grid rejects.
+ */
+function initialVolatile(
+  config: ResolvedCacheConfig,
+  grid: Grid,
+): number | undefined {
+  if (config.finalizedUntil === undefined) return undefined;
+  try {
+    return slotAtOrAfter(config.finalizedUntil, grid);
+  } catch (error) {
+    if (!(error instanceof InvalidRangeError)) throw error;
+    throw new ConfigError(`finalizedUntil: ${error.message}`);
+  }
+}
+
 export class CacheState {
   readonly config: ResolvedCacheConfig;
+  /** The config's grid: what every ms↔slot conversion of the cache takes (§4.1). */
+  readonly grid: Grid;
   readonly #hooks: CacheStateHooks;
   readonly #store: SegmentStore;
   readonly #coverage = new CoverageIndex();
@@ -351,7 +382,19 @@ export class CacheState {
   constructor(config: ResolvedCacheConfig, hooks: CacheStateHooks = {}) {
     this.config = config;
     this.#hooks = hooks;
-    this.#store = new SegmentStore(config);
+    // The watermark's slot is what can still reject the config here. An
+    // engine wraps the whole construction in `withGrid`; a cache made
+    // without one holds its grid the same way, once the slot is found.
+    const begin = (grid: Grid) => ({
+      grid,
+      from: initialVolatile(config, grid),
+    });
+    const { grid, from } =
+      hooks.grid === undefined
+        ? withGrid(config, undefined, begin)
+        : begin(hooks.grid);
+    this.grid = grid;
+    this.#store = new SegmentStore(config, this.grid);
     const memory = hooks.memory;
     this.#memory = memory;
     if (memory !== undefined) {
@@ -362,15 +405,8 @@ export class CacheState {
       this.#evicted = new CoverageIndex();
     }
     this.#version = config.version;
-    if (config.finalizedUntil !== undefined) {
-      try {
-        this.#volatileFrom = slotAtOrAfter(config.finalizedUntil, config);
-      } catch (error) {
-        if (!(error instanceof InvalidRangeError)) throw error;
-        throw new ConfigError(`finalizedUntil: ${error.message}`);
-      }
-      this.#finalizedUntil = config.finalizedUntil;
-    }
+    this.#volatileFrom = from;
+    this.#finalizedUntil = config.finalizedUntil;
   }
 
   static {
@@ -411,6 +447,7 @@ export class CacheState {
       batch,
       this.config,
       options?.range,
+      this.grid,
     );
     const meta = this.#validateMeta(batch.meta);
     return this.#mutating(() => this.#putValid(points, authority, meta));
@@ -539,12 +576,12 @@ export class CacheState {
    * request, taken from the same state (§2.8, N36).
    */
   get(range: Range, options?: { snapshot?: boolean }): GetResult {
-    const request = snapOut(range, this.config);
+    const request = snapOut(range, this.grid);
     const result = read(
       request,
       this.#store.segments,
       this.#coverage,
-      this.config,
+      this.grid,
       this.config.fields,
     );
     if (options?.snapshot === true) result.snapshot = this.#snapshot(request);
@@ -554,7 +591,7 @@ export class CacheState {
 
   /** What this cache knows about the range, snapped outward (§2.8, N34). */
   snapshot(range: Range): Snapshot {
-    const request = snapOut(range, this.config);
+    const request = snapOut(range, this.grid);
     const snapshot = this.#snapshot(request);
     this.#memory?.read(this, request);
     return snapshot;
@@ -567,7 +604,7 @@ export class CacheState {
    * this cache neither covers nor holds as provisional, and covers it.
    */
   hydrate(snapshot: Snapshot): HydrateResult {
-    const valid = validateSnapshot(snapshot, this.config);
+    const valid = validateSnapshot(snapshot, this.config, this.grid);
     return this.#mutating(() => this.#hydrateValid(valid));
   }
 
@@ -589,7 +626,7 @@ export class CacheState {
       this.#apply(valid, part);
       this.#hooks.onChange?.({ kind: "write", slots: part });
     }
-    return { applied: parts.map((part) => toMs(part, this.config)) };
+    return { applied: parts.map((part) => toMs(part, this.grid)) };
   }
 
   /**
@@ -616,6 +653,7 @@ export class CacheState {
     return takeSnapshot(
       {
         config: this.config,
+        grid: this.grid,
         segments: this.#store.segments,
         coverage: this.#coverage,
         version: this.#version,
@@ -738,13 +776,13 @@ export class CacheState {
 
   /** The authoritative sub-ranges of `range` in ms, without reading points. */
   coverage(range: Range): Range[] {
-    const request = snapOut(range, this.config);
-    return this.#coverage.covered(request).map((r) => toMs(r, this.config));
+    const request = snapOut(range, this.grid);
+    return this.#coverage.covered(request).map((r) => toMs(r, this.grid));
   }
 
   /** Forgets coverage; the points stay (N16). Snaps outward (N1). */
   invalidate(range: Range): void {
-    const slots = snapOut(range, this.config);
+    const slots = snapOut(range, this.grid);
     this.#mutating(() => {
       this.#withdraw(slots);
       this.#hooks.onChange?.({ kind: "remove", slots });
@@ -779,7 +817,7 @@ export class CacheState {
 
   /** Sets the watermark exactly; moving it back makes points provisional again. */
   setFinalizedUntil(t: number): void {
-    const slot = slotAtOrAfter(t, this.config);
+    const slot = slotAtOrAfter(t, this.grid);
     this.#mutating(() => this.#reportWatermark(this.#setWatermark(t, slot)));
   }
 
@@ -917,7 +955,7 @@ export class CacheState {
 
   #validWatermark(t: number): { t: number; slot: number } {
     try {
-      return { t, slot: slotAtOrAfter(t, this.config) };
+      return { t, slot: slotAtOrAfter(t, this.grid) };
     } catch (error) {
       if (!(error instanceof InvalidRangeError)) throw error;
       return reject(`meta.finalizedUntil: ${error.message}`);
@@ -933,7 +971,7 @@ export class CacheState {
       const end =
         from === undefined ? range.end : Math.min(range.end, from - 1);
       out.push({
-        range: toMs({ start: range.start, end }, this.config),
+        range: toMs({ start: range.start, end }, this.grid),
         fields,
       });
     }

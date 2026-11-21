@@ -38,6 +38,7 @@ const ENTRIES = {
   worker: "browser",
   engine: "browser",
   fetcher: "browser",
+  grid: "browser",
   vite: "node",
 } as const;
 

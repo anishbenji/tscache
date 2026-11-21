@@ -142,6 +142,7 @@ covers webpack, setups without a bundler, and the full fetcher contract.
 | `@anishbenji/tscache/worker`  | the worker script; you serve it, you never import it into the page                     |
 | `@anishbenji/tscache/fetcher` | your fetcher module: its types and `AuthInvalidError`, nothing else                    |
 | `@anishbenji/tscache/engine`  | the engine without a worker, for Node, server rendering and tests                      |
+| `@anishbenji/tscache/grid`    | grid arithmetic for the page: `snapRange`, `slotStart`, `nextSlotStart`                |
 | `@anishbenji/tscache/vite`    | `fetcherUrl()`, the Vite plugin for the fetcher module (`vite` 8 is an optional peer)  |
 
 ## Browser support

@@ -8,6 +8,7 @@
 
 import type * as EngineEntry from "../src/entries/engine";
 import type { PutBatch, Range } from "../src/types";
+import { calendarCases } from "./calendar-cases";
 import {
   barsIn,
   batchOf,
@@ -34,6 +35,12 @@ export interface Case {
   expect: number;
   /** Builds the state outside any timer and returns the operation. */
   prepare(impl: Impl): Op;
+  /**
+   * Whether a revision can run the case at all: absent, every revision
+   * can. A base that cannot is replaced by a second copy of the head, so
+   * the case reports and cannot gate until the base has the feature.
+   */
+  needs?(impl: Impl): boolean;
 }
 
 /** The screen a chart shows: 500 one-minute bars. */
@@ -321,5 +328,11 @@ function moveCases({ allDay, viewport, month, monthBars }: Scene): Case[] {
 /** The cases, built lazily: fixtures cost a second or two. */
 export function cases(): Case[] {
   const s = scene();
-  return [...readCases(s), ...putCases(s), ...fillCases(s), ...moveCases(s)];
+  return [
+    ...readCases(s),
+    ...putCases(s),
+    ...fillCases(s),
+    ...moveCases(s),
+    ...calendarCases(),
+  ];
 }

@@ -1,0 +1,7 @@
+# N106: How data on a calendar is cached (G1)
+
+Row N106 of the decision table in `docs/architecture.md` §8, whose introduction says how its rows were taken. Recorded in step 129 from the calendar grid design proposal (`docs/design/calendar-grid.md`, row G1), which keeps the alternatives in full. Decisions are locked (`AGENTS.md`); the architecture section lists every decision with a one-line summary.
+
+## Resolution
+
+**Built-in calendar grids, by unit and IANA time zone.** A cache's `interval` may be a calendar interval: one slot per calendar unit in a zone, starting at a local wall-clock time. It covers daily bars stamped at a session open in a daylight-saving zone and weekly, monthly, quarterly and yearly bars, with code the library tests, and the grid stays data, so N20, snapshots and records name it by value. Inside the engine only `grid.ts` changes, since everything else runs on slot indices. Rejected: recipes only (the gap of finding M4 stays, and caches hold dates or ordinals in place of instants); a pluggable grid loaded in the worker (application code would decide coverage correctness, and needs a code-loading path into the worker and the same code in the page); an ordinal grid behind a page-side mapping (ordinals on disk and in the fetcher, and a mapping change re-labels records silently). The cost: a closed set of units, amendments of locked text (N109, N113, N114) and about 3 kB of code. User decision 83, row G1 option (c), 2026-11-21 (§2.2, §4.1, step 129)

@@ -9,3 +9,7 @@ Row N35 of the decision table in `docs/architecture.md` §8, whose introduction 
 ## Amendment, 2026-11-16
 
 User decision 65, row D7 option (a) (N77, step 114): `hydrate` now sends `cacheChanged` for the parts it applied and for the coverage its first watermark withdrew. The "No events" bullet of architecture §2.8 is amended for that event only; `hydrate` still never clears, so it emits no `cacheCleared`, and it reports no `mergeWarning`.
+
+## Amendment, 2026-11-21
+
+User decision 83, rows G9 option (a) and G8 option (c) (N114, N113, step 129): `hydrate`'s validation gains three things, for a calendar cache only. Rule 1 accepts `format: 2` with a `grid` equal to the cache's, where a fixed cache requires `format: 1` and its `interval` and `alignmentOffset`. A rule after it compares the snapshot's charge with the lookup budget, before any instant is converted. A rule after rule 5 requires each stored slot index to be the slot its instant has under the reader's zone data. A failure of any of them throws `TscacheError` before anything changes, as every other malformation does (architecture §4.5).

@@ -41,13 +41,22 @@ interface Page {
   next?: number;
 }
 
+/**
+ * The interval as this backend's query names it. A fixed interval is a
+ * number of ms; a calendar cache's is an object, which `String()` would
+ * turn into "[object Object]", so name its unit instead.
+ */
+function intervalParam(interval: FetchRequest["interval"]): string {
+  return typeof interval === "number" ? String(interval) : interval.unit;
+}
+
 async function fetchPage(request: FetchRequest, start: number): Promise<Page> {
   const { token, origin } = (request.context ?? {}) as Context;
   // The cache id names the series: `<dataset>/<symbol>`.
   const query = new URLSearchParams({
     start: String(start),
     end: String(request.range.end),
-    interval: String(request.interval),
+    interval: intervalParam(request.interval),
     offset: String(request.alignmentOffset),
   });
   const path = `/api/series/${request.cacheId}?${query}`;

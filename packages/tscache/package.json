@@ -32,6 +32,10 @@
       "types": "./dist/engine.d.ts",
       "default": "./dist/engine.js"
     },
+    "./grid": {
+      "types": "./dist/grid.d.ts",
+      "default": "./dist/grid.js"
+    },
     "./fetcher": {
       "types": "./dist/fetcher.d.ts",
       "default": "./dist/fetcher.js"

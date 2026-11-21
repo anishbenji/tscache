@@ -573,7 +573,7 @@ const RUNS: Record<string, Run> = {
     );
   },
   async "grid.ts"(logs) {
-    const { gauge, monthIndex, monthOf, months, sessions, week, weekly } =
+    const { forming, gauge, months, next, sessions, shown, week, weekly } =
       await load("grid.ts");
     const snapped = week.misses[0]?.range;
     check(
@@ -581,16 +581,26 @@ const RUNS: Record<string, Run> = {
         snapped.end === Date.UTC(2026, 9, 30, 14, 30),
       `snapped to ${JSON.stringify(snapped)}`,
     );
-    // The recipes for data that does not fit a fixed grid: every put was
-    // accepted, and each cache holds what the page says.
+    // The calendar grid: the New York session opens of both seasons were
+    // accepted, and a read returns them at those instants.
+    const opens = [Date.UTC(2026, 2, 6, 14, 30), Date.UTC(2026, 2, 9, 13, 30)];
     const daily: GetResult = await sessions.get(
-      { start: Date.UTC(2026, 2, 6), end: Date.UTC(2026, 2, 9) },
+      { start: opens[0] as number, end: opens[1] as number },
       { cacheOnly: true },
     );
     check(
-      daily.timestamps.join() ===
-        [Date.UTC(2026, 2, 6), Date.UTC(2026, 2, 9)].join(),
+      daily.timestamps.join() === opens.join() &&
+        daily.coverage.length === 1 &&
+        daily.misses.length === 0,
       `daily bars at ${daily.timestamps.join()}`,
+    );
+    // The grid entry agrees with what the cache reads.
+    check(
+      shown.start === opens[0] &&
+        shown.end === Date.UTC(2026, 2, 10, 13, 30) &&
+        forming === opens[1] &&
+        next === Date.UTC(2026, 2, 10, 13, 30),
+      `the grid entry gave ${JSON.stringify({ shown, forming, next })}`,
     );
     const mondays: GetResult = await weekly.get(
       { start: Date.UTC(2026, 10, 1), end: Date.UTC(2026, 10, 15) },
@@ -602,29 +612,26 @@ const RUNS: Record<string, Run> = {
       `weekly bars at ${mondays.timestamps.join()}`,
     );
     check(
-      months.timestamps.join() === "680,681",
-      `monthly ordinals ${months.timestamps.join()}`,
+      months.timestamps.join() ===
+        [Date.UTC(2026, 8, 1), Date.UTC(2026, 9, 1)].join(),
+      `monthly bars at ${months.timestamps.join()}`,
     );
     check(
       JSON.stringify(logs.at(-1)?.[0]) ===
         JSON.stringify([
-          { year: 2026, month: 9 },
-          { year: 2026, month: 10 },
+          "2026-09-01T00:00:00.000Z",
+          "2026-10-01T00:00:00.000Z",
         ]),
       `months logged as ${JSON.stringify(logs.at(-1))}`,
     );
-    // Ordinals before 1970 are negative and must map back too.
-    for (const [year, month] of [
-      [1969, 12],
-      [1969, 1],
-      [1968, 6],
-    ] as const) {
-      const back = monthOf(monthIndex(year, month));
-      check(
-        back.year === year && back.month === month,
-        `${year}-${month} came back as ${JSON.stringify(back)}`,
-      );
-    }
+    // The months of the request the cache holds nothing for are misses on
+    // the calendar: January to August, and November to December.
+    check(
+      months.misses.length === 2 &&
+        months.misses[0]?.range.start === Date.UTC(2026, 0, 1) &&
+        months.misses[1]?.range.end === Date.UTC(2026, 11, 1),
+      `monthly misses ${JSON.stringify(months.misses)}`,
+    );
     const load1m: GetResult = await gauge.get(
       { start: Date.UTC(2026, 10, 10, 12), end: Date.UTC(2026, 10, 10, 12, 1) },
       { cacheOnly: true },

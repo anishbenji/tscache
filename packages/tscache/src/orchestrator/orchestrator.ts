@@ -7,9 +7,9 @@
  * edges.
  */
 
-import { type Engine, pinPages } from "../engine/engine";
+import { cacheGridOf, type Engine, pinPages } from "../engine/engine";
 import { ConfigError, isAuthInvalidError, show, TscacheError } from "../errors";
-import { type Grid, msOf, type SlotRange, snapOut, toMs } from "../grid";
+import { type Grid, inDomain, type SlotRange, snapOut, toMs } from "../grid";
 import type { Evt, FetcherConfig } from "../rpc/protocol";
 import type {
   Fetcher,
@@ -71,9 +71,9 @@ function overlaps(a: SlotRange, b: SlotRange): boolean {
   return a.start <= b.end && b.start <= a.end;
 }
 
-/** Whether a slot and its timestamp both lie in the safe-integer domain. */
+/** Whether a slot lies in the grid's domain, so that it has a timestamp (§4.1). */
 function safeSlot(slot: number, grid: Grid): boolean {
-  return Number.isSafeInteger(slot) && Number.isSafeInteger(msOf(slot, grid));
+  return inDomain(slot, grid);
 }
 
 /**
@@ -440,7 +440,7 @@ export class Orchestrator {
     if (this.#fetcher === undefined || options?.cacheOnly === true) {
       return this.#engine.get(cacheId, range, options);
     }
-    const grid = this.#engine.configOf(cacheId);
+    const grid = cacheGridOf(this.#engine, cacheId);
     const request = snapOut(range, grid);
     // With a memory budget, the request and its one-slot flanks (the
     // round's probe) are pinned from the first round to the read (N94),
@@ -518,7 +518,7 @@ export class Orchestrator {
     this.#engine.invalidate(cacheId, range);
     const list = this.#inflight.get(cacheId);
     if (list === undefined) return;
-    const slots = snapOut(range, this.#engine.configOf(cacheId));
+    const slots = snapOut(range, cacheGridOf(this.#engine, cacheId));
     for (const entry of list) {
       if (overlaps(entry.range, slots)) entry.fenced = true;
     }
@@ -569,7 +569,7 @@ export class Orchestrator {
     blocked: readonly SlotRange[],
     requestId: string | undefined,
   ): Inflight[] | { gated: SlotRange[] } {
-    const grid = this.#engine.configOf(cacheId);
+    const grid = cacheGridOf(this.#engine, cacheId);
     const probe = probeOf(request, grid);
     const around = this.#engine
       .coverage(cacheId, toMs(probe, grid))
@@ -650,7 +650,7 @@ export class Orchestrator {
     leave: () => void,
   ): Promise<Outcome> {
     const fetcher = this.#fetcher as Fetcher;
-    const grid = this.#engine.configOf(cacheId);
+    const grid = cacheGridOf(this.#engine, cacheId);
     const range = toMs(slots, grid);
     const authGeneration = this.#authGeneration;
     // Switches with the generation: the context this fetch is refused with.

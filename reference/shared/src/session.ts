@@ -65,6 +65,7 @@ import {
   feedUrl,
   formingBar,
   market,
+  oneBarPast,
   openingRange,
   readRange,
   socketSubscription,
@@ -298,7 +299,7 @@ export function startSession({ open, served, feed }: SessionOptions): Session {
   function following(): boolean {
     if (chart === undefined) return detached?.following ?? false;
     const visible = chart.visible();
-    return visible !== undefined && visible.end + market.interval >= asked.end;
+    return visible !== undefined && oneBarPast(visible.end) >= asked.end;
   }
 
   /**
@@ -405,7 +406,7 @@ export function startSession({ open, served, feed }: SessionOptions): Session {
         if (span.end < asked.start) return;
         // New bars on screen, or just past its end as the market moves on:
         // they are in the cache, so read from it alone.
-        if (span.start <= asked.end + market.interval) {
+        if (span.start <= oneBarPast(asked.end)) {
           asked = { start: asked.start, end: Math.max(asked.end, span.end) };
           bars.refresh(asked);
           return;
