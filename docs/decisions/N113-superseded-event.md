@@ -1,0 +1,7 @@
+# N113: What the application is told of a newer generation
+
+Row N113 of the decision table in `docs/architecture.md` §8, whose introduction says how its rows were taken. Recorded in step 135 from the M5 design proposal (`docs/design/m5-deploy-skew.md`), which keeps the alternatives in full. Decisions are locked (`AGENTS.md`); the architecture section lists every decision with a one-line summary.
+
+## Resolution
+
+**A client-scoped event, `superseded { lib }`, and a `client.superseded` property.** The superseded worker sends the event to every ready connection, and to every connection that completes `init` later, right after its `init-ok`; it goes to a connection whatever it subscribed to, and before the `persistStopped` events of the same stop. `lib` is the library version of the higher-ranked worker, taken from its channel message. The property holds the payload for code that looks after the event fired, the lesson of `modeFallback`. `WorkerFeature` gains `'superseded'`, listed in `hello.features` (N79), as user decision 71 asked: `client.features.has('superseded')` says whether this tab's worker can report a newer generation at all. In development the client prints one `console.info` naming both library versions. Rejected: the event only (a listener attached after it fired misses it); the property only (must be polled); calls that reject with a new error (breaks working tabs; the cache still answers correctly). User decision 71, row F8 option (a), 2026-11-16 (§2.1, §2.7, §3.2, step 135)

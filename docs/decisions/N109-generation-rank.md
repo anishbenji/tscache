@@ -1,0 +1,7 @@
+# N109: Which generation is current
+
+Row N109 of the decision table in `docs/architecture.md` §8, whose introduction says how its rows were taken. Recorded in step 135 from the M5 design proposal (`docs/design/m5-deploy-skew.md`), which keeps the alternatives in full. Decisions are locked (`AGENTS.md`); the architecture section lists every decision with a one-line summary.
+
+## Resolution
+
+**The higher library version, then the later start, then the greater id.** Two workers of different generations are compared by rank: the higher `lib` by semantic version (a prerelease below its release) ranks higher; for equal `lib`, the later `startedAt` (the worker's `performance.timeOrigin`); for equal both, the greater `id`. Both sides compute the same answer from the same two messages, and a worker that finds a higher-ranked worker of another generation is superseded. A tscache upgrade therefore wins whatever the start order. Costs accepted: for one library version, a page served stale that starts later ranks newer, so an application that reloads automatically on the event could loop, which is why the guide recommends a prompt; and a library rollback ranks below the release it replaces, so its tabs are prompted to reload into the same build until the newer tabs close. Rejected: the later start only (the stale-page case across library versions too); an application-supplied order (a new option every application must set). User decision 71, row F4 option (a), 2026-11-16 (§4.7, step 135)
