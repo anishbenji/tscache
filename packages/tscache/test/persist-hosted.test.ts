@@ -456,6 +456,48 @@ describe("clearAll after a chunk failure (user decision 123 A)", () => {
     expect(h.engine.coverage("mem", all)).toEqual([]);
   });
 
+  // Codex gate round 1, R1-2: a store that opens after the deadline is
+  // still emptied, after the call has answered (§4.10.8).
+  it("empties the store when its opening resolves after clearAll answered", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const store = new MemoryStore();
+    const seeded = fixture({ id: "never" }, [0, 4]);
+    store.seed("never", seeded);
+    const opening = deferred<MemoryStore | undefined>();
+    const h = await failedWith(() => opening.promise, "gone");
+    const cleared = tracked(
+      Promise.resolve(h.persistence.clearAll()).then(() => undefined),
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cleared.done).toBe(true);
+    expect(store.records("never")).toEqual(seeded);
+    opening.resolve(store);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.records("never")).toEqual({ cache: undefined, pages: [] });
+  });
+
+  it("deletes a cache's records when the cleanup's opening resolves after its removal answered", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const store = new MemoryStore();
+    const seeded = fixture({}, [0, 4]);
+    store.seed("persist", seeded);
+    const opening = deferred<MemoryStore | undefined>();
+    const h = await failedWith(() => opening.promise);
+    const removal = tracked(
+      Promise.resolve(
+        h.persistence.durably("persist", () =>
+          h.engine.invalidate("persist", all),
+        ),
+      ).then(() => undefined),
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(removal.done).toBe(true);
+    expect(store.records("persist")).toEqual(seeded);
+    opening.resolve(store);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.records("persist")).toEqual({ cache: undefined, pages: [] });
+  });
+
   it("empties the store when the clearAll's own import of the chunk fails", async () => {
     vi.useFakeTimers({ now: 0 });
     const h = hosted();
