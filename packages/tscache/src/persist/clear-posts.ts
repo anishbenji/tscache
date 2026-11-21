@@ -1,6 +1,6 @@
 /**
  * When a hosting's `clearAll` is posted to the other workers of the origin
- * (docs/architecture.md §4.10.7, §4.10.8; N116). A `clearAll` of the hosting
+ * (docs/architecture.md §4.10.7, §4.10.8; N135). A `clearAll` of the hosting
  * itself is posted twice: in the synchronous step that clears its memory,
  * and when its disk clear has settled. A `clearAll` run on behalf of a
  * channel message is relayed once, when its disk clear settles, and never

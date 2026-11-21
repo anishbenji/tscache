@@ -123,12 +123,12 @@ export interface Persistence {
    * `clearMemory` empties the caches (default `Engine.clearAll`): the
    * server passes its own, so a deferred clear still names its request.
    * `fromClearId` is the clear id of the channel message the clear runs
-   * for, when another worker's `clearAll` caused it (N116).
+   * for, when another worker's `clearAll` caused it (N135).
    */
   clearAll(clearMemory?: () => void, fromClearId?: string): unknown;
   /**
-   * The worker is superseded (N110): nothing persists any more. Absent
-   * where a hosting is never superseded (N119).
+   * The worker is superseded (N129): nothing persists any more. Absent
+   * where a hosting is never superseded (N138).
    */
   supersede?(): void;
   /** The last connection went: writes what the debounce still holds. */
@@ -140,13 +140,13 @@ export interface ServerOptions {
    * The optional features this server lists in its hello (N79). Default:
    * `'cacheChanged'` and `'memoryBudget'`, which every hosting offers. A
    * SharedWorker that takes part in finding newer generations adds
-   * `'superseded'` (N113): only such a worker can ever send that event.
+   * `'superseded'` (N132): only such a worker can ever send that event.
    */
   features?: readonly WorkerFeature[];
   /**
    * Called once, right after the first `init-ok`, with the fetcher module
    * that connection named, if any: the SharedWorker announces itself to the
-   * other workers then (N108).
+   * other workers then (N127).
    */
   onFirstInit?: (fetcher: string | undefined) => void;
 }
@@ -159,7 +159,7 @@ export class RpcServer {
   readonly #persistence: Persistence | undefined;
   readonly #features: readonly WorkerFeature[];
   #onFirstInit: ServerOptions["onFirstInit"];
-  /** Set once this worker is superseded (N113): sent to later connections. */
+  /** Set once this worker is superseded (N132): sent to later connections. */
   #superseded: ClientEvents["superseded"] | undefined;
   readonly #connections = new Set<Connection>();
   #nextClient = 0;
@@ -254,10 +254,10 @@ export class RpcServer {
   }
 
   /**
-   * This worker is superseded (N113): a worker of a newer generation runs
+   * This worker is superseded (N132): a worker of a newer generation runs
    * in the origin, with library version `payload.lib`. Tells every ready
    * connection, and each later one right after its init-ok, then stops the
-   * persistence (N110), so the stop's persistStopped events follow the
+   * persistence (N129), so the stop's persistStopped events follow the
    * superseded event on every port. No cache changes. Only the first call
    * acts.
    */
@@ -273,7 +273,7 @@ export class RpcServer {
   }
 
   /**
-   * A clearAll heard from another worker (N116): empties every cache, and
+   * A clearAll heard from another worker (N135): empties every cache, and
    * with persistence the disk, as the clearAll op does, but under no
    * request, so the events it causes carry no requestId. The persistence
    * relays it once for `clearId`. Nobody awaits it: a listener error the

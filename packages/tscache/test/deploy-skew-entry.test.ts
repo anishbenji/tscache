@@ -5,7 +5,7 @@ import { fakeChannels } from "./workers-channel";
 
 // Implementer tests: entries/worker.ts as each worker global runs it, among
 // the workers of its origin (architecture §4.7, Generations; §4.10.8,
-// Entries; N108). The entry is loaded with the worker globals stubbed, as
+// Entries; N127). The entry is loaded with the worker globals stubbed, as
 // hosting.test.ts loads it.
 
 const cleanup: (() => void)[] = [];

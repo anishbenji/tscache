@@ -40,7 +40,7 @@ export class TscacheError extends Error {
 
 /**
  * What a `ConfigError` reports, where the library gives it an identity of
- * its own (N122). `'fetcher-conflict'`: a worker already runs one fetcher
+ * its own (N141). `'fetcher-conflict'`: a worker already runs one fetcher
  * module and a connection named another.
  */
 export type ConfigErrorCode = "fetcher-conflict";
@@ -49,7 +49,7 @@ export type ConfigErrorCode = "fetcher-conflict";
 export class ConfigError extends TscacheError {
   override name: string = nameFor(this, ConfigError, "ConfigError");
   /**
-   * Set only on the refusal of a second fetcher module (N122); unset on
+   * Set only on the refusal of a second fetcher module (N141); unset on
    * every other ConfigError. Recognise that refusal by this code, not by
    * the message.
    */

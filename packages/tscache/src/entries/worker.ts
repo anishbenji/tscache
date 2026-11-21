@@ -56,7 +56,7 @@ interface SharedIdentity {
   channel: WorkersChannel;
   /** The worker script's URL (`self.location.href`). */
   url: string;
-  /** The SharedWorker's name, its generation key (N106). */
+  /** The SharedWorker's name, its generation key (N125). */
   name?: string;
   /** The worker's `performance.timeOrigin`. */
   startedAt: number;
@@ -69,7 +69,7 @@ interface SharedIdentity {
  * server persists through a lazily loaded Persister whose stops it
  * broadcasts (§4.10.8), or, with `clearOnly`, persists nothing and only
  * empties the database at `clearAll` (§4.10.7, N66), posting that clear to
- * the SharedWorkers of the origin (N116). With `shared`, the SharedWorker's
+ * the SharedWorkers of the origin (N135). With `shared`, the SharedWorker's
  * server takes part in the workers' channel: it announces itself after its
  * first init under `lock` as its id (a random id without one), reports a
  * newer generation, which its hello announces with the 'superseded'
@@ -132,7 +132,7 @@ export function createServer(
     generations === undefined
       ? {}
       : {
-          // It can report a newer generation, so its hello says so (N113).
+          // It can report a newer generation, so its hello says so (N132).
           features: WORKER_FEATURES,
           onFirstInit: (fetcher) => generations.announce(fetcher),
         },

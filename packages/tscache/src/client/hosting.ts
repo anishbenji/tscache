@@ -110,7 +110,7 @@ function globals(): WorkerGlobals {
 }
 
 /**
- * The page's generation key (N106, N107): the SharedWorker's name. A
+ * The page's generation key (N125, N126): the SharedWorker's name. A
  * SharedWorker is found by its URL and its name together, so pages that
  * differ in the library version or in the fetcher module string never share
  * a worker, and a deploy that changes either starts a worker of its own.

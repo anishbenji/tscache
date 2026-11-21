@@ -1,6 +1,6 @@
 /**
  * The channel the SharedWorkers of an origin share (docs/architecture.md
- * §4.7, §4.10.7; N108, N116), and the post of the hostings that only post
+ * §4.7, §4.10.7; N127, N135), and the post of the hostings that only post
  * their `clearAll` on it. The SharedWorker's own part, the announcements
  * and the rank, is `generations.ts`.
  *
@@ -40,7 +40,7 @@ export function openWorkersChannel(): WorkersChannel | undefined {
 }
 
 /**
- * The `post` of a hosting that only posts its `clearAll` (N116, N119): the
+ * The `post` of a hosting that only posts its `clearAll` (N135, N138): the
  * dedicated worker and the in-process hosting. It opens the channel at a
  * clear's first post and closes it after its second, so a page that never
  * calls `clearAll` never holds a channel. Undefined in a realm without

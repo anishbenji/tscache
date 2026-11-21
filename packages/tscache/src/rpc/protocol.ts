@@ -254,7 +254,7 @@ function rebuildProtocolError(wire: WireError): ProtocolMismatchError {
   });
 }
 
-/** The ConfigError codes this client knows (N122); any other stays unset. */
+/** The ConfigError codes this client knows (N141); any other stays unset. */
 const CONFIG_CODES: ReadonlySet<string> = new Set<ConfigErrorCode>([
   "fetcher-conflict",
 ]);

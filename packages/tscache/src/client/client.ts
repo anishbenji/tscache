@@ -55,7 +55,7 @@ export interface TscacheClient {
   /**
    * Set once a worker of a newer generation of this application (another
    * tscache version, fetcher module or worker build) is running in the
-   * origin (N113): `lib` is that worker's tscache version. This tab's worker
+   * origin (N132): `lib` is that worker's tscache version. This tab's worker
    * no longer persists; the tab keeps working from memory and its fetcher,
    * and a reload joins the newer worker. Undefined until then. When the
    * worker was superseded before `createClient` resolved, this is set from
@@ -75,7 +75,7 @@ export interface TscacheClient {
    * the browser has IndexedDB it also empties the persisted records, from
    * any hosting (N54, N66), and resolves once the disk is empty or the
    * clear gave up at its deadline; it never rejects for a disk failure.
-   * It also reaches the other SharedWorkers of the origin (N116), which
+   * It also reaches the other SharedWorkers of the origin (N135), which
    * clear their caches and the disk too; the promise does not wait for
    * them. Their tabs hear `cacheCleared`, possibly more than once.
    */
@@ -222,9 +222,9 @@ class Client implements TscacheClient {
     this.mode = hosting.mode;
     this.features = this.#port.features;
     this.#changes = new ChangeSubscriptions(this.#port);
-    // A worker script of another library version (N117): development only.
+    // A worker script of another library version (N136): development only.
     warnWorkerLib(LIB_VERSION, this.#port.lib);
-    // A superseded event that arrived before this client existed (N113):
+    // A superseded event that arrived before this client existed (N132):
     // the property holds it from the start, and its listeners hear it below.
     const early = this.#port.superseded;
     if (early !== undefined) this.#supersede(early, false);
@@ -282,7 +282,7 @@ class Client implements TscacheClient {
   }
 
   /**
-   * The worker is superseded (N113): the property is set before the
+   * The worker is superseded (N132): the property is set before the
    * listeners run, and only the first event counts. `live`: the event
    * arrived on the port just now, so its listeners are called here; one
    * kept from before the client existed is delivered by the constructor.
@@ -432,7 +432,7 @@ async function applyBudget(port: PortClient, bytes: number): Promise<void> {
  * on the port before the client exists: the client queues the fallback
  * steps on a timer when it is built, which must run after the caller holds
  * it. A `superseded` event that arrives meanwhile is kept by the port
- * client and delivered by that timer too (N113). A failed budget op
+ * client and delivered by that timer too (N132). A failed budget op
  * releases the port and the hosting, and rethrows.
  */
 export async function createClient(

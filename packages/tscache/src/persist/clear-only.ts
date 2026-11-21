@@ -18,7 +18,7 @@
  * and the next `clearAll` tries again.
  *
  * Since step 135 the clear is posted to the SharedWorkers of the origin
- * through the injected `post`, at its start and at its settling (N116).
+ * through the injected `post`, at its start and at its settling (N135).
  */
 
 import type { Engine } from "../engine/engine";
@@ -44,7 +44,7 @@ export class ClearOnlyPersistence implements Persistence {
    * `load` imports the chunk, at each `clearAll` (the module system keeps
    * it once loaded). `timeoutMs` bounds the import and the clear together;
    * `post` and `nextClearId` carry the clear to the SharedWorkers of the
-   * origin (N116).
+   * origin (N135).
    */
   constructor(
     engine: Engine,
@@ -82,7 +82,7 @@ export class ClearOnlyPersistence implements Persistence {
    * clear settled, at most `timeoutMs` after the call. A listener error of
    * the engine's clear is rethrown then. `clearMemory` empties the caches
    * (default `Engine.clearAll`). The clear is posted right after the memory
-   * clear and again when the disk clear has settled (N116); with
+   * clear and again when the disk clear has settled (N135); with
    * `fromClearId`, the clear id of a channel message it runs for, it is
    * relayed once, at its settling.
    */

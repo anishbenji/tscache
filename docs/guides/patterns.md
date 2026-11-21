@@ -151,7 +151,7 @@ const candles = await client.cache({
 - **Logout.** One `client.clearAll()` from a tab of the SharedWorker empties every cache and the database,
   and resolves once the records are gone (or persistence has stopped). From 0.3.0 it also reaches every
   other SharedWorker of the origin, another deploy's included: each clears its memory and the disk, and
-  the call does not wait for them (architecture §4.10.7, N116). A worker of 0.1.0 or 0.2.0 is not
+  the call does not wait for them (architecture §4.10.7, N135). A worker of 0.1.0 or 0.2.0 is not
   reached and writes back what it holds. A client hosted in a dedicated worker or in-process persists
   nothing, but its `clearAll` empties the database too and reaches the SharedWorkers in the same way,
   so a logout from any page removes what a SharedWorker session stored. When the clear fails (IndexedDB unavailable or

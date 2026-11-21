@@ -14,7 +14,7 @@ import { fakeChannels } from "./workers-channel";
 
 // Implementer tests for decision concern DC2 of docs/design/m5-deploy-skew.md
 // §8, built with its option (a) (test 29 of §6; architecture §2.7, §4.7;
-// N79, N113): only a worker that takes part in the detection lists
+// N79, N132): only a worker that takes part in the detection lists
 // 'superseded' in hello.features, and a listener on a client whose worker
 // does not list it prints no development warning.
 

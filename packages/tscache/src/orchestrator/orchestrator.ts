@@ -306,7 +306,7 @@ export class Orchestrator {
   /**
    * import()s the module once (N30). The module name is reserved before the
    * import starts, so a concurrent connection naming a different module is
-   * refused with ConfigError, code 'fetcher-conflict' (N122), and the same
+   * refused with ConfigError, code 'fetcher-conflict' (N141), and the same
    * module shares the one load.
    */
   async load(config: FetcherConfig): Promise<void> {

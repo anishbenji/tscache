@@ -24,7 +24,7 @@ import {
   workerUrl,
 } from "./support";
 
-// Deploy skew in the browser (architecture §2.7, §4.7, §4.10.7; N106-N122;
+// Deploy skew in the browser (architecture §2.7, §4.7, §4.10.7; N125-N141;
 // tests 18-24, 33 and 34 of docs/design/m5-deploy-skew.md §6). The pages of
 // one BrowserContext are the tabs of one origin: they share SharedWorkers,
 // the database and the workers' BroadcastChannel, and each test has a fresh

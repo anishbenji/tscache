@@ -31,7 +31,7 @@ function fileFor(pathname: string): string {
   if (pathname.startsWith("/dist/")) {
     return `packages/tscache/dist/${pathname.slice("/dist/".length)}`;
   }
-  // The same module under a second URL: another generation key (N107).
+  // The same module under a second URL: another generation key (N126).
   if (pathname === "/fetcher-b.js") return "e2e/pages/fetcher.js";
   return `e2e/pages${pathname === "/" ? "/index.html" : pathname}`;
 }
@@ -54,7 +54,7 @@ async function rewritten(
  * The built package as a later library version: every file of dist/ with
  * the package's version literal replaced, so that a page loading
  * /dist-next/index.js and its worker at /dist-next/worker.js are a
- * generation with a higher `LIB_VERSION` (N107, N109).
+ * generation with a higher `LIB_VERSION` (N126, N128).
  */
 async function nextLibrary(pathname: string): Promise<Response> {
   const manifest = (await Bun.file(

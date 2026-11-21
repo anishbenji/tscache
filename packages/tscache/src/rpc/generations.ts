@@ -1,6 +1,6 @@
 /**
  * The SharedWorkers of an origin, to each other (docs/architecture.md §4.7,
- * §4.10.7; N108, N109, N116, N121). They share one `BroadcastChannel`: a
+ * §4.10.7; N127, N128, N135, N140). They share one `BroadcastChannel`: a
  * worker announces itself there once, so that workers of different
  * generations find each other and the lower-ranked one is superseded, and
  * every hosting posts its `clearAll` there. Nothing of it crosses a port.
@@ -22,7 +22,7 @@ export interface Announcement {
   url: string;
   /** The fetcher module it loaded, resolved against `url`; absent when none. */
   fetcher?: string;
-  /** The SharedWorker's name: its generation key (N106). */
+  /** The SharedWorker's name: its generation key (N125). */
   name?: string;
   /** Its `performance.timeOrigin`. */
   startedAt: number;
@@ -108,7 +108,7 @@ function resolved(worker: Announcement): string | undefined {
 }
 
 /**
- * Whether two workers are of one generation (N121): the same script and
+ * Whether two workers are of one generation (N140): the same script and
  * library, and the same fetcher module or one of them without a fetcher.
  * Such workers never supersede each other, whatever their ranks: a reload
  * could not join them.
@@ -121,7 +121,7 @@ export function sameGeneration(a: Announcement, b: Announcement): boolean {
 }
 
 /**
- * Whether `a` ranks above `b` (N109): the higher library version, then the
+ * Whether `a` ranks above `b` (N128): the higher library version, then the
  * later start, then the greater id. A strict total order on workers with
  * different ids, so both sides of a pair compute the same answer.
  */
@@ -159,7 +159,7 @@ declare const process: { env: { NODE_ENV?: string } };
 
 /**
  * One console.warn, in a development build of the worker, that a second
- * worker of this generation runs under another key (N121).
+ * worker of this generation runs under another key (N140).
  */
 function warnTwoKeys(own: string | undefined, other: string | undefined): void {
   try {
@@ -223,7 +223,7 @@ export class Generations {
     this.#post({ ...this.#self, t: "announce", v: 1 });
   }
 
-  /** Posts a `clearAll` of this worker, or its relay of another's (N116). */
+  /** Posts a `clearAll` of this worker, or its relay of another's (N135). */
   postClear(clearId: string): void {
     this.#post({ t: "clearAll", v: 1, id: this.#self.id, clear: clearId });
   }

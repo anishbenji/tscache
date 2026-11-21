@@ -11,7 +11,7 @@ import { fakeChannels } from "./workers-channel";
 
 // Implementer tests for the workers' channel (docs/design/m5-deploy-skew.md
 // §6 tests 11, 12, 14 and the posting half of 16; architecture §4.7,
-// Generations; N108, N109, N116, N121). The rank and the same-generation
+// Generations; N127, N128, N135, N140). The rank and the same-generation
 // rule are pure, so their tests are properties over seeded announcements.
 
 afterEach(() => {
@@ -60,7 +60,7 @@ function announcements(seed: number, count: number): Announcement[] {
   });
 }
 
-describe("11: rank (N109)", () => {
+describe("11: rank (N128)", () => {
   it("orders the library versions by semantic version, whatever the start times", () => {
     for (let low = 0; low < LIBS.length; low++) {
       for (let high = low + 1; high < LIBS.length; high++) {
@@ -116,7 +116,7 @@ describe("11: rank (N109)", () => {
   );
 });
 
-describe("12: same generation (N121)", () => {
+describe("12: same generation (N140)", () => {
   it.each([1, 0xc0ffee, 0xdeadbeef])(
     "holds exactly for one script, one library and compatible fetchers (seed %i)",
     (seed) => {
@@ -174,7 +174,7 @@ function joined(
   return { generations, superseded, cleared };
 }
 
-describe("14: announce and present (N108)", () => {
+describe("14: announce and present (N127)", () => {
   it("posts one announce, with its url and resolved fetcher, at its first init and none later", () => {
     const bus = fakeChannels();
     const a = joined(
@@ -357,7 +357,7 @@ describe("14: announce and present (N108)", () => {
   });
 });
 
-describe("16: clearAll on the channel (N116)", () => {
+describe("16: clearAll on the channel (N135)", () => {
   it("hands another worker's clear ids to the hook, before its own announce too, and not its own posts", () => {
     const bus = fakeChannels();
     const a = joined(bus, worker({ id: "a" }));

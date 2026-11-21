@@ -115,7 +115,7 @@ export class PortClient {
   readonly features: ReadonlySet<WorkerFeature>;
   /**
    * hello.lib, the worker script's library version, when it is a string
-   * (N117). The handshake never acts on it.
+   * (N136). The handshake never acts on it.
    */
   readonly lib: string | undefined;
   readonly #port: MessagePortLike;
@@ -195,7 +195,7 @@ export class PortClient {
         // Only a name can be queued on; anything else watches nothing.
         lock = typeof message.lock === "string" ? message.lock : undefined;
         features = featuresOf(message.features);
-        // Kept for a development warning (N117); no value of it is refused.
+        // Kept for a development warning (N136); no value of it is refused.
         lib = typeof message.lib === "string" ? message.lib : undefined;
         stage = "init";
         afterHello?.(lock);
@@ -223,7 +223,7 @@ export class PortClient {
   }
 
   /**
-   * The first `superseded` event the worker sent on this port (N113), kept
+   * The first `superseded` event the worker sent on this port (N132), kept
    * whoever was listening, as `features` is kept from the hello. A
    * connection that joins a superseded worker is sent the event right after
    * its init-ok, which with a `memoryBudget` is before the client exists
@@ -324,7 +324,7 @@ export class PortClient {
     for (const fn of [...this.#lostListeners]) fn(error);
   }
 
-  /** Keeps the first superseded event (N113), then tells the listeners. */
+  /** Keeps the first superseded event (N132), then tells the listeners. */
   #event(evt: Evt): void {
     if (evt.scope === "client" && evt.event === "superseded") {
       this.#superseded ??= evt;

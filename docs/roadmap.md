@@ -150,7 +150,7 @@ evicted page stays on disk and is loaded again on demand, which needs the lazy l
 
 ## Design sketch: deploy skew
 
-**Specified in `docs/architecture.md` §2.7, §4.7–§4.8 and §4.10.6–§4.10.8 (decisions N106–N122, user
+**Specified in `docs/architecture.md` §2.7, §4.7–§4.8 and §4.10.6–§4.10.8 (decisions N125–N141, user
 decision 71 of 2026-11-16) and built in step 135; where this sketch and the architecture differ, the
 architecture governs.** The proposal [`docs/design/m5-deploy-skew.md`](design/m5-deploy-skew.md) (step
 100, finding M5) records the alternatives. It names each SharedWorker by its

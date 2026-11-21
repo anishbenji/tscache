@@ -21,8 +21,8 @@
  * `'unavailable'`.
  *
  * Deploy skew (§4.10.7, step 135): `supersede()` stops the persister, or is
- * remembered until the chunk has loaded (N110), and `clearAll` is posted to
- * the other workers of the origin through the injected `post` (N116).
+ * remembered until the chunk has loaded (N129), and `clearAll` is posted to
+ * the other workers of the origin through the injected `post` (N135).
  */
 
 import type { Engine } from "../engine/engine";
@@ -75,7 +75,7 @@ export class HostedPersistence implements Persistence {
   #held = 0;
   /** Caches stopped without a persister: each is reported once (N59). */
   readonly #stopped = new Set<string>();
-  /** The worker was superseded (N110); kept for its life. */
+  /** The worker was superseded (N129); kept for its life. */
   #superseded = false;
   readonly #posts: ClearPosts;
 
@@ -83,7 +83,7 @@ export class HostedPersistence implements Persistence {
    * `load` imports the chunk; it is called once, at the first open or
    * clearAll. `options` are the persister's, and `timeoutMs` also bounds
    * the import; `post` and `nextClearId` carry `clearAll` to the other
-   * workers of the origin (N116).
+   * workers of the origin (N135).
    */
   constructor(
     engine: Engine,
@@ -146,7 +146,7 @@ export class HostedPersistence implements Persistence {
 
   /**
    * `fromClearId`: the clear id of the channel message this clear runs for
-   * (N116); without it the clear is this worker's own. An own clear is
+   * (N135); without it the clear is this worker's own. An own clear is
    * posted when it runs, right after its memory clear, and again when its
    * disk clear has settled; a clear for a message is relayed once, then.
    */
@@ -179,7 +179,7 @@ export class HostedPersistence implements Persistence {
   }
 
   /**
-   * The worker is superseded (N110): the persister stops for its life, now
+   * The worker is superseded (N129): the persister stops for its life, now
    * or as soon as its chunk has loaded. Before that, a persisted cache
    * opened later stops at once without the import, and one whose open waits
    * for the chunk stops when it arrives. Idempotent.
@@ -262,7 +262,7 @@ export class HostedPersistence implements Persistence {
 
   /**
    * A persisted cache opened without a persister: its persistence stops,
-   * with 'superseded' once the worker is (N112), else because the chunk did
+   * with 'superseded' once the worker is (N131), else because the chunk did
    * not load.
    */
   #stopUnloaded(cacheId: string): void {

@@ -14,7 +14,7 @@ import { deferred } from "./persist-memory-store";
 
 // Implementer tests for decision concern DC4 of docs/design/m5-deploy-skew.md
 // §8, built with its option (a) (test 30 of §6; architecture §2.7, §4.8;
-// N101, N103, N113): a superseded event that reaches a port before its
+// N101, N103, N132): a superseded event that reaches a port before its
 // client exists is kept by the port client, client.superseded is set when
 // createClient resolves, and the event follows on the next macrotask, as
 // modeFallback does. Each order of arrival is made by the server-side port,

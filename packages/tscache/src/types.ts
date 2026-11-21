@@ -313,7 +313,7 @@ export type RequestId = string;
 
 /**
  * An optional feature a worker may offer, listed in its hello (N79) and
- * exposed as `TscacheClient.features`. `'superseded'` (N113): the worker
+ * exposed as `TscacheClient.features`. `'superseded'` (N132): the worker
  * can report that a worker of a newer generation of the application runs.
  * Only a SharedWorker that can find the other workers of its origin lists
  * it: a dedicated worker and the in-process hosting never do, and neither
@@ -340,7 +340,7 @@ export interface ClientEvents {
   /**
    * A worker of a newer generation of this application (another tscache
    * version, fetcher module or worker build) is running in the origin
-   * (N113). This tab's worker no longer persists; the tab keeps working
+   * (N132). This tab's worker no longer persists; the tab keeps working
    * from memory and its fetcher. Reload the tab to join the newer worker:
    * show the user a prompt, since the library never reloads a page. `lib`
    * is the newer worker's tscache version. At most once per client;
@@ -353,7 +353,7 @@ export interface ClientEvents {
   /**
    * A cache was cleared; in SharedWorker mode one tab's clear affects all,
    * and a `clearAll` reaches the other SharedWorkers of the origin too
-   * (N116), so one call can be heard more than once.
+   * (N135), so one call can be heard more than once.
    */
   cacheCleared: {
     cacheId: string;
@@ -377,7 +377,7 @@ export interface ClientEvents {
    * loads is emitted before the handle exists, so subscribe with
    * `client.on` to hear it.
    *
-   * `'superseded'` (N112) is not a failure: a worker of a newer generation
+   * `'superseded'` (N131) is not a failure: a worker of a newer generation
    * of the application runs in the origin and owns the stored records now.
    * Nothing was deleted, and a reload joins that worker.
    */

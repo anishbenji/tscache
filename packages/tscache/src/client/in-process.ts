@@ -6,7 +6,7 @@
  * (N52), but where the realm has IndexedDB its clearAll empties the
  * database too, with the clear-only call of the persistence chunk, loaded
  * at the first clearAll (§4.10.7, N66), and that clear is posted to the
- * SharedWorkers of the origin (N116).
+ * SharedWorkers of the origin (N135).
  */
 
 import { Engine } from "../engine/engine";

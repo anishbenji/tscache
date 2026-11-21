@@ -1,6 +1,6 @@
 /**
  * The persister (docs/architecture.md §4.10.6; N46, N49, N50, N54, N58, N59,
- * N61, N110): loads persisted caches into an engine and writes their changes
+ * N61, N129): loads persisted caches into an engine and writes their changes
  * behind, through one writer that runs one job at a time under one deadline
  * per job. Memory is canonical: a load applies only into a cache that knows
  * nothing, and a flush writes what memory holds without reading the disk.
@@ -165,7 +165,7 @@ export class Persister {
   /**
    * Set when the store failed to open, a clearAll failed or the worker was
    * superseded: nothing persists any more. 'superseded' is kept once set
-   * (N112).
+   * (N131).
    */
   #failure: { reason: Reason; error: Failure | undefined } | undefined;
 
@@ -327,7 +327,7 @@ export class Persister {
   }
 
   /**
-   * This worker is superseded (N110, §4.10.6): a newer generation's worker
+   * This worker is superseded (N129, §4.10.6): a newer generation's worker
    * owns the stored records now. Every tracked cache stops with
    * 'superseded' and without a cleanup, every persisted cache opened later
    * stops the same way and reads nothing, and no write starts for any
@@ -740,7 +740,7 @@ export class Persister {
       this.#barrier = undefined;
       this.#unqueue(job);
       if (this.#current === job) this.#current = undefined;
-      // A superseded persister keeps that reason for later opens (N112).
+      // A superseded persister keeps that reason for later opens (N131).
       if (this.#failure?.reason !== "superseded") {
         this.#failure = { reason, error };
       }

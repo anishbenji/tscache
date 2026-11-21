@@ -226,7 +226,7 @@ describe("fallback chain", () => {
     });
   });
 
-  it("creates the SharedWorker as a module with extendedLifetime and its generation name, with the same options in every tab (§4.10.8, N106)", async () => {
+  it("creates the SharedWorker as a module with extendedLifetime and its generation name, with the same options in every tab (§4.10.8, N125)", async () => {
     const server = new RpcServer(new Engine(), "0.0.0");
     const created: { url: string; options: unknown }[] = [];
     vi.stubGlobal(

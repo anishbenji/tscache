@@ -29,7 +29,7 @@ export const workerUrl = "/dist/worker.js";
 
 /**
  * The fixture fetcher under a second URL (scripts/e2e-server.ts): another
- * generation key, so a SharedWorker of its own (architecture §2.7, N107).
+ * generation key, so a SharedWorker of its own (architecture §2.7, N126).
  */
 export const secondFetcher = "/fetcher-b.js";
 
@@ -745,7 +745,7 @@ class Backend {
 
   /**
    * Client options whose fetcher asks this backend with `token`. `module`
-   * is the fetcher's URL: another one is another generation key (N107).
+   * is the fetcher's URL: another one is another generation key (N126).
    */
   clientOptions(
     token = initialTokens.access,

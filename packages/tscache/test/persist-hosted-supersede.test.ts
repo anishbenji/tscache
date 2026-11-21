@@ -1,5 +1,5 @@
 // Implementer tests for HostedPersistence.supersede() beside a second open of
-// the same cache (docs/architecture.md §4.10.8, Lazy loading; N59, N110):
+// the same cache (docs/architecture.md §4.10.8, Lazy loading; N59, N129):
 // a cache is reported once, whenever its opens and the chunk arrive. The
 // contract tests are in persist-deploy-skew.test.ts (test 7).
 

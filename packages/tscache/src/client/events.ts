@@ -13,7 +13,7 @@ const NAMES: Record<Evt["scope"], readonly (keyof ClientEvents)[]> = {
   cache: ["cacheCleared", "persistStopped", "cacheChanged"],
   request: ["mergeWarning"],
   // `superseded` reaches here through the client, at most once and with
-  // its property already set (N113).
+  // its property already set (N132).
   client: ["authInvalid", "superseded"],
 };
 

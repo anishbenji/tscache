@@ -3,8 +3,8 @@
  * decision #8): merge warnings are printed in the page that made the write,
  * once per put, in addition to the put result and the mergeWarning event.
  * Also the warnings for a worker without a feature (N80, N101), for a worker
- * script of another library version (N117), and the note that a newer
- * generation's worker is running (N113).
+ * script of another library version (N136), and the note that a newer
+ * generation's worker is running (N132).
  */
 
 import type { MergeWarning, WorkerFeature } from "../types";
@@ -89,7 +89,7 @@ export function warnBudget(
 
 /**
  * Prints one console.warn that the worker script is not of this page's
- * library version (N117): `hello.lib` differs from the client's, in either
+ * library version (N136): `hello.lib` differs from the client's, in either
  * direction, or the worker sent none. Development builds only; nothing is
  * refused, and nothing else depends on the version.
  */
@@ -106,7 +106,7 @@ export function warnWorkerLib(
 }
 
 /**
- * Prints one console.info that this tab's worker is superseded (N113):
+ * Prints one console.info that this tab's worker is superseded (N132):
  * `newerLib` is the newer worker's library version, `workerLib` this tab's
  * worker's (`hello.lib`). Development builds only.
  */

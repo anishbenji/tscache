@@ -25,8 +25,8 @@ import { fakeChannels } from "./workers-channel";
 
 // Implementer tests for deploy skew over the RPC layer, the hostings and the
 // client (docs/design/m5-deploy-skew.md §6 tests 13, 15-17, 31, 32 and 36;
-// architecture §2.7, §4.7, §4.8, §4.10.7; N106, N110, N113, N116, N117,
-// N122). Tests 29 and 30 are in files of their own (decision concerns DC2
+// architecture §2.7, §4.7, §4.8, §4.10.7; N125, N129, N132, N135, N136,
+// N141). Tests 29 and 30 are in files of their own (decision concerns DC2
 // and DC4). Real timers: nothing here waits for time. An absence is shown by
 // a round trip on the same port, which arrives after everything the server
 // posted before it (docs/testing.md, Waiting).
@@ -176,7 +176,7 @@ const stoppedEvt = (cacheId: string): Evt => ({
   payload: { cacheId, reason: "superseded" },
 });
 
-describe("13: the SharedWorker's name (N106, N107)", () => {
+describe("13: the SharedWorker's name (N125, N126)", () => {
   it("is the generation key, with the fetcher module as the page passes it", async () => {
     const { created, servers } = installWorkers(fakeChannels());
     await make({ workerUrl, fetcher: { module: moduleA } });
@@ -233,7 +233,7 @@ describe("13: the SharedWorker's name (N106, N107)", () => {
   });
 });
 
-describe("15: the superseded event (N110, N113)", () => {
+describe("15: the superseded event (N129, N132)", () => {
   it("goes to every ready connection before the stop's persistStopped, and to a later one after its init-ok", async () => {
     const bus = fakeChannels();
     const a = shared(bus, { startedAt: 1 });
@@ -358,7 +358,7 @@ describe("15: the superseded event (N110, N113)", () => {
   });
 });
 
-describe("16: clearAll across workers (N116)", () => {
+describe("16: clearAll across workers (N135)", () => {
   it("a worker hearing another's clearAll clears memory and disk for each message, and relays once", async () => {
     const bus = fakeChannels();
     const store = new MemoryStore();
@@ -506,7 +506,7 @@ describe("16: clearAll across workers (N116)", () => {
   });
 });
 
-describe("17: hello.lib (N117)", () => {
+describe("17: hello.lib (N136)", () => {
   /** A port whose server's hello carries `lib` as given, even malformed. */
   function helloWith(lib: unknown): MessagePortLike {
     const channel = new MessageChannel();
@@ -739,7 +739,7 @@ describe("31: budget and stats on a superseded worker (N88, N101, N103)", () => 
   });
 });
 
-describe("32: a channel clear's events (N78, N116)", () => {
+describe("32: a channel clear's events (N78, N135)", () => {
   it("each cache, an empty one included, sends cacheCleared to every connection and cacheChanged without a requestId to the subscribed ones", async () => {
     const { server } = shared(fakeChannels());
     const quiet = await connect(server);
@@ -802,7 +802,7 @@ describe("32: a channel clear's events (N78, N116)", () => {
   });
 });
 
-describe("36: the refusal's code across the port (N122)", () => {
+describe("36: the refusal's code across the port (N141)", () => {
   const message = `this worker already runs fetcher ${moduleA}; cannot also load ${moduleB}`;
 
   it("a second fetcher module is answered init-err with the name, the message and the code", async () => {
