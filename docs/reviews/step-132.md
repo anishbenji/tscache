@@ -289,6 +289,17 @@ After security lane 2 (`05cd57c3`, with the fix). `persist/` is strict test-firs
 
 The lane's first repro (a `clear` after a rejected read waits and deletes) is covered by Codex's rejected-read case. No existing assertion changed.
 
+## Codex gate
+
+Round 1, on `6580f33e`: block.
+
+| #    | Sev | Finding                                                                                                                                                                                | Decision | Resolution                                                                                                                                                                                                                                                             |
+| ---- | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1-1 | P0  | `clearAll` absorbed a deferred cleanup that an earlier removal queued in the same turn (`persister.ts`, `#fresh`), so a clear that failed left the invalidated records (checklist §12) | accepted | `2517d845`: a cleanup is absorbed only when a `clear` change queued it and no removal came since, which holds for the one the call's own engine clear queues; the step marker is gone. Test first: "runs ahead of a clearAll that fails, deleting the removed records" |
+| R1-2 | P1  | No test of the late deletion that §4.10.8 states (`hosted.ts`, `#bounded`)                                                                                                             | accepted | `test(persist)` commit: two fake-timer tests with a gated opener, for logout's whole-store clear and for a cache's deferred cleanup                                                                                                                                    |
+
+Proof. R1-1's test failed with `6580f33e`'s `persister.ts` (no cleanup write; the records stayed) and passes at `2517d845`. R1-2's tests pin behaviour that already existed, so they pass with and without this round's code; with a mutant that skips the deletion once the deadline has passed (the guard the round named), both fail.
+
 ## Pre-review (Claude), not the gate
 
 Pre-review 1, by Fable, at `57b2e722`; the director relayed its findings. All four were valid and fixed.
