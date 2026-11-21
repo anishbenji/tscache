@@ -69,7 +69,6 @@ Two words of the reviewer's text overstate the gap, as the check noted: "permane
 
 Decision rows changed: F11 (options, pros and cons). No recommendation changed.
 
-
 ## Round 2 (GPT-6.1 Sol, high) — reviewer verdict: merge after fixes
 
 Run on head `dd4b773` (the director's merge of `origin/main` into the branch). Finding check by Fable: V 1, P 0, I 0, D 0. Raw output: `.reviews/step-100/round-2.md`.
@@ -84,7 +83,6 @@ Test numbers: round 2 inserted a test 10, so the tests numbered 10 to 22 in the 
 
 Decision rows changed: F11 (option (b) added; the old (b) and (c) are now (c) and (d); pros, cons and the recommendation's note). The recommendation is unchanged: (a).
 
-
 ## Round 3 (GPT-6.1 Sol, high) — reviewer verdict: merge after fixes
 
 Run on head `bd901df` (the director's merge of `origin/main` into the branch). No finding check ran for this round. Raw output: `.reviews/step-100/round-3.md`.
@@ -94,7 +92,6 @@ Run on head `bd901df` (the director's merge of `origin/main` into the branch). N
 | R3-1 | P1  | R2-1 remains unresolved in the recommended `clearAll` protocol: the disclosure is accurate, but F11 still recommends (a), which leaves the logout gap; adopt the relay or record the user's acceptance of the gap. No new finding | decision (director's triage: D) | Acted on by recommending (b), since the user was already asked to choose F11 and accepting the gap is the user's call, not made. §4.6 now describes the relay as the recommended protocol (§4.6.1), why it closes the lagging-writer case and on which three premises (§4.6.2), its remaining limits (a failed or timed-out clear, 0.1.0 workers, a realm without `BroadcastChannel`) and its cost; two posts without a relay is the alternative (a), with "narrows but does not close" and the R2-1 sequence in its description (§4.6.3). F11 recommends (b), notes the change in round 3 and why, and keeps the user's decision and the approval of N54, N66 and §4.10.7. §4.11's cost is the relay's; test 8 expects the relay by default (a channel clear posts once per clear id at settle); test 10's expectation under (b) is the default and the one the two-post design fails; test 16 relays once per id |
 
 Decision rows changed: F11 (recommendation (a) to (b); pros and cons rearranged with the gap as (a)'s con).
-
 
 ## Round 4 (GPT-6.1 Sol, high) — reviewer verdict: merge after fixes
 

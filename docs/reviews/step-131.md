@@ -88,6 +88,7 @@ The user answered D1 (director queue #96) with option (B) on 2026-11-21: the pag
 **Code.** One condition in `CacheState.evict` (`engine/cache.ts`): `if (!this.#restoring) this.#evicted?.add(range);`. `#restoring` is set only on the cache `restore` runs on, so another cache evicted by the same enforcement indexes its pages as before (test 2). The `evict` TSDoc names the exception. No other line was needed.
 
 **Spec.**
+
 - Architecture §2.7 rule (2) gains: "The pages a `restore` trims from its own cache stay out of that cache's index, since no reader has seen them (user decision 96, 2026-11-21, narrowing N104); another cache's pages the same enforcement evicts enter that cache's index as any eviction does."
 - §4.5 gains, after the sentence on not reporting those pages: "Nor do they enter the evicted index: `evict` skips the index while `restore` runs on its own cache, so a later removal over them lists only the coverage it withdrew (user decision 96, 2026-11-21, narrowing N104)."
 
