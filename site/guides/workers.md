@@ -86,7 +86,12 @@ The worker loads its persistence code with `import()`, only once a cache with `p
 downloaded but not run; with `worker: { format: "es" }` in `vite.config.ts` it is a chunk of its own,
 which an app that persists nothing never downloads ([the Vite plugin](/guides/vite) warns in
 `vite build` when the format is `'iife'`). Pass the URL as Vite gives it: the chunks import the
-worker file by that URL, so a query added to it would load the worker twice.
+worker file by that URL, so a query added to it would load the worker twice. This repository's
+benchmarks and tests add a query on purpose, for a fresh SharedWorker per run (there is one per script
+URL), and can because nothing there loads the persistence chunk from a Vite-built worker: the Vite-built
+benchmark persists no cache and never calls `clearAll`, and the other suites load the package's own
+build, whose chunks never import the worker file. A test of your own that persists a cache in a
+Vite-built worker under such a query loads the worker twice.
 
 ### webpack 5 and Rspack
 
@@ -202,7 +207,7 @@ a worker that already runs the newer fetcher, and its retry loads the old one: i
 fetcher-load `TscacheError` when the deploy removed that file, and otherwise runs the old fetcher without
 any error. A page that may itself be stale has to reload. Nothing else separates the deploys' workers
 today: tscache gives the SharedWorker no name a deploy id could go into, and a query added to a Vite
-worker URL loads the worker twice ([Vite](#vite)). A recovery path is planned.
+worker URL loads the worker twice when its persistence chunk loads ([Vite](#vite)). A recovery path is planned.
 :::
 
 ## Losing the worker
