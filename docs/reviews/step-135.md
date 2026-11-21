@@ -242,20 +242,23 @@ The table above is the state before the review fixes. For the fixes (`2c885555` 
 
 ## Sizes and bench
 
-`bun scripts/size.ts`, brotli, `main` at `09627a7c` (measured in a temporary worktree) against this branch:
+`bun scripts/size.ts`, brotli. "Before" is `main` at `09627a7c`, where this step started, and "Step 135" this branch before it merged `main` (both measured in temporary worktrees); then `main` at `1ab139b4`, with the calendar grid (step 129), and this branch after merging it, on the final code (R3-1's fix included):
 
-| Entry                  |   Before |    After | Budget before | Budget after |
-| ---------------------- | -------: | -------: | ------------: | -----------: |
-| `index`                |  5.31 kB |  5.77 kB |          5952 |         6432 |
-| `index (lazy)`         | 14.25 kB | 14.77 kB |         15104 |        15648 |
-| `index (lazy, nested)` |  5.39 kB |  5.48 kB |          6000 |         6000 |
-| `worker`               | 15.50 kB | 17.00 kB |         16352 |        17936 |
-| `worker (lazy)`        |  5.39 kB |  5.48 kB |          5824 |         5824 |
-| `engine`               | 11.57 kB | 11.58 kB |         12352 |        12352 |
-| `fetcher`              |  0.17 kB |  0.17 kB |           656 |          656 |
-| `vite`                 |  1.24 kB |  1.24 kB |          1488 |         1488 |
+| Entry                  |   Before | Step 135 | `main` `1ab139b4` |   Merged | Budget before | Budget now |
+| ---------------------- | -------: | -------: | ----------------: | -------: | ------------: | ---------: |
+| `index`                |  5.31 kB |  5.77 kB |           5.65 kB |  6.09 kB |          5952 |       6432 |
+| `index (lazy)`         | 14.25 kB | 14.77 kB |          17.99 kB | 18.48 kB |         15104 |      19504 |
+| `index (lazy, nested)` |  5.39 kB |  5.48 kB |           5.61 kB |  5.71 kB |          6000 |       6000 |
+| `worker`               | 15.50 kB | 17.00 kB |          19.22 kB | 20.68 kB |         16352 |      21824 |
+| `worker (lazy)`        |  5.39 kB |  5.48 kB |           5.61 kB |  5.71 kB |          5824 |       6368 |
+| `engine`               | 11.57 kB | 11.58 kB |          15.16 kB | 15.22 kB |         12352 |      16016 |
+| `fetcher`              |  0.17 kB |  0.17 kB |           0.17 kB |  0.17 kB |           656 |        656 |
+| `grid`                 |        — |        — |           3.64 kB |  3.65 kB |             — |       4240 |
+| `vite`                 |  1.24 kB |  1.24 kB |           1.24 kB |  1.24 kB |          1488 |       1488 |
 
-The three raised budgets are the new size plus max(512 B, 3 %), the repository's rule (`312dc2f7`). The page pays 0.46 kB for the property, the event, the generation name, the kept event and two development messages; the worker 1.50 kB for the channel, the rank, the relay and the server's two calls. The measurement tree-shakes, so moving the post-only channel code into `rpc/workers-channel.ts` (`e97ee82c`) changes the built chunks, not these figures.
+Before the merge, this step raised three budgets to the new size plus max(512 B, 3 %), the repository's rule (`312dc2f7`): `index` 6432, `index (lazy)` 15648 and `worker` 17936. The page paid 0.46 kB for the property, the event, the generation name, the kept event and two development messages; the worker 1.50 kB for the channel, the rank, the relay and the server's two calls. The measurement tree-shakes, so moving the post-only channel code into `rpc/workers-channel.ts` (`e97ee82c`) changes the built chunks, not these figures.
+
+At the merge, `budgets.json` took the higher budget of each side, and three entries were over them (R3-2): the two features' additions add up. Under user decision 124 A, `3a6952e1` set `index (lazy)`, `worker` and `worker (lazy)` by the same rule from the merged sizes: 19,504, 21,824 and 6,368 B, for 18,927, 21,180 and 5,848 B measured. `index` keeps this step's 6432 and `index (lazy, nested)` 6000; the engine, `grid` and the rest are `main`'s, unchanged.
 
 The counted budgets of `packages/tscache/test/perf/` (messages per read, memory, fetches, extents, growth) pass unchanged: nothing is added per operation or per message on the port.
 
