@@ -7,6 +7,7 @@
     "../packages/tscache/src/entries/index.ts",
     "../packages/tscache/src/entries/engine.ts",
     "../packages/tscache/src/entries/fetcher.ts",
+    "../packages/tscache/src/entries/grid.ts",
     "../packages/tscache/src/entries/vite.ts"
   ],
   "tsconfig": "../packages/tscache/tsconfig.json",

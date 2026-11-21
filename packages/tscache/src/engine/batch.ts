@@ -6,11 +6,12 @@
 
 import { PutError, type PutErrorCode, show } from "../errors";
 import {
+  describeGrid,
   type Grid,
-  isAligned,
+  gridOf,
   msOf,
   type SlotRange,
-  slotOf,
+  slotsOf,
   snapIn,
 } from "../grid";
 import { FIELD_ARRAYS } from "../segment/dtype";
@@ -121,28 +122,22 @@ function fieldArraysOf(batch: PutBatch, names: string[]): NumericArray[] {
   });
 }
 
-/** Scans once and throws for the first timestamp that breaks a rule. */
-function assertTimestamps(
+/**
+ * The timestamps as slots, throwing for the first timestamp that breaks a
+ * rule: at one index, misalignment is reported before the order. The
+ * conversion runs first, in one call that decides the grid kind once
+ * (§4.3), and stops at the first timestamp off the grid; the order is then
+ * checked up to it.
+ */
+function slotsOfTimestamps(
   timestamps: NumericArray,
   n: number,
   grid: Grid,
-): void {
-  const expected = `t ≡ ${grid.alignmentOffset} (mod ${grid.interval})`;
-  for (let i = 0; i < n; i++) {
+): Float64Array {
+  const slots = new Float64Array(n);
+  const misaligned = slotsOf(timestamps as ArrayLike<number>, n, grid, slots);
+  for (let i = 1; i < misaligned; i++) {
     const t = timestamps[i] as number;
-    if (!isAligned(t, grid)) {
-      throw new PutError(
-        `timestamp ${show(t)} at index ${i} is not on the grid ${expected}`,
-        {
-          code: "misaligned",
-          offenderIndex: i,
-          // A non-number offender has no numeric value to report.
-          ...(typeof t === "number" ? { offenderTimestamp: t } : {}),
-          expected,
-        },
-      );
-    }
-    if (i === 0) continue;
     const previous = timestamps[i - 1] as number;
     if (t > previous) continue;
     const code = t === previous ? "duplicate" : "unsorted";
@@ -156,6 +151,23 @@ function assertTimestamps(
       },
     );
   }
+  if (misaligned < n) {
+    const t = timestamps[misaligned] as number;
+    const expected = describeGrid(grid);
+    const where =
+      grid.calendar === undefined ? `on the grid ${expected}` : expected;
+    throw new PutError(
+      `timestamp ${show(t)} at index ${misaligned} is not ${where}`,
+      {
+        code: "misaligned",
+        offenderIndex: misaligned,
+        // A non-number offender has no numeric value to report.
+        ...(typeof t === "number" ? { offenderTimestamp: t } : {}),
+        expected,
+      },
+    );
+  }
+  return slots;
 }
 
 /** The rejection of the field value at index `i` (N68). */
@@ -270,6 +282,7 @@ export function validateBatch(
   batch: PutBatch,
   config: ResolvedCacheConfig,
   range?: Range,
+  grid: Grid = gridOf(config),
 ): ValidatedBatch {
   const names = Object.keys(config.fields);
   const timestamps = timestampsOf(batch);
@@ -284,17 +297,14 @@ export function validateBatch(
       );
     }
   });
-  assertTimestamps(timestamps, n, config);
+  // Slots now, before any field array is read: a field's getter may rewrite
+  // the timestamps, and the batch is converted with the ones checked here.
+  const slots = slotsOfTimestamps(timestamps, n, grid);
   let authority: SlotRange | undefined;
   if (range !== undefined) {
-    authority = snapIn(range, config);
+    authority = snapIn(range, grid);
     assertInside(timestamps, n, range);
   }
-  // Slots now, before any field array is read: a field's getter may rewrite
-  // the timestamps, and the batch is converted with the ones checked above.
-  const slots = new Float64Array(n);
-  for (let i = 0; i < n; i++)
-    slots[i] = slotOf(timestamps[i] as number, config);
 
   // (5) Values (N68): field by field in schema order, each copied into a
   // fresh array of its dtype before anything is kept.
@@ -315,7 +325,7 @@ export function validateBatch(
       (dtype[0] === "f" || typedArrayKind.call(values) === Field.name)
     ) {
       data.set(values);
-    } else scanInto(data, name, dtype, values, slots, config);
+    } else scanInto(data, name, dtype, values, slots, grid);
     setOwn(fields, name, data);
   });
   return { points: { slots, fields }, authority };

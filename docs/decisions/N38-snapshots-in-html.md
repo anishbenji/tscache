@@ -5,3 +5,7 @@ Row N38 of the decision table in `docs/architecture.md` §8, whose introduction 
 ## Resolution
 
 **`encodeSnapshot` and `decodeSnapshot` ship from the `.` entry** (and, since step ⑮ T6, from `./engine` too): base64 for buffers and the mask, JSON for the rest, with `btoa`/`atob` and no DOM, so `NaN` survives. Escaping for a `<script>` element stays with the app, since it depends on how the page is built. The page carries two forms: the server's read as columns for the hydration render, and the snapshot for the cache. A public reader that derives the columns from the snapshot can be added later without changing the format; it would bring the segment decoder into the page bundle. Rejected: leaving the encoding to the app (every server-rendering app would copy the same base64 and `NaN` handling, as the examples and the integrations do today). User-confirmed 2026-10-23
+
+## Amendment, 2026-11-21
+
+User decision 83, row G9 option (a) (N114, step 129): `encodeSnapshot` and `decodeSnapshot` carry format 2 as well. A format 2 value keeps its `grid` (plain JSON) and its slot indices as numbers; `decodeSnapshot` checks their shape, position by position, and rebuilds each payload in its own format. `EncodedSnapshot` and `EncodedSegmentPayload` are unions of the two formats. The mechanism is unchanged: base64 for buffers, JSON for the rest, escaping left to the application.

@@ -6,7 +6,7 @@
  */
 
 import type { CoverageIndex } from "../coverage";
-import { type Grid, msOf, type SlotRange, toMs } from "../grid";
+import { type Grid, msInto, type SlotRange, toMs } from "../grid";
 import { assertSlotRange } from "../segment/assert";
 import { FIELD_ARRAYS } from "../segment/dtype";
 import { setOwn } from "../segment/own";
@@ -79,9 +79,7 @@ export function read(
   const columns = collect(segments, request, fields);
   // The slots array is fresh, so it becomes the timestamps array in place.
   const timestamps = columns.slots;
-  for (let i = 0; i < timestamps.length; i++) {
-    timestamps[i] = msOf(timestamps[i] as number, grid);
-  }
+  msInto(timestamps, grid);
   return {
     timestamps,
     fields: columns.fields,

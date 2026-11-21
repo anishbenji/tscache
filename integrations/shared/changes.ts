@@ -10,10 +10,12 @@
 
 import type {
   CacheHandle,
+  CalendarInterval,
   ClientEvents,
   GetResult,
   Range,
 } from "@anishbenji/tscache";
+import { nextSlotStart, slotStart, snapRange } from "@anishbenji/tscache/grid";
 
 type Changed = ClientEvents["cacheChanged"];
 
@@ -24,28 +26,11 @@ function overlaps(a: Range, b: Range): boolean {
   return a.start <= b.end && b.start <= a.end;
 }
 
-/** A cache's grid, as its config names it. */
+/** A cache's grid, as its config names it: a fixed or a calendar interval. */
 export interface Grid {
-  interval: number;
-  /** Default 0. */
+  interval: number | CalendarInterval;
+  /** Fixed intervals only. Default 0. */
   alignmentOffset?: number;
-}
-
-/**
- * `range` snapped outward to the grid: what a read of it returns (§2.3,
- * N1), from the grid point at or before its start to the one at or after
- * its end. The root entry does not export the package's grid module, so
- * this is the same rule, in milliseconds.
- */
-function snappedOut(
-  range: Range,
-  { interval, alignmentOffset = 0 }: Grid,
-): Range {
-  const floor = (t: number) =>
-    alignmentOffset + Math.floor((t - alignmentOffset) / interval) * interval;
-  const ceil = (t: number) =>
-    alignmentOffset + Math.ceil((t - alignmentOffset) / interval) * interval;
-  return { start: floor(range.start), end: ceil(range.end) };
 }
 
 /**
@@ -62,7 +47,9 @@ export function reaction(
   range: Range,
   grid: Grid,
 ): Reread | undefined {
-  const shown = snappedOut(range, grid);
+  // The range as a read returns it (§2.3, N1): snapped outward by the
+  // package's own grid module, so a calendar view's edges are right too.
+  const shown = snapRange(range, grid.interval, grid.alignmentOffset);
   if (event.written.length > 0) {
     const touched =
       event.cleared ||
@@ -207,13 +194,20 @@ type Miss = GetResult["misses"][number];
  * miss `uncached`. Where `previous` labelled a slot that is still missing,
  * `next` keeps that label, so a change re-read never hides a failure the
  * view showed. A fetching read replaces the labels: pass its answer as is.
- * `interval` is the cache's: misses lie on its grid.
+ * `interval` is the cache's: misses lie on its grid, so the slot before a
+ * label and the one after it are found on that grid.
  */
 export function keepFailures(
   previous: GetResult | undefined,
   next: GetResult,
-  interval: number,
+  interval: number | CalendarInterval,
 ): GetResult {
+  // The grid point before one, and the grid point after one. A miss is
+  // aligned to the grid, whatever the cache's alignmentOffset is.
+  const before = (t: number) =>
+    typeof interval === "number" ? t - interval : slotStart(t - 1, interval);
+  const after = (t: number) =>
+    typeof interval === "number" ? t + interval : nextSlotStart(t, interval);
   const labelled = (previous?.misses ?? []).filter(
     (miss) => miss.reason !== "uncached",
   );
@@ -232,11 +226,11 @@ export function keepFailures(
       if (start > cursor) {
         misses.push({
           ...miss,
-          range: { start: cursor, end: start - interval },
+          range: { start: cursor, end: before(start) },
         });
       }
       misses.push({ ...label, range: { start, end } });
-      cursor = end + interval;
+      cursor = after(end);
     }
     if (cursor <= miss.range.end) {
       misses.push({ ...miss, range: { start: cursor, end: miss.range.end } });
@@ -255,7 +249,7 @@ export function keepFailures(
 export function cacheOnlyAfter(
   base: Promise<GetResult> | undefined,
   read: () => Promise<GetResult>,
-  interval: number,
+  interval: number | CalendarInterval,
 ): Promise<GetResult> {
   if (base === undefined) return read();
   return base.then(
@@ -344,8 +338,8 @@ export interface ViewRead {
 export interface ViewReadsOptions {
   /** The range the view shows now; undefined while it shows none. */
   shown(): Range | undefined;
-  /** The cache's interval: misses lie on its grid. */
-  interval: number;
+  /** The cache's interval, fixed or calendar: misses lie on its grid. */
+  interval: number | CalendarInterval;
   /**
    * The cache's alignment offset (default 0): with `interval`, the grid an
    * event is judged on, so a change at a snapped edge of the view counts.

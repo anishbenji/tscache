@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validateBatch } from "../src/engine/batch";
 import { SegmentStore } from "../src/engine/merge";
 import { resolveCacheConfig } from "../src/engine/validate";
-import { msOf, type SlotRange } from "../src/grid";
+import { gridOf, msOf, type SlotRange } from "../src/grid";
 import type { ResolvedCacheConfig } from "../src/types";
 import { extents, points, snapshot } from "./merge-test-helpers";
 
@@ -210,7 +210,7 @@ describe("SegmentStore seeded properties — architecture §4.3, §5, N11, N14, 
         // covers.
         const volumes = slots.map(() => next(-32_768, 32_767));
         const input = {
-          timestamps: slots.map((slot) => msOf(slot, config)),
+          timestamps: slots.map((slot) => msOf(slot, gridOf(config))),
           fields: { price: prices, volume: volumes },
         };
         // Fractional flanks exercise inward snapping without including neighbors.
@@ -218,8 +218,8 @@ describe("SegmentStore seeded properties — architecture §4.3, §5, N11, N14, 
           authority === undefined
             ? undefined
             : {
-                start: msOf(authority.start, config) - 0.25,
-                end: msOf(authority.end, config) + 0.25,
+                start: msOf(authority.start, gridOf(config)) - 0.25,
+                end: msOf(authority.end, gridOf(config)) + 0.25,
               };
         const validated = validateBatch(input, config, range);
         expect(validated.authority).toEqual(authority);

@@ -3,6 +3,7 @@ import {
   connect,
   drainEvents,
   expect,
+  heard,
   installRefresh,
   lockQueue,
   open,
@@ -105,6 +106,49 @@ test("any tab's updateAuth recovers every tab", async ({
     coverage: [{ start: 3, end: 33 }],
     misses: [],
   });
+});
+
+// A tab that opens after a refusal with the refused context (step 133, §4.9
+// Loading): through the real SharedWorker its context arrives as a clone in
+// the worker's realm, the same material as the refused one, so it changes
+// nothing; auth stays invalid until an updateAuth.
+test("a tab that joins after a refusal with the refused context changes nothing", async ({
+  context,
+  backend,
+}) => {
+  const config = cacheConfig();
+  const a = await open(context);
+  await connect(a, backend.clientOptions());
+  await backend.control({ expire: true });
+  expect((await read(a, config, { start: 3, end: 33 })).misses).toEqual([
+    { range: { start: 3, end: 33 }, reason: "auth-pending" },
+  ]);
+  expect(await drainEvents(a, config, "authInvalid")).toHaveLength(1);
+  expect((await backend.state()).requests).toEqual({ "3-33": 1 });
+  // B opens with the context A was refused with: { ns, token: "at-0" }.
+  const b = await open(context);
+  await connect(b, backend.clientOptions());
+  expect((await read(b, config, { start: 43, end: 63 })).misses).toEqual([
+    { range: { start: 43, end: 63 }, reason: "auth-pending" },
+  ]);
+  expect((await read(a, config, { start: 83, end: 103 })).misses).toEqual([
+    { range: { start: 83, end: 103 }, reason: "auth-pending" },
+  ]);
+  expect((await backend.state()).requests).toEqual({ "3-33": 1 });
+  // A refusal would reach B's port before the answer to its read.
+  expect(await heard(b, "authInvalid")).toEqual([]);
+  expect(await drainEvents(a, config, "authInvalid")).toHaveLength(1);
+  // An explicit updateAuth with a fresh token recovers both tabs.
+  const { access } = await backend.refresh("rt-0");
+  await updateAuth(b, { ns: backend.ns, token: access });
+  for (const [page, range] of [
+    [b, { start: 43, end: 63 }],
+    [a, { start: 3, end: 33 }],
+  ] as const) {
+    const got = await read(page, config, range);
+    expect(got.coverage).toEqual([range]);
+    expect(got.misses).toEqual([]);
+  }
 });
 
 // The snippet on its own, with stand-in clients (pages/refresh-harness.js):

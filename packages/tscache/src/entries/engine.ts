@@ -22,11 +22,16 @@ export {
 export { decodeSnapshot, encodeSnapshot } from "../snapshot";
 export type {
   CacheConfig,
+  CalendarInterval,
+  CalendarSegmentPayload,
+  CalendarSnapshot,
   DenseSegmentPayload,
   Dtype,
   EncodedSegmentPayload,
   EncodedSnapshot,
   FieldArray,
+  FixedSegmentPayload,
+  FixedSnapshot,
   GetResult,
   HydrateResult,
   MemoryStats,
@@ -38,6 +43,7 @@ export type {
   PutResult,
   Range,
   ResolvedCacheConfig,
+  ResolvedCalendarInterval,
   Snapshot,
 } from "../types";
 export { DTYPES } from "../types";

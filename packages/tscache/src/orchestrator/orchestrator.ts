@@ -7,9 +7,9 @@
  * edges.
  */
 
-import { type Engine, pinPages } from "../engine/engine";
+import { cacheGridOf, type Engine, pinPages } from "../engine/engine";
 import { ConfigError, isAuthInvalidError, show, TscacheError } from "../errors";
-import { type Grid, msOf, type SlotRange, snapOut, toMs } from "../grid";
+import { type Grid, inDomain, type SlotRange, snapOut, toMs } from "../grid";
 import type { Evt, FetcherConfig } from "../rpc/protocol";
 import type {
   Fetcher,
@@ -71,9 +71,9 @@ function overlaps(a: SlotRange, b: SlotRange): boolean {
   return a.start <= b.end && b.start <= a.end;
 }
 
-/** Whether a slot and its timestamp both lie in the safe-integer domain. */
+/** Whether a slot lies in the grid's domain, so that it has a timestamp (§4.1). */
 function safeSlot(slot: number, grid: Grid): boolean {
-  return Number.isSafeInteger(slot) && Number.isSafeInteger(msOf(slot, grid));
+  return inDomain(slot, grid);
 }
 
 /**
@@ -333,13 +333,15 @@ export class Orchestrator {
     await this.#loading;
     // A joining tab with other material takes the updateAuth path once the
     // module is there, so its hook hears it and the generation advances.
-    // Only an identical value is "the same"; anything else is conservatively
-    // new (structured-cloneable values have no cheap, cycle-safe equality).
+    // Every value that is not the identical one counts as other material on
+    // purpose: the generation must advance for any credential that may be
+    // new, so a late 401 under the old one is ignored (step 11, R4-2). The
+    // join's update then skips material already refused (#update, step 133).
     if (
       config.context !== undefined &&
       !Object.is(config.context, this.#context)
     ) {
-      await this.updateAuth(config.context);
+      await this.#update(config.context, true);
     }
   }
 
@@ -379,12 +381,29 @@ export class Orchestrator {
    * never blocks on a credential refresh).
    */
   updateAuth(context: unknown): Promise<void> {
+    return this.#update(context, false);
+  }
+
+  /**
+   * updateAuth, and a joining tab's context (`joining`). A join whose
+   * material the last flip refused (AuthState.wasRefused; every object
+   * context through a SharedWorker is a clone) changes nothing, whatever
+   * the auth state: no hook, no switch, no generation, no restore, so auth
+   * stays invalid until the next updateAuth (§4.9.1 rule 4) and a refresh
+   * that landed first stays in place (step 133). The rule is checked when
+   * the update's turn comes, so the hook never hears material refused by
+   * then, and again after the hook, since a refusal may land while it runs.
+   * A client's updateAuth is always applied.
+   */
+  #update(context: unknown, joining: boolean): Promise<void> {
     // Pure pull-model worker: nothing to deliver to, nothing to remember
     // (§4.9: a no-op without a fetcher), so a later first load starts clean.
     if (this.#loading === undefined) return Promise.resolve();
+    const refused = () => joining && this.#auth.wasRefused(context);
     const apply = async () => {
       // The first import may still be in flight: the hook must hear this.
       await this.#loading?.catch(() => {});
+      if (refused()) return;
       this.#transitioning = true;
       try {
         // A copy: the hook may keep and change it; what fetches carry and
@@ -393,6 +412,9 @@ export class Orchestrator {
       } finally {
         this.#transitioning = false;
       }
+      // A refusal may have landed while the hook ran (pre-review P1): the
+      // refused material must not switch back in.
+      if (refused()) return;
       this.#context = context;
       this.#authGeneration++;
       this.#auth.restore();
@@ -420,7 +442,7 @@ export class Orchestrator {
     if (this.#fetcher === undefined || options?.cacheOnly === true) {
       return this.#engine.get(cacheId, range, options);
     }
-    const grid = this.#engine.configOf(cacheId);
+    const grid = cacheGridOf(this.#engine, cacheId);
     const request = snapOut(range, grid);
     // With a memory budget, the request and its one-slot flanks (the
     // round's probe) are pinned from the first round to the read (N94),
@@ -498,7 +520,7 @@ export class Orchestrator {
     this.#engine.invalidate(cacheId, range);
     const list = this.#inflight.get(cacheId);
     if (list === undefined) return;
-    const slots = snapOut(range, this.#engine.configOf(cacheId));
+    const slots = snapOut(range, cacheGridOf(this.#engine, cacheId));
     for (const entry of list) {
       if (overlaps(entry.range, slots)) entry.fenced = true;
     }
@@ -549,7 +571,7 @@ export class Orchestrator {
     blocked: readonly SlotRange[],
     requestId: string | undefined,
   ): Inflight[] | { gated: SlotRange[] } {
-    const grid = this.#engine.configOf(cacheId);
+    const grid = cacheGridOf(this.#engine, cacheId);
     const probe = probeOf(request, grid);
     const around = this.#engine
       .coverage(cacheId, toMs(probe, grid))
@@ -630,7 +652,7 @@ export class Orchestrator {
     leave: () => void,
   ): Promise<Outcome> {
     const fetcher = this.#fetcher as Fetcher;
-    const grid = this.#engine.configOf(cacheId);
+    const grid = cacheGridOf(this.#engine, cacheId);
     const range = toMs(slots, grid);
     const authGeneration = this.#authGeneration;
     // Switches with the generation: the context this fetch is refused with.

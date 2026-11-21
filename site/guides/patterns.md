@@ -57,7 +57,9 @@ stays open, and so does everything it holds.
 A bar costs the bytes of its fields plus one presence bit; timestamps are implicit
 ([Performance](/performance)). One year of one-minute OHLCV bars with five `f64` fields is
 365 × 1,440 = 525,600 bars of 40 bytes and one bit each, about 21 MB per series, before the copies a
-page keeps of what it read. A cache with `persist: true` loads its stored records into the worker's
+page keeps of what it read. A daily, weekly or monthly cache is small by comparison (a year of daily
+bars is 365 slots), and one page of it spans decades, so a budget evicts such a cache whole or not at
+all unless you lower `segmentSlotCap`. A cache with `persist: true` loads its stored records into the worker's
 memory when it opens ([Persistence](/guides/persistence)), so persistence does not reduce this.
 
 **Set a memory budget** in every application that lets a user browse many series or a long history:

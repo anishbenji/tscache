@@ -87,8 +87,12 @@ describe("Engine snapshots — architecture §2.8, §4.6", () => {
       engine.get("a", { start: 23, end: 3 }, { snapshot: true }),
     ).toThrow(InvalidRangeError);
     expect(
-      thrown(() => engine.hydrate("a", { ...snapshotFixture(), interval: 11 }))
-        .message,
+      thrown(() =>
+        engine.hydrate("a", {
+          ...snapshotFixture(),
+          interval: 11,
+        } as Snapshot),
+      ).message,
     ).toMatch(/^invalid snapshot:/);
     expect(
       thrown(() =>

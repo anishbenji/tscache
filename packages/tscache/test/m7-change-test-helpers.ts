@@ -1,7 +1,11 @@
+// fallow-ignore-file duplicate-export
+// The test helpers each export a `batch` and a `config` of their own; Fallow
+// audits the pairs among the files a branch changes (step 129).
 import { vi } from "vitest";
 import type { CacheChange } from "../src/engine/cache";
 import {
   type CacheObserver,
+  cacheGridOf,
   Engine,
   observeCaches,
 } from "../src/engine/engine";
@@ -93,7 +97,7 @@ export function observed(overrides: Partial<CacheConfig> = {}): {
   const disk: { cacheId: string; change: CacheChange }[] = [];
   const subscribers = new Set([overrides.id ?? id]);
   const report = vi.fn<ReaderObserver["onReaderChange"]>((cacheId, report) => {
-    const grid = engine.configOf(cacheId);
+    const grid = cacheGridOf(engine, cacheId);
     const event: ChangeEvent = {
       cacheId,
       written: report.written.map((range) => toMs(range, grid)),

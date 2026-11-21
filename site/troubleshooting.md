@@ -67,6 +67,19 @@ needs the DOM. `fetcherUrl()` fails the build for this; import statically or
 A timestamp is not on the cache's grid. `expected` shows the grid, e.g. `"t ≡ 0 (mod 60000)"`. Check
 `interval` and `alignmentOffset`, and that timestamps are milliseconds, not seconds.
 
+With a [calendar interval](/concepts/grid#calendar-intervals), `expected` names the calendar, e.g.
+`"the start of a day in America/New_York at 09:30"`. Check that each bar is stamped at the instant the
+zone's clock reads `at`, which moves in UTC when the zone changes its clocks, and that the zone and
+`at` are the backend's.
+
+## `cache()` rejects a calendar interval with `ConfigError`
+
+The message names the field: an unknown `unit`, a `zone` the runtime does not know, an `at` that is not
+`HH:MM`, a `weekStart` outside a week, or an `alignmentOffset` other than 0. If it names the
+`'calendar-grid'` feature instead, the page's worker runs a version of the library from before calendar
+intervals, typically a cached worker script during a deploy: `client.features.has("calendar-grid")`
+tells you beforehand.
+
 ## `cache()` rejects with `ConfigError` in one tab
 
 Another tab created the cache with another structure (interval, offset, fields, `gapSplitK`,

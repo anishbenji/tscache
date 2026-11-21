@@ -547,6 +547,7 @@ describe("17: hello.lib (N136)", () => {
       // Today's features, whatever the lib; and the connection works.
       expect([...client.features].sort()).toEqual([
         "cacheChanged",
+        "calendar-grid",
         "memoryBudget",
       ]);
       await expect(client.request("cache", plain)).resolves.toMatchObject({

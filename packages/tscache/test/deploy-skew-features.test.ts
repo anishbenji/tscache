@@ -66,9 +66,15 @@ describe("29: the 'superseded' feature name (DC2 option (a))", () => {
       },
     );
     const { features, client } = await hello(server);
-    expect(features).toEqual(["cacheChanged", "memoryBudget", "superseded"]);
+    expect(features).toEqual([
+      "cacheChanged",
+      "memoryBudget",
+      "superseded",
+      "calendar-grid",
+    ]);
     expect([...client.features].sort()).toEqual([
       "cacheChanged",
+      "calendar-grid",
       "memoryBudget",
       "superseded",
     ]);
@@ -109,7 +115,7 @@ describe("29: the 'superseded' feature name (DC2 option (a))", () => {
     // A BroadcastChannel in the realm changes nothing for the other hostings.
     fakeChannels().install();
     const { features, client } = await hello(server());
-    expect(features).toEqual(["cacheChanged", "memoryBudget"]);
+    expect(features).toEqual(["cacheChanged", "memoryBudget", "calendar-grid"]);
     expect(client.features.has("superseded")).toBe(false);
   });
 
@@ -121,6 +127,7 @@ describe("29: the 'superseded' feature name (DC2 option (a))", () => {
     const client = await make({ mode: "in-process" });
     expect([...client.features].sort()).toEqual([
       "cacheChanged",
+      "calendar-grid",
       "memoryBudget",
     ]);
     const heard = vi.fn();

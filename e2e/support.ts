@@ -9,11 +9,14 @@ import type {
   CacheConfig,
   ClientEvents,
   ClientOptions,
+  EncodedSnapshot,
   GetOptions,
   HostingMode,
+  HydrateResult,
   MemoryStats,
   Miss,
   Range,
+  Snapshot,
   TscacheClient,
 } from "../packages/tscache/src/entries/index";
 import type {
@@ -85,7 +88,10 @@ interface Got {
 
 interface E2EWindow {
   ready?: boolean;
-  tscache: { createClient(options: ClientOptions): Promise<TscacheClient> };
+  tscache: {
+    createClient(options: ClientOptions): Promise<TscacheClient>;
+    decodeSnapshot(encoded: EncodedSnapshot): Snapshot;
+  };
   client: TscacheClient;
   /** Every client event this page heard, in order. */
   log: { event: keyof ClientEvents; payload: unknown }[];
@@ -258,6 +264,25 @@ export async function put(
       });
     },
     { cfg: config, ts: timestamps },
+  );
+}
+
+/**
+ * Hydrates a cache from a snapshot as a page carries it (§2.8, N38): the
+ * JSON text of `encodeSnapshot`, parsed and decoded in the page.
+ */
+export function hydrateEncoded(
+  page: Page,
+  config: CacheConfig,
+  json: string,
+): Promise<HydrateResult> {
+  return page.evaluate(
+    async ({ cfg, text }) => {
+      const w = window as unknown as E2EWindow;
+      const cache = await w.client.cache(cfg);
+      return cache.hydrate(w.tscache.decodeSnapshot(JSON.parse(text)));
+    },
+    { cfg: config, text: json },
   );
 }
 

@@ -409,6 +409,59 @@ describe("keepFailures (PR-1)", () => {
     expect(keepFailures(undefined, next, 10)).toBe(next);
     expect(keepFailures(next, next, 10)).toBe(next);
   });
+
+  it("steps by calendar slots around a label, across a clock change", () => {
+    // New York sessions of March 2026: they open at 14:30 UTC to the 7th
+    // and at 13:30 UTC from the 8th, so the slot of the 7th is 23 hours.
+    const interval = {
+      unit: "day",
+      zone: "America/New_York",
+      at: "09:30",
+    } as const;
+    const winter = (day: number) => Date.UTC(2026, 2, day, 14, 30);
+    const summer = (day: number) => Date.UTC(2026, 2, day, 13, 30);
+    const failed = (start: number, end: number): GetResult => ({
+      ...empty,
+      misses: [{ range: { start, end }, reason: "fetch-failed", error }],
+    });
+    const missing = (start: number, end: number): GetResult => ({
+      ...empty,
+      misses: [{ range: { start, end }, reason: "uncached" }],
+    });
+    // A label on the first summer session: the slot before it starts 23
+    // hours earlier, not 24.
+    expect(
+      keepFailures(
+        failed(summer(8), summer(8)),
+        missing(winter(6), summer(10)),
+        interval,
+      ).misses,
+    ).toEqual([
+      { range: { start: winter(6), end: winter(7) }, reason: "uncached" },
+      {
+        range: { start: summer(8), end: summer(8) },
+        reason: "fetch-failed",
+        error,
+      },
+      { range: { start: summer(9), end: summer(10) }, reason: "uncached" },
+    ]);
+    // A label ending on the last winter session: the slot after it starts
+    // 23 hours later.
+    expect(
+      keepFailures(
+        failed(winter(6), winter(7)),
+        missing(winter(6), summer(9)),
+        interval,
+      ).misses,
+    ).toEqual([
+      {
+        range: { start: winter(6), end: winter(7) },
+        reason: "fetch-failed",
+        error,
+      },
+      { range: { start: summer(8), end: summer(9) }, reason: "uncached" },
+    ]);
+  });
 });
 
 describe("ChangeWatch.started (PR-6)", () => {

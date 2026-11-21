@@ -18,6 +18,15 @@ updates:
       interval: monthly
     commit-message:
       prefix: chore
+    # A release must age before Dependabot proposes it, so a compromised or
+    # broken version has time to be noticed and pulled first: 3 days for patch
+    # and minor (minor and patch fall back to default-days), 7 for a major.
+    # Cooldown is checked per dependency, inside groups too. It holds back
+    # version updates only: security updates still open at once, and an
+    # upgrade approved by hand is not affected.
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
     # A dependency joins the first group it matches, so the lockstep groups
     # come first. React and react-dom must move together (react-dom's server
     # build fails against an older react), as must Solid and its @solidjs/*

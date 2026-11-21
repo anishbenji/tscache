@@ -42,6 +42,13 @@ cache held there that the response lacks are removed. So:
   response. Do not assemble one response from two versions.
 - **Timestamps** on the cache's grid (`request.interval`, `request.alignmentOffset`), ascending,
   unique, with every field present. A response that fails validation makes the range `'fetch-failed'`.
+- **The interval is a number or a calendar interval.** `request.interval` is the cache's interval as
+  its config resolved it: milliseconds, or for a calendar cache
+  ([Calendar intervals](/concepts/grid#calendar-intervals)) an object such as
+  `{ unit: "day", zone: "America/New_York", at: "09:30" }`, with `request.alignmentOffset` 0. Narrow it
+  before doing arithmetic or building a query: `String(request.interval)` of a calendar interval is
+  `"[object Object]"`, and TypeScript does not flag it. The fetcher above names the unit
+  (`intervalParam`). Stamp each bar at its slot's start, the instant the zone's clock reads `at`.
 - **Missing values** as `NaN` in float fields, and every value one its field can hold
   ([Batches](/concepts/grid#batches)). JSON has no `NaN` and writes it as `null`, and a put rejects
   `null` in every field. The fetcher above maps it to `NaN` in its float fields only
@@ -53,14 +60,15 @@ cache held there that the response lacks are removed. So:
   the backend sends fractions for an integer field.
 
 The range is already coalesced: adjacent misses are merged, and a miss next to known data is extended by
-one interval into it.
+one slot into it (one interval on a fixed grid, one day or month on a calendar grid). Its ends are slot
+starts.
 
 ## Errors
 
-| You throw          | The `get` sees                                                       | Then                                                                                          |
-| ------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `AuthInvalidError` | the range as `'auth-pending'`                                        | every tab hears `authInvalid`; no fetch runs until `updateAuth` ([Credentials](/guides/auth)) |
-| anything else      | the range as `'fetch-failed'`, with the error's `name` and `message` | nothing is cached; the next `get` tries again                                                 |
+| You throw          | The `get` sees                                                       | Then                                                                                                                                         |
+| ------------------ | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthInvalidError` | the range as `'auth-pending'`                                        | every tab hears `authInvalid`; no fetch runs until the next `updateAuth`, or a joining tab with other material ([Credentials](/guides/auth)) |
+| anything else      | the range as `'fetch-failed'`, with the error's `name` and `message` | nothing is cached; the next `get` tries again                                                                                                |
 
 Retries, backoff and timeouts are yours: tscache retries nothing on behalf of a `get` that already
 returned.

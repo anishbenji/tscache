@@ -354,7 +354,7 @@ describe("hydrate validates in full before changing state — architecture §4.5
     } as unknown as DenseSegmentPayload;
     const expected = thrown(() =>
       segmentFromPayload(invalid, {
-        grid: c.config,
+        grid: c.grid,
         fields: c.config.fields,
         slotCap: c.config.segmentSlotCap,
       }),

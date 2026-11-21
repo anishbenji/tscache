@@ -84,6 +84,8 @@ export function coveredSpan(snapshot: EncodedSnapshot): {
 export function coveredPoints(snapshot: EncodedSnapshot): number[] {
   const out: number[] = [];
   for (const payload of snapshot.segments) {
+    // The examples cache fixed grids: slot i is at start + i * interval.
+    if (payload.format !== 1) throw new Error("expected a fixed-grid payload");
     const mask = atob(payload.mask);
     for (let i = 0; i < payload.count; i++) {
       if (((mask.charCodeAt(i >> 3) >> (i & 7)) & 1) === 0) continue;
