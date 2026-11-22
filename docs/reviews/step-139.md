@@ -63,14 +63,22 @@ Not a regression: on 11.17.2 and 12.3.0 alike, `vitepress-plugin-mermaid` someti
 - Dependabot's lockfile also records a nested `vitepress-plugin-mermaid/mermaid` entry at 11.17.2 (with its `katex` 0.16.47), because 12 is outside the plugin's peer range. Bun's isolated install (this repository's default) does not install it: `node_modules/.bun` holds only `mermaid@12.3.0` and `katex@0.18.11`.
 - No newer plugin release exists: `npm view vitepress-plugin-mermaid versions peerDependencies --json` lists 2.0.17 as the latest, with the same `"mermaid": "10 || 11"`.
 - Recommendation: no plugin bump or override is needed now; there is nothing newer to bump to, and an override would only silence a warning Bun does not print. Revisit when the plugin publishes a release that declares mermaid 12.
-- Side effect: step 86's remaining `katex` advisory (0.16.47, held by `mermaid` 11's range) is resolved by 12.3.0, which installs `katex` 0.18.11; the nested lockfile entry above still names 0.16.47, so `bun audit` still reports `katex@0.18.11, 0.16.47` under the same low advisory (GHSA-238p-pmpm-9mq7), as on main; the total stays at 6 advisories.
+- `katex` (step 86's remaining low advisory, GHSA-238p-pmpm-9mq7): the installed `katex` is now 0.18.11, which is fixed. The lockfile's nested `vitepress-plugin-mermaid/mermaid` entry above still names 0.16.47, so `bun audit` still lists `katex@0.18.11, 0.16.47` under that advisory, as on main. The advisory stays in the audit count (6 in total) until the plugin accepts mermaid 12.
 
 ## Verification
 
 - `bun run docs:build` passes (`build complete`), and `bun run docs:check` passes (`doc-anchors: 249 anchors in 42 pages resolve`), after `bun run build`.
 - `bun scripts/test-clocks.ts`: `215 files clean`.
 - The screenshot comparison above.
-- `bun run ci`: see the step report.
+- `bun run ci` passes (Vitest 174 files, 3362 tests; Playwright 197; `docs:build`; gitleaks; bench smoke).
+
+## Pre-review (Claude), not the gate
+
+- Pre-review 1 (Claude Opus 5.5), head a6a77434: no code findings. A P1 on the round setup (the local `main` ref was behind `origin/main`, so the round's diff would include merged work) is fixed by updating `main` before round 1. One nit, the `katex` wording above, is fixed.
+
+## Security lane (Claude), not the gate
+
+- run 1, head a6a77434: P0 0, P1 0, P2 0
 
 ## Never and Notify paths touched
 
