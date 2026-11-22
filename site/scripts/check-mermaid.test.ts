@@ -63,26 +63,15 @@ describe("check-mermaid: pages", () => {
 });
 
 describe("check-mermaid: reporting", () => {
-  it("names the fence's line and the page line of Mermaid's parse error", () => {
-    const failure = {
-      file: "site/how-it-works/tabs.md",
-      line: 7,
-      message:
-        "Parse error on line 25:\n...the port\n----^\nExpecting 'X', got 'NEWLINE'",
-    };
-    expect(formatFailure(failure)).toBe(
-      "site/how-it-works/tabs.md:7: Parse error on line 25 (page line 32):\n" +
-        "    ...the port\n    ----^\n    Expecting 'X', got 'NEWLINE'",
-    );
-  });
-
-  it("prints any other message as Mermaid gives it", () => {
+  it("prints the fence's line and Mermaid's message, its later lines indented", () => {
     const failure = {
       file: "a.md",
       line: 3,
-      message: "No diagram type detected",
+      message: "Parse error on line 2:\n...B\n---^\n",
     };
-    expect(formatFailure(failure)).toBe("a.md:3: No diagram type detected");
+    expect(formatFailure(failure)).toBe(
+      "a.md:3: Parse error on line 2:\n    ...B\n    ---^",
+    );
   });
 
   it("reads a package's ES module entry from its exports", () => {
@@ -122,9 +111,7 @@ describe("check-mermaid: the command", () => {
     }
     const printed = error.mock.calls.map((call) => String(call[0]));
     expect(printed[0]).toMatch(
-      new RegExp(
-        `^${join(dir, "tabs.md")}:3: Parse error on line 4 \\(page line 7\\):\n`,
-      ),
+      new RegExp(`^${join(dir, "tabs.md")}:3: Parse error on line 4:\n`),
     );
     expect(printed).toHaveLength(2);
     expect(printed[1]).toContain("1 of 2 diagram(s) do not parse");
@@ -153,15 +140,16 @@ describe("check-mermaid: the command", () => {
   });
 
   it("checks the pages Git lists under site/ when given none", async () => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const listed = () => ({
       exitCode: 0,
       stdout: "README.md\nsite/index.md\n",
       stderr: "",
     });
     expect(await run([], listed)).toBe(0);
-    expect(console.log).toHaveBeenCalledWith(
-      "mermaid: 0 diagrams in 1 pages parse",
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(String(log.mock.calls[0]?.[0])).toMatch(
+      /^mermaid: \d+ diagrams in 1 pages parse$/,
     );
   });
 
@@ -190,10 +178,16 @@ describe("check-mermaid: the command", () => {
       "tabs.md": `# Tabs\n\n${BROKEN}`,
     });
     try {
-      const out = spawnSync("bun", [SCRIPT, dir], { encoding: "utf8" });
+      // The timeout only ends a hung child, so the run fails instead of blocking; no assertion
+      // depends on how long the child takes.
+      const out = spawnSync("bun", [SCRIPT, dir], {
+        encoding: "utf8",
+        timeout: 60_000,
+      });
+      expect(out.error).toBeUndefined();
       expect(out.status, out.stderr).toBe(1);
       expect(out.stderr).toContain(
-        `${join(dir, "tabs.md")}:3: Parse error on line 4 (page line 7):`,
+        `${join(dir, "tabs.md")}:3: Parse error on line 4:`,
       );
       expect(out.stderr).toContain("1 of 2 diagram(s) do not parse");
       expect(out.stderr).not.toContain("ok.md");

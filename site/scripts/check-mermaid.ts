@@ -114,7 +114,13 @@ interface Manifest {
   exports?: unknown;
 }
 
-/** The file an ES module `import` of a package's root loads: its `"."` export's `import` entry. */
+/**
+ * The file an ES module `import` of a package's root loads: its `"."` export's `import` entry.
+ * It takes `import`, then `default`, at each level, not the condition order Node and Bun apply. A
+ * package that lists `node`, `bun` or `module-sync` first, pointing at another file, would load a
+ * second DOMPurify the fill-in misses; every real diagram then fails loudly, and the flowchart test
+ * catches it.
+ */
 export function importEntry(manifest: Manifest): string {
   let entry: unknown = manifest.exports;
   if (entry !== null && typeof entry === "object" && "." in entry)
@@ -170,16 +176,13 @@ export async function checkDiagrams(
 }
 
 /**
- * One failure as the check prints it: `file:line: ` (the fence's line) and Mermaid's message,
- * indented under it. Mermaid counts a parse error's line within the diagram, whose first line is
- * the one after the fence, so the page line it names is added to the message.
+ * One failure as the check prints it: `file:line: ` (the fence's line) and Mermaid's message as
+ * Mermaid gives it, its later lines indented. A parse error's line counts within the diagram, after
+ * Mermaid strips comments, directives and the diagram's own frontmatter, so it is not mapped to a
+ * page line.
  */
 export function formatFailure(f: Failure): string {
-  const [first = "", ...rest] = f.message.trimEnd().split("\n");
-  const head = first.replace(
-    /^(Parse error on line (\d+))/,
-    (_, text: string, n: string) => `${text} (page line ${f.line + Number(n)})`,
-  );
+  const [head = "", ...rest] = f.message.trimEnd().split("\n");
   return [`${f.file}:${f.line}: ${head}`, ...rest.map((l) => `    ${l}`)].join(
     "\n",
   );
