@@ -71,4 +71,6 @@ loss. `bun run ci` runs every check; tests run with `bun run test`, under Node.
 The site lives in `site/`: VitePress pages, an API reference that TypeDoc generates from the package's
 TSDoc into `site/api/`, and code examples in `site/snippets/` that `bun run docs:check` type-checks
 against the built package and `bun run docs:run` executes against the examples' mock backend. `bun run docs:dev` serves it; `bun run docs:build` builds it and fails on a
-dead link, including a link to a repository file that does not exist.
+dead link, including a link to a repository file that does not exist. `bun run docs:check` also
+parses every Mermaid diagram and fails on a syntax error, which the browser would otherwise show only
+as an error box on the page.
