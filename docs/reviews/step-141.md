@@ -21,6 +21,17 @@ User decision 129 D (2026-11-21): `bun run ci` should parse every mermaid diagra
 - Removing the `addHook` no-op makes the three real-parse tests fail with `DOMPurify.addHook is not a function` under both Node and Bun; restored before committing.
 - The check adds about 0.25 s to `docs:check` (three warm runs of `bun site/scripts/check-mermaid.ts`: 0.26 s, 0.25 s, 0.24 s; the first, cold run took 0.65 s).
 
+## Pre-review (Claude), not the gate
+
+The director's Opus pre-review of 9409a3d8. All four findings were valid and are fixed in d0670667.
+
+| #    | Sev | Finding                                                                                                                                                                                                | Decision | Resolution                                                                                                                                                              |
+| ---- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR-1 | P2  | The "(page line N)" added to a parse error is wrong when a diagram has `%%` comments, its own `---` frontmatter, a `%%{init}%%` directive or leading blank lines, which Mermaid strips before counting | accepted | fixed in d0670667: the annotation is dropped; a failure prints the fence's line and Mermaid's diagram-relative message, and the test of the made-up message is replaced |
+| PR-2 | nit | The Bun subprocess test's `spawnSync` has no timeout, so a hung child blocks the run                                                                                                                   | accepted | fixed in d0670667: a 60 s `timeout`, used only to end a hung child, and an assertion that `out.error` is undefined                                                      |
+| PR-3 | nit | The no-argument test depends on the real `site/index.md` holding no diagram                                                                                                                            | accepted | fixed in d0670667: it asserts only the exit code, one log line and the page count                                                                                       |
+| PR-4 | nit | `importEntry` takes `import`, then `default`, unlike Node's and Bun's condition order, without saying so                                                                                               | accepted | fixed in d0670667: its TSDoc states the order and how a mismatch fails (loudly, caught by the flowchart test)                                                           |
+
 ## Never and Notify paths touched
 
 - Never: root `package.json` (`scripts.docs:check` only).
