@@ -32,6 +32,10 @@ The director's Opus pre-review of 9409a3d8. All four findings were valid and are
 | PR-3 | nit | The no-argument test depends on the real `site/index.md` holding no diagram                                                                                                                            | accepted | fixed in d0670667: it asserts only the exit code, one log line and the page count                                                                                       |
 | PR-4 | nit | `importEntry` takes `import`, then `default`, unlike Node's and Bun's condition order, without saying so                                                                                               | accepted | fixed in d0670667: its TSDoc states the order and how a mismatch fails (loudly, caught by the flowchart test)                                                           |
 
+## Security lane (Claude), not the gate
+
+- run 1, head dbf5536f: P0 0, P1 0, P2 0
+
 ## Never and Notify paths touched
 
 - Never: root `package.json` (`scripts.docs:check` only).
