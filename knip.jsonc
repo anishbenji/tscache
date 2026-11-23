@@ -44,7 +44,5 @@
     }
   },
   // Consumed by tsdown's attw integration, not imported anywhere.
-  "ignoreDependencies": ["@arethetypeswrong/cli"],
-  // A system tool the demo launcher's spec uses to find leftover servers.
-  "ignoreBinaries": ["pgrep"]
+  "ignoreDependencies": ["@arethetypeswrong/cli"]
 }

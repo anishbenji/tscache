@@ -10,7 +10,7 @@
     "site"
   ],
   "engines": {
-    "node": ">=22.12"
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
   },
   "scripts": {
     "check": "biome check .",
@@ -37,20 +37,20 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
-    "@biomejs/biome": "^2.6.4",
+    "@biomejs/biome": "^2.6.8",
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
-    "@playwright/test": "^1.64.1",
+    "@playwright/test": "^1.65.1",
     "@stryker-mutator/core": "10.1.1",
     "@stryker-mutator/vitest-runner": "10.1.1",
     "@types/bun": "^1.4.4",
-    "fallow": "^3.37.0",
+    "fallow": "^3.43.2",
     "git-cliff": "^2.14.2",
-    "knip": "^6.44.0",
+    "knip": "^6.45.1",
     "lefthook": "^2.2.2",
     "publint": "^0.3.25",
-    "tsdown": "^0.23.4",
+    "tsdown": "^0.23.7",
     "typescript": "7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.1"
   }
 }

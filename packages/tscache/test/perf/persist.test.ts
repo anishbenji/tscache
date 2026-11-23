@@ -156,8 +156,8 @@ describe("a chart scrolling back after a reload (counters.test.ts)", () => {
   }
 
   const clients: PortClient[] = [];
-  afterEach(async () => {
-    for (const client of clients.splice(0)) await client.dispose();
+  afterEach(() => {
+    for (const client of clients.splice(0)) client.dispose();
   });
 
   /** A worker's engine, persister and server over `store`, and a client. */

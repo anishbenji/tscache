@@ -77,6 +77,7 @@ These time what a page sees: the client, a real SharedWorker and its port, and t
 | `fast-scroll`          | a chart scrolls back faster than the backend answers: twelve reads, each a screen further back, posted together | the first scroll read posted, to the last resolved: each read's fetch of its new screen over HTTP, the rest awaited from the fetches in flight (§4.9.1), the merges, twelve reads and transfers                   |        2.25 ms |
 
 **How they run.** The driver bundles the package's client, worker and fetcher entries of each revision with Bun (unminified ESM, as `tsdown` emits) and serves them beside the scenario page, the Playwright suites' mock backend (`scripts/e2e-backend.ts`) and their fixture fetcher (`e2e/pages/fetcher.js`). The fixture fetcher asks for binary columns bodies (the format of `examples/mock-backend/src/columns.ts`), or for JSON on a side that `--fetchers` names `json`; with `--base HEAD` on a clean tree, `--fetchers json,columns` times the two formats on one engine (step 42). Each scenario gets a BrowserContext of its own, so its pages share its SharedWorkers and no other scenario's.
+
 - `handshake-first-read` opens a new page for every run, and a worker URL no earlier run used, so each run starts a new SharedWorker. The driver alternates the revisions, base then head, head then base, one run per side per round, after two warm-up runs per side. A run takes milliseconds, far above the clock's 100 µs, so a batch is one run.
 - `reload-first-read` runs like `handshake-first-read`, one run a batch, in a BrowserContext per side, so each revision has an IndexedDB of its own and a head that upgrades the database's version cannot lock the base out of it. In each run a setup page reads the bars into a persisted cache of its own (one fetch) and disposes its client, so its SharedWorker writes them at once; on a revision that persists, the driver waits until IndexedDB holds the cache's pages. Then a new page, with a worker URL no earlier run used, so a new SharedWorker, creates a client, opens the cache and reads the same bars.
 - `read-viewport-shared` connects one page to both revisions, each with its own SharedWorker, fills each cache with three screens by one fetch, and reads the middle screen. `sampleAsync` times it as `sample` times a case: warm-up, 40 ms batches, 20 paired rounds, each operation awaited before the next starts.
@@ -95,6 +96,7 @@ Times are from the Apple Silicon Mac, in two runs with base and head the same re
 **One bundle, two revisions.** `scripts/bench.ts` extracts the base revision's `packages/tscache/src` with `git archive`, so nothing is checked out. It bundles it with Bun beside the working tree's source and a second copy of the working tree's, and the same bundle runs in every runtime.
 
 **Paired rounds** (`bench/sample.ts`):
+
 1. Each side is warmed up for half a second.
 2. A batch is calibrated to last at least 100 ms in `compare` (the sampler's own default, used by the end-to-end scenarios, is 40 ms). Chromium coarsens `performance.now()` to 100 µs without cross-origin isolation; 40 ms keeps that under 0.3 %. The longer batch is for the runner, not the timer: with 40 ms batches and 20 rounds, Chromium's A/A control left its bounds in 5 of 20 runs on GitHub's runner, and with 100 ms batches and 30 rounds in 1 of 20 (calibration log, chore 39). Each batch size is timed three times per side and the fastest timing counts: a pause of the process only adds time, and one paused timing would otherwise end calibration early with batches far shorter than intended.
 3. Thirty rounds (twenty for the end-to-end scenarios) time one batch of each side, in the order A B, B A, A B…, and each round gives a ratio, head over base.
@@ -105,11 +107,13 @@ Times are from the Apple Silicon Mac, in two runs with base and head the same re
 The interval treats the rounds as independent. Neighbouring rounds share the machine's state (a frequency change, another job), so the true coverage is somewhat less than 95 %. The confirmation in a fresh process and the A/A control are there for that.
 
 **Runtimes.**
+
 - **Chromium** is the primary signal: it is the engine most users run.
 - **Bun** is the only JSC available on a Linux runner. The engines rank the cases differently (on the Mac above, reads are two to three times slower in Bun while appending bars is faster), so a regression can show in one and not the other.
 - **Node** can be timed (`--runtime node`) but is never gated. It is a second V8, older than any shipped browser's, so a regression only Node shows is one no user meets.
 
 **Why not mitata or Vitest bench.** Starter §4 named mitata for micro-benches and Vitest bench (tinybench) for regression gating. Both are set aside, a deliberate deviation recorded here for the user to confirm:
+
 - Vitest bench runs under Node only, cannot run in Chromium or Bun, and compares against a stored baseline instead of interleaving two revisions in one process.
 - mitata would add a dependency without adding interleaving.
 
@@ -128,6 +132,7 @@ The paired sampler serves all three runtimes. Vitest remains the runner for the 
 | End-to-end timings, Chromium                                        | the `bench` job                              | never: report-only, the step continues on error                                |
 
 **A timing regression** must meet all of these:
+
 - a median head/base ratio of at least **1.10**;
 - the confidence interval's lower bound at least **1.03**;
 - the head slower by at least **0.25 µs** per operation;
@@ -145,6 +150,7 @@ Perf-Accepted: put-page@bun 1.15 JSC only; V8 is unchanged
 ```
 
 The case may then be up to that ratio slower; beyond it, it fails again. A trailer accepts the package's source as it stood at its commit, together with whatever the base has brought in since. The gate merges the trailer's commit with the newest base revision the head contains, as git would on its own (`git merge-tree`). The trailer stands only while the head's `packages/tscache/src` is exactly that merge's, so these void it:
+
 - a later edit of the source;
 - a source conflict resolved by hand, where git's own merge leaves markers;
 - another branch merged in;
@@ -153,6 +159,7 @@ The case may then be up to that ratio slower; beyond it, it fails again. A trail
 GitHub's merge ref, a conflict outside the source, and a branch behind its base keep it. It retires with the merge, since the next pull request's base already contains that code.
 
 **Calibration before the timing gate blocks.** Dispatch `bench-calibrate.yml` three times, with slowdown `0`, `0.15` and `0.25`. Each dispatch runs the head against itself in 20 parallel jobs, with the head made that much slower: an operation of 2 ms or more (judged from warm calls) spins for that fraction of its own time, and a shorter one runs again that often, with no clock read that would slow it on its own. The summary job tallies how often the gate fired per runtime and case, leaving out noisy runs. The gate may block when:
+
 - it fired in none of the 20 same-revision runs;
 - it caught at least 90 % of the runs at 25 %, in every gated case whose slowdown clears the floor.
 
@@ -209,11 +216,13 @@ bun scripts/size.ts --update                               # reseed the size bud
 | 2026-10-30 | the same, run 41126649937                                                                                                                                                | 0.25     | Bun, 20 quiet runs: 20 in eight cases, 14 (70 %) in `read-year`. Chromium, 20 quiet runs: 20 in all nine cases                                                                                                                                                                                                                                |
 
 **Verdict of the 2026-10-30 calibration: the timing gate stays report-only.** Bun met both conditions except `read-year` at 25 % (84 %, below 90 %). Chromium could not be judged: its A/A control left [0.95, 1.05] in 17 to 20 of the 20 runs per dispatch. The batches were long enough (512 calls of about 0.11 ms, some 56 ms, against the 40 ms the timer needs), and the control's round ratios split into groups near 0.7, 1.0 and 1.4, so the noise comes from the runner (two shared vCPUs for Chromium's processes), not from the timer. Before the gate can block:
+
 1. Done: recalibrate on a main that includes step 22 (#43), which made the reads several times faster and so changes what each case measures.
 2. Find a Chromium setup the runner keeps quiet: more rounds, longer batches, fewer Chromium processes, or a larger runner. A larger runner costs money, so it is the user's decision.
 3. Decide whether Bun gates alone in the meantime, with `read-year` left out until it reaches 90 %.
 
 **Verdict of the recalibration after step 22: the timing gate still stays report-only.** No false alarm in either runtime, and Chromium's runs were mostly quiet this time (16 of 20 at 0 %, against none before), so its noise is not constant on the runner. Detection fell short in both runtimes:
+
 - Bun caught every 25 % slowdown in six cases (`read-viewport`, `read-viewport-sessions`, `put-page`, `put-live-bar`, `fill-month`, `read-transfer`). `append-bars` and `snapshot-roundtrip` reached 89 %, just below 90 %. `read-year` fell from 84 % to 17 %: since step 22 it is one large copy per column, and an injected extra call no longer costs its full share of time, so the injection, not only the gate, needs a look for this case.
 - Chromium caught every 25 % slowdown in four cases and missed the others often, including the viewport reads.
 
@@ -234,12 +243,14 @@ With the new timing, both runtimes meet the gate's conditions except in one case
 ## How this setup was chosen
 
 Three designers worked from one brief and the repository, each without seeing the others' first proposal: Claude Opus 5.5, Claude Fable 5.1 and GPT-6.1 Sol. Each then critiqued the other two and revised, and a third round settled the remaining disagreements with experiments under `/tmp`:
+
 - noise of same-revision runs in each runtime;
 - detection of injected +15 % and +25 % slowdowns under each proposed rule;
 - whether memory per point is exact;
 - whether constructor counting can be evaded.
 
 They agreed early on exact budgets first, a rebuilt base rather than a stored baseline, and a bundle-and-sampler harness rather than mitata or Vitest bench. The evidence decided the rest:
+
 - **Thresholds.** Of the three rules proposed, 1.10 with a lower bound of 1.03 caught 76–100 % of +15 % slowdowns per runtime in one design's experiment and 29 of 30 in another's, all of +25 % in both, with no false alarm in same-revision runs. A rule of 1.15 caught 7–34 % at +15 %. A rule of 1.35 with all rounds above 1.15 caught none even at +25 %, and its author withdrew it.
 - **Runtimes.** Chromium and Bun: Node agrees with Chromium (one engine, twice), and Bun is the only JSC signal.
 - **Memory.** Node's `arrayBuffers` after a full collection is exact to the thousandth of a byte across runs, once the cache is held alive. An earlier reading of zero was a collected engine, which the lower bound now catches.

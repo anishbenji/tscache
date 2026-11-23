@@ -20,6 +20,7 @@ Item 1 of the performance plan of 2026-10-30 (experiment E1): a read across segm
 ## Evidence
 
 **Tests first.** Before the implementation, `bunx vitest run packages/tscache/test/dense-segment-slice-into.test.ts` failed 49 of 49 (`TypeError: segment.countIn is not a function`); after it, 49 passed. They cover:
+
 - every fencepost of a fully present segment and of one with gaps: the whole extent, both flanks beyond it, ranges that end one slot before or start one slot after it, ranges touching its first or last slot, one-slot ranges, ranges that start and end inside gaps, exactly one gap, a single absent slot, and a fully present run between gaps (which takes the copy branch inside a segment with gaps);
 - empty and emptied segments, offset zero, a target with no spare element, a segment made whole again;
 - segments spanning exactly their slot cap (1, 8 and 32,768), fully present and with every other slot cleared;

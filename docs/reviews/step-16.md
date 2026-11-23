@@ -103,6 +103,7 @@ The first GitHub run failed at Knip: it loads each example's `vite.config.ts`, w
 **Question (backlog, user 2026-10-23).** Is there a better option for fetcher authors than the static-import rule `fetcherUrl()` enforces?
 
 **Findings.** Vite 8.3.4 adds its preload helper only to an app's client build: `getInsertPreload` is `consumer === "client" && !config.isWorker && !config.build.lib` (`dist/node/chunks/node.js`). Worker bundles drop the entry's exports (`preserveEntrySignatures: false`), which is why `?worker&url` cannot serve a fetcher. Probes, each with a fetcher that lazily imports a decoder and throws `AuthInvalidError`:
+
 - A Vite library-mode build keeps the default export, splits the decoder into its own chunk, and contains no helper.
 - `bun build --splitting` keeps the export too. Its own preload code touches `document` only when it exists, so it is worker-safe.
 - Both outputs run in Node, with no `document`: the lazy chunk loads, and the auth error keeps its `code`.
