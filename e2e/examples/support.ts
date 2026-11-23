@@ -115,6 +115,37 @@ export async function logSince(page: Page, marker: string): Promise<string> {
   return at < 0 ? "" : log.slice(0, at);
 }
 
+const HYDRATION =
+  /(<script id="tscache-hydration" type="application\/json">)(.*?)(<\/script>)/;
+
+/**
+ * Serves the page with its hydration element's text replaced by
+ * `change(text)`; everything else is as the server wrote it. Returns the
+ * texts the server wrote, one per page served, in order.
+ */
+async function serveHydration(
+  page: Page,
+  change: (text: string) => string,
+): Promise<string[]> {
+  const served: string[] = [];
+  await page.route("/", async (route) => {
+    const response = await route.fetch();
+    const html = await response.text();
+    const found = HYDRATION.exec(html);
+    if (found === null) throw new Error("the page carries no hydration");
+    const text = found[2] ?? "";
+    served.push(text);
+    await route.fulfill({
+      response,
+      body: html.replace(
+        HYDRATION,
+        () => `${found[1]}${change(text)}${found[3]}`,
+      ),
+    });
+  });
+  return served;
+}
+
 /**
  * Serves the page with its snapshot's first segment given twice, so the
  * browser's `hydrate` refuses it part way through validation: the second
@@ -123,23 +154,21 @@ export async function logSince(page: Page, marker: string): Promise<string> {
  * it.
  */
 export async function serveCorruptSnapshot(page: Page): Promise<void> {
-  const element =
-    /(<script id="tscache-hydration" type="application\/json">)(.*?)(<\/script>)/;
-  await page.route("/", async (route) => {
-    const response = await route.fetch();
-    const html = await response.text();
-    const found = element.exec(html);
-    if (found === null) throw new Error("the page carries no hydration");
-    const hydration = JSON.parse(found[2] ?? "") as {
-      snapshot: EncodedSnapshot;
-    };
+  await serveHydration(page, (text) => {
+    const hydration = JSON.parse(text) as { snapshot: EncodedSnapshot };
     const [first] = hydration.snapshot.segments;
     if (first === undefined) throw new Error("the snapshot has no segment");
     hydration.snapshot.segments = [first, ...hydration.snapshot.segments];
-    const json = JSON.stringify(hydration).replaceAll("<", "\\u003c");
-    await route.fulfill({
-      response,
-      body: html.replace(element, () => `${found[1]}${json}${found[3]}`),
-    });
+    return JSON.stringify(hydration).replaceAll("<", "\\u003c");
   });
+}
+
+/**
+ * Serves the page with its hydration's text cut in half, so it is not
+ * JSON, as a truncated response would be; the page's other elements are as
+ * the server wrote them. Returns the hydrations the server wrote, one per
+ * page served, in order.
+ */
+export async function serveTruncatedHydration(page: Page): Promise<string[]> {
+  return serveHydration(page, (text) => text.slice(0, text.length / 2));
 }

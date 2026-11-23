@@ -13,6 +13,7 @@ import {
   notices,
   recordNotices,
   serveCorruptSnapshot,
+  serveTruncatedHydration,
   span,
   stats,
   waitNotices,
@@ -205,6 +206,36 @@ test("a snapshot that fails to apply leaves the cache to fetch the whole window"
   );
   const hydration = await hydrationOf(page);
   // Nothing was seeded, so the one fetch starts at the window's first day.
+  const fetched = await waitNotices(page, 1);
+  expect(fetched.map((notice) => notice.range.start)).toEqual([
+    seededSpan(hydration).from,
+  ]);
+  await expect(page.getByTestId("fetches")).toHaveText("1");
+  expect(await value(page, "bars")).toBeGreaterThan(100);
+  expect(problems).toEqual([]);
+});
+
+// A hydration that is not JSON, beside valid props, is not seeded either:
+// the page mounts, and the cache fetches the window.
+test("a hydration that is not JSON leaves the cache to fetch the whole window", async ({
+  page,
+}) => {
+  const problems: string[] = [];
+  page.on("pageerror", (error) => problems.push(error.message));
+  page.on("console", (message) => {
+    // The warning is for development builds; this is a production build.
+    if (message.type() === "error" || message.type() === "warning") {
+      problems.push(message.text());
+    }
+  });
+  const served = await serveTruncatedHydration(page);
+  await open(page);
+  await expect(page.getByTestId("mode")).toHaveText("shared");
+  await expect(page.locator(".log")).toContainText(
+    "snapshot from the server: not applied",
+  );
+  // The page carries half the text; the server wrote all of it.
+  const hydration = JSON.parse(served[0] ?? "null") as Hydration;
   const fetched = await waitNotices(page, 1);
   expect(fetched.map((notice) => notice.range.start)).toEqual([
     seededSpan(hydration).from,

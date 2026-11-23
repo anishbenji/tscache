@@ -25,6 +25,8 @@ import {
 } from "../src/hydration";
 
 const MINUTE = 60_000;
+/** Text a warning must never quote: it stands for the page's data. */
+const MARKER = "SECRETMARKER";
 const T0 = Date.UTC(2026, 5, 1);
 const at = (slot: number) => T0 + slot * MINUTE;
 
@@ -287,14 +289,61 @@ describe("seedCache", () => {
     vi.restoreAllMocks();
   });
 
-  it("counts a failure as not seeded, and warns in development with the message", async () => {
+  it("counts a failure as not seeded, and warns in development with the error's name only", async () => {
     const cache = refusing(new Error("invalid snapshot: overlaps"));
     expect(await seedCache(cache, hydration, () => true)).toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
     const args = warn.mock.calls[0] ?? [];
     expect(args).toHaveLength(1);
-    expect(args[0]).toContain("invalid snapshot: overlaps");
+    // The message can quote the snapshot, which carries the page's data.
+    expect(args[0]).toContain("(Error)");
+    expect(args[0]).not.toContain("invalid snapshot: overlaps");
     expect(args[0]).toContain('"candles"');
+  });
+
+  it("names a TscacheError's code beside its name", async () => {
+    const error = Object.assign(new TscacheError("refused: 0123"), {
+      code: "duplicate",
+    });
+    expect(await seedCache(refusing(error), hydration, () => true)).toBe(
+      undefined,
+    );
+    expect(warn.mock.calls[0]?.[0]).toContain("(TscacheError duplicate)");
+    expect(warn.mock.calls[0]?.[0]).not.toContain("0123");
+  });
+
+  it("never quotes a snapshot whose error would quote it", async () => {
+    // decodeSnapshot quotes a snapshot that is not an object whole.
+    const cache = await cacheOf();
+    const spoiled = {
+      range: hydration.range,
+      snapshot: `${JSON.stringify(hydration.snapshot)}${MARKER}`,
+    } as unknown as Hydration;
+    expect(await seedCache(cache, spoiled, () => true)).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("(TscacheError)");
+    expect(warn.mock.calls[0]?.[0]).not.toContain(MARKER);
+  });
+
+  it("counts a hydration that is not JSON as not seeded, and never quotes it", async () => {
+    // The element is there, so reading it succeeds; its text is parsed only
+    // when the seeding reads the snapshot. JSON.parse quotes the text it
+    // stopped at.
+    const text = JSON.stringify({ range: hydration.range, snapshot: MARKER });
+    const broken = text.replace(`"${MARKER}"`, MARKER);
+    vi.stubGlobal("document", {
+      getElementById: (id: string) =>
+        id === "tscache-hydration" ? { textContent: broken } : null,
+    });
+    const read = readHydration();
+    const cache = await cacheOf();
+    expect(await seedCache(cache, read, () => true)).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("(SyntaxError)");
+    expect(warn.mock.calls[0]?.[0]).not.toContain(MARKER);
+    // The cache is open and empty: a read fetches all of it.
+    const known = await cache.get(hydration.range, { cacheOnly: true });
+    expect(known.coverage).toEqual([]);
   });
 
   it("is silent when the attempt no longer counts, as when its worker was lost", async () => {

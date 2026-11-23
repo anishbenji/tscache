@@ -153,12 +153,14 @@ provisional day.
 - A snapshot that fails to apply (a malformed or foreign one, a failed
   write) leaves the cache not seeded, as a worker without `hydrate` does
   (architecture §2.8): the page connects, the log reads `snapshot from the
-  server: not applied`, and the cache fetches the whole window. A
-  development build also warns in the console with the error's message,
-  never the snapshot. Only a cache that cannot be opened fails the
-  connection: the log reads `could not connect`, and the page does not try
-  again until it is reloaded, unless the worker is lost meanwhile, which
-  connects a new client.
+  server: not applied`, and the cache fetches whatever of the window it
+  does not already cover: all of it in a fresh tab, less beside a tab that
+  already filled the shared cache. Hydration text that is not JSON counts
+  so too. A development build also warns in the console with the error's
+  name, never its message, which can quote the snapshot. Only a cache that
+  cannot be opened fails the connection: the log reads `could not connect`,
+  and the page does not try again until it is reloaded, unless the worker
+  is lost meanwhile, which connects a new client.
 
 ## What else is in here
 
