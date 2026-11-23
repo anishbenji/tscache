@@ -339,11 +339,14 @@ export class HostedPersistence implements Persistence {
 
   /**
    * Runs one strict deletion through a store that exists, with the
-   * persister's deadline and no retry; never rejects: a failure leaves the
-   * records (§4.10.6, Failures).
+   * persister's deadline and no retry; never rejects nor throws: a failure,
+   * an opener that throws included, leaves the records (§4.10.6, Failures).
    */
   #bounded(run: (store: PersistStore) => Promise<void>): Promise<void> {
-    this.#store ??= this.#openStore({ ifExists: true });
+    // The opener is called now; a throw is the opening's rejection.
+    this.#store ??= new Promise((open) =>
+      open(this.#openStore({ ifExists: true })),
+    );
     const opening = this.#store;
     // A failed opening is tried again by the next cleanup.
     const forget = () => {

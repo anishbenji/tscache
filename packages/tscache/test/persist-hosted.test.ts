@@ -456,6 +456,73 @@ describe("clearAll after a chunk failure (user decision 123 A)", () => {
     expect(h.engine.coverage("mem", all)).toEqual([]);
   });
 
+  // Codex gate round 2, R2-2: the twin of the case above with an opener
+  // that throws synchronously; the throw is the opening's rejection.
+  it("resolves with memory cleared when the store opener throws", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = await failedWith(() => {
+      throw new DOMException("open failed", "SecurityError");
+    }, "gone");
+    h.engine.put("mem", batch([1]));
+    await h.persistence.clearAll();
+    expect(h.open.mock.calls).toEqual([[{ ifExists: true }]]);
+    expect(h.engine.coverage("mem", all)).toEqual([]);
+  });
+
+  it("answers a removal whose cleanup's store opener throws, the removal applied", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = await failedWith(() => {
+      throw new DOMException("open failed", "SecurityError");
+    });
+    h.engine.put("persist", batch([1, 2]));
+    const removal = h.persistence.durably("persist", () =>
+      h.engine.invalidate("persist", all),
+    );
+    expect(removal).toBeInstanceOf(Promise);
+    await removal;
+    expect(h.open.mock.calls).toEqual([[{ ifExists: true }]]);
+    expect(h.engine.coverage("persist", all)).toEqual([]);
+  });
+
+  // The class map of step 132: cleanups started before the call are waited
+  // for, and the whole-store clear is the cleanup of every cache its engine
+  // clear reached, so a later removal waits for nothing (§4.10.8).
+  it("waits for a cleanup started before the call", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const store = new MemoryStore();
+    store.seed("persist", fixture({}, [0, 4]));
+    const h = await failedWith(async () => store);
+    const cleanup = store.gate("write");
+    const removal = h.persistence.durably("persist", () =>
+      h.engine.invalidate("persist", all),
+    );
+    await cleanup.entered;
+    const cleared = tracked(
+      Promise.resolve(h.persistence.clearAll()).then(() => undefined),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.log.at(-1)?.kind).toBe("clearAll");
+    expect(cleared.done).toBe(false);
+    cleanup.release();
+    await Promise.all([removal, cleared.promise]);
+    expect(store.records("persist")).toEqual({ cache: undefined, pages: [] });
+  });
+
+  it("starts no cleanup for a removal after a whole-store clear that failed", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = await failedWith(() =>
+      Promise.reject(new DOMException("open failed", "UnknownError")),
+    );
+    await h.persistence.clearAll();
+    expect(
+      h.persistence.durably("persist", () =>
+        h.engine.invalidate("persist", all),
+      ),
+    ).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.open.mock.calls).toEqual([[{ ifExists: true }]]);
+  });
+
   // Codex gate round 1, R1-2: a store that opens after the deadline is
   // still emptied, after the call has answered (§4.10.8).
   it("empties the store when its opening resolves after clearAll answered", async () => {
