@@ -39,7 +39,8 @@ resolves, to the listeners attached by then. Check `client.mode` if persistence 
   (Chromium), tscache creates the worker with `extendedLifetime`, which keeps it running about 30 seconds
   after its last tab so that write can land. Elsewhere the option is ignored, and a worker that ends
   first loses the additions still waiting, at most five seconds of them; the disk keeps the earlier state.
-  A removal is not exposed to this, since its call resolves only once it is durable.
+  A removal is not exposed to this, since its call resolves only once it is durable; in a superseded
+  worker it is not written at all ([Failures](#failures)).
 
 ## Loading
 
@@ -84,7 +85,9 @@ later loads nothing. Its tabs keep working from memory until they are reloaded.
 A stored range is served in every later session without asking the backend, so a restatement the backend
 does not announce lasts across reloads too. Set `version` when the dataset has one: records of another
 version are never loaded. Without one, `invalidate` or `clear` on your own clock removes stored ranges as
-well ([Expiry and other patterns](/guides/patterns)).
+well ([Expiry and other patterns](/guides/patterns)), except in a tab whose worker is superseded
+([Failures](#failures)): there the records stay, for the newer worker to load, and only `clearAll()`
+removes them.
 
 ## Keeping the storage
 

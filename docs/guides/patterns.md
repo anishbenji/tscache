@@ -142,7 +142,9 @@ const candles = await client.cache({
   during `cache()` comes before the handle exists, so listen with `client.on`.
 - **Restatements need a version, across sessions too.** A stored range is served in every later session
   without asking the backend. Set `version` when the dataset has one: records of another version are
-  never loaded. Without one, `invalidate` or `clear` on your own clock removes stored ranges as well.
+  never loaded. Without one, `invalidate` or `clear` on your own clock removes stored ranges as well,
+  except in a tab whose worker is superseded: there the records stay, for the newer worker to load, and
+  only `clearAll()` removes them.
 - **Durable storage is your call.** Browsers evict best-effort storage under pressure, and a range whose
   record was evicted is simply fetched again. To keep the cache, call `navigator.storage.persist()` from
   the page; tscache never does, since some browsers prompt the user.
