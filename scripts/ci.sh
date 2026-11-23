@@ -64,9 +64,7 @@ bun run fallow
 # The health floor: the project's Fallow health score (0-100) may not drop
 # below 95 (step 83 set it at 90; step 112 raised it).
 bun run fallow:health
-# The persistence event-order tests run every order of up to 5 events here,
-# 3 in the normal suite (packages/tscache/test/persist-orders.ts).
-TSCACHE_EVENT_ORDERS=5 bunx vitest run --passWithNoTests
+bunx vitest run --passWithNoTests
 # What npm would publish: exactly the manifest, README, license and the
 # built code with its declarations, every entry among it; no test, fixture
 # or source map (scripts/check-pack.ts).

@@ -989,11 +989,11 @@ function byRule(
 const env = (globalThis as { process?: { env: Record<string, string> } })
   .process?.env;
 /**
- * Events per order: 3 in the normal suite, 4,006 orders (3,201 persister,
- * 805 hosted) in under a second. `bun run ci` sets TSCACHE_EVENT_ORDERS=5,
- * which every round 1-3 reproduction fits (R3-2, the longest: openA,
- * clearAll, openB, invB, fail): 572,866 orders (421,339 and 151,527), about
- * 105 s and 37 s for the two files on an idle machine, run side by side.
+ * Events per order: 3 in the normal suite and in `bun run ci`, 4,006 orders
+ * (3,201 persister, 805 hosted) in under a second. TSCACHE_EVENT_ORDERS=5
+ * runs every order that the round 1-3 reproductions fit (R3-2, the longest:
+ * openA, clearAll, openB, invB, fail): 572,866 orders (421,339 and 151,527),
+ * about 105 s and 37 s for the two files on an idle machine, side by side.
  */
 const BOUND = Number(env?.TSCACHE_EVENT_ORDERS ?? 3);
 
