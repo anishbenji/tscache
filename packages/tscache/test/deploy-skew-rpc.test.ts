@@ -93,6 +93,75 @@ async function connect(server: RpcServer, module?: string) {
   return { client, events };
 }
 
+/**
+ * A fetcher module whose import waits for `release`: `loaded` resolves once
+ * its evaluation ended. Each tag is a module of its own, as the realm keeps
+ * one evaluation per URL.
+ */
+function gatedModule(tag: string) {
+  const key = `__tscacheGate_${tag.replace(/\W/g, "_")}`;
+  const gate = deferred<void>();
+  const loaded = deferred<void>();
+  (globalThis as Record<string, unknown>)[key] = {
+    gate: gate.promise,
+    loaded: loaded.resolve,
+  };
+  const module = `data:text/javascript,${encodeURIComponent(`
+    const hooks = globalThis[${JSON.stringify(key)}];
+    await hooks.gate;
+    hooks.loaded();
+    export default {
+      async fetch(req) {
+        const ts = [];
+        for (let t = req.range.start; t <= req.range.end; t += req.interval) ts.push(t);
+        return { timestamps: ts, fields: { value: ts } };
+      },
+    }; // gated ${tag}
+  `)}`;
+  return { module, release: () => gate.resolve(), loaded: loaded.promise };
+}
+
+/**
+ * A port that sends `init` with `module`: `arrived` resolves once the server
+ * has handled the init (its import is pending), and `end` then detaches the
+ * port at the server or closes it from the tab's side, resolving once the
+ * server has forgotten it.
+ */
+function joining(server: RpcServer, module: string) {
+  const channel = new MessageChannel();
+  const port = channel.port1;
+  const arrived = deferred<void>();
+  const wrapped: MessagePortLike = {
+    postMessage: (m, t) => port.postMessage(m, t ?? []),
+    addEventListener: (type, fn) =>
+      port.addEventListener(type, (event) => {
+        const data = (event as MessageEvent).data as { t?: string } | null;
+        fn({ data });
+        if (type === "message" && data?.t === "init") arrived.resolve();
+      }),
+    removeEventListener: () => {},
+    start: () => port.start(),
+    close: () => port.close(),
+  };
+  const count = server.connections;
+  server.attach(wrapped);
+  const connecting = PortClient.connect(channel.port2 as MessagePortLike, {
+    fetcher: { module },
+  }).catch((error: unknown) => error);
+  return {
+    arrived: arrived.promise,
+    connecting,
+    end: async (how: "detached" | "closed") => {
+      if (how === "detached") server.detach(wrapped);
+      else channel.port2.close();
+      await vi.waitFor(() => expect(server.connections).toBe(count), {
+        timeout: 4000,
+        interval: 1,
+      });
+    },
+  };
+}
+
 /** A round trip: everything the server posted before it has arrived. */
 async function barrier(client: PortClient): Promise<void> {
   await client.request("cache", plain);
@@ -404,6 +473,105 @@ describe("15: the superseded event (N129, N132)", () => {
     expect(firsts).toEqual([undefined, moduleA]);
     expect(later).toEqual([moduleA]);
   });
+
+  // Gate round 6 (R6-3), the class: the worker's fetcher identity is the
+  // first module the orchestrator installs, whatever becomes of the
+  // connection whose init loaded it.
+  for (const end of ["detached", "closed"] as const) {
+    it(`a module whose loading port is ${end} during the import is reported once it is installed, after the announcement (R6-3)`, async () => {
+      const firsts: (string | undefined)[] = [];
+      const later: string[] = [];
+      const server = new RpcServer(
+        new Engine(),
+        LIB_VERSION,
+        undefined,
+        undefined,
+        {
+          onFirstInit: (fetcher) => firsts.push(fetcher),
+          onFirstFetcher: (fetcher) => later.push(fetcher),
+        },
+      );
+      const bare = await connect(server);
+      const gated = gatedModule(`later-${end}`);
+      const joiner = joining(server, gated.module);
+      await joiner.arrived;
+      await joiner.end(end);
+      gated.release();
+      await gated.loaded;
+      await barrier(bare.client);
+      expect(firsts).toEqual([undefined]);
+      expect(later).toEqual([gated.module]);
+      expect(await joiner.connecting).toBeInstanceOf(Error);
+      // A later init of the same module reports nothing more.
+      await connect(server, gated.module);
+      expect(later).toEqual([gated.module]);
+    });
+
+    it(`a module whose first loading port is ${end} during the import is the one the first init-ok announces (R6-3)`, async () => {
+      const firsts: (string | undefined)[] = [];
+      const later: string[] = [];
+      const server = new RpcServer(
+        new Engine(),
+        LIB_VERSION,
+        undefined,
+        undefined,
+        {
+          onFirstInit: (fetcher) => firsts.push(fetcher),
+          onFirstFetcher: (fetcher) => later.push(fetcher),
+        },
+      );
+      const gated = gatedModule(`first-${end}`);
+      const joiner = joining(server, gated.module);
+      await joiner.arrived;
+      await joiner.end(end);
+      gated.release();
+      await gated.loaded;
+      const bare = await connect(server);
+      await barrier(bare.client);
+      expect(firsts).toEqual([gated.module]);
+      expect(later).toEqual([]);
+    });
+  }
+
+  for (const first of [false, true]) {
+    it(`an unnamed worker whose ${first ? "first" : "later"} loading port detaches during the import answers a later peer of another module with it, and its tabs hear superseded (R6-3)`, async () => {
+      const bus = fakeChannels();
+      const old = shared(bus, { startedAt: 1 });
+      const gated = gatedModule(`peer-${String(first)}`);
+      let bare: Awaited<ReturnType<typeof connect>> | undefined;
+      if (!first) bare = await connect(old.server);
+      const joiner = joining(old.server, gated.module);
+      await joiner.arrived;
+      await joiner.end("detached");
+      gated.release();
+      await gated.loaded;
+      bare ??= await connect(old.server);
+      await barrier(bare.client);
+      const before = bus.posts.length;
+      const peer = shared(bus, {
+        startedAt: 2,
+        name: `tscache:${LIB_VERSION}:${moduleB}`,
+      });
+      const named = await connect(peer.server, moduleB);
+      await barrier(bare.client);
+      await barrier(named.client);
+      const announced = bus.posts.slice(0, before);
+      expect(announced.map((m) => m.t)).toEqual(["announce"]);
+      if (first) {
+        expect(announced[0]).toMatchObject({
+          fetcher: new URL(gated.module, workerUrl).href,
+        });
+      } else expect(announced[0]).not.toHaveProperty("fetcher");
+      const after = bus.posts.slice(before);
+      expect(after.map((m) => m.t)).toEqual(["announce", "present"]);
+      expect(after[1]).toMatchObject({
+        t: "present",
+        fetcher: new URL(gated.module, workerUrl).href,
+      });
+      expect(bare.events).toEqual([supersededEvt(LIB_VERSION)]);
+      expect(named.events).toEqual([]);
+    });
+  }
 
   it("two tabs with one key share a worker, and a tab without a fetcher beside them supersedes nobody", async () => {
     const { servers } = installWorkers(fakeChannels());

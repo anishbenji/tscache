@@ -147,15 +147,18 @@ export interface ServerOptions {
   features?: readonly WorkerFeature[];
   /**
    * Called once, right after the first `init-ok`, with the fetcher module
-   * that connection named, if any: the SharedWorker announces itself to the
-   * other workers then (N127).
+   * the worker has installed by then, if any (usually the one that
+   * connection named; one whose loading connection ended first counts
+   * too): the SharedWorker announces itself to the other workers then
+   * (N127).
    */
   onFirstInit?: (fetcher: string | undefined) => void;
   /**
-   * Called once, right after the `init-ok` of a later connection that loaded
-   * the worker's first fetcher module, when its first init named none (an
-   * unnamed worker, step 135 gate round 5): the SharedWorker then answers
-   * other workers with that module.
+   * Called once, as soon as the worker installs its first fetcher module,
+   * when that happens after the first `init-ok` reported none (an unnamed
+   * worker, step 135 gate rounds 5 and 6), whether or not the connection
+   * that loaded it is still there: the SharedWorker then answers other
+   * workers with that module.
    */
   onFirstFetcher?: (fetcher: string) => void;
 }
@@ -169,6 +172,8 @@ export class RpcServer {
   readonly #features: readonly WorkerFeature[];
   #onFirstInit: ServerOptions["onFirstInit"];
   #onFirstFetcher: ServerOptions["onFirstFetcher"];
+  /** The first fetcher module the orchestrator installed, once it has. */
+  #module: string | undefined;
   /** Set once this worker is superseded (N132): sent to later connections. */
   #superseded: ClientEvents["superseded"] | undefined;
   readonly #connections = new Set<Connection>();
@@ -407,39 +412,46 @@ export class RpcServer {
         this.#drop(connection);
         return;
       }
+      // Installed, whether or not this connection is still there.
+      this.#installed(fetcher.module);
     }
     if (!this.#connections.has(connection)) return;
     connection.ready = true;
     const reply: InitResult = { t: "init-ok" };
     this.#send(connection, reply);
-    this.#afterInit(connection, fetcher);
+    this.#afterInit(connection);
+  }
+
+  /**
+   * The orchestrator holds `module` now (step 135, gate rounds 5 and 6):
+   * the worker's fetcher identity is the first module installed, however
+   * the connection that loaded it ends. Before the first init-ok it waits
+   * for `onFirstInit`; after it, `onFirstFetcher` hears it once.
+   */
+  #installed(module: string): void {
+    if (this.#module !== undefined) return;
+    this.#module = module;
+    if (this.#onFirstInit !== undefined) return;
+    const onFirstFetcher = this.#onFirstFetcher;
+    this.#onFirstFetcher = undefined;
+    onFirstFetcher?.(module);
   }
 
   /**
    * What follows an init-ok (step 135): a connection that joins a
    * superseded worker is told right away, and the server's first init is
-   * reported to its entry, with the fetcher module it named. When that init
-   * named none, the first later init that loaded a module reports it too.
+   * reported to its entry, with the fetcher module installed by then, if
+   * any. A module installed later is reported by `#installed`.
    */
-  #afterInit(connection: Connection, fetcher: FetcherConfig | undefined): void {
+  #afterInit(connection: Connection): void {
     if (this.#superseded !== undefined) {
       this.#send(connection, this.#supersededEvt(this.#superseded));
     }
-    const module =
-      isObject(fetcher) && typeof fetcher.module === "string"
-        ? fetcher.module
-        : undefined;
     const onFirstInit = this.#onFirstInit;
-    if (onFirstInit !== undefined) {
-      this.#onFirstInit = undefined;
-      if (module !== undefined) this.#onFirstFetcher = undefined;
-      onFirstInit(module);
-      return;
-    }
-    const onFirstFetcher = this.#onFirstFetcher;
-    if (onFirstFetcher === undefined || module === undefined) return;
-    this.#onFirstFetcher = undefined;
-    onFirstFetcher(module);
+    if (onFirstInit === undefined) return;
+    this.#onFirstInit = undefined;
+    if (this.#module !== undefined) this.#onFirstFetcher = undefined;
+    onFirstInit(this.#module);
   }
 
   async #request(connection: Connection, req: Req): Promise<void> {
