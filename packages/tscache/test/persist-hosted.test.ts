@@ -565,6 +565,28 @@ describe("clearAll after a chunk failure (user decision 123 A)", () => {
     expect(store.records("persist")).toEqual({ cache: undefined, pages: [] });
   });
 
+  // Codex gate round 4, R4-2: a logout that found no database looks again at
+  // the next one, since another worker may have created it meanwhile.
+  it("opens the store again at a later clearAll when an earlier one found no database", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const store = new MemoryStore();
+    let created = false;
+    const h = await failedWith(
+      async () => (created ? store : undefined),
+      "gone",
+    );
+    await h.persistence.clearAll();
+    store.seed("never", fixture({ id: "never" }, [0, 4]));
+    created = true;
+    await h.persistence.clearAll();
+    expect(h.open.mock.calls).toEqual([
+      [{ ifExists: true }],
+      [{ ifExists: true }],
+    ]);
+    expect(store.log.map((call) => call.kind)).toEqual(["clearAll"]);
+    expect(store.records("never")).toEqual({ cache: undefined, pages: [] });
+  });
+
   it("empties the store when the clearAll's own import of the chunk fails", async () => {
     vi.useFakeTimers({ now: 0 });
     const h = hosted();
@@ -628,6 +650,114 @@ describe("an op that fails after its removal, the chunk failed", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(outcome).toBe(boom);
       expect(store.records("persist")).toEqual({ cache: undefined, pages: [] });
+    },
+  );
+});
+
+// Codex gate round 4, R4-3: a chunk loader that throws is an import that
+// failed: the calls waiting for it take the failure path (§4.10.8).
+describe("a chunk loader that throws", () => {
+  function throwing() {
+    const store = new MemoryStore();
+    store.seed("never", fixture({ id: "never" }, [0, 4]));
+    const engine = new Engine();
+    const open = vi.fn(async (_options?: { ifExists?: boolean }) => store);
+    const stops: Stop[] = [];
+    const persistence = new HostedPersistence(
+      engine,
+      () => {
+        throw new TypeError("no chunk");
+      },
+      open,
+      { onStopped: (event) => stops.push(event) },
+    );
+    engine.cache(config());
+    return { store, open, stops, persistence };
+  }
+  const error = { name: "TypeError", message: "no chunk" };
+
+  it("a first clearAll answers, the whole store emptied through the store opener", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = throwing();
+    const cleared = h.persistence.clearAll();
+    expect(cleared).toBeInstanceOf(Promise);
+    await cleared;
+    expect(h.open.mock.calls).toEqual([[{ ifExists: true }]]);
+    expect(h.store.log.map((call) => call.kind)).toEqual(["clearAll"]);
+    expect(h.store.records("never")).toEqual({ cache: undefined, pages: [] });
+    await h.persistence.open("persist");
+    expect(h.stops).toEqual([
+      { cacheId: "persist", reason: "unavailable", error },
+    ]);
+  });
+
+  it("a first open answers and stops the cache with 'unavailable' and the error", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const h = throwing();
+    const opening = h.persistence.open("persist");
+    expect(opening).toBeInstanceOf(Promise);
+    await opening;
+    expect(h.stops).toEqual([
+      { cacheId: "persist", reason: "unavailable", error },
+    ]);
+    expect(h.open).not.toHaveBeenCalled();
+  });
+});
+
+// Codex gate round 4, R4-1: the calls made while the chunk loads take effect
+// in the order they arrived, so an order in which the import fails leaves the
+// store as the same calls made after the failure do (§4.10.8). Here a logout
+// waits behind a held removal of A, and B is opened after the logout: the
+// whole-store clear is not B's cleanup, and B's first removal deletes its
+// records, whether the clear failed or not.
+describe("calls held for a chunk that fails take effect in arrival order", () => {
+  async function sixCalls(failFirst: boolean, clear: "ok" | "fail") {
+    vi.useFakeTimers({ now: 0 });
+    const store = new MemoryStore();
+    store.seed("A", fixture({ id: "A" }, [0, 4]));
+    store.seed("B", fixture({ id: "B" }, [0, 4]));
+    if (clear === "fail") store.fail("clearAll");
+    const engine = new Engine();
+    const chunk = deferred<LazyPersist>();
+    const persistence = new HostedPersistence(
+      engine,
+      () => chunk.promise,
+      async () => store,
+    );
+    const failure = new TypeError("chunk 404");
+    if (failFirst) {
+      chunk.reject(failure);
+      await persistence.open("gone");
+    }
+    const answers: Promise<unknown>[] = [];
+    engine.cache(config({ id: "A" }));
+    answers.push(Promise.resolve(persistence.open("A")));
+    answers.push(
+      Promise.resolve(persistence.durably("A", () => engine.clear("A"))).catch(
+        () => {},
+      ),
+    );
+    answers.push(Promise.resolve(persistence.clearAll()).catch(() => {}));
+    engine.cache(config({ id: "B" }));
+    answers.push(Promise.resolve(persistence.open("B")));
+    if (!failFirst) chunk.reject(failure);
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.all(answers);
+    const afterLogout = store.records("B");
+    await persistence.durably("B", () => engine.invalidate("B", all));
+    const log = store.log.map((call) =>
+      call.kind === "clearAll" ? call.kind : `${call.kind}:${call.cacheId}`,
+    );
+    return { log, afterLogout, after: store.records("B") };
+  }
+
+  it.each(["ok", "fail"] as const)(
+    "a held logout, then B opened, then the failure (store clear %s)",
+    async (clear) => {
+      const held = await sixCalls(false, clear);
+      expect(held).toEqual(await sixCalls(true, clear));
+      expect(held.log).toEqual(["write:A", "clearAll", "write:B"]);
+      expect(held.after).toEqual({ cache: undefined, pages: [] });
     },
   );
 });

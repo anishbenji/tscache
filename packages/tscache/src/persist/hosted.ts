@@ -237,7 +237,9 @@ export class HostedPersistence implements Persistence {
     if (this.#state !== "idle") return;
     this.#state = "loading";
     const timer = setTimeout(() => this.#settle(undefined), this.#timeoutMs);
-    this.#load().then(
+    // The loader is called now; a throw is the import's rejection (round 4,
+    // R4-3).
+    new Promise<LazyPersist>((load) => load(this.#load())).then(
       (chunk) => {
         clearTimeout(timer);
         this.#settle(chunk);
