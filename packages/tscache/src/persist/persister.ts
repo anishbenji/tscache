@@ -767,7 +767,9 @@ export class Persister {
 
   /**
    * A failed clear stops every tracked cache, without a cleanup: it was
-   * their cleanup. Nothing persists any more (D27).
+   * their cleanup, a deferred one included, also of a cache stopped before
+   * (a failed opening the clear shared). Cleanups already queued stay.
+   * Nothing persists any more (D27).
    */
   #clearFailed(job: Job, reason: Reason, error: Failure | undefined): void {
     this.#atomically(() => {
@@ -777,6 +779,7 @@ export class Persister {
       this.#failure = { reason, error, cleanup: false };
       for (const cache of this.#tracked.values()) {
         this.#stop(cache, reason, error, false);
+        cache.deferred = false;
       }
       this.#settle(job);
     });
