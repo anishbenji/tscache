@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -453,6 +454,30 @@ describe("check-mermaid: the command", () => {
     expect(printed).toHaveLength(1);
     expect(printed[0]).toContain(join(root, "site/snippets/[topic].md"));
     expect(printed[0]).toContain("Rename the file");
+  });
+
+  it("exits 1 naming a symbolic link under site/, which VitePress follows and the check does not", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = fixture({
+      "site/index.md": `# Home\n\n${FLOWCHART}`,
+      "docs/shared/topic.md": `# Topic\n\n${BROKEN}`,
+    });
+    symlinkSync("../docs/shared", join(root, "site/shared"));
+    const listed = () => ({
+      exitCode: 0,
+      stdout: "site/index.md\0site/shared\0",
+      stderr: "",
+    });
+    try {
+      expect(await run([], listed, root)).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true });
+    }
+    const printed = error.mock.calls.map((call) => String(call[0]));
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toContain(join(root, "site/shared"));
+    expect(printed[0]).toContain("symbolic link");
+    expect(printed[0]).toContain("Replace the link with the files");
   });
 
   it("exits 1 when Git cannot list the files", async () => {

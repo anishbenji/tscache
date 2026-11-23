@@ -40,6 +40,7 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -362,12 +363,13 @@ function shown(full: string): string {
 }
 
 /**
- * Checks the `given` pages and directories, or every page Git lists under `site/` of `root` plus
- * the pages generated into `site/api/`, which Git ignores, and returns the exit code: 1 when a
- * diagram does not parse, when Git cannot list the files, when there is no page, or, without
- * `given`, when a listed page has a bracket-named segment in its path (VitePress's dynamic-route
- * form), whatever the page holds and whether or not the site excludes it. A dynamic route needs
- * the check extended first.
+ * Checks the `given` pages and directories, or the regular Markdown files Git lists under `site/`
+ * of `root` plus the pages generated into `site/api/`, which Git ignores, and returns the exit
+ * code: 1 when a diagram does not parse, when Git cannot list the files, when there is no page,
+ * or, without `given`, when a name Git lists under `site/` is a symbolic link (VitePress follows
+ * it; the check does not), or when a listed page has a bracket-named segment in its path
+ * (VitePress's dynamic-route form), whatever the page holds and whether or not the site excludes
+ * it. A link or a dynamic route needs the check extended first.
  */
 export async function run(
   given: readonly string[],
@@ -389,11 +391,19 @@ export async function run(
       return 1;
     }
     const api = join(root, "site", "api");
-    pages = listed.stdout
+    const underSite = listed.stdout
       .split("\0")
-      .filter((f) => f.startsWith("site/") && f.endsWith(".md"))
-      .map((f) => join(root, f))
-      .filter((f) => existsSync(f))
+      .filter((f) => f.startsWith("site/"))
+      .map((f) => join(root, f));
+    const links = underSite.filter((f) =>
+      lstatSync(f, { throwIfNoEntry: false })?.isSymbolicLink(),
+    );
+    for (const f of links)
+      console.error(
+        `mermaid: ${shown(f)} is a symbolic link, which VitePress follows and the check does not. Replace the link with the files, or extend the check before adding a link`,
+      );
+    pages = underSite
+      .filter((f) => f.endsWith(".md") && existsSync(f))
       .concat(existsSync(api) ? pagesUnder(api) : []);
     const dynamic = pages.filter((f) =>
       DYNAMIC_ROUTE.test(relative(join(root, "site"), f)),
@@ -402,7 +412,7 @@ export async function run(
       console.error(
         `mermaid: ${shown(f)} has a bracket name, which VitePress reads as a dynamic route; the check does not read dynamic routes. Rename the file, or extend the check before adding a route`,
       );
-    if (dynamic.length > 0) return 1;
+    if (links.length > 0 || dynamic.length > 0) return 1;
   }
   if (pages.length === 0) {
     console.error("mermaid: no pages to check");
