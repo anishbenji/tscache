@@ -575,3 +575,59 @@ describe("clearAll after a chunk failure (user decision 123 A)", () => {
     expect(h.store.records("never")).toEqual({ cache: undefined, pages: [] });
   });
 });
+
+// Codex gate round 2, R2-3: after a chunk failure, an op that fails after
+// recording a removal answers with its own error, and only once the deferred
+// cleanup settled (N58, user decision 113 A, §4.10.8).
+describe("an op that fails after its removal, the chunk failed", () => {
+  async function stoppedOver(store: MemoryStore) {
+    const engine = new Engine();
+    const persistence = new HostedPersistence(
+      engine,
+      () => Promise.reject(new TypeError("chunk 404")),
+      async () => store,
+    );
+    engine.cache(config());
+    await persistence.open("persist");
+    return { engine, persistence };
+  }
+
+  it.each(["throws", "rejects"])(
+    "%s with its error once the gated cleanup settled",
+    async (failure) => {
+      vi.useFakeTimers({ now: 0 });
+      const store = new MemoryStore();
+      store.seed("persist", fixture());
+      const h = await stoppedOver(store);
+      const cleanup = store.gate("write");
+      const boom = new Error("listener");
+      const op =
+        failure === "throws"
+          ? () => {
+              h.engine.invalidate("persist", all);
+              throw boom;
+            }
+          : async () => {
+              await Promise.resolve();
+              h.engine.invalidate("persist", all);
+              throw boom;
+            };
+      let outcome: unknown = "pending";
+      Promise.resolve(h.persistence.durably("persist", op)).then(
+        () => {
+          outcome = "resolved";
+        },
+        (error: unknown) => {
+          outcome = error;
+        },
+      );
+      await cleanup.entered;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBe("pending");
+      cleanup.release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBe(boom);
+      expect(store.records("persist")).toEqual({ cache: undefined, pages: [] });
+    },
+  );
+});
