@@ -19,6 +19,10 @@
 // hard-coded version or path, so the check runs under Bun (`bun run docs:check`) and under Node
 // (Vitest) alike, and follows whichever Mermaid `site/package.json` pins.
 //
+//   - A dynamic route's content comes from its paths loader, which the check does not run, so it
+//     cannot see that content's diagrams. With no arguments it fails, naming the page, when a page
+//     is a dynamic-route template (`site/guide/[topic].md`); the site has none.
+//
 //   bun site/scripts/check-mermaid.ts                  checks every page Git lists under site/,
 //                                                      and the generated site/api/ pages
 //   bun site/scripts/check-mermaid.ts <files or dirs>  checks those pages, and the pages under those dirs
@@ -212,21 +216,30 @@ export async function mermaidParser(): Promise<ParseDiagram> {
   return (text) => withWindow(() => api.parse(text));
 }
 
+/** How many parses are running with the stand-in `window`; it is installed while this is not 0. */
+let windowHolders = 0;
+
 /**
- * Runs `parse` with a stand-in `window` where there is none, removed when it settles. Mermaid's
- * sequence parser reads `window?.CSS` to check a `box` colour, which throws a ReferenceError
- * without a `window`; the stand-in accepts every colour, which changes nothing a parse checks.
+ * Runs `parse` with a stand-in `window` where there is none. Mermaid's sequence parser reads
+ * `window?.CSS` to check a `box` colour, which throws a ReferenceError without a `window`; the
+ * stand-in accepts every colour, which changes nothing a parse checks. Overlapping parses share
+ * one stand-in, installed by the first and removed when the last settles; a `window` this helper
+ * did not install is left as it is.
  */
-async function withWindow<T>(parse: () => Promise<T>): Promise<T> {
-  if ("window" in globalThis) return parse();
-  Object.defineProperty(globalThis, "window", {
-    value: { CSS: { supports: () => true } },
-    configurable: true,
-  });
+export async function withWindow<T>(parse: () => Promise<T>): Promise<T> {
+  if (windowHolders === 0) {
+    if ("window" in globalThis) return parse();
+    Object.defineProperty(globalThis, "window", {
+      value: { CSS: { supports: () => true } },
+      configurable: true,
+    });
+  }
+  windowHolders++;
   try {
     return await parse();
   } finally {
-    delete (globalThis as { window?: unknown }).window;
+    windowHolders--;
+    if (windowHolders === 0) delete (globalThis as { window?: unknown }).window;
   }
 }
 
@@ -302,6 +315,12 @@ function pagesUnder(dir: string): string[] {
     .sort();
 }
 
+/**
+ * VitePress's pattern for a dynamic-route template (`dynamicRouteRE`): a page such as
+ * `guide/[topic].md` whose content a `[topic].paths.ts` loader injects at `<!-- @content -->`.
+ */
+const DYNAMIC_ROUTE = /\[(\w+?)\]/;
+
 /** A page's path as the check prints it: relative to this repository when inside it. */
 function shown(full: string): string {
   const rel = relative(ROOT, full);
@@ -311,7 +330,8 @@ function shown(full: string): string {
 /**
  * Checks the `given` pages and directories, or every page Git lists under `site/` of `root` plus
  * the pages generated into `site/api/`, which Git ignores, and returns the exit code: 1 when a
- * diagram does not parse, when Git cannot list the files, or when there is no page.
+ * diagram does not parse, when Git cannot list the files, when there is no page, or when a listed
+ * page is a dynamic-route template.
  */
 export async function run(
   given: readonly string[],
@@ -339,6 +359,14 @@ export async function run(
       .map((f) => join(root, f))
       .filter((f) => existsSync(f))
       .concat(existsSync(api) ? pagesUnder(api) : []);
+    const dynamic = pages.filter((f) =>
+      DYNAMIC_ROUTE.test(relative(join(root, "site"), f)),
+    );
+    for (const f of dynamic)
+      console.error(
+        `mermaid: ${shown(f)} is a dynamic route: the check cannot see the content its paths loader injects`,
+      );
+    if (dynamic.length > 0) return 1;
   }
   if (pages.length === 0) {
     console.error("mermaid: no pages to check");

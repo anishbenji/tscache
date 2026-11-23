@@ -15,6 +15,7 @@ import {
   formatFailure,
   importEntry,
   run,
+  withWindow,
 } from "./check-mermaid";
 
 const SCRIPT = fileURLToPath(new URL("./check-mermaid.ts", import.meta.url));
@@ -288,6 +289,28 @@ describe("check-mermaid: the command", () => {
     expect(printed[1]).toContain("1 of 2 diagram(s) do not parse");
   });
 
+  it("exits 1 naming a dynamic route, whose injected content it cannot see", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = fixture({
+      "site/index.md": `# Home\n\n${FLOWCHART}`,
+      "site/guide/[topic].md": "<!-- @content -->\n",
+    });
+    const listed = () => ({
+      exitCode: 0,
+      stdout: "site/index.md\0site/guide/[topic].md\0",
+      stderr: "",
+    });
+    try {
+      expect(await run([], listed, root)).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true });
+    }
+    const printed = error.mock.calls.map((call) => String(call[0]));
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toContain(join(root, "site/guide/[topic].md"));
+    expect(printed[0]).toContain("dynamic route");
+  });
+
   it("exits 1 when Git cannot list the files", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const failed = () => ({ exitCode: 128, stdout: "", stderr: "not a repo" });
@@ -307,6 +330,38 @@ describe("check-mermaid: the command", () => {
       rmSync(root, { recursive: true });
     }
     expect(error).toHaveBeenCalledWith("mermaid: no pages to check");
+  });
+
+  it("keeps the stand-in window until the last overlapping parse settles", async () => {
+    let settleFirst = () => {};
+    let settleSecond = () => {};
+    const first = withWindow(
+      () => new Promise<void>((resolve) => (settleFirst = resolve)),
+    );
+    const second = withWindow(
+      () => new Promise<void>((resolve) => (settleSecond = resolve)),
+    );
+    expect("window" in globalThis).toBe(true);
+    settleFirst();
+    await first;
+    expect("window" in globalThis).toBe(true);
+    settleSecond();
+    await second;
+    expect("window" in globalThis).toBe(false);
+  });
+
+  it("leaves a window it did not install in place", async () => {
+    const own = { CSS: { supports: () => false } };
+    Object.defineProperty(globalThis, "window", {
+      value: own,
+      configurable: true,
+    });
+    try {
+      await withWindow(async () => {});
+      expect((globalThis as { window?: unknown }).window).toBe(own);
+    } finally {
+      delete (globalThis as { window?: unknown }).window;
+    }
   });
 
   // `bun run docs:check` runs the script under Bun, whose module loader differs from Node's: the
