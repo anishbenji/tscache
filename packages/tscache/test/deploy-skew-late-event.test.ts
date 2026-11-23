@@ -128,12 +128,18 @@ function installSharedWorker(server: RpcServer, options: TapOptions = {}) {
   return { taps, first: first.promise };
 }
 
-/** No SharedWorker, and a dedicated worker whose server is `server`. */
-function installDedicatedWorker(server: RpcServer): void {
+/**
+ * No SharedWorker, and a dedicated worker whose server is `server`, each
+ * connection through a tap.
+ */
+function installDedicatedWorker(server: RpcServer) {
+  const taps: ReturnType<typeof tap>[] = [];
   vi.stubGlobal("SharedWorker", undefined);
   vi.stubGlobal("Worker", function FakeWorker() {
     const channel = new MessageChannel();
-    server.attach(channel.port1 as MessagePortLike);
+    const tapped = tap(channel.port1, {});
+    taps.push(tapped);
+    server.attach(tapped.wrapped);
     const port = channel.port2;
     return {
       postMessage: (m: unknown, t?: Transferable[]) =>
@@ -149,6 +155,7 @@ function installDedicatedWorker(server: RpcServer): void {
       terminate: () => port.close(),
     };
   });
+  return { taps };
 }
 
 async function make(
@@ -659,5 +666,177 @@ describe("gate round 6: every event before the client takes over (R6-1, R6-2)", 
     await eventually(() =>
       expect(order).toEqual(["modeFallback:dedicated", "superseded"]),
     );
+  });
+});
+
+// Gate round 7 of step 135 (R7-1, R7-2), the class: the replay holds only
+// what reached the port before the client existed, and it is drained once,
+// before the port delivers anything else, or by the startup timer if that
+// comes first. So the page observes the server's post order, whatever the
+// timer does: each test below holds the timer and never runs it until the
+// end (a hidden tab's throttled timers, docs/testing.md, Waiting).
+
+/** The answers the page observes in these tests, as `tap` names them. */
+const observed = new Set(["res:cache", "res:put", "res:get", "res:clearAll"]);
+
+/** The event names the page listens to here, besides modeFallback. */
+const heardEvents: (keyof ClientEvents)[] = [
+  "superseded",
+  "cacheChanged",
+  "mergeWarning",
+  "authInvalid",
+  "cacheCleared",
+];
+
+const overlapping: CacheConfig = {
+  ...plain,
+  id: "overlap",
+  warnOnOverlapDiff: true,
+};
+const batch = (v: number) => ({
+  timestamps: new Float64Array([1]),
+  fields: { v: new Float64Array([v]) },
+});
+
+describe("gate round 7: the startup replay keeps the port's order (R7-1, R7-2)", () => {
+  const variants = [
+    {
+      name: "a superseded join without a budget",
+      budget: undefined,
+      fallback: false,
+    },
+    {
+      name: "a superseded join with a memoryBudget",
+      // Room for every point these tests write (PAGE_BYTES is a test
+      // engine's page, smaller than the default engine's).
+      budget: 1 << 20,
+      fallback: false,
+    },
+    {
+      name: "a start that stepped down to a dedicated worker",
+      budget: undefined,
+      fallback: true,
+    },
+  ];
+  for (const { name, budget, fallback } of variants) {
+    it(`${name}: with the startup timer held, listener calls and settlements follow the server's post order`, async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.spyOn(console, "info").mockImplementation(() => {});
+      let taps: ReturnType<typeof tap>[];
+      if (fallback) {
+        // No superseding: a dedicated worker cannot report it.
+        ({ taps } = installDedicatedWorker(
+          new RpcServer(new Engine(), LIB_VERSION),
+        ));
+      } else {
+        const server = listingServer();
+        server.supersede(payload);
+        ({ taps } = installSharedWorker(server));
+      }
+      const client = await make({
+        workerUrl,
+        fetcher: { module: refusingModule, context: "old" },
+        ...(budget === undefined ? {} : { memoryBudget: budget }),
+      });
+      expect(client.mode).toBe(fallback ? "dedicated" : "shared");
+      const page: string[] = [];
+      client.on("modeFallback", () => page.push("modeFallback"));
+      for (const event of heardEvents) {
+        client.on(event, () => page.push(`evt:${event}`));
+      }
+      const settle = async <T>(op: string, promise: Promise<T>) => {
+        const value = await promise;
+        page.push(`res:${op}`);
+        return value;
+      };
+      const handle = await settle("cache", client.cache(overlapping));
+      await settle("put", handle.put(batch(1)));
+      warn.mockClear();
+      // Overwrites a differing value: the worker posts a mergeWarning for
+      // this put before its answer, and the page prints it once, as a put.
+      await settle("put", handle.put(batch(2)));
+      // An orchestrated fetch the fetcher refuses for its auth.
+      await settle("get", handle.get({ start: 0, end: 3 }));
+      await settle("clearAll", client.clearAll());
+      // A last round trip: everything the server posted has arrived.
+      await settle("cache", client.cache(plain));
+      const posted = (taps[0]?.sent ?? []).filter(
+        (label) => label.startsWith("evt:") || observed.has(label),
+      );
+      const expected = [...(fallback ? ["modeFallback"] : []), ...posted];
+      expect(posted).toContain("evt:mergeWarning");
+      expect(page).toEqual(expected);
+      // The held timer finds nothing left to deliver.
+      vi.runAllTimers();
+      vi.useRealTimers();
+      expect(page).toEqual(expected);
+      expect(warn).toHaveBeenCalledOnce();
+      expect(String(warn.mock.calls[0]?.[0])).toContain(
+        'a put to cache "overlap"',
+      );
+    });
+  }
+
+  it("a modeFallback listener that disposes the client stops the event whose arrival ran the delivery", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { taps } = installDedicatedWorker(
+      new RpcServer(new Engine(), LIB_VERSION),
+    );
+    const client = await make({ workerUrl });
+    expect(client.mode).toBe("dedicated");
+    const order: string[] = [];
+    client.on("modeFallback", () => {
+      order.push("modeFallback");
+      void client.dispose();
+    });
+    client.on("cacheCleared", () => order.push("cacheCleared"));
+    const disposed = new Promise<void>((resolve) =>
+      client.on("modeFallback", () => resolve()),
+    );
+    taps[0]?.wrapped.postMessage({
+      t: "evt",
+      scope: "cache",
+      cacheId: "plain",
+      event: "cacheCleared",
+      payload: { cacheId: "plain", reason: "clear-all" },
+    } satisfies Evt);
+    await disposed;
+    vi.runAllTimers();
+    vi.useRealTimers();
+    expect(order).toEqual(["modeFallback"]);
+  });
+
+  it("each kept event reports its own first listener error, and the replay goes on", async () => {
+    const reported: unknown[] = [];
+    vi.stubGlobal("reportError", (error: unknown) => reported.push(error));
+    const { first } = installSharedWorker(listingServer(), {
+      hold: "unsubscribe",
+    });
+    const creating = createClient({ workerUrl });
+    const tapped = await first;
+    await tapped.arrived;
+    const cleared = (cacheId: string): Evt => ({
+      t: "evt",
+      scope: "cache",
+      cacheId,
+      event: "cacheCleared",
+      payload: { cacheId, reason: "clear-all" },
+    });
+    tapped.wrapped.postMessage(cleared("a"));
+    tapped.wrapped.postMessage(cleared("b"));
+    tapped.release();
+    const client = await creating;
+    open.push(client);
+    const errors = [new Error("listener failed on a"), new Error("on b")];
+    const calls: string[] = [];
+    client.on("cacheCleared", ({ cacheId }) => {
+      calls.push(cacheId);
+      throw errors[calls.length - 1];
+    });
+    await eventually(() => {
+      expect(calls).toEqual(["a", "b"]);
+      expect(reported).toEqual(errors);
+    });
   });
 });

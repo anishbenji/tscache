@@ -40,11 +40,18 @@ function isSuperseded(evt: Evt): boolean {
   return evt.scope === "client" && evt.event === "superseded";
 }
 
-/** Surfaces a listener error that no caller can catch. */
+/**
+ * Surfaces a listener error that no caller can catch. Without the page's
+ * reporter it is thrown from a microtask, never at the caller: the startup
+ * delivery runs inside the port's message handling, which must go on.
+ */
 function report(error: unknown): void {
   const page = globalThis as { reportError?: (e: unknown) => void };
   if (typeof page.reportError === "function") page.reportError(error);
-  else throw error;
+  else
+    queueMicrotask(() => {
+      throw error;
+    });
 }
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5000;
 
@@ -230,11 +237,10 @@ class Client implements TscacheClient {
   /** The superseded listeners have been called (at most once). */
   #supersededHeard = false;
   /**
-   * Events waiting for the startup delivery, in port order: the kept ones,
-   * then any that arrive before its timer runs. Undefined once it ran, or
-   * when there was nothing to deliver.
+   * The startup delivery (see the constructor), until it has run once.
+   * Undefined when there was nothing to deliver.
    */
-  #queue: Evt[] | undefined;
+  #startup: (() => void) | undefined;
 
   constructor(hosting: Hosting, fallbacks: ClientEvents["modeFallback"][]) {
     this.#hosting = hosting;
@@ -245,42 +251,47 @@ class Client implements TscacheClient {
     // A worker script of another library version (N136): development only.
     warnWorkerLib(LIB_VERSION, this.#port.lib);
     // Every event that reached the port before this client existed (step
-    // 135, gate round 6): a superseded one sets the property from the
-    // start (N132), and all of them are delivered by the timer below.
-    const kept = this.#port.takeKept();
+    // 135, gate rounds 6 and 7): a superseded one sets the property from
+    // the start (N132), and all of them are delivered by the startup
+    // delivery below. Events after this point are dispatched as they come.
+    const kept = this.#port.takeKept(() => this.#deliverStartup());
     for (const evt of kept) if (isSuperseded(evt)) this.#markSuperseded(evt);
     this.#port.on((evt) => this.#arrive(evt));
     this.#port.onLost((error) => this.#lose(error));
-    // What happened before anyone could subscribe is delivered on the next
-    // macrotask, after the awaiting caller has had its turn: the chain's
-    // steps, then the kept events in port order, then any event that
-    // arrived meanwhile, so the port's order holds throughout. Every one is
-    // delivered even if a listener throws; the first error surfaces
-    // afterwards. Nothing is delivered once the client has ended (§2.7):
-    // the worker was lost or the client disposed before the timer ran, or
-    // a listener of an earlier step disposed it.
+    // What happened before anyone could subscribe is delivered once, after
+    // the awaiting caller has had its turn: on the next macrotask (the
+    // timer), or when the port's next response or event arrives, before it
+    // is handled, if that comes first. So the port's order holds against
+    // every later message. The chain's steps come first, every one even if
+    // a listener throws, and their first error is reported; then the kept
+    // events in port order, each reporting its own first error (§2.7).
+    // Nothing is delivered once the client has ended (§2.7): the worker was
+    // lost or the client disposed first, or a listener of an earlier step
+    // disposed it.
     if (fallbacks.length > 0 || kept.length > 0) {
-      this.#queue = kept;
-      setTimeout(() => {
+      this.#startup = () => {
         let failure: { error: unknown } | undefined;
-        const deliver = (emit: () => void) => {
+        for (const step of fallbacks) {
           if (this.#ended !== undefined) return;
           try {
-            emit();
+            this.#events.emit("modeFallback", step);
           } catch (error) {
             failure ??= { error };
           }
-        };
-        for (const step of fallbacks) {
-          deliver(() => this.#events.emit("modeFallback", step));
         }
-        const queue = this.#queue ?? [];
-        this.#queue = undefined;
-        for (const evt of queue) deliver(() => this.#dispatch(evt));
-        // Nobody awaits this macrotask: hand the error to the page's
+        // Nobody awaits this delivery: hand the error to the page's
         // reporter (window.reportError) rather than throwing into the void.
         if (failure !== undefined) report(failure.error);
-      }, 0);
+        for (const evt of kept) {
+          if (this.#ended !== undefined) return;
+          try {
+            this.#dispatch(evt);
+          } catch (error) {
+            report(error);
+          }
+        }
+      };
+      setTimeout(() => this.#deliverStartup(), 0);
     }
     // A tab that closes or navigates away tells the worker (browsers fire
     // no port-close event a SharedWorker could rely on); best effort. A page
@@ -301,15 +312,20 @@ class Client implements TscacheClient {
     return this.#superseded;
   }
 
+  /** Runs the startup delivery the first time only. */
+  #deliverStartup(): void {
+    const startup = this.#startup;
+    this.#startup = undefined;
+    startup?.();
+  }
+
   /**
-   * An event from the port: held while the startup delivery is pending, so
-   * it follows the kept ones, else delivered now. A superseded event sets
-   * the property on arrival either way.
+   * An event from the port, delivered now: the port has run the startup
+   * delivery before it (`takeKept`). A superseded event sets the property.
    */
   #arrive(evt: Evt): void {
     if (isSuperseded(evt)) this.#markSuperseded(evt);
-    if (this.#queue === undefined) this.#dispatch(evt);
-    else this.#queue.push(evt);
+    this.#dispatch(evt);
   }
 
   /**
@@ -502,12 +518,12 @@ async function awaitSuperseded(port: PortClient): Promise<void> {
  * §2.1. Resolves once a hosting completed the handshake and, with a
  * `memoryBudget`, once the worker answered it (§2.9); without one, once a
  * worker with the `superseded` feature answered one request. Both go out
- * on the port before the client exists: the client queues the fallback
- * steps on a timer when it is built, which must run after the caller holds
- * it. Every event that arrives meanwhile is kept by the port client and
- * delivered by that timer too, in port order (N132; gate round 6 of step
- * 135). A failed budget op or
- * answer releases the port and the hosting, and rethrows.
+ * on the port before the client exists: the client delivers the fallback
+ * steps once it is built, after the caller holds it. Every event that
+ * arrives meanwhile is kept by the port client and delivered with them, in
+ * port order, before anything the port receives later (N132; gate rounds 6
+ * and 7 of step 135). A failed budget op or answer releases the port and
+ * the hosting, and rethrows.
  */
 export async function createClient(
   options: ClientOptions = {},

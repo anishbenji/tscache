@@ -128,6 +128,8 @@ export class PortClient {
   #ended: string | undefined;
   /** Events received before `takeKept`, in port order; undefined after it. */
   #kept: Evt[] | undefined = [];
+  /** Runs once, before the next res or evt received (see `takeKept`). */
+  #beforeNext: (() => void) | undefined;
 
   private constructor(
     port: MessagePortLike,
@@ -229,13 +231,17 @@ export class PortClient {
    * arrive between `init-ok` and the client's construction (a `superseded`
    * event right after `init-ok` (N132), an `authInvalid` or `cacheCleared`
    * any tab caused), before anything listens: the client takes them when
-   * it is built and delivers them (step 135, gate round 6). Keeping also
-   * ends at the first `on` listener, so a port that is never taken over
-   * holds nothing for long; later events reach only the listeners.
+   * it is built and delivers them (step 135, gate rounds 6 and 7). Keeping
+   * also ends at the first `on` listener, so a port that is never taken
+   * over holds nothing for long; later events reach only the listeners.
+   * `beforeNext` runs once, when the next response or event arrives and
+   * before it is handled (never for a bye), so the caller can deliver what
+   * it took first and the port's order holds.
    */
-  takeKept(): Evt[] {
+  takeKept(beforeNext: () => void): Evt[] {
     const kept = this.#kept ?? [];
     this.#kept = undefined;
+    this.#beforeNext = beforeNext;
     return kept;
   }
 
@@ -339,6 +345,13 @@ export class PortClient {
   #receive(data: unknown): void {
     if (!isObject(data)) return;
     const message = data as ToClient;
+    if (message.t === "res" || message.t === "evt") {
+      const before = this.#beforeNext;
+      this.#beforeNext = undefined;
+      before?.();
+      // A listener there may have disposed the client: handle nothing more.
+      if (this.#ended !== undefined) return;
+    }
     if (message.t === "res") {
       const pending = this.#pending.get(message.id);
       if (pending === undefined) return;

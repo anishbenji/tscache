@@ -56,6 +56,9 @@ sequenceDiagram
 
 ## Write-back
 
+The diagram shows a cache whose persistence is active. A superseded worker's removals answer at once and
+leave the records (step 3).
+
 ```mermaid
 sequenceDiagram
   participant S as RpcServer
@@ -67,7 +70,7 @@ sequenceDiagram
   Note over R,D: pages marked dirty, the flush waits for a quiet spell
   S->>E: invalidate, clear, or a watermark moved back
   E->>R: onChange (remove or clear): the flush is due now
-  Note over S,R: the call that made the removal answers only once it is durable
+  Note over S,R: while persisting, the call that made the removal answers once it is durable
   R->>D: write(cacheId, plan): one transaction, strict when it carries a removal
   D-->>R: done
   R-->>S: the removal is durable, the call answers
