@@ -4,19 +4,23 @@
 // error builds cleanly and only shows on the live page as Mermaid's error box. This check parses
 // each diagram with the Mermaid the site pins, at build time.
 //
-//   - Pages are parsed by VitePress's own Markdown renderer, so a fence is found exactly as the
-//     site finds it: a fence token whose info is `mermaid`, inside containers and lists too.
+//   - Pages are read by VitePress's own Markdown renderer, so a fence is found exactly as the site
+//     finds it: the page is rendered as the site renders it, which expands its `<!-- @include -->`
+//     directives (inside fences too), and the expanded text is searched for fence tokens whose
+//     info is `mermaid`, inside containers and lists too.
 //   - Diagrams are parsed by `mermaid.parse`, which runs the diagram's grammar without rendering.
 //     Outside a browser, Mermaid's DOMPurify has no window and leaves out `sanitize`, `addHook` and
 //     `removeHook`, which parsing calls. The check fills them in as no-ops on the very instance
 //     Mermaid imports, resolved from Mermaid's own package, before Mermaid loads. Parsing only reads
-//     the text, so nothing it sanitises is ever shown.
+//     the text, so nothing it sanitises is ever shown. The sequence parser also reads `window.CSS`
+//     to check a box's colour, so each parse runs with a stand-in `window` that it removes after.
 //
 // Mermaid and DOMPurify are resolved through Node's resolver and their package exports, never a
 // hard-coded version or path, so the check runs under Bun (`bun run docs:check`) and under Node
 // (Vitest) alike, and follows whichever Mermaid `site/package.json` pins.
 //
-//   bun site/scripts/check-mermaid.ts                  checks every page Git lists under site/
+//   bun site/scripts/check-mermaid.ts                  checks every page Git lists under site/,
+//                                                      and the generated site/api/ pages
 //   bun site/scripts/check-mermaid.ts <files or dirs>  checks those pages, and the pages under those dirs
 
 import { spawnSync } from "node:child_process";
@@ -38,8 +42,12 @@ const SITE = join(ROOT, "site");
 /** A Mermaid fence on a page. */
 export interface Diagram {
   file: string;
-  /** The 1-based line of the page the opening fence is on. */
+  /**
+   * The 1-based line the opening fence is on: a line of the page, or, when `expanded`, a line of
+   * the page with its includes expanded (the fence came in with an include, or sits between two).
+   */
   line: number;
+  expanded?: true;
   text: string;
 }
 
@@ -47,11 +55,19 @@ export interface Diagram {
 export interface Failure {
   file: string;
   line: number;
+  expanded?: true;
   message: string;
 }
 
-/** Finds the Mermaid diagrams on one Markdown page. */
-export type FindDiagrams = (file: string, markdown: string) => Diagram[];
+/**
+ * Finds the Mermaid diagrams on one Markdown page. `file` is the name the check prints; `path`,
+ * the page's real path, from which its includes resolve, defaults to it.
+ */
+export type FindDiagrams = (
+  file: string,
+  markdown: string,
+  path?: string,
+) => Promise<Diagram[]>;
 
 /** Parses one diagram's text, throwing Mermaid's error when it does not parse. */
 export type ParseDiagram = (text: string) => Promise<unknown>;
@@ -61,18 +77,56 @@ const newlines = (text: string) => text.split("\n").length - 1;
 /**
  * A reader of pages built on VitePress's Markdown renderer, with its default options: the site's
  * config adds Mermaid's fence renderer, which changes how a fence renders, not how a page parses.
+ * VitePress expands a page's includes only when it renders the page (`renderAsync`, given the
+ * page's path), and leaves the expanded text in `env.src`; that text is what gets parsed.
  */
 export async function diagramReader(): Promise<FindDiagrams> {
   const md = await createMarkdownRenderer(SITE);
-  return (file, markdown) => {
+  return async (file, markdown, path = file) => {
+    const rendered: { path: string; src?: string } = { path };
+    await md.renderAsync(markdown, rendered);
+    const src = rendered.src ?? markdown;
     const env: { content?: string } = {};
-    const tokens = md.parse(markdown, env);
-    const first = firstLine(markdown, env.content);
-    return tokens.flatMap((token) =>
-      token.type === "fence" && token.info.trim() === "mermaid"
-        ? [{ file, line: first + (token.map?.[0] ?? 0), text: token.content }]
-        : [],
-    );
+    const tokens = md.parse(src, env);
+    const first = firstLine(src, env.content);
+    const toPage = pageLines(markdown, src);
+    return tokens.flatMap((token) => {
+      if (token.type !== "fence" || token.info.trim() !== "mermaid") return [];
+      const line = first + (token.map?.[0] ?? 0);
+      const onPage = toPage(line);
+      return [
+        onPage === undefined
+          ? { file, line, expanded: true as const, text: token.content }
+          : { file, line: onPage, text: token.content },
+      ];
+    });
+  };
+}
+
+/**
+ * Maps a 1-based line of the expanded text to the page's line, for the lines before the first
+ * include and after the last, which expansion leaves as they are; undefined for the lines between.
+ */
+function pageLines(
+  markdown: string,
+  src: string,
+): (line: number) => number | undefined {
+  const page = markdown.split("\n");
+  const expanded = src.split("\n");
+  const shorter = Math.min(page.length, expanded.length);
+  let before = 0;
+  while (before < shorter && page[before] === expanded[before]) before++;
+  let after = 0;
+  while (
+    after < shorter - before &&
+    page[page.length - 1 - after] === expanded[expanded.length - 1 - after]
+  )
+    after++;
+  return (line) => {
+    if (line <= before) return line;
+    if (line > expanded.length - after)
+      return line - (expanded.length - page.length);
+    return undefined;
   };
 }
 
@@ -155,7 +209,25 @@ export async function mermaidParser(): Promise<ParseDiagram> {
   const { default: api } = (await import(importOf(mermaid))) as {
     default: { parse: ParseDiagram };
   };
-  return (text) => api.parse(text);
+  return (text) => withWindow(() => api.parse(text));
+}
+
+/**
+ * Runs `parse` with a stand-in `window` where there is none, removed when it settles. Mermaid's
+ * sequence parser reads `window?.CSS` to check a `box` colour, which throws a ReferenceError
+ * without a `window`; the stand-in accepts every colour, which changes nothing a parse checks.
+ */
+async function withWindow<T>(parse: () => Promise<T>): Promise<T> {
+  if ("window" in globalThis) return parse();
+  Object.defineProperty(globalThis, "window", {
+    value: { CSS: { supports: () => true } },
+    configurable: true,
+  });
+  try {
+    return await parse();
+  } finally {
+    delete (globalThis as { window?: unknown }).window;
+  }
 }
 
 /** The diagrams that do not parse, each with Mermaid's message. */
@@ -169,7 +241,12 @@ export async function checkDiagrams(
       await parse(d.text);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      failures.push({ file: d.file, line: d.line, message });
+      failures.push({
+        file: d.file,
+        line: d.line,
+        ...(d.expanded && { expanded: d.expanded }),
+        message,
+      });
     }
   }
   return failures;
@@ -177,15 +254,17 @@ export async function checkDiagrams(
 
 /**
  * One failure as the check prints it: `file:line: ` (the fence's line) and Mermaid's message as
- * Mermaid gives it, its later lines indented. A parse error's line counts within the diagram, after
- * Mermaid strips comments, directives and the diagram's own frontmatter, so it is not mapped to a
- * page line.
+ * Mermaid gives it, its later lines indented. A fence an include brought in has no line on the
+ * page, so its line on the expanded page is named as such. A parse error's line counts within the
+ * diagram, after Mermaid strips comments, directives and the diagram's own frontmatter, so it is
+ * not mapped to a page line.
  */
 export function formatFailure(f: Failure): string {
   const [head = "", ...rest] = f.message.trimEnd().split("\n");
-  return [`${f.file}:${f.line}: ${head}`, ...rest.map((l) => `    ${l}`)].join(
-    "\n",
-  );
+  const where = f.expanded
+    ? `${f.file}, line ${f.line} of the page with its includes expanded`
+    : `${f.file}:${f.line}`;
+  return [`${where}: ${head}`, ...rest.map((l) => `    ${l}`)].join("\n");
 }
 
 /** What `git ls-files` printed, and its exit code. */
@@ -195,11 +274,14 @@ export interface Listing {
   stderr: string;
 }
 
-/** Lists the repository's files, tracked or new but not ignored. */
+/**
+ * Lists the repository's files, tracked or new but not ignored, each ended by a NUL: with `-z`,
+ * Git prints a name as it is, where it would otherwise quote one holding a non-ASCII character.
+ */
 function gitLsFiles(): Listing {
   const listed = spawnSync(
     "git",
-    ["ls-files", "--cached", "--others", "--exclude-standard"],
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
     { cwd: ROOT, encoding: "utf8" },
   );
   return {
@@ -220,20 +302,21 @@ function pagesUnder(dir: string): string[] {
     .sort();
 }
 
-/** A page's path as the check prints it: relative to the repository when inside it. */
+/** A page's path as the check prints it: relative to this repository when inside it. */
 function shown(full: string): string {
   const rel = relative(ROOT, full);
   return rel.startsWith("..") ? full : rel;
 }
 
 /**
- * Checks the `given` pages and directories, or every page Git lists under `site/`, and returns the
- * exit code: 1 when a diagram does not parse, when Git cannot list the files, or when there is no
- * page.
+ * Checks the `given` pages and directories, or every page Git lists under `site/` of `root` plus
+ * the pages generated into `site/api/`, which Git ignores, and returns the exit code: 1 when a
+ * diagram does not parse, when Git cannot list the files, or when there is no page.
  */
 export async function run(
   given: readonly string[],
   list: () => Listing = gitLsFiles,
+  root: string = ROOT,
 ): Promise<number> {
   let pages: string[];
   if (given.length > 0) {
@@ -249,20 +332,24 @@ export async function run(
       console.error(`mermaid: git ls-files failed: ${listed.stderr}`);
       return 1;
     }
+    const api = join(root, "site", "api");
     pages = listed.stdout
-      .split("\n")
+      .split("\0")
       .filter((f) => f.startsWith("site/") && f.endsWith(".md"))
-      .map((f) => join(ROOT, f))
-      .filter((f) => existsSync(f));
+      .map((f) => join(root, f))
+      .filter((f) => existsSync(f))
+      .concat(existsSync(api) ? pagesUnder(api) : []);
   }
   if (pages.length === 0) {
     console.error("mermaid: no pages to check");
     return 1;
   }
   const find = await diagramReader();
-  const diagrams = pages.flatMap((page) =>
-    find(shown(page), readFileSync(page, "utf8")),
-  );
+  const diagrams: Diagram[] = [];
+  for (const page of pages)
+    diagrams.push(
+      ...(await find(shown(page), readFileSync(page, "utf8"), page)),
+    );
   const failures = await checkDiagrams(diagrams, await mermaidParser());
   for (const f of failures) console.error(formatFailure(f));
   if (failures.length > 0) {
