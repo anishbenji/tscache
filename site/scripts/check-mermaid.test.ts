@@ -37,6 +37,27 @@ const BOXES = fence(
   "sequenceDiagram\n  box Aqua Client\n    participant T as Tab\n  end\n  box Server\n    participant S as Server\n  end\n  T->>S: req\n  S-->>T: res",
 );
 
+/**
+ * Mermaid's `details` statement reads a page element while parsing; outside a browser there is
+ * no `document`, and a missing element is skipped.
+ */
+const DETAILS = fence(
+  "sequenceDiagram\n  participant Alice\n  participant Bob\n  details Alice: aliceDetails\n  Alice->>Bob: hi",
+);
+const DETAILS_BROKEN = fence(
+  "sequenceDiagram\n  participant Alice\n  participant Bob\n  details Alice: aliceDetails\n  Alice->>Bob: hi; then more",
+);
+/** Frontmatter that does not open the diagram is a syntax error when the page renders it. */
+const COMMENT_THEN_FRONTMATTER = fence(
+  "%% Comment\n---\ntitle: T\n---\nflowchart LR\n  A --> B",
+);
+const DIRECTIVE_THEN_FRONTMATTER = fence(
+  "%%{init: {'theme': 'dark'}}%%\n---\ntitle: T\n---\nflowchart LR\n  A --> B",
+);
+const FRONTMATTER_FIRST = fence(
+  "---\ntitle: T\n---\n%% Comment\nflowchart LR\n  A --> B",
+);
+
 const find = await diagramReader();
 const lines = async (markdown: string) =>
   (await find("site/page.md", markdown)).map((d) => d.line);
@@ -206,6 +227,62 @@ describe("check-mermaid: the command", () => {
     expect("window" in globalThis).toBe(false);
   });
 
+  it("exits 1 when a comment or a directive comes before the diagram's frontmatter", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const dir = fixture({
+      "comment.md": `# Comment\n\n${COMMENT_THEN_FRONTMATTER}`,
+      "directive.md": `# Directive\n\n${DIRECTIVE_THEN_FRONTMATTER}`,
+    });
+    try {
+      expect(await run([dir])).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+    const printed = error.mock.calls.map((call) => String(call[0]));
+    expect(printed).toHaveLength(3);
+    expect(printed[0]).toMatch(new RegExp(`^${join(dir, "comment.md")}:3: `));
+    expect(printed[1]).toMatch(new RegExp(`^${join(dir, "directive.md")}:3: `));
+    expect(printed[2]).toContain("2 of 2 diagram(s) do not parse");
+  });
+
+  it("passes a diagram whose frontmatter comes first", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const dir = fixture({ "page.md": `# Page\n\n${FRONTMATTER_FIRST}` });
+    try {
+      expect(await run([dir])).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+    expect(log).toHaveBeenCalledWith("mermaid: 1 diagrams in 1 pages parse");
+  });
+
+  it("passes a sequence diagram with participant details, leaving no document behind", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const dir = fixture({ "page.md": `# Page\n\n${DETAILS}` });
+    try {
+      expect(await run([dir])).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+    expect(log).toHaveBeenCalledWith("mermaid: 1 diagrams in 1 pages parse");
+    expect("document" in globalThis).toBe(false);
+    expect("window" in globalThis).toBe(false);
+  });
+
+  it("exits 1 on a `;` in a sequence message next to participant details", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const dir = fixture({ "page.md": `# Page\n\n${DETAILS_BROKEN}` });
+    try {
+      expect(await run([dir])).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+    const printed = error.mock.calls.map((call) => String(call[0]));
+    expect(printed[0]).toMatch(
+      new RegExp(`^${join(dir, "page.md")}:3: Parse error on line 5:\n`),
+    );
+  });
+
   it("passes a valid flowchart and a valid sequence diagram", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const dir = fixture({ "page.md": `# Page\n\n${FLOWCHART}\n${SEQUENCE}` });
@@ -311,6 +388,25 @@ describe("check-mermaid: the command", () => {
     expect(printed[0]).toContain("dynamic route");
   });
 
+  it("passes a bracket-named page that takes no injected content", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const root = fixture({
+      "site/index.md": `# Home\n\n${FLOWCHART}`,
+      "site/snippets/[topic].md": "A plain-text fragment that pages include.\n",
+    });
+    const listed = () => ({
+      exitCode: 0,
+      stdout: "site/index.md\0site/snippets/[topic].md\0",
+      stderr: "",
+    });
+    try {
+      expect(await run([], listed, root)).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true });
+    }
+    expect(log).toHaveBeenCalledWith("mermaid: 1 diagrams in 2 pages parse");
+  });
+
   it("exits 1 when Git cannot list the files", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const failed = () => ({ exitCode: 128, stdout: "", stderr: "not a repo" });
@@ -348,6 +444,24 @@ describe("check-mermaid: the command", () => {
     settleSecond();
     await second;
     expect("window" in globalThis).toBe(false);
+  });
+
+  it("keeps the stand-in document until the last overlapping parse settles", async () => {
+    let settleFirst = () => {};
+    let settleSecond = () => {};
+    const first = withWindow(
+      () => new Promise<void>((resolve) => (settleFirst = resolve)),
+    );
+    const second = withWindow(
+      () => new Promise<void>((resolve) => (settleSecond = resolve)),
+    );
+    expect("document" in globalThis).toBe(true);
+    settleFirst();
+    await first;
+    expect("document" in globalThis).toBe(true);
+    settleSecond();
+    await second;
+    expect("document" in globalThis).toBe(false);
   });
 
   it("leaves a window it did not install in place", async () => {

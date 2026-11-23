@@ -1,27 +1,35 @@
-// Fails when a Mermaid diagram in the docs site does not parse.
+// Catches syntax errors in the docs site's published Mermaid diagrams, outside a browser.
 //
 // The site renders every ```mermaid fence in the browser (vitepress-plugin-mermaid), so a syntax
 // error builds cleanly and only shows on the live page as Mermaid's error box. This check parses
-// each diagram with the Mermaid the site pins, at build time.
+// each diagram with the Mermaid the site pins, at build time. It has three limits:
 //
-//   - Pages are read by VitePress's own Markdown renderer, so a fence is found exactly as the site
-//     finds it: the page is rendered as the site renders it, which expands its `<!-- @include -->`
-//     directives (inside fences too), and the expanded text is searched for fence tokens whose
-//     info is `mermaid`, inside containers and lists too.
-//   - Diagrams are parsed by `mermaid.parse`, which runs the diagram's grammar without rendering.
-//     Outside a browser, Mermaid's DOMPurify has no window and leaves out `sanitize`, `addHook` and
-//     `removeHook`, which parsing calls. The check fills them in as no-ops on the very instance
-//     Mermaid imports, resolved from Mermaid's own package, before Mermaid loads. Parsing only reads
-//     the text, so nothing it sanitises is ever shown. The sequence parser also reads `window.CSS`
-//     to check a box's colour, so each parse runs with a stand-in `window` that it removes after.
+//   - It is a syntax check, not a render. A diagram that parses but draws wrongly, or throws in
+//     Mermaid's renderer, passes.
+//   - It reads the Markdown files Git lists under `site/` plus the generated `site/api/` pages:
+//     every published page, and files the site excludes from publishing. It does not load the
+//     site's config (`srcExclude`, rewrites, extra pages) or run a dynamic route's paths loader;
+//     it fails, naming the page, on a dynamic-route template that takes injected content.
+//   - A `details` statement, whose parsing reads an element of the page, is parsed without it.
+//
+// How it reads and parses:
+//
+//   - Pages are read by VitePress's own Markdown renderer: the page is rendered, which expands
+//     its `<!-- @include -->` directives (inside fences too), and the expanded text is searched
+//     for fence tokens whose info is `mermaid`, inside containers and lists too.
+//   - Diagrams are parsed by `mermaid.parse`, which applies the diagram's own config and runs its
+//     grammar without rendering, and then by the parse step `mermaid.render` runs
+//     (`mermaidAPI.getDiagramFromText`): the two preprocess the text differently, so a diagram
+//     must pass both. Outside a browser, Mermaid's DOMPurify has no window and leaves out
+//     `sanitize`, `addHook` and `removeHook`, which parsing calls. The check fills them in as
+//     no-ops on the very instance Mermaid imports, resolved from Mermaid's own package, before
+//     Mermaid loads. Parsing only reads the text, so nothing it sanitises is ever shown. The
+//     sequence parser also reads `window.CSS` to check a box's colour and `document` for
+//     `details`, so each parse runs with a stand-in `window` and `document` that it removes after.
 //
 // Mermaid and DOMPurify are resolved through Node's resolver and their package exports, never a
 // hard-coded version or path, so the check runs under Bun (`bun run docs:check`) and under Node
 // (Vitest) alike, and follows whichever Mermaid `site/package.json` pins.
-//
-//   - A dynamic route's content comes from its paths loader, which the check does not run, so it
-//     cannot see that content's diagrams. With no arguments it fails, naming the page, when a page
-//     is a dynamic-route template (`site/guide/[topic].md`); the site has none.
 //
 //   bun site/scripts/check-mermaid.ts                  checks every page Git lists under site/,
 //                                                      and the generated site/api/ pages
@@ -211,35 +219,57 @@ export async function mermaidParser(): Promise<ParseDiagram> {
     removeHook: () => {},
   });
   const { default: api } = (await import(importOf(mermaid))) as {
-    default: { parse: ParseDiagram };
+    default: {
+      parse: ParseDiagram;
+      mermaidAPI: { getDiagramFromText: ParseDiagram };
+    };
   };
-  return (text) => withWindow(() => api.parse(text));
+  return (text) =>
+    withWindow(async () => {
+      await api.parse(text);
+      return api.mermaidAPI.getDiagramFromText(text);
+    });
 }
 
-/** How many parses are running with the stand-in `window`; it is installed while this is not 0. */
+/** How many parses are running with the stand-ins; they are installed while this is not 0. */
 let windowHolders = 0;
+/** The globals the first holder installed, which the last one removes. */
+let installed: string[] = [];
+
+/** The stand-ins, by global name. */
+const STAND_INS: Readonly<Record<string, () => unknown>> = {
+  window: () => ({ CSS: { supports: () => true } }),
+  document: () => ({ getElementById: () => null }),
+};
 
 /**
- * Runs `parse` with a stand-in `window` where there is none. Mermaid's sequence parser reads
- * `window?.CSS` to check a `box` colour, which throws a ReferenceError without a `window`; the
- * stand-in accepts every colour, which changes nothing a parse checks. Overlapping parses share
- * one stand-in, installed by the first and removed when the last settles; a `window` this helper
- * did not install is left as it is.
+ * Runs `parse` with a stand-in `window` and `document` where there are none. Mermaid's sequence
+ * parser reads `window?.CSS` to check a `box` colour, and `document.getElementById` to read a
+ * `details` statement's element, each a ReferenceError without the global. The stand-in `window`
+ * accepts every colour, which changes nothing a parse checks; the stand-in `document` has no
+ * element, which Mermaid skips, so `details` is parsed without the page's element. Overlapping
+ * parses share the stand-ins, installed by the first and removed when the last settles. A page
+ * environment that has a `window` is left as it is, and so is a `document` this helper did not
+ * install.
  */
 export async function withWindow<T>(parse: () => Promise<T>): Promise<T> {
   if (windowHolders === 0) {
     if ("window" in globalThis) return parse();
-    Object.defineProperty(globalThis, "window", {
-      value: { CSS: { supports: () => true } },
-      configurable: true,
-    });
+    installed = Object.keys(STAND_INS).filter((name) => !(name in globalThis));
+    for (const name of installed)
+      Object.defineProperty(globalThis, name, {
+        value: STAND_INS[name]?.(),
+        configurable: true,
+      });
   }
   windowHolders++;
   try {
     return await parse();
   } finally {
     windowHolders--;
-    if (windowHolders === 0) delete (globalThis as { window?: unknown }).window;
+    if (windowHolders === 0)
+      for (const name of installed)
+        delete (globalThis as Record<string, unknown>)[name];
   }
 }
 
@@ -321,6 +351,9 @@ function pagesUnder(dir: string): string[] {
  */
 const DYNAMIC_ROUTE = /\[(\w+?)\]/;
 
+/** Where VitePress injects a dynamic route's loader content; the one place it does. */
+const CONTENT_MARKER = "<!-- @content -->";
+
 /** A page's path as the check prints it: relative to this repository when inside it. */
 function shown(full: string): string {
   const rel = relative(ROOT, full);
@@ -331,7 +364,8 @@ function shown(full: string): string {
  * Checks the `given` pages and directories, or every page Git lists under `site/` of `root` plus
  * the pages generated into `site/api/`, which Git ignores, and returns the exit code: 1 when a
  * diagram does not parse, when Git cannot list the files, when there is no page, or when a listed
- * page is a dynamic-route template.
+ * page is a dynamic-route template that takes injected content (a bracket-named page holding
+ * `<!-- @content -->`).
  */
 export async function run(
   given: readonly string[],
@@ -359,8 +393,10 @@ export async function run(
       .map((f) => join(root, f))
       .filter((f) => existsSync(f))
       .concat(existsSync(api) ? pagesUnder(api) : []);
-    const dynamic = pages.filter((f) =>
-      DYNAMIC_ROUTE.test(relative(join(root, "site"), f)),
+    const dynamic = pages.filter(
+      (f) =>
+        DYNAMIC_ROUTE.test(relative(join(root, "site"), f)) &&
+        readFileSync(f, "utf8").includes(CONTENT_MARKER),
     );
     for (const f of dynamic)
       console.error(
