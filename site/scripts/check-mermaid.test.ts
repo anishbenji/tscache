@@ -388,8 +388,53 @@ describe("check-mermaid: the command", () => {
     expect(printed[0]).toContain("dynamic route");
   });
 
-  it("passes a bracket-named page that takes no injected content", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("exits 1 on a bracket-named page with the content marker spelled without spaces", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = fixture({
+      "site/index.md": `# Home\n\n${FLOWCHART}`,
+      "site/guide/[topic].md": "<!--@content-->\n",
+    });
+    const listed = () => ({
+      exitCode: 0,
+      stdout: "site/index.md\0site/guide/[topic].md\0",
+      stderr: "",
+    });
+    try {
+      expect(await run([], listed, root)).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true });
+    }
+    const printed = error.mock.calls.map((call) => String(call[0]));
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toContain(join(root, "site/guide/[topic].md"));
+    expect(printed[0]).toContain("dynamic route");
+  });
+
+  it("exits 1 on a CR-only bracket-named page whose frontmatter hides a broken fence", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = fixture({
+      "site/index.md": `# Home\n\n${FLOWCHART}`,
+      "site/guide/[topic].md": `---\ntitle: Topic\n---\n\n${BROKEN}`.replaceAll(
+        "\n",
+        "\r",
+      ),
+    });
+    const listed = () => ({
+      exitCode: 0,
+      stdout: "site/index.md\0site/guide/[topic].md\0",
+      stderr: "",
+    });
+    try {
+      expect(await run([], listed, root)).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true });
+    }
+    const printed = error.mock.calls.map((call) => String(call[0]));
+    expect(printed[0]).toContain(join(root, "site/guide/[topic].md"));
+  });
+
+  it("exits 1 on a bracket-named page whatever it holds, telling the author what to do", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const root = fixture({
       "site/index.md": `# Home\n\n${FLOWCHART}`,
       "site/snippets/[topic].md": "A plain-text fragment that pages include.\n",
@@ -400,11 +445,14 @@ describe("check-mermaid: the command", () => {
       stderr: "",
     });
     try {
-      expect(await run([], listed, root)).toBe(0);
+      expect(await run([], listed, root)).toBe(1);
     } finally {
       rmSync(root, { recursive: true });
     }
-    expect(log).toHaveBeenCalledWith("mermaid: 1 diagrams in 2 pages parse");
+    const printed = error.mock.calls.map((call) => String(call[0]));
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toContain(join(root, "site/snippets/[topic].md"));
+    expect(printed[0]).toContain("Rename the file");
   });
 
   it("exits 1 when Git cannot list the files", async () => {

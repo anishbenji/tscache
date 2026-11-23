@@ -76,5 +76,7 @@ catches syntax errors in the published Mermaid diagrams, outside a browser: it p
 the tracked pages and the generated `site/api/` pages after their includes are expanded, and fails on
 a syntax error, which the browser would otherwise show only as an error box on the page. It is a
 syntax check, not a render, so a diagram that parses but draws wrongly passes. It does not load the
-site's config or run a dynamic route's loader, and fails on a dynamic route that injects content. A
-`details` statement is parsed without the page's element.
+site's config or run a dynamic route's loader, and fails on any Markdown file under `site/` with a
+bracket name (VitePress's dynamic-route form, such as `[param].md`), excluded files included: rename
+the file, or extend the check before adding a dynamic route. A `details` statement is parsed without
+the page's element.

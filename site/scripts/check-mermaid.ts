@@ -8,8 +8,10 @@
 //     Mermaid's renderer, passes.
 //   - It reads the Markdown files Git lists under `site/` plus the generated `site/api/` pages:
 //     every published page, and files the site excludes from publishing. It does not load the
-//     site's config (`srcExclude`, rewrites, extra pages) or run a dynamic route's paths loader;
-//     it fails, naming the page, on a dynamic-route template that takes injected content.
+//     site's config (`srcExclude`, rewrites, extra pages) or run a dynamic route's paths loader.
+//     The no-argument run, which `docs:check` uses, fails naming the page on any Markdown file
+//     under `site/` with a bracket-named segment (VitePress's dynamic-route form), whatever it
+//     holds and excluded files included; a dynamic route needs the check extended first.
 //   - A `details` statement, whose parsing reads an element of the page, is parsed without it.
 //
 // How it reads and parses:
@@ -347,12 +349,11 @@ function pagesUnder(dir: string): string[] {
 
 /**
  * VitePress's pattern for a dynamic-route template (`dynamicRouteRE`): a page such as
- * `guide/[topic].md` whose content a `[topic].paths.ts` loader injects at `<!-- @content -->`.
+ * `guide/[topic].md` whose content a `[topic].paths.ts` loader may inject. The check fails on
+ * every page whose path matches, whatever the page holds, rather than model how VitePress loads
+ * a template.
  */
 const DYNAMIC_ROUTE = /\[(\w+?)\]/;
-
-/** Where VitePress injects a dynamic route's loader content; the one place it does. */
-const CONTENT_MARKER = "<!-- @content -->";
 
 /** A page's path as the check prints it: relative to this repository when inside it. */
 function shown(full: string): string {
@@ -363,9 +364,10 @@ function shown(full: string): string {
 /**
  * Checks the `given` pages and directories, or every page Git lists under `site/` of `root` plus
  * the pages generated into `site/api/`, which Git ignores, and returns the exit code: 1 when a
- * diagram does not parse, when Git cannot list the files, when there is no page, or when a listed
- * page is a dynamic-route template that takes injected content (a bracket-named page holding
- * `<!-- @content -->`).
+ * diagram does not parse, when Git cannot list the files, when there is no page, or, without
+ * `given`, when a listed page has a bracket-named segment in its path (VitePress's dynamic-route
+ * form), whatever the page holds and whether or not the site excludes it. A dynamic route needs
+ * the check extended first.
  */
 export async function run(
   given: readonly string[],
@@ -393,14 +395,12 @@ export async function run(
       .map((f) => join(root, f))
       .filter((f) => existsSync(f))
       .concat(existsSync(api) ? pagesUnder(api) : []);
-    const dynamic = pages.filter(
-      (f) =>
-        DYNAMIC_ROUTE.test(relative(join(root, "site"), f)) &&
-        readFileSync(f, "utf8").includes(CONTENT_MARKER),
+    const dynamic = pages.filter((f) =>
+      DYNAMIC_ROUTE.test(relative(join(root, "site"), f)),
     );
     for (const f of dynamic)
       console.error(
-        `mermaid: ${shown(f)} is a dynamic route: the check cannot see the content its paths loader injects`,
+        `mermaid: ${shown(f)} has a bracket name, which VitePress reads as a dynamic route; the check does not read dynamic routes. Rename the file, or extend the check before adding a route`,
       );
     if (dynamic.length > 0) return 1;
   }
