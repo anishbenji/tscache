@@ -72,6 +72,9 @@ The site lives in `site/`: VitePress pages, an API reference that TypeDoc genera
 TSDoc into `site/api/`, and code examples in `site/snippets/` that `bun run docs:check` type-checks
 against the built package and `bun run docs:run` executes against the examples' mock backend. `bun run docs:dev` serves it; `bun run docs:build` builds it and fails on a
 dead link, including a link to a repository file that does not exist. `bun run docs:check` also
-parses every Mermaid diagram, on the tracked pages and the generated `site/api/` pages after their
-includes are expanded, and fails on a syntax error, which the browser would otherwise show only as an
-error box on the page.
+catches syntax errors in the published Mermaid diagrams, outside a browser: it parses each diagram on
+the tracked pages and the generated `site/api/` pages after their includes are expanded, and fails on
+a syntax error, which the browser would otherwise show only as an error box on the page. It is a
+syntax check, not a render, so a diagram that parses but draws wrongly passes. It does not load the
+site's config or run a dynamic route's loader, and fails on a dynamic route that injects content. A
+`details` statement is parsed without the page's element.
