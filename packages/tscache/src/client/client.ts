@@ -449,13 +449,27 @@ async function applyBudget(port: PortClient, bytes: number): Promise<void> {
 }
 
 /**
+ * Without a budget, waits for one answer from a worker that can report
+ * being superseded (N132, DC4 option (a)): an already superseded worker
+ * posts the event right after `init-ok`, and the port keeps order, so the
+ * event has been kept once the answer arrives. `memoryStats` reads and
+ * changes nothing, and its answer is not used. Such a worker always
+ * answers it, so a rejection means the port went: it fails `createClient`
+ * as a failed budget op does.
+ */
+async function awaitSuperseded(port: PortClient): Promise<void> {
+  if (port.features.has("superseded")) await port.request("memoryStats", {});
+}
+
+/**
  * §2.1. Resolves once a hosting completed the handshake and, with a
- * `memoryBudget`, once the worker answered it (§2.9). The budget goes out
+ * `memoryBudget`, once the worker answered it (§2.9); without one, once a
+ * worker with the `superseded` feature answered one request. Both go out
  * on the port before the client exists: the client queues the fallback
  * steps on a timer when it is built, which must run after the caller holds
  * it. A `superseded` event that arrives meanwhile is kept by the port
- * client and delivered by that timer too (N132). A failed budget op
- * releases the port and the hosting, and rethrows.
+ * client and delivered by that timer too (N132). A failed budget op or
+ * answer releases the port and the hosting, and rethrows.
  */
 export async function createClient(
   options: ClientOptions = {},
@@ -463,14 +477,13 @@ export async function createClient(
   const r = resolve(options);
   const fallbacks: ClientEvents["modeFallback"][] = [];
   const hosting = await connect(r, fallbacks);
-  if (r.memoryBudget !== undefined) {
-    try {
-      await applyBudget(hosting.client, r.memoryBudget);
-    } catch (error) {
-      hosting.client.dispose();
-      hosting.terminate();
-      throw error;
-    }
+  try {
+    if (r.memoryBudget === undefined) await awaitSuperseded(hosting.client);
+    else await applyBudget(hosting.client, r.memoryBudget);
+  } catch (error) {
+    hosting.client.dispose();
+    hosting.terminate();
+    throw error;
   }
   return new Client(hosting, fallbacks);
 }

@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClient, type TscacheClient } from "../src/client/client";
 import { Engine } from "../src/engine/engine";
+import { TscacheError } from "../src/errors";
 import {
   LIB_VERSION,
   type MessagePortLike,
   type Op,
   type Req,
+  WORKER_FEATURES,
 } from "../src/rpc/protocol";
 import { RpcServer } from "../src/rpc/server";
 import type { CacheConfig, ClientEvents } from "../src/types";
@@ -239,10 +241,22 @@ describe("30: the superseded event before the client exists (DC4 option (a))", (
   });
 
   it("without a budget the same listener is called once and the property is set", async () => {
-    const server = new RpcServer(new Engine(), LIB_VERSION);
+    // As the SharedWorker that finds generations does: only a server that
+    // lists 'superseded' can send it (ServerOptions.features, N132).
+    const server = new RpcServer(
+      new Engine(),
+      LIB_VERSION,
+      undefined,
+      undefined,
+      {
+        features: WORKER_FEATURES,
+      },
+    );
     server.supersede(payload);
     const { taps } = installSharedWorker(server);
     const client = await make({ workerUrl });
+    // Resolved with the property set (DC4 option (a)), before any listener.
+    expect(client.superseded).toEqual(payload);
     const heard = listen(client);
     expect(heard).toEqual([]);
     await deliveredOnce(client, heard);
@@ -350,6 +364,54 @@ describe("30: the superseded event before the client exists (DC4 option (a))", (
     vi.runAllTimers();
     vi.useRealTimers();
     expect(order).toEqual(["modeFallback:dedicated"]);
+  });
+
+  it("without a budget, one answer is awaited only from a worker that lists 'superseded'", async () => {
+    const listing = new RpcServer(
+      new Engine(),
+      LIB_VERSION,
+      undefined,
+      undefined,
+      {
+        features: WORKER_FEATURES,
+      },
+    );
+    const first = installSharedWorker(listing);
+    const current = await make({ workerUrl });
+    expect(current.superseded).toBeUndefined();
+    expect(first.taps[0]?.sent).toEqual([
+      "hello",
+      "init-ok",
+      "res:memoryStats",
+    ]);
+    const older = installSharedWorker(new RpcServer(new Engine(), LIB_VERSION));
+    const client = await make({ workerUrl });
+    expect(client.features.has("superseded")).toBe(false);
+    expect(older.taps[0]?.sent).toEqual(["hello", "init-ok"]);
+  });
+
+  it("without a budget, a port that goes before the answer rejects createClient", async () => {
+    const server = new RpcServer(
+      new Engine(),
+      LIB_VERSION,
+      undefined,
+      undefined,
+      {
+        features: WORKER_FEATURES,
+      },
+    );
+    const { first } = installSharedWorker(server, { hold: "memoryStats" });
+    const creating = createClient({ workerUrl }).then(
+      (client) => {
+        open.push(client);
+        return client;
+      },
+      (error: unknown) => error,
+    );
+    const tapped = await first;
+    await tapped.arrived;
+    tapped.wrapped.postMessage({ t: "bye" });
+    expect(await creating).toBeInstanceOf(TscacheError);
   });
 
   it("a worker that is never superseded delivers nothing", async () => {
