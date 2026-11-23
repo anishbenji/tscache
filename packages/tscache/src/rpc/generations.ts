@@ -35,21 +35,23 @@ export interface Announcement {
 type Announce = Announcement & { t: "announce" | "present"; v: 1 };
 
 interface Version {
-  core: number[];
+  /** Major, minor and patch as digit strings, compared by `compareNumeric`. */
+  core: string[];
   /** The prerelease identifiers; undefined for a release. */
   pre: string[] | undefined;
 }
 
-/** A semantic version, read leniently: what is not a number counts as 0. */
+/**
+ * A semantic version, read leniently: each core part is its leading digits,
+ * and a part without any counts as 0. The digits stay a string, so no part
+ * is rounded (gate round 6 of step 135).
+ */
 function versionOf(lib: string): Version {
   const version = lib.split("+", 1)[0] ?? "";
   const dash = version.indexOf("-");
   const core = (dash < 0 ? version : version.slice(0, dash))
     .split(".")
-    .map((part) => {
-      const n = Number.parseInt(part, 10);
-      return Number.isNaN(n) ? 0 : n;
-    });
+    .map((part) => /^\d+/.exec(part)?.[0] ?? "0");
   return {
     core,
     pre: dash < 0 ? undefined : version.slice(dash + 1).split("."),
@@ -59,9 +61,11 @@ function versionOf(lib: string): Version {
 const NUMERIC = /^\d+$/;
 
 /**
- * Two numeric identifiers by value, exactly at any size (semver §11): a
- * `Number` rounds above 2^53. Without leading zeros the longer one is the
- * larger; of equal length, the digits decide.
+ * Two numbers written in digits, by value, exactly at any size (semver
+ * §11): a `Number` rounds above 2^53. Every numeric part of a version goes
+ * through here, core and prerelease alike. Leading zeros do not count;
+ * without them the longer one is the larger, and of equal length the
+ * digits decide.
  */
 function compareNumeric(a: string, b: string): number {
   const x = a.replace(/^0+(?=\d)/, "");
@@ -103,7 +107,7 @@ function compareLib(a: string, b: string): number {
   const x = versionOf(a);
   const y = versionOf(b);
   for (let i = 0; i < 3; i++) {
-    const by = (x.core[i] ?? 0) - (y.core[i] ?? 0);
+    const by = compareNumeric(x.core[i] ?? "0", y.core[i] ?? "0");
     if (by !== 0) return by;
   }
   return comparePrereleases(x.pre, y.pre);

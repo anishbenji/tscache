@@ -112,6 +112,91 @@ describe("11: rank (N128)", () => {
     expect(outranks(padded, same)).toBe(false);
   });
 
+  // Gate round 6 (R6-4), the class: every numeric part of a version, core
+  // and prerelease alike, compares exactly at any size through one rule.
+  const BIG = "9007199254740992"; // 2^53
+  const BIGGER = "9007199254740993"; // 2^53 + 1, the same Number as 2^53
+  const PARTS: [string, (n: string) => string][] = [
+    ["major", (n) => `${n}.0.0`],
+    ["minor", (n) => `0.${n}.0`],
+    ["patch", (n) => `0.3.${n}`],
+    ["numeric prerelease identifier", (n) => `0.3.0-rc.${n}`],
+  ];
+
+  it.each(PARTS)(
+    "compares the %s exactly at and above 2^53, in both directions (gate round 6, R6-4)",
+    (_part, lib) => {
+      const pairs = [
+        [BIGGER, BIG],
+        [BIG, "9007199254740991"],
+        ["10000000000000000000", "9999999999999999999"],
+      ];
+      for (const [high, low] of pairs) {
+        for (const [highStart, lowStart] of [
+          [1, 9],
+          [9, 1],
+        ]) {
+          const higher = worker({
+            id: "a",
+            lib: lib(high as string),
+            startedAt: highStart as number,
+          });
+          const lower = worker({
+            id: "z",
+            lib: lib(low as string),
+            startedAt: lowStart as number,
+          });
+          expect([lib(high as string), outranks(higher, lower)]).toEqual([
+            lib(high as string),
+            true,
+          ]);
+          expect([lib(low as string), outranks(lower, higher)]).toEqual([
+            lib(low as string),
+            false,
+          ]);
+        }
+      }
+    },
+  );
+
+  it.each(PARTS)(
+    "reads leading zeros in the %s as the same number, so the start decides (gate round 6, R6-4)",
+    (_part, lib) => {
+      const padded = worker({
+        id: "a",
+        lib: lib(`000${BIGGER}`),
+        startedAt: 1,
+      });
+      const plain = worker({ id: "z", lib: lib(BIGGER), startedAt: 9 });
+      expect(outranks(plain, padded)).toBe(true);
+      expect(outranks(padded, plain)).toBe(false);
+      const below = worker({ id: "z", lib: lib(BIG), startedAt: 9 });
+      expect(outranks(padded, below)).toBe(true);
+      expect(outranks(below, padded)).toBe(false);
+    },
+  );
+
+  it("ranks a release above each of its prereleases, at any size (gate round 6, R6-4)", () => {
+    const core = `${BIGGER}.${BIGGER}.${BIGGER}`;
+    const release = worker({ id: "a", lib: core, startedAt: 1 });
+    for (const pre of ["0", BIGGER, "rc.1", `rc.${BIGGER}`, "zzz"]) {
+      const prerelease = worker({
+        id: "z",
+        lib: `${core}-${pre}`,
+        startedAt: 9,
+      });
+      expect([pre, outranks(release, prerelease)]).toEqual([pre, true]);
+      expect([pre, outranks(prerelease, release)]).toEqual([pre, false]);
+      // Its own core one above 2^53 lower ranks below it, prerelease or not.
+      const lowerCore = worker({
+        id: "z",
+        lib: `${BIGGER}.${BIGGER}.${BIG}`,
+        startedAt: 9,
+      });
+      expect(outranks(prerelease, lowerCore)).toBe(true);
+    }
+  });
+
   it("for one library takes the later start, and for one start the greater id", () => {
     const first = worker({ id: "b", startedAt: 1 });
     expect(outranks(worker({ id: "a", startedAt: 2 }), first)).toBe(true);
