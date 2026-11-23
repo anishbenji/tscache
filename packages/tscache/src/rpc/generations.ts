@@ -230,6 +230,21 @@ export class Generations {
     this.#post({ ...this.#self, t: "announce", v: 1 });
   }
 
+  /**
+   * A later `init` loaded the worker's first fetcher module, its first
+   * naming none (an unnamed worker): from now on its `present` answers and
+   * its comparisons carry the module. Nothing is posted, as N127 has one
+   * `announce` per worker, so a worker that was already running is not
+   * compared again (a known limit, architecture §4.7).
+   */
+  fetcherLoaded(fetcher: string): void {
+    if (this.#self.fetcher !== undefined) return;
+    const fetcherUrl = resolved({ ...this.#self, fetcher });
+    if (fetcherUrl !== undefined) {
+      this.#self = { ...this.#self, fetcher: fetcherUrl };
+    }
+  }
+
   /** Posts a `clearAll` of this worker, or its relay of another's (N135). */
   postClear(clearId: string): void {
     this.#post({ t: "clearAll", v: 1, id: this.#self.id, clear: clearId });

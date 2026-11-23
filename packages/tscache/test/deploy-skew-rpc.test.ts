@@ -343,6 +343,68 @@ describe("15: the superseded event (N129, N132)", () => {
     expect(heard).not.toHaveBeenCalled();
   });
 
+  it("an unnamed worker whose later init loads its first fetcher answers with it and is superseded by a peer of another module started after (gate round 5, R5-2)", async () => {
+    const bus = fakeChannels();
+    // A page of 0.1.0 or 0.2.0 at a fixed URL passes no name (§4.7).
+    const old = shared(bus, { startedAt: 1 });
+    const bare = await connect(old.server);
+    const loaded = await connect(old.server, moduleA);
+    const before = bus.posts.length;
+    const peer = shared(bus, {
+      startedAt: 2,
+      name: `tscache:${LIB_VERSION}:${moduleB}`,
+    });
+    const named = await connect(peer.server, moduleB);
+    await barrier(bare.client);
+    await barrier(loaded.client);
+    await barrier(named.client);
+    // Nothing more was announced; the answer carries the module it loaded.
+    const later = bus.posts.slice(before);
+    expect(later.map((m) => m.t)).toEqual(["announce", "present"]);
+    expect(later[1]).toMatchObject({
+      t: "present",
+      fetcher: new URL(moduleA, workerUrl).href,
+    });
+    expect(later[1]).not.toHaveProperty("name");
+    expect(bare.events).toEqual([supersededEvt(LIB_VERSION)]);
+    expect(loaded.events).toEqual([supersededEvt(LIB_VERSION)]);
+    expect(named.events).toEqual([]);
+  });
+
+  it("reports the first fetcher a later init loads once, and never when the first init named one", async () => {
+    const firsts: (string | undefined)[] = [];
+    const later: string[] = [];
+    const options = {
+      onFirstInit: (fetcher: string | undefined) => firsts.push(fetcher),
+      onFirstFetcher: (fetcher: string) => later.push(fetcher),
+    };
+    const bare = new RpcServer(
+      new Engine(),
+      LIB_VERSION,
+      undefined,
+      undefined,
+      options,
+    );
+    await connect(bare);
+    await connect(bare);
+    await connect(bare, moduleA);
+    await connect(bare, moduleA);
+    expect(firsts).toEqual([undefined]);
+    expect(later).toEqual([moduleA]);
+    const withModule = new RpcServer(
+      new Engine(),
+      LIB_VERSION,
+      undefined,
+      undefined,
+      options,
+    );
+    await connect(withModule, moduleA);
+    await connect(withModule);
+    await connect(withModule, moduleA);
+    expect(firsts).toEqual([undefined, moduleA]);
+    expect(later).toEqual([moduleA]);
+  });
+
   it("two tabs with one key share a worker, and a tab without a fetcher beside them supersedes nobody", async () => {
     const { servers } = installWorkers(fakeChannels());
     const first = await make({ workerUrl, fetcher: { module: moduleA } });

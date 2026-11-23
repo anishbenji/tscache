@@ -135,6 +135,7 @@ export function createServer(
           // It can report a newer generation, so its hello says so (N132).
           features: WORKER_FEATURES,
           onFirstInit: (fetcher) => generations.announce(fetcher),
+          onFirstFetcher: (fetcher) => generations.fetcherLoaded(fetcher),
         },
   );
   return server;

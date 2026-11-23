@@ -151,6 +151,13 @@ export interface ServerOptions {
    * other workers then (N127).
    */
   onFirstInit?: (fetcher: string | undefined) => void;
+  /**
+   * Called once, right after the `init-ok` of a later connection that loaded
+   * the worker's first fetcher module, when its first init named none (an
+   * unnamed worker, step 135 gate round 5): the SharedWorker then answers
+   * other workers with that module.
+   */
+  onFirstFetcher?: (fetcher: string) => void;
 }
 
 export class RpcServer {
@@ -161,6 +168,7 @@ export class RpcServer {
   readonly #persistence: Persistence | undefined;
   readonly #features: readonly WorkerFeature[];
   #onFirstInit: ServerOptions["onFirstInit"];
+  #onFirstFetcher: ServerOptions["onFirstFetcher"];
   /** Set once this worker is superseded (N132): sent to later connections. */
   #superseded: ClientEvents["superseded"] | undefined;
   readonly #connections = new Set<Connection>();
@@ -193,6 +201,7 @@ export class RpcServer {
     this.#persistence = persistence;
     this.#features = options.features ?? HELLO_FEATURES;
     this.#onFirstInit = options.onFirstInit;
+    this.#onFirstFetcher = options.onFirstFetcher;
     this.#orchestrator = new Orchestrator(
       engine,
       (evt) => this.#broadcast(evt),
@@ -409,17 +418,28 @@ export class RpcServer {
   /**
    * What follows an init-ok (step 135): a connection that joins a
    * superseded worker is told right away, and the server's first init is
-   * reported to its entry, with the fetcher module it named.
+   * reported to its entry, with the fetcher module it named. When that init
+   * named none, the first later init that loaded a module reports it too.
    */
   #afterInit(connection: Connection, fetcher: FetcherConfig | undefined): void {
     if (this.#superseded !== undefined) {
       this.#send(connection, this.#supersededEvt(this.#superseded));
     }
+    const module =
+      isObject(fetcher) && typeof fetcher.module === "string"
+        ? fetcher.module
+        : undefined;
     const onFirstInit = this.#onFirstInit;
-    if (onFirstInit === undefined) return;
-    this.#onFirstInit = undefined;
-    const named = isObject(fetcher) && typeof fetcher.module === "string";
-    onFirstInit(named ? fetcher.module : undefined);
+    if (onFirstInit !== undefined) {
+      this.#onFirstInit = undefined;
+      if (module !== undefined) this.#onFirstFetcher = undefined;
+      onFirstInit(module);
+      return;
+    }
+    const onFirstFetcher = this.#onFirstFetcher;
+    if (onFirstFetcher === undefined || module === undefined) return;
+    this.#onFirstFetcher = undefined;
+    onFirstFetcher(module);
   }
 
   async #request(connection: Connection, req: Req): Promise<void> {
