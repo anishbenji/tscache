@@ -64,7 +64,8 @@ transferred, so it stays usable: the client that replaces a lost one can be seed
 ::: tip Hydration is an optimisation
 A worker from before `hydrate` (a stale cached script) rejects the call with `TscacheError`
 "unknown op hydrate", and a `get` with `snapshot: true` returns no `snapshot`. Treat that as nothing
-applied: the cache fetches instead.
+applied: the cache fetches instead. Treat any other failure to apply a snapshot as not seeded too, and
+warn in development with the error's message only, as the snippet above does.
 :::
 
 With an `Engine`, `engine.snapshot(cacheId, range)` takes a snapshot without a read, for persistence

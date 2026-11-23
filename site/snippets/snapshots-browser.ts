@@ -26,18 +26,37 @@ export async function startCache(
   const client = await createClient(options);
   const cache = await client.cache(candles);
   if (text != null) {
-    const seed = decodeSnapshot(JSON.parse(text) as EncodedSnapshot);
     try {
+      const seed = decodeSnapshot(JSON.parse(text) as EncodedSnapshot);
       const { applied, skipped } = await cache.hydrate(seed);
       console.log(applied, skipped); // skipped: "version-mismatch" when refused
     } catch (error) {
-      // A worker from before hydrate (a stale cached script) refuses the op:
-      // nothing was applied, and the read below fetches instead.
+      // Not seeded: hydration saves fetches and is never needed for correct
+      // answers, so the read below fetches instead. A worker from before
+      // hydrate (a stale cached script) refuses the op; any other failure
+      // is worth a warning in development, with the message only, since
+      // the snapshot carries the page's data.
       const old =
         error instanceof TscacheError && error.message === "unknown op hydrate";
-      if (!old) throw error;
+      if (!old && development()) {
+        const why = error instanceof Error ? error.message : String(error);
+        console.warn(`snapshot not applied (${why}); the cache fetches`);
+      }
     }
   }
   return cache.get(range);
+}
+
+// Bundlers replace the exact text `process.env.NODE_ENV` at build time, so
+// it is read bare; a page that no bundler prepared has no `process`.
+declare const process: { env: { NODE_ENV?: string } };
+
+/** Whether this is a development build. */
+function development(): boolean {
+  try {
+    return process.env.NODE_ENV !== "production";
+  } catch {
+    return false;
+  }
 }
 // #endregion browser

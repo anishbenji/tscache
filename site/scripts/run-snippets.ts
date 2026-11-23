@@ -759,6 +759,41 @@ const RUNS: Record<string, Run> = {
     );
     check(tailOnly, `misses ${JSON.stringify(result.misses)}`);
     checkColumns(result, CANDLE_FIELDS);
+    // A snapshot that fails to apply (its one segment given twice, which
+    // hydrate refuses as overlapping) leaves the cache not seeded: the read
+    // fetches, and a development build warns once, with the message only.
+    const encoded = JSON.parse(text) as EncodedSnapshot;
+    const corrupt = JSON.stringify({
+      ...encoded,
+      segments: [...encoded.segments, ...encoded.segments],
+    });
+    const mode = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    const warned = logs.length;
+    try {
+      const fetched: GetResult = await startCache(
+        {
+          mode: "in-process",
+          fetcher: { module: FETCHER, context: { origin } },
+        },
+        sixHours,
+        corrupt,
+      );
+      check(
+        fetched.timestamps.length > 300,
+        `after a failed seed, the browser read ${fetched.timestamps.length} points`,
+      );
+    } finally {
+      if (mode === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = mode;
+    }
+    const warning = logs.slice(warned);
+    check(
+      warning.length === 1 &&
+        warning[0]?.length === 1 &&
+        String(warning[0]?.[0]).includes("invalid snapshot"),
+      `after a failed seed, logged ${JSON.stringify(warning)}`,
+    );
     // The page entry, with the server's script element in its document.
     const page = globalThis as Record<string, unknown>;
     page.document = {
