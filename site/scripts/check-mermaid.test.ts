@@ -570,6 +570,25 @@ describe("check-mermaid: the command", () => {
     }
   });
 
+  it("installs a stand-in document beside a caller's window, keeping the window", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const own = { CSS: { supports: () => true } };
+    Object.defineProperty(globalThis, "window", {
+      value: own,
+      configurable: true,
+    });
+    const dir = fixture({ "page.md": `# Page\n\n${DETAILS}` });
+    try {
+      expect(await run([dir])).toBe(0);
+      expect((globalThis as { window?: unknown }).window).toBe(own);
+      expect("document" in globalThis).toBe(false);
+    } finally {
+      delete (globalThis as { window?: unknown }).window;
+      rmSync(dir, { recursive: true });
+    }
+    expect(log).toHaveBeenCalledWith("mermaid: 1 diagrams in 1 pages parse");
+  });
+
   // `bun run docs:check` runs the script under Bun, whose module loader differs from Node's: the
   // DOMPurify the script fills in must be the instance Mermaid imports there too, or a real
   // flowchart fails with `addHook is not a function`.

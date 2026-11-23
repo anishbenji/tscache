@@ -259,13 +259,12 @@ const STAND_INS: Readonly<Record<string, () => unknown>> = {
  * `details` statement's element, each a ReferenceError without the global. The stand-in `window`
  * accepts every colour, which changes nothing a parse checks; the stand-in `document` has no
  * element, which Mermaid skips, so `details` is parsed without the page's element. Overlapping
- * parses share the stand-ins, installed by the first and removed when the last settles. A page
- * environment that has a `window` is left as it is, and so is a `document` this helper did not
- * install.
+ * parses share the stand-ins, installed by the first and removed when the last settles. Each
+ * stand-in is installed only where its global is missing, so a `window` or `document` the caller
+ * provides is left as it is.
  */
 export async function withWindow<T>(parse: () => Promise<T>): Promise<T> {
   if (windowHolders === 0) {
-    if ("window" in globalThis) return parse();
     installed = Object.keys(STAND_INS).filter((name) => !(name in globalThis));
     for (const name of installed)
       Object.defineProperty(globalThis, name, {
