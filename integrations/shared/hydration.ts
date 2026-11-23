@@ -138,7 +138,8 @@ export function rehydrate(config: CacheConfig, value: Dehydrated): ServerRead {
  * another dataset version is refused. The snapshot is cloned, so one read
  * can seed every client. A worker from before `hydrate` answers "unknown
  * op": that counts as nothing applied, and the cache fetches instead (N37).
- * Any other failure is a bug and propagates.
+ * Any other failure propagates; `connect` (connection.ts) counts it as
+ * "not seeded" too and warns in development (decision 98 C).
  */
 export async function hydrateRead(
   cache: CacheHandle,

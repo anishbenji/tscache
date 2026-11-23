@@ -49,10 +49,40 @@ export interface Connection {
 
 const CONNECTING: ConnectionState = { status: "connecting" };
 
+// Bundlers replace the exact text `process.env.NODE_ENV` at build time (Vite
+// in development and production, webpack, Bun with --production), so it is
+// read bare, as the library's own development warnings read it. A page
+// without `process` that no bundler prepared counts as production.
+declare const process: { env: { NODE_ENV?: string } };
+
+/** Whether this is a development build. */
+function development(): boolean {
+  try {
+    return process.env.NODE_ENV !== "production";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Says, in development builds only, that cache `id`'s seed was not applied.
+ * Only the error's message goes to the console, never the error or the
+ * snapshot: the snapshot carries the page's data.
+ */
+function warnNotSeeded(id: string, error: unknown): void {
+  if (!development()) return;
+  const why = error instanceof Error ? error.message : "a non-Error rejection";
+  console.warn(
+    `tscache: the server's snapshot for cache "${id}" was not applied (${why}), so the cache fetches that range instead; printed in development builds only.`,
+  );
+}
+
 /**
  * The applying of `seeds`: given a client and a cache id, the applying of
  * that cache's seed to that client, started on the first ask and shared by
- * every later one; undefined for a cache without a seed.
+ * every later one; undefined for a cache without a seed. It rejects only
+ * when the cache cannot be opened: a snapshot that fails to apply leaves
+ * the cache not seeded (decision 98 C).
  */
 function seeder(
   seeds: readonly Seed[],
@@ -70,10 +100,12 @@ function seeder(
     }
     let applying = ofClient.get(id);
     if (applying === undefined) {
-      applying = client
-        .cache(seed.config)
-        .then((cache) => hydrateRead(cache, seed.read))
-        .then(() => {});
+      applying = client.cache(seed.config).then((cache) =>
+        hydrateRead(cache, seed.read).then(
+          () => {},
+          (error: unknown) => warnNotSeeded(id, error),
+        ),
+      );
       ofClient.set(id, applying);
     }
     return applying;
@@ -93,10 +125,21 @@ function seeder(
  * data (N39). Each seed is applied once per client, when its cache is
  * first asked for, into the cache opened with the seed's own config: a
  * reader asking for a conflicting config is refused by the client's check,
- * rather than handed coverage read on another grid. A seeding that fails
- * stays failed for its client: every later `cache()` call for that cache
- * rejects with the same error until a replacement client seeds afresh
- * (`hydrateRead` counts only a worker without `hydrate` as not seeded).
+ * rather than handed coverage read on another grid.
+ *
+ * A snapshot that fails to apply counts as "not seeded" (decision 98 C,
+ * architecture §2.8: hydration is an optimisation, never a requirement for
+ * correctness): `cache()` still hands out the cache, which fetches what the
+ * seed would have filled, and a development build warns once per client
+ * and cache with the error's message. `hydrate` validates the whole
+ * snapshot before it changes anything, so a refused snapshot leaves
+ * nothing behind; a write that fails part way (an allocation failure)
+ * keeps only the parts it finished, each recorded as coverage. A worker
+ * without `hydrate` is not seeded either, without a warning
+ * (`hydrateRead`). The seed is not applied again on that client. Only a
+ * seed's cache that cannot be opened with the seed's config rejects: every
+ * later `cache()` call for it on that client rejects with the same error
+ * until a replacement client seeds afresh.
  */
 export function connect(
   open: () => Promise<TscacheClient>,
