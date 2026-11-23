@@ -39,6 +39,7 @@ Dispatches of `bench-calibrate.yml` on GitHub's `ubuntu-24.04` runner, setup `de
 `read-year` in Bun at 25 %: median measured ratio 1.28 with the wait (range 1.16–1.39), 1.26 with repetition (1.15–1.34). Its time per call ranged 3.4–11.6 ms across jobs, in two clusters near 4 and 8 ms, with 16 or 32 calls per batch. The three misses with the wait were two flagged runs whose confirmation fell short and one interval whose low end was below 1.03 (1.026).
 
 Local checks (Apple Silicon Mac):
+
 - `bunx vitest run packages/tscache/test/perf/gated.test.ts`: 8 passed. Before `gatedCases` existed, the file failed to load.
 - Under the heavy-job lock, `bun scripts/bench.ts compare --base HEAD --runtime bun --only <case> --slowdown 0.25 --gate`: `put-live-bar` (gated) 1.270 [1.263, 1.274], `regression`, `gates`, exit 1, with "Confirmed regression of a gated case: put-live-bar@bun"; `read-year` (report-only) 1.296 [1.269, 1.325], `regression`, `reports`, exit 0.
 - `bun run typecheck`, `bun run bench:smoke`: clean.

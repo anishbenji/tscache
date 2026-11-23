@@ -32,6 +32,7 @@ The branch was rebased onto `main` at `15fa506` after the first three commits; t
 **Mutation checks.** Comparing with `===` alone (NaN never equal) fails 1 test; dropping the check of the bars before the last drawn one fails 3.
 
 **E2E tests first.** New in `e2e/reference/clients.spec.ts`, for each of the vanilla, React and Solid clients:
+
 - `a live bar draws only the newest bars, not every bar (lightweight, step 41)` and `(uplot, step 41)`: after the opening draw, two live bars under the SSE feed raise the appended count by at least two and leave the full count unchanged;
 - `a dataset version pushed with a bar draws every bar again (step 41)`.
 
@@ -258,10 +259,12 @@ try {
 **R1-1, validated.** With both loops deleted from `lightweight.ts`, `~/code/tscache-reports/bin/heavy-run.sh "live child: r1 validate" env E2E_EXAMPLES=reference-vanilla,reference-react,reference-solid bunx playwright test e2e/reference --project examples -g "step 41"` passed 9 of 9. The finding holds: the counters prove the decision is wired, not the drawing.
 
 **Fix.** Unit tests of each view against a stand-in for its library (`vi.mock`), which observe what the library receives:
+
 - `lightweight-view.test.ts` (7). The stand-in series keep their bars as Lightweight Charts documents `setData()` (replace all) and `update()` (replace the last bar at the same time, add one after it, refuse an earlier time). After each draw the test checks the calls each series got and that both the candle and the volume series hold every bar of the answer, values and volume colour included: the first answer and an earlier correction or a moved range through `setData()`; an appended bar, the updated forming bar, and the forming bar with bars after it through `update()`; and six live answers in a row, alternately moving the forming bar and opening a new one, after a single `setData()`.
 - `uplot-view.test.ts` (4). For an appended bar, the forming bar, an earlier correction and a moved range, the draw hands uPlot `setData([timestamps, open, high, low, close, volume], false)` with the answer's own arrays.
 
 **Mutation checks**, `bunx vitest run reference/shared/test`:
+
 - both `update()` loops deleted: 4 of the 7 Lightweight tests fail (every `update()` case; the three `setData()` cases pass);
 - only the volume loop deleted: the same 4 fail;
 - uPlot skipping `setData` for an answer `appendedFrom` accepts: 2 of 4 fail (the appended and forming-bar cases).

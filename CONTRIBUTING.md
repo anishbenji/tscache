@@ -11,8 +11,8 @@ By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Setup
 
-You need Node 22.12 or later, [Bun](https://bun.sh) and
-[gitleaks](https://github.com/gitleaks/gitleaks) on your `PATH`.
+You need Node `^22.18.0 || ^24.11.0 || >=26.0.0` (the range tsdown, the build tool, requires),
+[Bun](https://bun.sh) and [gitleaks](https://github.com/gitleaks/gitleaks) on your `PATH`.
 
 ```sh
 bun install                        # installs the workspace dependencies
