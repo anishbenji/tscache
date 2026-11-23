@@ -413,6 +413,56 @@ describe("connect, when a seed fails to apply", () => {
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
+  it("is silent when the worker is lost while the seed applies, and the replacement seeds", async () => {
+    let applies = 0;
+    let reject: ((error: Error) => void) | undefined;
+    const { clients, connection, connected } = lossyConnection([seed], {
+      options,
+      hydrate: (handle) => (snapshot) => {
+        applies++;
+        if (applies > 1) return handle.hydrate(snapshot);
+        return new Promise<never>((_, fail) => {
+          reject = fail;
+        });
+      },
+    });
+    await until(() => connected() !== null);
+    const first = connected() as TscacheClient;
+    const asked = connection.cache(first, config);
+    await until(() => reject !== undefined);
+    // As the port client does when its worker is lost: it rejects every
+    // pending call, then fires workerLost (rpc/port-client.ts).
+    reject?.(new TscacheError("worker lost"));
+    clients[0]?.lose();
+    await expect(asked).rejects.toThrow("worker lost");
+    expect(warn).not.toHaveBeenCalled();
+
+    await until(() => connected() !== null && connected() !== first);
+    const next = await connection.cache(connected() as TscacheClient, config);
+    expect(applies).toBe(2);
+    const seeded = await next.get(seed.range, { cacheOnly: true });
+    expect(seeded.coverage).toEqual([{ start: 0, end: 20 }]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("is silent when the connection is disposed while the seed applies", async () => {
+    let reject: ((error: Error) => void) | undefined;
+    const { connection, connected } = lossyConnection([seed], {
+      options,
+      hydrate: () => () =>
+        new Promise<never>((_, fail) => {
+          reject = fail;
+        }),
+    });
+    await until(() => connected() !== null);
+    const asked = connection.cache(connected() as TscacheClient, config);
+    await until(() => reject !== undefined);
+    await connection.dispose();
+    reject?.(new TscacheError("client disposed"));
+    await asked.catch(() => {});
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("still rejects when the seed's cache cannot be opened", async () => {
     const { connection, connected } = lossyConnection([seed], {
       options,

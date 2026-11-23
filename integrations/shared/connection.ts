@@ -82,10 +82,14 @@ function warnNotSeeded(id: string, error: unknown): void {
  * that cache's seed to that client, started on the first ask and shared by
  * every later one; undefined for a cache without a seed. It rejects only
  * when the cache cannot be opened: a snapshot that fails to apply leaves
- * the cache not seeded (decision 98 C).
+ * the cache not seeded (decision 98 C). The warning is given only while
+ * `live` holds for the client: a client lost or disposed meanwhile fails
+ * every pending call, `hydrate` included, and that is no news about the
+ * snapshot.
  */
 function seeder(
   seeds: readonly Seed[],
+  live: (client: TscacheClient) => boolean,
 ): (client: TscacheClient, id: string) => Promise<void> | undefined {
   const byId = new Map(seeds.map((seed) => [seed.config.id, seed]));
   /** Per client, the applying of each cache's seed, started on the first ask. */
@@ -103,7 +107,9 @@ function seeder(
       applying = client.cache(seed.config).then((cache) =>
         hydrateRead(cache, seed.read).then(
           () => {},
-          (error: unknown) => warnNotSeeded(id, error),
+          (error: unknown) => {
+            if (live(client)) warnNotSeeded(id, error);
+          },
         ),
       );
       ofClient.set(id, applying);
@@ -131,7 +137,8 @@ function seeder(
  * architecture §2.8: hydration is an optimisation, never a requirement for
  * correctness): `cache()` still hands out the cache, which fetches what the
  * seed would have filled, and a development build warns once per client
- * and cache with the error's message. `hydrate` validates the whole
+ * and cache with the error's message, unless the client was lost or the
+ * connection disposed meanwhile. `hydrate` validates the whole
  * snapshot before it changes anything, so a refused snapshot leaves
  * nothing behind; a write that fails part way (an allocation failure)
  * keeps only the parts it finished, each recorded as coverage. A worker
@@ -147,7 +154,11 @@ export function connect(
 ): Connection {
   let state = CONNECTING;
   let disposed = false;
-  const seeding = seeder(seeds);
+  const seeding = seeder(
+    seeds,
+    (client) =>
+      !disposed && state.status === "connected" && state.client === client,
+  );
   const listeners = new Set<() => void>();
 
   function set(next: ConnectionState): void {
