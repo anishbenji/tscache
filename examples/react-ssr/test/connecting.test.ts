@@ -89,4 +89,22 @@ describe("attempts", () => {
     await settle();
     expect(seen).toEqual(["failed no worker"]);
   });
+
+  it("says nothing of a lost attempt's failure, and the next attempt connects", async () => {
+    const { started, seen } = harness();
+    // The port client rejects the pending call, then reports the loss.
+    started[0]?.attempt.lose("port closed");
+    started[0]?.reject(new Error("port closed"));
+    started[1]?.resolve("second");
+    await settle();
+    expect(seen).toEqual(["lost port closed", "connected second"]);
+  });
+
+  it("says nothing of a failure that arrives after stop", async () => {
+    const { started, seen, stop } = harness();
+    stop();
+    started[0]?.reject(new Error("unmounted"));
+    await settle();
+    expect(seen).toEqual([]);
+  });
 });

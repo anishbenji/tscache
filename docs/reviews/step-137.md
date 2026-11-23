@@ -1,6 +1,6 @@
 # Step 137 — a failed seeding means "not seeded"
 
-Branch: `fix/137-seed-failure-not-seeded` · Reviewer: none yet (the director runs the review) · Status: built, awaiting review · Never paths touched: none
+Branch: `fix/137-seed-failure-not-seeded` · Reviewer: Codex (gate), with Claude pre-reviews and the security lane · Rounds: 1 · Status: round 1 fixed, round 2 next · Never paths touched: none
 
 ## Scope
 
@@ -192,3 +192,16 @@ No `docs/INDEX.md` row changes: none of the edited files has a sized row.
 ### Decision concerns
 
 - `decodeSnapshot` still quotes a snapshot that is not an object (`packages/tscache/src/snapshot.ts:216`, through `show` in `errors.ts`). The three sites in this step no longer print messages, but an application that prints the message of a failed `decodeSnapshot` still leaks the page's data. Changing it touches `packages/tscache/src/`, a protected path; the director raises it with the user.
+
+## Pre-review (Claude), before round 2 — not the gate
+
+Opus pre-review on `349a3769`: no P0 or P1; the five round 1 fixes checked on every seeding site.
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Verdict  | Fix                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------ |
+| [P2] A lost or stopped attempt's failure is still reported as "could not connect" (`examples/react-ssr/src/connecting.ts`): when the hosting tab crashes while `client.cache` is pending, the port client rejects the call and then fires `workerLost`, and the old attempt's rejection logged `could not connect` beside the replacement's success; a failure after `stop()` was logged too. Not new (the old `useConnection` did the same), but against the module's contract. | Accepted | `attempts` reports a failure only while the attempt is live; the module header and `Outcomes.failed` say so. |
+| [nit] This file's header still read "awaiting review"                                                                                                                                                                                                                                                                                                                                                                                                                            | Accepted | Header updated.                                                                                              |
+
+Tests (each failed before the fix): `examples/react-ssr/test/connecting.test.ts`, "says nothing of a lost attempt's failure, and the next attempt connects" and "says nothing of a failure that arrives after stop".
+
+Verification: `bunx vitest run examples/react-ssr/test/connecting.test.ts`: 2 failed before, 6 passed after; `bunx tsc --noEmit -p examples/react-ssr` and `bunx biome check examples/react-ssr`: clean.

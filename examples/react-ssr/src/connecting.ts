@@ -1,7 +1,7 @@
 // How the page's client connects, apart from React and Vite's browser-only
 // imports, so unit tests can drive it (test/connecting.test.ts): one
 // attempt at a time, the next started when an attempt's worker is lost, and
-// a lost or stopped attempt's result dropped.
+// a lost or stopped attempt's result dropped and its failure not reported.
 
 /** What one connection attempt is given. */
 export interface Attempt {
@@ -21,7 +21,7 @@ export interface Outcomes<T> {
   connected(result: T): void;
   /** An attempt's worker was lost before the attempts were stopped. */
   lost(reason: string): void;
-  /** An attempt failed to connect. */
+  /** A live attempt failed to connect. */
   failed(error: unknown): void;
   /** Releases the result of an attempt that no longer counts. */
   drop(result: T): void;
@@ -55,7 +55,9 @@ export function attempts<T>(
         if (attempt.live()) on.connected(result);
         else on.drop(result);
       },
-      (error: unknown) => on.failed(error),
+      (error: unknown) => {
+        if (attempt.live()) on.failed(error);
+      },
     );
   };
   next();
