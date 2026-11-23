@@ -50,3 +50,36 @@ None. These tests are integration tests of application snippets, outside the eng
 ## Decision concerns
 
 - **The two SSR examples still fail on a failed seed.** `examples/react-ssr/src/session.ts` disposes the client and rejects the connection when its seed fails, and `examples/solid-ssr/src/session.ts` fails the cache memo; their READMEs (Known limits) say so. Both seed through their own code, not `integrations/shared/connection.ts`, and the brief scopes this step to the integrations. Step 134's recommendation for option C named them too (with `examples/mock-backend/src/hydration.ts`). Options: (a) a follow-up step applies decision C to both examples and their READMEs; (b) leave them, documented as they are. Recommendation: (a), so every seeding in the repository follows one rule.
+
+## Part b: the SSR examples
+
+The director applied decision 98 C to the two SSR examples in this step (option (a) of the concern above), so every seeding in the repository follows one rule. The examples import nothing from `integrations/`, so the rule is mirrored in each example's own code rather than shared; `examples/mock-backend/src/hydration.ts`'s `seed` keeps its contract, as part a kept `hydrateRead`'s.
+
+### What changed
+
+- **`examples/react-ssr/src/session.ts`.** A new `seedCache` applies the snapshot through `seed` and returns the ranges it filled, or `undefined` when the snapshot failed to apply. In that case a development build (`import.meta.env.DEV`) prints one `console.warn` naming the cache id and the error's message, as a single string; neither the error nor the snapshot is passed. `connect` still disposes the client and rejects when the cache cannot be opened. The page log reads `snapshot from the server: not applied; the cache fetches what it would have covered` in place of the ranges applied. One consequence needed a guard: a seed interrupted by a lost worker used to reject the attempt, and now resolves with the lost client, so `useConnection` marks each attempt lost when its `workerLost` fires and disposes the attempt's result instead of setting it, which keeps a lost client from replacing the client connected after it.
+- **`examples/solid-ssr/src/session.ts`.** The cache memo catches a failure of `seed`, warns in development as above, logs the same line, and returns the handle, so the memo resolves and the page reads through the cache, which fetches. A `client().cache(config)` that rejects still fails the memo, and the `Errored` boundary still shows the server's figures. A lost worker refreshes the client memo, which recomputes the cache memo, so no guard like React's is needed.
+- **`examples/mock-backend/src/hydration.ts`.** `seed` is unchanged. Its TSDoc no longer calls every other failure "a bug"; it says that the SSR examples' callers count it as not seeded and warn in development.
+- **READMEs.** Both examples' Known limits describe the new behaviour: the page connects, the log reads `not applied`, the cache fetches the whole window, a development build warns with the message; only a cache that cannot be opened fails as before.
+- **`e2e/examples/support.ts`.** `serveCorruptSnapshot(page)` serves the page with its snapshot's first segment given twice, the part a corruption: validation rules 1–4 pass and the second segment is refused as overlapping the first. Range and coverage are left as the server wrote them.
+
+### Tests
+
+The examples' seeding tests are their Playwright specs (`e2e/examples/react-ssr.spec.ts`, `e2e/examples/solid-ssr.spec.ts`); the examples have no Vitest tests of their own. The brief's scope list names only `examples/` and this file, but its test step asks for a test where the examples' seeding tests are, so one test was added to each spec, with the helper above. This is the one departure from the listed scope.
+
+| Test                                                                                 | Before the change                                               | What it pins                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| react-ssr: a snapshot that fails to apply leaves the cache to fetch the whole window | failed: status stayed `hydrating` (the connection was refused)  | The page reaches `ready` in shared mode, the log reads `not applied`, the one fetch starts at the window's first day (nothing seeded), the fetch count reads 1, and no page error, console error or console warning (a production build). |
+| solid-ssr: a snapshot that fails to apply leaves the cache to fetch the whole day    | failed: status stayed `server-rendered` (the cache memo failed) | The page reaches `ready` in shared mode, the log reads `not applied`, the first fetch starts at the window's first minute, the readings reach at least the server's, and no page error, console error or console warning.                 |
+
+No existing test or assertion was changed or removed. `examples/mock-backend/test/hydration.test.ts` still pins `seed`'s "lets other failures through", which holds, since `seed` is unchanged. The development warning is not covered by a test: the specs run production builds (`vite preview`), and the examples have no unit-test setup that renders a session.
+
+### Verification
+
+- Before the change (session files at `af18229f`, the new tests in place): `E2E_EXAMPLES=react-ssr,solid-ssr heavy-run.sh … bunx playwright test --project=examples -g "fails to apply" e2e/examples/react-ssr.spec.ts e2e/examples/solid-ssr.spec.ts`: 2 failed, as in the table.
+- After it: the two specs in full, 13 passed, including both worker-crash tests.
+- `bunx tsc -p examples/react-ssr`, `examples/solid-ssr`, `examples/mock-backend` and `e2e` with `--noEmit`: exit 0. `bunx biome check examples e2e docs/reviews`: no findings.
+- `bunx vitest run examples/mock-backend`: 6 files, 128 tests passed. `bun run check:integrations`: no errors. `bun scripts/test-clocks.ts`: 215 files clean.
+- `bun run ci` through `heavy-run.sh`: see the child report for the final head.
+
+Not verified: the development-build warning in a browser (`bun run dev` for either example); it is the same expression as part a's, behind `import.meta.env.DEV`.
