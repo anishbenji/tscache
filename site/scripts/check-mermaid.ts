@@ -1,17 +1,25 @@
 // Catches syntax errors in the docs site's published Mermaid diagrams, outside a browser.
 //
-// The site renders every ```mermaid fence in the browser (vitepress-plugin-mermaid), so a syntax
+// The site renders each ```mermaid fence in the browser (vitepress-plugin-mermaid), so a syntax
 // error builds cleanly and only shows on the live page as Mermaid's error box. This check parses
-// each diagram with the Mermaid the site pins, at build time. It has three limits:
+// those diagrams with the Mermaid the site pins, at build time. Its limits:
 //
 //   - It is a syntax check, not a render. A diagram that parses but draws wrongly, or throws in
 //     Mermaid's renderer, passes.
-//   - It reads the Markdown files Git lists under `site/` plus the generated `site/api/` pages:
-//     every published page, and files the site excludes from publishing. It does not load the
-//     site's config (`srcExclude`, rewrites, extra pages) or run a dynamic route's paths loader.
-//     The no-argument run, which `docs:check` uses, fails naming the page on any Markdown file
-//     under `site/` with a bracket-named segment (VitePress's dynamic-route form), whatever it
-//     holds and excluded files included; a dynamic route needs the check extended first.
+//   - It reads the regular Markdown files Git lists under `site/` plus the generated `site/api/`
+//     pages; on this site today that is every published page, and also the files the site
+//     excludes from publishing. It does not load the site's config (`srcExclude`, rewrites,
+//     extra pages) or run a dynamic route's paths loader. The no-argument run, which
+//     `docs:check` uses, fails naming the path, rather than follow it, on any name Git lists
+//     under `site/` that is a symbolic link, and on any Markdown file under `site/` with a
+//     bracket-named segment (VitePress's dynamic-route form), whatever it holds and excluded
+//     files included; a link or a dynamic route needs the check extended first.
+//   - It reads `mermaid` fences only, not a hand-written `<Mermaid>` tag or raw HTML. A
+//     `mermaid` fence that a `::: code-group` shows as code is still parsed: write a deliberately
+//     broken example as an `mmd` fence or give it a title.
+//   - It parses with Mermaid's default options, not the site's (`securityLevel`, `sequence`),
+//     and does not apply the 50,000-character limit above which `mermaid.render` draws an error
+//     box instead of the diagram.
 //   - A `details` statement, whose parsing reads an element of the page, is parsed without it.
 //
 // How it reads and parses:
@@ -34,7 +42,7 @@
 // hard-coded version or path, so the check runs under Bun (`bun run docs:check`) and under Node
 // (Vitest) alike, and follows whichever Mermaid `site/package.json` pins.
 //
-//   bun site/scripts/check-mermaid.ts                  checks every page Git lists under site/,
+//   bun site/scripts/check-mermaid.ts                  checks the pages Git lists under site/,
 //                                                      and the generated site/api/ pages
 //   bun site/scripts/check-mermaid.ts <files or dirs>  checks those pages, and the pages under those dirs
 
