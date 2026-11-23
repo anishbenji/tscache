@@ -4,6 +4,8 @@ import {
   type ClientOptions,
   ConfigError,
   createClient,
+  decodeSnapshot,
+  type EncodedSnapshot,
   type GetResult,
   type Range,
   type TscacheClient,
@@ -19,7 +21,7 @@ import {
   vi,
 } from "vitest";
 import { type Connection, connect } from "../shared/connection";
-import type { ServerRead } from "../shared/hydration";
+import { dehydrate, rehydrate, type ServerRead } from "../shared/hydration";
 import { config, type Lossy, lossy, until } from "./helpers";
 
 const open: (Connection | TscacheClient)[] = [];
@@ -474,4 +476,46 @@ describe("connect, when a seed fails to apply", () => {
     await expect(connection.cache(client, config)).rejects.toThrow(ConfigError);
     expect(warn).not.toHaveBeenCalled();
   });
+
+  // A page's read goes through `rehydrate` before `connect`: a snapshot that
+  // `decodeSnapshot` refuses must not stop the page there.
+  it.each([
+    {
+      what: "a format the library does not know",
+      spoil: (s: EncodedSnapshot): unknown => ({ ...s, format: 3 }),
+    },
+    {
+      what: "a mask that is not base64",
+      spoil: (s: EncodedSnapshot): unknown => ({
+        ...s,
+        segments: s.segments.map((p) => ({ ...p, mask: "!" })),
+      }),
+    },
+  ])(
+    "counts a snapshot with $what as not seeded, and the cache fetches",
+    async ({ spoil }) => {
+      const value = dehydrate(seed);
+      const spoiled = spoil(value.snapshot) as EncodedSnapshot;
+      let message = "";
+      try {
+        decodeSnapshot(spoiled);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).not.toBe("");
+
+      const read = rehydrate(config, { ...value, snapshot: spoiled });
+      const { connection, connected } = lossyConnection([read], { options });
+      await until(() => connected() !== null);
+      const handle = await connection.cache(
+        connected() as TscacheClient,
+        config,
+      );
+      const answer = await handle.get(seed.range);
+      expect(fetched).toEqual([seed.range]);
+      expect(Array.from(answer.fields.v ?? [])).toEqual([7, 7, 7]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain(message);
+    },
+  );
 });
