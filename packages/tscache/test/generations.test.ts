@@ -83,6 +83,35 @@ describe("11: rank (N128)", () => {
     }
   });
 
+  it("compares numeric prerelease identifiers beyond 2^53 exactly, by length and then digits (semver §11; gate round 5, R5-3)", () => {
+    const higher = worker({
+      id: "z",
+      lib: "0.3.0-9007199254740993",
+      startedAt: 1,
+    });
+    const lower = worker({
+      id: "a",
+      lib: "0.3.0-9007199254740992",
+      startedAt: 9,
+    });
+    expect(outranks(higher, lower)).toBe(true);
+    expect(outranks(lower, higher)).toBe(false);
+    // A longer number is the larger one, whatever its digits.
+    const longer = worker({ id: "a", lib: "0.3.0-10000000000000000000" });
+    const shorter = worker({ id: "z", lib: "0.3.0-9999999999999999999" });
+    expect(outranks(longer, shorter)).toBe(true);
+    expect(outranks(shorter, longer)).toBe(false);
+    // Leading zeros (not valid semver) do not count: 0010 is 10, above 9,
+    // and equal to 10, where the later start decides.
+    const padded = worker({ id: "a", lib: "0.3.0-0010", startedAt: 1 });
+    const plain = worker({ id: "z", lib: "0.3.0-9", startedAt: 9 });
+    expect(outranks(padded, plain)).toBe(true);
+    expect(outranks(plain, padded)).toBe(false);
+    const same = worker({ id: "z", lib: "0.3.0-10", startedAt: 9 });
+    expect(outranks(same, padded)).toBe(true);
+    expect(outranks(padded, same)).toBe(false);
+  });
+
   it("for one library takes the later start, and for one start the greater id", () => {
     const first = worker({ id: "b", startedAt: 1 });
     expect(outranks(worker({ id: "a", startedAt: 2 }), first)).toBe(true);

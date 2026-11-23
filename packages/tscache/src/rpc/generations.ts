@@ -58,11 +58,23 @@ function versionOf(lib: string): Version {
 
 const NUMERIC = /^\d+$/;
 
+/**
+ * Two numeric identifiers by value, exactly at any size (semver §11): a
+ * `Number` rounds above 2^53. Without leading zeros the longer one is the
+ * larger; of equal length, the digits decide.
+ */
+function compareNumeric(a: string, b: string): number {
+  const x = a.replace(/^0+(?=\d)/, "");
+  const y = b.replace(/^0+(?=\d)/, "");
+  if (x.length !== y.length) return x.length - y.length;
+  return x === y ? 0 : x < y ? -1 : 1;
+}
+
 /** Semver precedence of two prerelease identifiers. */
 function compareIdentifiers(a: string, b: string): number {
   const an = NUMERIC.test(a);
   const bn = NUMERIC.test(b);
-  if (an && bn) return Number(a) - Number(b);
+  if (an && bn) return compareNumeric(a, b);
   if (an !== bn) return an ? -1 : 1;
   return a === b ? 0 : a < b ? -1 : 1;
 }
