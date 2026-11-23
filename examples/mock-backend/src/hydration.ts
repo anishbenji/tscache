@@ -73,9 +73,8 @@ export function readHydration(): Hydration {
  * stale versioned snapshot is refused and covered slots are never touched.
  * A worker from before `hydrate` answers "unknown op": the cache then
  * fetches what it is asked for, so that counts as nothing applied. Any other
- * failure (a snapshot for another grid, say) propagates; the SSR examples'
- * callers count it as "not seeded" too, so the cache fetches instead, and
- * warn in development with the error's message only (architecture §2.8).
+ * failure (a snapshot for another grid, say) propagates; `seedCache`
+ * counts it as "not seeded" too (architecture §2.8).
  */
 export async function seed(
   cache: CacheHandle,
@@ -92,5 +91,35 @@ export async function seed(
       return { applied: [] };
     }
     throw error;
+  }
+}
+
+/**
+ * Applies the server's snapshot to `cache` and returns the ranges it
+ * filled, or undefined when the snapshot was not applied. A snapshot that
+ * fails to apply (a malformed or foreign one, a failed write) only means
+ * the cache is not seeded: hydration saves fetches, it is never needed for
+ * correct answers (architecture §2.8), so the cache fetches those ranges
+ * instead. A development build says why, with the error's message only
+ * (the snapshot carries the page's data), and only while `live` holds: a
+ * lost or disposed client fails every pending call, `hydrate` included, and
+ * that is no news about the snapshot. `live` is asked after the failure, so
+ * a client lost while `hydrate` was pending counts as lost.
+ */
+export async function seedCache(
+  cache: CacheHandle,
+  hydration: Hydration,
+  live: () => boolean,
+): Promise<Range[] | undefined> {
+  try {
+    return (await seed(cache, hydration)).applied;
+  } catch (error) {
+    if (import.meta.env.DEV && live()) {
+      const why = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `tscache: the server's snapshot for cache "${cache.id}" was not applied (${why}), so the cache fetches that range instead; printed in development builds only.`,
+      );
+    }
+    return undefined;
   }
 }

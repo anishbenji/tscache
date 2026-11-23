@@ -11,12 +11,12 @@ import {
 } from "@anishbenji/tscache";
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
-import type { Hydration } from "@examples/mock-backend/hydration";
+import { type Hydration, seedCache } from "@examples/mock-backend/hydration";
 import { pageContext } from "@examples/mock-backend/insights";
 import { onFetchNotice } from "@examples/mock-backend/notices";
 import { useEffect, useState } from "react";
 import { candles, type Summary, summarize, utcDay } from "./candles";
-import { type Attempt, attempts, seedCache } from "./connecting";
+import { type Attempt, attempts } from "./connecting";
 import { insights } from "./insights";
 import { log, message } from "./log";
 

@@ -15,7 +15,7 @@ import {
 } from "@anishbenji/tscache";
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
-import { readHydration, seed } from "@examples/mock-backend/hydration";
+import { readHydration, seedCache } from "@examples/mock-backend/hydration";
 import { pageContext } from "@examples/mock-backend/insights";
 import { createMemo, refresh, type SourceAccessor } from "solid-js";
 import { config } from "./sensor";
@@ -45,24 +45,15 @@ export function createSession(log: (text: string) => void): Session {
   });
   const cache = createMemo(async () => {
     const current = client();
-    // Only a cache that cannot be opened fails the memo.
+    // Only a cache that cannot be opened fails the memo. A lost client's
+    // memo is about to be recomputed with its replacement, which seeds
+    // afresh, so a lost client's seeding is neither warned about nor logged.
     const handle = await current.cache(config);
-    try {
-      const { applied } = await seed(handle, hydration);
+    const live = () => !lost.has(current);
+    const applied = await seedCache(handle, hydration, live);
+    if (applied !== undefined) {
       log(`snapshot from the server: ${applied.length} range(s) applied`);
-    } catch (error) {
-      // A lost client's memo is about to be recomputed with its
-      // replacement, which seeds afresh.
-      if (lost.has(current)) return handle;
-      // Hydration saves fetches; it is never needed for correct answers.
-      // Only the error's message is printed: the snapshot carries the
-      // page's data.
-      if (import.meta.env.DEV) {
-        const why = error instanceof Error ? error.message : String(error);
-        console.warn(
-          `tscache: the server's snapshot for cache "${handle.id}" was not applied (${why}), so the cache fetches that range instead; printed in development builds only.`,
-        );
-      }
+    } else if (live()) {
       log(
         "snapshot from the server: not applied; the cache fetches what it would have covered",
       );

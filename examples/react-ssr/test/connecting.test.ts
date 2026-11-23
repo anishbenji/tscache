@@ -1,20 +1,5 @@
-import { type CacheHandle, createClient } from "@anishbenji/tscache";
-import { dehydrate, type Hydration } from "@examples/mock-backend/hydration";
-import {
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
-import {
-  type Attempt,
-  attempts,
-  type Outcomes,
-  seedCache,
-} from "../src/connecting";
+import { describe, expect, it } from "vitest";
+import { type Attempt, attempts, type Outcomes } from "../src/connecting";
 
 /** A promise and the functions that settle it. */
 function deferred<T>() {
@@ -52,7 +37,12 @@ function harness() {
   return { started, seen, stop };
 }
 
-/** Lets every settled promise's handlers run. */
+/**
+ * Lets every settled promise's handlers run. `attempts` keeps its promise
+ * chain to itself, so a test cannot await it; it cannot flake: the handlers
+ * are microtasks of promises already settled, with no timer or I/O between,
+ * and Node drains every microtask before it runs a setImmediate callback.
+ */
 const settle = () => new Promise<void>((done) => setImmediate(done));
 
 describe("attempts", () => {
@@ -98,67 +88,5 @@ describe("attempts", () => {
     started[0]?.reject(new Error("no worker"));
     await settle();
     expect(seen).toEqual(["failed no worker"]);
-  });
-});
-
-describe("seedCache", () => {
-  /** A server's snapshot of [0, 20] for a cache like the page's. */
-  let hydration: Hydration;
-  beforeAll(async () => {
-    const server = await createClient({ mode: "in-process" });
-    const cache = await server.cache({
-      id: "candles",
-      interval: 10,
-      fields: { v: "f64" },
-    });
-    const range = { start: 0, end: 20 };
-    await cache.put({ timestamps: [0, 20], fields: { v: [1, 2] } }, { range });
-    const { snapshot } = await cache.get(range, {
-      cacheOnly: true,
-      snapshot: true,
-    });
-    await server.dispose();
-    if (snapshot === undefined) throw new Error("no snapshot");
-    hydration = dehydrate(range, snapshot);
-  });
-
-  /** A cache whose `hydrate` rejects with `error`. */
-  const refusing = (error: Error) =>
-    ({
-      id: "candles",
-      hydrate: () => Promise.reject(error),
-    }) as unknown as CacheHandle;
-
-  let warn: ReturnType<typeof vi.spyOn>;
-  beforeEach(() => {
-    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.stubEnv("DEV", true);
-  });
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.restoreAllMocks();
-  });
-
-  it("counts a failure as not seeded, and warns in development with the message", async () => {
-    const cache = refusing(new Error("invalid snapshot: overlaps"));
-    expect(await seedCache(cache, hydration, () => true)).toBeUndefined();
-    expect(warn).toHaveBeenCalledTimes(1);
-    const args = warn.mock.calls[0] ?? [];
-    expect(args).toHaveLength(1);
-    expect(args[0]).toContain("invalid snapshot: overlaps");
-    expect(args[0]).toContain('"candles"');
-  });
-
-  it("is silent when the attempt no longer counts, as when its worker was lost", async () => {
-    const cache = refusing(new Error("worker lost"));
-    expect(await seedCache(cache, hydration, () => false)).toBeUndefined();
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it("is silent in production", async () => {
-    vi.stubEnv("DEV", false);
-    const cache = refusing(new Error("invalid snapshot: overlaps"));
-    expect(await seedCache(cache, hydration, () => true)).toBeUndefined();
-    expect(warn).not.toHaveBeenCalled();
   });
 });

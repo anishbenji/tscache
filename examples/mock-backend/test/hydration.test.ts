@@ -6,13 +6,22 @@ import {
   type TscacheClient,
   TscacheError,
 } from "@anishbenji/tscache";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   dehydrate,
   type Hydration,
   hydrationScript,
   readHydration,
   seed,
+  seedCache,
 } from "../src/hydration";
 
 const MINUTE = 60_000;
@@ -237,5 +246,89 @@ describe("SSR hydration", () => {
   it("says so when the page carries no hydration", () => {
     vi.stubGlobal("document", { getElementById: () => null });
     expect(() => readHydration()).toThrow(/server-rendered/);
+  });
+});
+
+describe("seedCache", () => {
+  /** A server's snapshot of [0, 20] for a cache like the page's. */
+  let hydration: Hydration;
+  beforeAll(async () => {
+    const server = await createClient({ mode: "in-process" });
+    const cache = await server.cache({
+      id: "candles",
+      interval: 10,
+      fields: { v: "f64" },
+    });
+    const range = { start: 0, end: 20 };
+    await cache.put({ timestamps: [0, 20], fields: { v: [1, 2] } }, { range });
+    const { snapshot } = await cache.get(range, {
+      cacheOnly: true,
+      snapshot: true,
+    });
+    await server.dispose();
+    if (snapshot === undefined) throw new Error("no snapshot");
+    hydration = dehydrate(range, snapshot);
+  });
+
+  /** A cache whose `hydrate` rejects with `error`. */
+  const refusing = (error: Error) =>
+    ({
+      id: "candles",
+      hydrate: () => Promise.reject(error),
+    }) as unknown as CacheHandle;
+
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("DEV", true);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("counts a failure as not seeded, and warns in development with the message", async () => {
+    const cache = refusing(new Error("invalid snapshot: overlaps"));
+    expect(await seedCache(cache, hydration, () => true)).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const args = warn.mock.calls[0] ?? [];
+    expect(args).toHaveLength(1);
+    expect(args[0]).toContain("invalid snapshot: overlaps");
+    expect(args[0]).toContain('"candles"');
+  });
+
+  it("is silent when the attempt no longer counts, as when its worker was lost", async () => {
+    const cache = refusing(new Error("worker lost"));
+    expect(await seedCache(cache, hydration, () => false)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("is silent in production", async () => {
+    vi.stubEnv("DEV", false);
+    const cache = refusing(new Error("invalid snapshot: overlaps"));
+    expect(await seedCache(cache, hydration, () => true)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("is silent about a client lost while hydrate was pending", async () => {
+    // As the Solid example asks: `live` is whether the client is outside
+    // its set of lost clients. A lost worker rejects every pending call,
+    // hydrate included, then fires workerLost, which adds the client to the
+    // set, all before the rejection reaches seedCache.
+    const client = {};
+    const lost = new WeakSet<object>();
+    let reject: (error: Error) => void = () => {};
+    const cache = {
+      id: "candles",
+      hydrate: () =>
+        new Promise<never>((_, fail) => {
+          reject = fail;
+        }),
+    } as unknown as CacheHandle;
+    const seeding = seedCache(cache, hydration, () => !lost.has(client));
+    reject(new TscacheError("worker lost"));
+    lost.add(client);
+    expect(await seeding).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
   });
 });
