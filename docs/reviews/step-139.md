@@ -1,12 +1,12 @@
 # Step 139 — mermaid 12 on the docs site, with the 11.x diagram look
 
-Branch: `docs/139-mermaid-12` · Reviewer: none yet (the director runs the review) · Rounds: 0 · Status: built, awaiting review · Verdict after triage: —
+Branch: `docs/139-mermaid-12` · Reviewer: Codex · Rounds: 1 · Status: settled · Verdict after triage: merge
 
 ## Scope
 
 User decision 129 A (2026-11-21): take Dependabot #164, which moves `mermaid` in `site/package.json` from 11.17.2 to 12.3.0. Check #164 found that mermaid 12's new defaults change both flowcharts substantially (the package map three times taller, the startup flowchart's labels wrapped and cut off). This step lands the bump with settings that restore the 11.x look, and supersedes #164, which is to be closed once this merges.
 
-The first commit is #164's commit (8a244496) with the same tree and Dependabot's body; only the subject is lowercased (`chore(deps): bump mermaid from 11.17.2 to 12.3.0`) because commitlint rejects the capitalised original. `bun install --frozen-lockfile` printed no warning (`629 packages installed`).
+The first commit (`28433416`) is #164's commit (`8a244496`) cherry-picked onto `main` at `8e47716a`. The patch is the same (`site/package.json` and `bun.lock` are identical; `git patch-id --stable` matches), but the tree is not, because `main` had since merged step 140. The subject became `chore(deps): bump mermaid from 11.17.2 to 12.3.0` (a `deps` scope added and the first word lowercased, since commitlint rejects the capitalised original), and a `Co-Authored-By` trailer was appended to Dependabot's otherwise unchanged body. `bun install --frozen-lockfile` printed no warning (`629 packages installed`).
 
 ## Version
 
@@ -71,6 +71,18 @@ Not a regression: on 11.17.2 and 12.3.0 alike, `vitepress-plugin-mermaid` someti
 - `bun scripts/test-clocks.ts`: `215 files clean`.
 - The screenshot comparison above.
 - `bun run ci` passes (Vitest 174 files, 3362 tests; Playwright 197; `docs:build`; gitleaks; bench smoke).
+
+## Round 1 (Codex) — reviewer verdict: merge
+
+One P2, on `c9f44a5f`; the reviewer found both accepted pre-review fixes present and compared the saved light and dark captures of all 12 diagrams.
+
+| #    | Sev | Finding                                                                                                                                                                    | Decision | Resolution                                                                                                                                       |
+| ---- | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1-1 | P2  | The Scope section said the first commit has #164's tree and only a lowercased subject; the tree differs (newer `main`), the subject gained a scope and a trailer was added | accepted | Reworded in Scope: same patch (`git patch-id --stable` matches), cherry-picked onto `8e47716a`, subject scope and lowercasing, the added trailer |
+
+## Finding check (Claude Fable 5.2), round 1
+
+1 valid, 0 partly, 0 invalid, 0 decision.
 
 ## Pre-review (Claude), not the gate
 
