@@ -59,13 +59,21 @@ const FRONTMATTER_FIRST = fence(
   "---\ntitle: T\n---\n%% Comment\nflowchart LR\n  A --> B",
 );
 
+/** Asserts that `text` starts with `prefix`, compared as a literal string. */
+function expectPrefix(text: string | undefined, prefix: string): void {
+  expect(text?.slice(0, prefix.length)).toBe(prefix);
+}
+
 const find = await diagramReader();
 const lines = async (markdown: string) =>
   (await find("site/page.md", markdown)).map((d) => d.line);
 
-/** Writes `pages` (name to Markdown) into a fresh directory and returns it. */
+/**
+ * Writes `pages` (name to Markdown) into a fresh directory and returns it. The directory's name
+ * holds a space and parentheses, so an assertion that reads a printed path as a pattern fails.
+ */
 function fixture(pages: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), "check-mermaid-"));
+  const dir = mkdtempSync(join(tmpdir(), "check-mermaid (tmp)-"));
   for (const [name, markdown] of Object.entries(pages)) {
     mkdirSync(join(dir, name, ".."), { recursive: true });
     writeFileSync(join(dir, name), markdown);
@@ -191,8 +199,9 @@ describe("check-mermaid: the command", () => {
       rmSync(dir, { recursive: true });
     }
     const printed = error.mock.calls.map((call) => String(call[0]));
-    expect(printed[0]).toMatch(
-      new RegExp(`^${join(dir, "tabs.md")}:3: Parse error on line 4:\n`),
+    expectPrefix(
+      printed[0],
+      `${join(dir, "tabs.md")}:3: Parse error on line 4:\n`,
     );
     expect(printed).toHaveLength(2);
     expect(printed[1]).toContain("1 of 2 diagram(s) do not parse");
@@ -210,8 +219,9 @@ describe("check-mermaid: the command", () => {
       rmSync(dir, { recursive: true });
     }
     const printed = error.mock.calls.map((call) => String(call[0]));
-    expect(printed[0]).toMatch(
-      new RegExp(`^${join(dir, "tabs.md")}:3: Parse error on line 4:\n`),
+    expectPrefix(
+      printed[0],
+      `${join(dir, "tabs.md")}:3: Parse error on line 4:\n`,
     );
     expect(printed[1]).toContain("1 of 1 diagram(s) do not parse");
   });
@@ -241,8 +251,8 @@ describe("check-mermaid: the command", () => {
     }
     const printed = error.mock.calls.map((call) => String(call[0]));
     expect(printed).toHaveLength(3);
-    expect(printed[0]).toMatch(new RegExp(`^${join(dir, "comment.md")}:3: `));
-    expect(printed[1]).toMatch(new RegExp(`^${join(dir, "directive.md")}:3: `));
+    expectPrefix(printed[0], `${join(dir, "comment.md")}:3: `);
+    expectPrefix(printed[1], `${join(dir, "directive.md")}:3: `);
     expect(printed[2]).toContain("2 of 2 diagram(s) do not parse");
   });
 
@@ -279,8 +289,9 @@ describe("check-mermaid: the command", () => {
       rmSync(dir, { recursive: true });
     }
     const printed = error.mock.calls.map((call) => String(call[0]));
-    expect(printed[0]).toMatch(
-      new RegExp(`^${join(dir, "page.md")}:3: Parse error on line 5:\n`),
+    expectPrefix(
+      printed[0],
+      `${join(dir, "page.md")}:3: Parse error on line 5:\n`,
     );
   });
 
