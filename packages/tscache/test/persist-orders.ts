@@ -13,17 +13,20 @@
  * first time, rejects; `clearAll`; `ok` and `fail`, which settle one held
  * call, the run choosing which; `next`, which advances time to the next
  * timer. A user call runs either in the same turn as the one before or after
- * that turn's work. The outcomes: the store opener resolves, rejects, throws
- * or is held; a store read, write or clearAll succeeds, fails or is held;
- * the chunk import is held until `ok`, `fail` or its deadline. After the
- * last event time runs out: held calls never settle, and every later call
- * succeeds.
+ * that turn's work. The outcomes: the store opener resolves, rejects,
+ * throws, finds no database (the store is then empty) or is held; a store
+ * read, write or clearAll succeeds, fails or is held; the chunk loader
+ * throws, or its import is held until `ok`, `fail` or its deadline (step
+ * 132, Codex gate round 4, R4-2 and R4-3). After the last event time runs
+ * out: held calls never settle, and every later call succeeds.
  *
  * After every event the run checks the properties below, each named after
  * the rule it comes from (docs/architecture.md §4.10.6 and §4.10.8, N58, N59
  * with user decisions 113 A and 123 A, N61, checklist §12). They are stated
  * on what the store, the opener and the calls' answers show, never on the
- * code's own state.
+ * code's own state. A hosted order in which the chunk fails is also replayed
+ * with the same calls made after the failure, and must leave the same store
+ * log (`arrivalOrder`, round 4, R4-1).
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -86,7 +89,7 @@ interface Point {
   time: number;
 }
 
-type Outcome = "ok" | "fail" | "throw" | "hold";
+type Outcome = "ok" | "fail" | "throw" | "hold" | "absent";
 
 interface Op {
   kind: "opener" | "import" | StoreKind;
@@ -96,6 +99,8 @@ interface Op {
   end: (Point & { ok: boolean }) | undefined;
   /** Hosted: started while no persister existed (after the chunk failed). */
   unloaded: boolean;
+  /** An opener call: whether it passed `ifExists` (a clear's or a cleanup's). */
+  ifExists: boolean;
 }
 
 interface Call {
@@ -135,6 +140,13 @@ interface Violation {
   detail: string;
 }
 
+/** One entry of what a run did, in order, for the replay after a failure. */
+type Trace =
+  | { kind: "user"; name: EventName }
+  | { kind: "turn" }
+  | { kind: "settle"; ok: boolean; target: Op | undefined }
+  | { kind: "next" };
+
 class Run {
   readonly choices: Choices;
   readonly hosted: boolean;
@@ -150,16 +162,34 @@ class Run {
   /** Removals answered with records left under decision #131's case. */
   open131 = 0;
   violation: Violation | undefined;
+  /** What the run did; a replay has none. */
+  readonly trace: Trace[] = [];
+  /**
+   * Hosted: how many trace entries had run when the chunk's failure was
+   * first seen (undefined: it did not fail).
+   */
+  failedAt: number | undefined;
   #seq = 0;
   step = 0;
   #removalsOf = new Map<string, number>();
+  /** A replay: the outcomes of the opener and store calls, in order. */
+  readonly #replay: readonly Outcome[] | undefined;
+  #replayAt = 0;
 
-  constructor(hosted: boolean, prefix: readonly number[]) {
+  constructor(
+    hosted: boolean,
+    prefix: readonly number[],
+    replay?: readonly Outcome[],
+  ) {
     this.choices = new Choices(prefix);
     this.hosted = hosted;
+    this.#replay = replay;
     for (const id of IDS) this.memory.seed(id, fixture({ id }, [0, 4]));
     const store = this.#store();
-    const opener = (): Promise<PersistStore | undefined> => this.#open(store);
+    const opener = (o?: {
+      ifExists?: boolean;
+    }): Promise<PersistStore | undefined> =>
+      this.#open(store, o?.ifExists === true);
     const options = {
       debounceMs: DEBOUNCE_MS,
       timeoutMs: TIMEOUT_MS,
@@ -206,6 +236,7 @@ class Run {
       start: this.point(),
       end: undefined,
       unloaded: !this.loaded(),
+      ifExists: false,
     };
     this.ops.push(op);
     this.events.push(
@@ -235,7 +266,9 @@ class Run {
       cacheId: string | undefined,
       run: () => Promise<T>,
     ): Promise<T> => {
-      const outcome = (["ok", "fail", "hold"] as const)[this.choices.pick(3)];
+      const outcome =
+        this.#replayed() ??
+        (["ok", "fail", "hold"] as const)[this.choices.pick(3)];
       const op = this.#op(kind, outcome ?? "ok", cacheId);
       if (outcome === "fail") this.memory.fail(kind);
       const gate = outcome === "hold" ? this.memory.gate(kind) : undefined;
@@ -256,17 +289,34 @@ class Run {
     };
   }
 
-  #open(store: PersistStore): Promise<PersistStore | undefined> {
-    const outcome = (["ok", "fail", "throw", "hold"] as const)[
-      this.choices.pick(4)
-    ];
+  #open(
+    store: PersistStore,
+    ifExists: boolean,
+  ): Promise<PersistStore | undefined> {
+    const outcome =
+      this.#replayed() ??
+      (["ok", "fail", "throw", "hold", "absent"] as const)[
+        this.choices.pick(5)
+      ];
     const op = this.#op("opener", outcome ?? "ok");
+    op.ifExists = ifExists;
     if (outcome === "throw") {
       // Seen settled after the turn, as a rejection would be.
       void Promise.resolve().then(() => {
         op.end = { ...this.point(), ok: false };
       });
       throw planted();
+    }
+    if (outcome === "absent") {
+      // No database at the opening (round 4, R4-2): no store is open, and
+      // there are no records; a later opening creates the database empty.
+      for (const id of IDS)
+        this.memory.seed(id, { cache: undefined, pages: [] });
+      const promise = Promise.resolve(undefined);
+      void promise.then(() => {
+        op.end = { ...this.point(), ok: false };
+      });
+      return promise;
     }
     let promise: Promise<PersistStore>;
     if (outcome === "fail") promise = Promise.reject(planted());
@@ -281,8 +331,29 @@ class Run {
     return promise;
   }
 
+  /** A replay's next outcome ("ok" once they run out); undefined otherwise. */
+  #replayed(): Outcome | undefined {
+    if (this.#replay === undefined) return undefined;
+    return this.#replay[this.#replayAt++] ?? "ok";
+  }
+
   #import(): Promise<LazyPersist> {
-    const op = this.#op("import", "hold");
+    if (this.#replay !== undefined) {
+      // A replay's chunk fails at once.
+      const op = this.#op("import", "fail");
+      const chunk = Promise.reject(planted());
+      this.#track(op, chunk);
+      return chunk;
+    }
+    // The loader may throw instead of returning a promise (round 4, R4-3).
+    const outcome = (["hold", "throw"] as const)[this.choices.pick(2)];
+    const op = this.#op("import", outcome ?? "hold");
+    if (outcome === "throw") {
+      void Promise.resolve().then(() => {
+        op.end = { ...this.point(), ok: false };
+      });
+      throw planted();
+    }
     const chunk = deferred<LazyPersist>();
     this.#hold(op, (ok) =>
       ok ? chunk.resolve(lazy) : chunk.reject(planted()),
@@ -427,9 +498,70 @@ class Run {
     await flush();
     const at = this.choices.pick(this.held.length);
     const [target] = this.held.splice(at, 1);
+    this.trace.push({ kind: "settle", ok, target: target?.op });
     this.events.push(`<${target?.op.kind ?? ""} ${target?.op.cacheId ?? ""}>`);
     target?.settle(ok);
     await flush();
+  }
+
+  /**
+   * A replay: settles the held call made in the same place as the original
+   * run's `index`-th opener or store call; false when there is none.
+   */
+  async settleAt(index: number, ok: boolean): Promise<boolean> {
+    await flush();
+    const op = this.ops.filter((o) => o.kind !== "import")[index];
+    const at = this.held.findIndex((h) => h.op === op);
+    const [target] = at < 0 ? [] : this.held.splice(at, 1);
+    target?.settle(ok);
+    await flush();
+    return target !== undefined;
+  }
+
+  /** A replay: the chunk's import starts, and fails, before any call. */
+  async prime(): Promise<void> {
+    void this.persistence?.open("primer");
+    await flush();
+  }
+
+  /**
+   * Hosted: whether the chunk was seen to fail: its import settled, or its
+   * deadline passed, and no persister exists.
+   */
+  importFailed(): boolean {
+    const op = this.ops.find((o) => o.kind === "import");
+    if (op === undefined || this.loaded()) return false;
+    const now = vi.getMockedSystemTime()?.getTime() ?? 0;
+    return op.end !== undefined || now >= op.start.time + TIMEOUT_MS;
+  }
+
+  /**
+   * The store log, every call's answer (its error, or pending) and each
+   * cache's records at the end, as the replay compares them. Whether records
+   * were left at an answer is not compared: within one turn it depends on
+   * how many promise steps an answer takes, which the spec leaves open.
+   */
+  log(): string[] {
+    const ops = this.ops
+      .filter((o) => o.kind !== "import")
+      .map(
+        (o) =>
+          `[${o.kind}${o.cacheId === undefined ? "" : ` ${o.cacheId}`} ${o.outcome} ${
+            o.end === undefined ? "pending" : o.end.ok ? "ok" : "failed"
+          }]`,
+      );
+    const calls = this.calls.map(
+      (c) =>
+        `${c.kind}${c.cacheId === undefined ? "" : ` ${c.cacheId}`} ${
+          c.end === undefined
+            ? "pending"
+            : c.end.error === undefined
+              ? "answered"
+              : String(c.end.error)
+        }`,
+    );
+    const left = IDS.filter((id) => this.hasRecords(id));
+    return [...ops, "|", ...calls, "| records", ...left];
   }
 }
 
@@ -494,16 +626,28 @@ function check(run: Run, final: boolean): void {
     }
     return start;
   };
-  /** The store.clearAll that emptied the disk for `c`, if one did. */
-  const emptied = (c: Call) =>
-    c.end === undefined
-      ? undefined
-      : storeClears.find(
-          (k) =>
-            k.start.seq > barrierStart(c).seq &&
-            k.end?.ok === true &&
-            k.end.seq < (c.end?.seq ?? Infinity),
-        );
+  /**
+   * The store.clearAll that emptied the disk for `c`, or the opening that
+   * found no database, so nothing to clear (§4.10.6 clearAll), if one did.
+   * The clear's own opening is the last one with `ifExists` that settled in
+   * its barrier; with none, it shared a load's opening.
+   */
+  const emptied = (c: Call) => {
+    if (c.end === undefined) return undefined;
+    const end = c.end.seq;
+    const within = (k: Op) =>
+      k.start.seq > barrierStart(c).seq &&
+      k.end !== undefined &&
+      k.end.seq < end;
+    const cleared = storeClears.find((k) => within(k) && k.end?.ok === true);
+    if (cleared !== undefined) return cleared;
+    const settled = openers
+      .filter(within)
+      .sort((a, b) => (a.end?.seq ?? 0) - (b.end?.seq ?? 0));
+    const own = settled.filter((o) => o.ifExists);
+    const opening = own.length > 0 ? own.at(-1) : settled.at(-1);
+    return opening?.outcome === "absent" ? opening : undefined;
+  };
   const cleared = (c: Call) => emptied(c) !== undefined;
   const failedClear = (c: Call) => c.end !== undefined && !cleared(c);
   const name = (op: Op) => `${op.kind} ${op.cacheId ?? ""} at ${op.start.step}`;
@@ -803,7 +947,15 @@ function check(run: Run, final: boolean): void {
       !removalsOf(id).some((x) => made(x) > stop.seq && made(x) < m) &&
       !clears.some(
         (c) =>
-          c.start.seq < m && (c.start.seq > open.start.seq || failedClear(c)),
+          c.start.seq < m &&
+          (c.start.seq > open.start.seq ||
+            failedClear(c) ||
+            // The persister's clear that succeeded after the cache stopped
+            // during its barrier was its cleanup (§4.10.6 Success, R3-2).
+            (c.loadedAtEnd &&
+              cleared(c) &&
+              barrierStart(c).seq < stop.seq &&
+              (emptied(c)?.end?.seq ?? -1) > stop.seq)),
       );
     const end = r.end.seq;
     if (
@@ -880,6 +1032,12 @@ async function runOrder(
 ): Promise<Run> {
   vi.useFakeTimers({ now: 0 });
   const run = new Run(hosted, prefix);
+  /** Notes the trace position at which the chunk's failure was first seen. */
+  const seen = () => {
+    if (run.hosted && run.failedAt === undefined && run.importFailed()) {
+      run.failedAt = run.trace.length;
+    }
+  };
   try {
     let user = false;
     for (
@@ -895,6 +1053,8 @@ async function runOrder(
         const pick = run.choices.pick(1 + same.length);
         if (pick === 0) {
           await flush();
+          run.trace.push({ kind: "turn" });
+          seen();
           check(run, false);
           if (run.violation !== undefined) break;
           names = run.enabled();
@@ -902,32 +1062,106 @@ async function runOrder(
       }
       const name = names[run.choices.pick(names.length)];
       if (name === undefined) break;
+      if (USER.has(name)) run.trace.push({ kind: "user", name });
+      else if (name === "next") run.trace.push({ kind: "next" });
       const settled = run.fire(name);
       if (settled !== undefined) await settled;
+      seen();
       user = USER.has(name);
       check(run, false);
     }
     if (run.violation === undefined) {
       await flush();
+      seen();
       check(run, false);
     }
-    // Time runs out: every deadline passes; held calls never settle, and
-    // every call made from now on succeeds.
-    run.step++;
-    run.events.push("(end)");
-    run.choices.settled = true;
-    for (let i = 0; i < 40 && vi.getTimerCount() > 0; i++) {
-      if (run.violation !== undefined) break;
-      await vi.advanceTimersToNextTimerAsync();
-      check(run, false);
-    }
-    await flush();
+    await timeRunsOut(run);
+    seen();
     check(run, true);
   } finally {
     vi.clearAllTimers();
     vi.useRealTimers();
   }
+  if (run.violation === undefined && run.failedAt !== undefined) {
+    await arrivalOrder(run, run.failedAt);
+  }
   return run;
+}
+
+/**
+ * Time runs out: every deadline passes; held calls never settle, and every
+ * call made from now on succeeds.
+ */
+async function timeRunsOut(run: Run): Promise<void> {
+  run.step++;
+  run.events.push("(end)");
+  run.choices.settled = true;
+  for (let i = 0; i < 40 && vi.getTimerCount() > 0; i++) {
+    if (run.violation !== undefined) break;
+    await vi.advanceTimersToNextTimerAsync();
+    check(run, false);
+  }
+  await flush();
+}
+
+/**
+ * §4.10.8, arrival order (step 132, Codex gate round 4, R4-1): the calls
+ * made while the chunk loaded take effect in the order they arrived, so an
+ * order in which the import fails leaves what the same calls leave when
+ * they come after the failure. The replay fails the chunk first, makes the
+ * calls that waited for it in one turn, then repeats the rest of the run,
+ * every opener and store call taking the outcome it had. The store log and
+ * every call's answer (its error, and whether records were left) must be
+ * the run's.
+ */
+async function arrivalOrder(run: Run, failedAt: number): Promise<void> {
+  const outcomes = run.ops
+    .filter((o) => o.kind !== "import")
+    .map((o) => o.outcome);
+  const original = run.ops.filter((o) => o.kind !== "import");
+  vi.useFakeTimers({ now: 0 });
+  const replay = new Run(true, [], outcomes);
+  let lost: string | undefined;
+  try {
+    await replay.prime();
+    for (const entry of run.trace.slice(0, failedAt)) {
+      // A user call returns nothing: it runs in this turn.
+      if (entry.kind === "user") void replay.fire(entry.name);
+    }
+    // The turn in which the failure ran the waiting calls.
+    await flush();
+    for (const entry of run.trace.slice(failedAt)) {
+      // A user call returns nothing: it runs in this turn.
+      if (entry.kind === "user") void replay.fire(entry.name);
+      else if (entry.kind === "turn") await flush();
+      else if (entry.kind === "next") {
+        await vi.advanceTimersToNextTimerAsync();
+        await flush();
+      } else if (entry.target?.kind === "import") {
+        // The chunk settling after its deadline: it changes nothing.
+        await flush();
+        await flush();
+      } else {
+        const index = original.indexOf(entry.target as Op);
+        if (!(await replay.settleAt(index, entry.ok))) {
+          lost ??= `no held call to settle in the replay at ${index}`;
+        }
+      }
+    }
+    await flush();
+    await timeRunsOut(replay);
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+  const got = run.log().join(" ");
+  const want = replay.log().join(" ");
+  if (lost !== undefined || got !== want) {
+    run.fail(
+      "§4.10.8 arrival order: an order with the chunk failing differs from its calls after the failure",
+      `${got} ≠ replay ${want}${lost === undefined ? "" : ` (${lost})`} [${replay.events.join(" ")}]`,
+    );
+  }
 }
 
 /**
@@ -989,11 +1223,13 @@ function byRule(
 const env = (globalThis as { process?: { env: Record<string, string> } })
   .process?.env;
 /**
- * Events per order: 3 in the normal suite and in `bun run ci`, 4,006 orders
- * (3,201 persister, 805 hosted) in under a second. TSCACHE_EVENT_ORDERS=5
+ * Events per order: 3 in the normal suite and in `bun run ci`, 7,442 orders
+ * (4,577 persister, 2,865 hosted) in about a second. TSCACHE_EVENT_ORDERS=5
  * runs every order that the round 1-3 reproductions fit (R3-2, the longest:
- * openA, clearAll, openB, invB, fail): 572,866 orders (421,339 and 151,527),
- * about 105 s and 37 s for the two files on an idle machine, side by side.
+ * openA, clearAll, openB, invB, fail): 1,166,766 orders (650,904 and
+ * 515,862), about 160 s and 205 s for the two files on an idle machine, side
+ * by side (step 132, round 4: two more outcomes and the arrival-order
+ * replay).
  */
 const BOUND = Number(env?.TSCACHE_EVENT_ORDERS ?? 3);
 
