@@ -28,6 +28,36 @@ const DAY = 24 * 60 * MINUTE;
 
 const minuteOf = (t: number) => Math.floor(t / MINUTE) * MINUTE;
 
+declare global {
+  interface Window {
+    /** Set when the page withheld its first `hydrate` request. */
+    __hydrateHeld?: boolean;
+  }
+}
+
+/**
+ * Withholds the page's first `hydrate` request: it is never posted to the
+ * worker, so it stays pending until the client fails it. `page.route`
+ * cannot hold it, as it travels on the SharedWorker's port.
+ */
+async function holdFirstHydrate(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const post = MessagePort.prototype.postMessage;
+    MessagePort.prototype.postMessage = function (
+      this: MessagePort,
+      message: unknown,
+      ...rest: never[]
+    ) {
+      const op = (message as { op?: unknown } | null)?.op;
+      if (op === "hydrate" && window.__hydrateHeld !== true) {
+        window.__hydrateHeld = true;
+        return;
+      }
+      post.call(this, message, ...rest);
+    };
+  });
+}
+
 async function count(page: Page, id: string): Promise<number> {
   return Number(await page.getByTestId(id).textContent());
 }
@@ -248,6 +278,41 @@ test("loading the previous day fetches only that day", async ({ page }) => {
   for (const notice of all.filter((n) => !isOlder(n))) {
     expect(notice.range.start).toBeGreaterThanOrEqual(tail.range.end - MINUTE);
   }
+});
+
+// The worker lost while the seed applies fails `hydrate`, which is no news
+// about the snapshot: the lost client's seeding logs nothing, and its
+// replacement seeds (session.ts, the set of lost clients).
+test("a worker lost while the seed applies logs no failure, and the replacement seeds", async ({
+  context,
+}) => {
+  test.setTimeout(60_000);
+  // The first tab to connect creates the SharedWorker, in its own renderer.
+  const host = await context.newPage();
+  await open(host);
+  const survivor = await context.newPage();
+  await holdFirstHydrate(survivor);
+  await recordNotices(survivor);
+  await survivor.goto("/");
+  await expect
+    .poll(() => survivor.evaluate(() => window.__hydrateHeld === true))
+    .toBe(true);
+
+  const dead = host.waitForEvent("crash");
+  const cdp = await context.newCDPSession(host);
+  // The target dies before it can answer.
+  cdp.send("Page.crash").catch(() => {});
+  await dead;
+
+  await expect(survivor.locator(".log")).toContainText("worker lost");
+  await expect(survivor.locator(".log")).toContainText(
+    /snapshot from the server: [1-9]\d* range\(s\) applied/,
+  );
+  await expect(survivor.getByTestId("status")).toHaveText("ready");
+  // The lost client's seeding failed before its replacement connected, so
+  // any line it logged is in the log by now.
+  expect(await logCount(survivor, "snapshot from the server")).toBe(1);
+  expect(await logCount(survivor, "not applied")).toBe(0);
 });
 
 test("when the worker's host tab crashes, another tab connects a new client and goes on", async ({
