@@ -85,7 +85,8 @@ sequenceDiagram
 3. **Removals are due at once.** A `remove` or `clear` change makes the flush due immediately. The
    server runs every op that names a cache through the persistence: when the op recorded a removal, its
    answer, success or failure, waits until that removal is durable or the cache's persistence has
-   stopped.
+   stopped. A superseded worker has stopped every cache already, so such an op answers at once and the
+   records stay for the newer worker; its `clearAll` still waits for the disk clear.
 4. **One writer.** The persister runs one job at a time, removal-carrying jobs first. A flush builds its
    plan from memory alone, without reading the disk: the dirty pages' records (or every record after a
    clear or a version change) and the cache record. The store writes the plan in one transaction, with

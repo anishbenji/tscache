@@ -85,7 +85,9 @@ export interface TscacheClient {
    * the browser has IndexedDB it also empties the persisted records, from
    * any hosting (N54, N66), and resolves once the disk is empty or the
    * clear gave up at its deadline; it never rejects for a disk failure.
-   * It also reaches the other SharedWorkers of the origin (N135), which
+   * So it does in a tab whose worker is superseded, where a cache's own
+   * removals (`invalidate`, `clear`) answer at once and leave its records
+   * for the newer worker. It also reaches the other SharedWorkers of the origin (N135), which
    * clear their caches and the disk too; the promise does not wait for
    * them. Their tabs hear `cacheCleared`, possibly more than once.
    */

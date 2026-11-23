@@ -30,17 +30,19 @@ resolves, to the listeners attached by then. Check `client.mode` if persistence 
   ([Versions and watermarks](/concepts/freshness)) is never stored, so a reload fetches it again.
 - Additions are written behind: about a second after the last change, and at most five seconds after the
   first. A live tail that only rewrites provisional points writes nothing.
-- A removal (`invalidate`, `clear`, a watermark moved back, a version change, `clearAll`) is written at
-  once, and the call that made it resolves only once it is durable, or once persistence of the cache has
-  stopped and its records were deleted, except after `'superseded'` ([Failures](#failures)), when the
-  call resolves and the records stay; use `clearAll()` to remove data from the disk. Such a call takes at
-  most about ten seconds on a failing disk.
+- A removal (`invalidate`, `clear`, a watermark moved back, a version change) is written at once, and the
+  call that made it resolves only once it is durable, or once persistence of the cache has stopped and its
+  records were deleted, except after `'superseded'` ([Failures](#failures)), when the call resolves at
+  once and the records stay. `clearAll()` empties the disk and resolves once that clear has settled, in a
+  superseded tab too: use it to remove data from the disk. Either call takes at most about ten seconds on
+  a failing disk.
 - When the last tab closes, the worker writes what was still waiting. Where the browser supports it
   (Chromium), tscache creates the worker with `extendedLifetime`, which keeps it running about 30 seconds
   after its last tab so that write can land. Elsewhere the option is ignored, and a worker that ends
   first loses the additions still waiting, at most five seconds of them; the disk keeps the earlier state.
   A removal is not exposed to this, since its call resolves only once it is durable; in a superseded
-  worker it is not written at all ([Failures](#failures)).
+  worker a per-cache removal is not written at all, and only `clearAll()` still reaches the disk
+  ([Failures](#failures)).
 
 ## Loading
 
@@ -77,8 +79,10 @@ handle exists, so listen on the client:
 
 A fourth reason, `'superseded'`, is not a failure: a newer deploy's worker is running in the origin and
 owns the records now ([Stale scripts after a deploy](/guides/workers#older-tabs-are-told-superseded)).
-The older worker stops writing, for every persisted cache at once, and deletes nothing; a cache it opens
-later loads nothing. Its tabs keep working from memory until they are reloaded.
+The older worker stops writing, for every persisted cache at once, and deletes nothing of its own
+accord; a cache it opens later loads nothing. Its `invalidate`, `clear` and other removals resolve at
+once and leave the records, while `clearAll()` still empties the disk and resolves once that clear has
+settled. Its tabs keep working from memory until they are reloaded.
 
 ## Versions across sessions
 

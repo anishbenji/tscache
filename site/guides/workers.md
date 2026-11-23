@@ -193,8 +193,9 @@ later. The other is **superseded**, for as long as it runs:
   event on the next macrotask: attach the listener right after `await createClient()`, and it is
   called.
 - It stops persisting. Each persisted cache reports `persistStopped` with `reason: 'superseded'`, and
-  nothing is deleted: the records belong to the newer worker now
-  ([Persistence](/guides/persistence#failures)).
+  nothing is deleted: the records belong to the newer worker now, so a cache's `invalidate` or `clear`
+  resolves at once and leaves them. `clearAll()` still empties the disk and resolves once that clear has
+  settled ([Persistence](/guides/persistence#failures)).
 - Everything else goes on. The tab reads and writes its worker's memory and fetches through its own
   fetcher. A view there is no longer told of changes made through the newer deploy's tabs, which use
   another worker. A reload joins the newer worker.

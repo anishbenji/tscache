@@ -285,7 +285,8 @@ export class Persister {
 
   /**
    * Resolves once every removal recorded for the cache so far is durable, or
-   * once its persistence has stopped and its cleanup has settled (N58).
+   * once its persistence has stopped and its cleanup has settled (N58); a
+   * `'superseded'` stop has no cleanup, so the records stay.
    */
   durable(cacheId: string): Promise<void> {
     const cache = this.#tracked.get(cacheId);
