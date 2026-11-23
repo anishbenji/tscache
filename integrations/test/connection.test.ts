@@ -343,9 +343,9 @@ describe("connect, when a seed fails to apply", () => {
     expect(Array.from(answer.fields.v ?? [])).toEqual([7, 7, 7]);
   });
 
-  it("warns once in development with the error's message, and no snapshot", async () => {
+  it("warns once in development with the error's name, and neither its message nor the snapshot", async () => {
     const read = corrupt();
-    const { message } = await refusal(read);
+    const { message, name } = await refusal(read);
     expect(message).toMatch(/^invalid snapshot/);
     const { connection, connected } = lossyConnection([read], { options });
     await until(() => connected() !== null);
@@ -353,13 +353,44 @@ describe("connect, when a seed fails to apply", () => {
 
     expect(warn).toHaveBeenCalledTimes(1);
     // One string: neither the snapshot nor the error object, whose fields a
-    // console would print, goes to the console.
+    // console would print, goes to the console; nor the message, which can
+    // quote the snapshot.
     const args = warn.mock.calls[0] ?? [];
     expect(args).toHaveLength(1);
     const [text] = args;
     expect(typeof text).toBe("string");
-    expect(text).toContain(message);
+    expect(text).toContain(`(${name})`);
+    expect(text).not.toContain(message);
     expect(text).toContain(`"${config.id}"`);
+  });
+
+  it("never quotes a snapshot whose error would quote it", async () => {
+    // decodeSnapshot quotes a snapshot that is not an object whole.
+    const marker = "SECRETMARKER";
+    const value = dehydrate(seed);
+    const spoiled = `${JSON.stringify(value.snapshot)}${marker}`;
+    let message = "";
+    try {
+      decodeSnapshot(spoiled as unknown as EncodedSnapshot);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain(marker);
+
+    const read = rehydrate(config, {
+      ...value,
+      snapshot: spoiled as unknown as EncodedSnapshot,
+    });
+    const { connection, connected } = lossyConnection([read], { options });
+    await until(() => connected() !== null);
+    const handle = await connection.cache(connected() as TscacheClient, config);
+    const answer = await handle.get(seed.range);
+    expect(fetched).toEqual([seed.range]);
+    expect(Array.from(answer.fields.v ?? [])).toEqual([7, 7, 7]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [text] = warn.mock.calls[0] ?? [];
+    expect(text).toContain("(TscacheError)");
+    expect(text).not.toContain(marker);
   });
 
   it("is silent in production, and still hands out the cache", async () => {
@@ -465,6 +496,28 @@ describe("connect, when a seed fails to apply", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it("is silent when the application disposes the client while the seed applies", async () => {
+    let reject: ((error: Error) => void) | undefined;
+    const { connection, connected } = lossyConnection([seed], {
+      options,
+      hydrate: () => () =>
+        new Promise<never>((_, fail) => {
+          reject = fail;
+        }),
+    });
+    await until(() => connected() !== null);
+    const client = connected() as TscacheClient;
+    const asked = connection.cache(client, config);
+    await until(() => reject !== undefined);
+    // As the port client does on dispose(): every pending call rejects, and
+    // no workerLost follows, so the connection still holds the client.
+    await client.dispose();
+    reject?.(new TscacheError("client disposed"));
+    await expect(asked).rejects.toThrow("client disposed");
+    expect(connection.state.status).toBe("connected");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("still rejects when the seed's cache cannot be opened", async () => {
     const { connection, connected } = lossyConnection([seed], {
       options,
@@ -515,7 +568,9 @@ describe("connect, when a seed fails to apply", () => {
       expect(fetched).toEqual([seed.range]);
       expect(Array.from(answer.fields.v ?? [])).toEqual([7, 7, 7]);
       expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0]?.[0]).toContain(message);
+      // The error's name, never its message, which can quote the snapshot.
+      expect(warn.mock.calls[0]?.[0]).toContain("(TscacheError)");
+      expect(warn.mock.calls[0]?.[0]).not.toContain(message);
     },
   );
 });

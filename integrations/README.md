@@ -17,7 +17,8 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
   version and never touches what a cache covers (architecture §2.8, N39).
   A snapshot that fails to apply (a malformed or foreign snapshot, a failed write) counts as "not
   seeded" (architecture §2.8): `cache()` still hands out the cache, which fetches instead, and a
-  development build warns once per client and cache with the error's message, never the snapshot.
+  development build warns once per client and cache with the error's name, never its message, which can
+  quote the snapshot. A client lost or disposed while its seed applies is not warned about.
   A worker without `hydrate` is not seeded either, silently. Only a seed's cache that cannot be
   opened (a config the worker refuses) rejects that cache's `cache()` calls on that client until a
   replacement client seeds afresh. Each seed is applied at most once per client.

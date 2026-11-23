@@ -4,10 +4,11 @@
 // store, a signal, a ref) and reads through `cache()`; the rest of its job
 // is turning the read's promise into that reactivity too.
 
-import type {
-  CacheConfig,
-  CacheHandle,
-  TscacheClient,
+import {
+  type CacheConfig,
+  type CacheHandle,
+  type TscacheClient,
+  TscacheError,
 } from "@anishbenji/tscache";
 import { hydrateRead, type ServerRead } from "./hydration";
 
@@ -65,16 +66,40 @@ function development(): boolean {
 }
 
 /**
+ * What a warning says of `error`: its name, and a TscacheError's `code` when
+ * it has one. Never its message, which can quote the snapshot it refused
+ * (`decodeSnapshot` quotes one that is not an object), and the snapshot
+ * carries the page's data.
+ */
+function nameOf(error: unknown): string {
+  if (!(error instanceof Error)) return "a non-Error rejection";
+  const code: unknown =
+    error instanceof TscacheError
+      ? (error as { code?: unknown }).code
+      : undefined;
+  return typeof code === "string" ? `${error.name} ${code}` : error.name;
+}
+
+/**
  * Says, in development builds only, that cache `id`'s seed was not applied.
- * Only the error's message goes to the console, never the error or the
- * snapshot: the snapshot carries the page's data.
+ * Only the error's name goes to the console (`nameOf`), never the error, its
+ * message or the snapshot: the snapshot carries the page's data.
  */
 function warnNotSeeded(id: string, error: unknown): void {
   if (!development()) return;
-  const why = error instanceof Error ? error.message : "a non-Error rejection";
+  const why = nameOf(error);
   console.warn(
     `tscache: the server's snapshot for cache "${id}" was not applied (${why}), so the cache fetches that range instead; printed in development builds only.`,
   );
+}
+
+/**
+ * Whether `error` is a disposed client's answer, which every pending and
+ * later call gets: the application disposed the client itself, which fires
+ * no workerLost, so `live` cannot tell.
+ */
+function closed(error: unknown): boolean {
+  return error instanceof TscacheError && error.message === "client disposed";
 }
 
 /**
@@ -83,9 +108,9 @@ function warnNotSeeded(id: string, error: unknown): void {
  * every later one; undefined for a cache without a seed. It rejects only
  * when the cache cannot be opened: a snapshot that fails to apply leaves
  * the cache not seeded (decision 98 C). The warning is given only while
- * `live` holds for the client: a client lost or disposed meanwhile fails
- * every pending call, `hydrate` included, and that is no news about the
- * snapshot.
+ * `live` holds for the client and the client was not disposed: a client
+ * lost or disposed meanwhile fails every pending call, `hydrate` included,
+ * and that is no news about the snapshot.
  */
 function seeder(
   seeds: readonly Seed[],
@@ -108,7 +133,7 @@ function seeder(
         hydrateRead(cache, seed.read).then(
           () => {},
           (error: unknown) => {
-            if (live(client)) warnNotSeeded(id, error);
+            if (live(client) && !closed(error)) warnNotSeeded(id, error);
           },
         ),
       );
@@ -137,8 +162,9 @@ function seeder(
  * architecture §2.8: hydration is an optimisation, never a requirement for
  * correctness): `cache()` still hands out the cache, which fetches what the
  * seed would have filled, and a development build warns once per client
- * and cache with the error's message, unless the client was lost or the
- * connection disposed meanwhile. `hydrate` validates the whole
+ * and cache with the error's name (never its message, which can quote the
+ * snapshot), unless the client was lost or disposed or the connection
+ * disposed meanwhile. `hydrate` validates the whole
  * snapshot before it changes anything, so a refused snapshot leaves
  * nothing behind; a write that fails part way (an allocation failure)
  * keeps only the parts it finished, each recorded as coverage. A worker
