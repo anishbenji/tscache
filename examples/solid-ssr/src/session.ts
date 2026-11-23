@@ -28,24 +28,32 @@ export interface Session {
 /** Creates the memos under the calling component, which owns them. */
 export function createSession(log: (text: string) => void): Session {
   const hydration = readHydration();
+  // The clients whose worker was lost: a lost client fails every pending
+  // call, `hydrate` included, which is no news about the snapshot.
+  const lost = new WeakSet<TscacheClient>();
   const client: SourceAccessor<TscacheClient> = createMemo(async () => {
     const next = await createClient({
       workerUrl,
       fetcher: { module: fetcherModule, context: pageContext({}) },
     });
     next.on("workerLost", ({ reason }) => {
+      lost.add(next);
       log(`worker lost (${reason}); connecting a new client`);
       void refresh(client);
     });
     return next;
   });
   const cache = createMemo(async () => {
+    const current = client();
     // Only a cache that cannot be opened fails the memo.
-    const handle = await client().cache(config);
+    const handle = await current.cache(config);
     try {
       const { applied } = await seed(handle, hydration);
       log(`snapshot from the server: ${applied.length} range(s) applied`);
     } catch (error) {
+      // A lost client's memo is about to be recomputed with its
+      // replacement, which seeds afresh.
+      if (lost.has(current)) return handle;
       // Hydration saves fetches; it is never needed for correct answers.
       // Only the error's message is printed: the snapshot carries the
       // page's data.
