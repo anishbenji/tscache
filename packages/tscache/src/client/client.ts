@@ -35,6 +35,11 @@ interface PageHide {
   persisted?: boolean;
 }
 
+/** A `superseded` event (N132). */
+function isSuperseded(evt: Evt): boolean {
+  return evt.scope === "client" && evt.event === "superseded";
+}
+
 /** Surfaces a listener error that no caller can catch. */
 function report(error: unknown): void {
   const page = globalThis as { reportError?: (e: unknown) => void };
@@ -220,6 +225,14 @@ class Client implements TscacheClient {
   /** Why calls reject from now on: disposed, or the worker was lost. */
   #ended: string | undefined;
   #superseded: ClientEvents["superseded"] | undefined;
+  /** The superseded listeners have been called (at most once). */
+  #supersededHeard = false;
+  /**
+   * Events waiting for the startup delivery, in port order: the kept ones,
+   * then any that arrive before its timer runs. Undefined once it ran, or
+   * when there was nothing to deliver.
+   */
+  #queue: Evt[] | undefined;
 
   constructor(hosting: Hosting, fallbacks: ClientEvents["modeFallback"][]) {
     this.#hosting = hosting;
@@ -229,26 +242,23 @@ class Client implements TscacheClient {
     this.#changes = new ChangeSubscriptions(this.#port);
     // A worker script of another library version (N136): development only.
     warnWorkerLib(LIB_VERSION, this.#port.lib);
-    // A superseded event that arrived before this client existed (N132):
-    // the property holds it from the start, and its listeners hear it below.
-    const early = this.#port.superseded;
-    if (early !== undefined) this.#supersede(early, false);
-    this.#port.on((evt) => {
-      this.#warnFetched(evt);
-      if (evt.scope === "client" && evt.event === "superseded") {
-        this.#supersede(evt, true);
-      } else this.#events.receive(evt);
-    });
+    // Every event that reached the port before this client existed (step
+    // 135, gate round 6): a superseded one sets the property from the
+    // start (N132), and all of them are delivered by the timer below.
+    const kept = this.#port.takeKept();
+    for (const evt of kept) if (isSuperseded(evt)) this.#markSuperseded(evt);
+    this.#port.on((evt) => this.#arrive(evt));
     this.#port.onLost((error) => this.#lose(error));
     // What happened before anyone could subscribe is delivered on the next
     // macrotask, after the awaiting caller has had its turn: the chain's
-    // steps, then a superseded event that arrived early. Every one is
+    // steps, then the kept events in port order, then any event that
+    // arrived meanwhile, so the port's order holds throughout. Every one is
     // delivered even if a listener throws; the first error surfaces
     // afterwards. Nothing is delivered once the client has ended (§2.7):
     // the worker was lost or the client disposed before the timer ran, or
     // a listener of an earlier step disposed it.
-    const superseded = early === undefined ? undefined : this.#superseded;
-    if (fallbacks.length > 0 || superseded !== undefined) {
+    if (fallbacks.length > 0 || kept.length > 0) {
+      this.#queue = kept;
       setTimeout(() => {
         let failure: { error: unknown } | undefined;
         const deliver = (emit: () => void) => {
@@ -262,9 +272,9 @@ class Client implements TscacheClient {
         for (const step of fallbacks) {
           deliver(() => this.#events.emit("modeFallback", step));
         }
-        if (superseded !== undefined) {
-          deliver(() => this.#events.emit("superseded", superseded));
-        }
+        const queue = this.#queue ?? [];
+        this.#queue = undefined;
+        for (const evt of queue) deliver(() => this.#dispatch(evt));
         // Nobody awaits this macrotask: hand the error to the page's
         // reporter (window.reportError) rather than throwing into the void.
         if (failure !== undefined) report(failure.error);
@@ -290,18 +300,39 @@ class Client implements TscacheClient {
   }
 
   /**
-   * The worker is superseded (N132): the property is set before the
-   * listeners run, and only the first event counts. `live`: the event
-   * arrived on the port just now, so its listeners are called here; one
-   * kept from before the client existed is delivered by the constructor.
+   * An event from the port: held while the startup delivery is pending, so
+   * it follows the kept ones, else delivered now. A superseded event sets
+   * the property on arrival either way.
    */
-  #supersede(evt: Evt, live: boolean): void {
+  #arrive(evt: Evt): void {
+    if (isSuperseded(evt)) this.#markSuperseded(evt);
+    if (this.#queue === undefined) this.#dispatch(evt);
+    else this.#queue.push(evt);
+  }
+
+  /**
+   * Calls the listeners of one event. The superseded listeners are called
+   * once, for the first event, with the property already set (N132).
+   */
+  #dispatch(evt: Evt): void {
+    this.#warnFetched(evt);
+    if (!isSuperseded(evt)) {
+      this.#events.receive(evt);
+      return;
+    }
+    const superseded = this.#superseded;
+    if (this.#supersededHeard || superseded === undefined) return;
+    this.#supersededHeard = true;
+    this.#events.emit("superseded", superseded);
+  }
+
+  /** The worker is superseded (N132): only the first event sets the property. */
+  #markSuperseded(evt: Evt): void {
     if (this.#superseded !== undefined) return;
     const payload = evt.payload as Partial<ClientEvents["superseded"]> | null;
     const lib = typeof payload?.lib === "string" ? payload.lib : "";
     this.#superseded = { lib };
     noteSuperseded(lib, this.#port.lib);
-    if (live) this.#events.receive({ ...evt, payload: this.#superseded });
   }
 
   readonly #onPageHide = (event: PageHide) => {
@@ -451,14 +482,18 @@ async function applyBudget(port: PortClient, bytes: number): Promise<void> {
 /**
  * Without a budget, waits for one answer from a worker that can report
  * being superseded (N132, DC4 option (a)): an already superseded worker
- * posts the event right after `init-ok`, and the port keeps order, so the
- * event has been kept once the answer arrives. `memoryStats` reads and
- * changes nothing, and its answer is not used. Such a worker always
- * answers it, so a rejection means the port went: it fails `createClient`
- * as a failed budget op does.
+ * posts the event right after `init-ok`, and the port keeps order, so every
+ * event sent before the answer has been kept once it arrives. The request
+ * is `unsubscribe { all: true }`, a no-op of constant cost on a fresh
+ * connection, which holds no subscription (gate round 6 of step 135: the
+ * earlier `memoryStats` walked every cache). Such a worker always answers
+ * it, so a rejection means the port went: it fails `createClient` as a
+ * failed budget op does.
  */
 async function awaitSuperseded(port: PortClient): Promise<void> {
-  if (port.features.has("superseded")) await port.request("memoryStats", {});
+  if (port.features.has("superseded")) {
+    await port.request("unsubscribe", { all: true });
+  }
 }
 
 /**
@@ -467,8 +502,9 @@ async function awaitSuperseded(port: PortClient): Promise<void> {
  * worker with the `superseded` feature answered one request. Both go out
  * on the port before the client exists: the client queues the fallback
  * steps on a timer when it is built, which must run after the caller holds
- * it. A `superseded` event that arrives meanwhile is kept by the port
- * client and delivered by that timer too (N132). A failed budget op or
+ * it. Every event that arrives meanwhile is kept by the port client and
+ * delivered by that timer too, in port order (N132; gate round 6 of step
+ * 135). A failed budget op or
  * answer releases the port and the hosting, and rethrows.
  */
 export async function createClient(

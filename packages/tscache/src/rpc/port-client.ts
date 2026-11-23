@@ -126,7 +126,8 @@ export class PortClient {
   #seq = 0;
   /** Why requests reject from now on; set once by dispose or a loss. */
   #ended: string | undefined;
-  #superseded: Evt | undefined;
+  /** Events received before `takeKept`, in port order; undefined after it. */
+  #kept: Evt[] | undefined = [];
 
   private constructor(
     port: MessagePortLike,
@@ -223,15 +224,19 @@ export class PortClient {
   }
 
   /**
-   * The first `superseded` event the worker sent on this port (N132), kept
-   * whoever was listening, as `features` is kept from the hello. A
-   * connection that joins a superseded worker is sent the event right after
-   * its init-ok, which with a `memoryBudget` is before the client exists
-   * and so before anything listens here: the client reads it from this when
-   * it is built.
+   * Every event the worker sent on this port before this call, in port
+   * order, as `features` is kept from the hello; keeping ends here. Events
+   * arrive between `init-ok` and the client's construction (a `superseded`
+   * event right after `init-ok` (N132), an `authInvalid` or `cacheCleared`
+   * any tab caused), before anything listens: the client takes them when
+   * it is built and delivers them (step 135, gate round 6). Keeping also
+   * ends at the first `on` listener, so a port that is never taken over
+   * holds nothing for long; later events reach only the listeners.
    */
-  get superseded(): Evt | undefined {
-    return this.#superseded;
+  takeKept(): Evt[] {
+    const kept = this.#kept ?? [];
+    this.#kept = undefined;
+    return kept;
   }
 
   /** Requests awaiting a response (for tests and diagnostics). */
@@ -272,6 +277,7 @@ export class PortClient {
 
   /** Receives every evt message as sent; returns the unsubscribe. */
   on(fn: (evt: Evt) => void): () => void {
+    this.#kept = undefined;
     this.#listeners.add(fn);
     return () => this.#listeners.delete(fn);
   }
@@ -324,11 +330,9 @@ export class PortClient {
     for (const fn of [...this.#lostListeners]) fn(error);
   }
 
-  /** Keeps the first superseded event (N132), then tells the listeners. */
+  /** Keeps the event until the client takes over, then tells the listeners. */
   #event(evt: Evt): void {
-    if (evt.scope === "client" && evt.event === "superseded") {
-      this.#superseded ??= evt;
-    }
+    this.#kept?.push(evt);
     for (const fn of [...this.#listeners]) fn(evt);
   }
 

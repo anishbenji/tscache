@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClient, type TscacheClient } from "../src/client/client";
 import { Engine } from "../src/engine/engine";
 import { TscacheError } from "../src/errors";
+import { PortClient } from "../src/rpc/port-client";
 import {
+  type Evt,
   LIB_VERSION,
   type MessagePortLike,
   type Op,
@@ -382,7 +384,7 @@ describe("30: the superseded event before the client exists (DC4 option (a))", (
     expect(first.taps[0]?.sent).toEqual([
       "hello",
       "init-ok",
-      "res:memoryStats",
+      "res:unsubscribe",
     ]);
     const older = installSharedWorker(new RpcServer(new Engine(), LIB_VERSION));
     const client = await make({ workerUrl });
@@ -400,7 +402,7 @@ describe("30: the superseded event before the client exists (DC4 option (a))", (
         features: WORKER_FEATURES,
       },
     );
-    const { first } = installSharedWorker(server, { hold: "memoryStats" });
+    const { first } = installSharedWorker(server, { hold: "unsubscribe" });
     const creating = createClient({ workerUrl }).then(
       (client) => {
         open.push(client);
@@ -423,5 +425,239 @@ describe("30: the superseded event before the client exists (DC4 option (a))", (
     await client.cache(plain);
     expect(heard).toEqual([]);
     expect(client.superseded).toBeUndefined();
+  });
+});
+
+// Gate round 6 of step 135 (R6-1, R6-2), the class: every event a port
+// receives before its client takes over is kept and delivered once, in port
+// order, on the macrotask after `createClient` resolves; a budgetless join
+// waits for a constant-cost acknowledgement (`unsubscribe { all: true }`).
+
+/** Every event a worker can post on a port, one of each, in this order. */
+const startupEvents: { name: keyof ClientEvents; evt: Evt }[] = [
+  {
+    name: "authInvalid",
+    evt: {
+      t: "evt",
+      scope: "client",
+      event: "authInvalid",
+      payload: { error: { name: "Error", message: "401" }, context: "old" },
+    },
+  },
+  {
+    name: "cacheCleared",
+    evt: {
+      t: "evt",
+      scope: "cache",
+      cacheId: "plain",
+      event: "cacheCleared",
+      payload: { cacheId: "plain", reason: "clear-all" },
+    },
+  },
+  {
+    name: "superseded",
+    evt: { t: "evt", scope: "client", event: "superseded", payload },
+  },
+  {
+    name: "persistStopped",
+    evt: {
+      t: "evt",
+      scope: "cache",
+      cacheId: "plain",
+      event: "persistStopped",
+      payload: { cacheId: "plain", reason: "superseded" },
+    },
+  },
+  {
+    name: "cacheChanged",
+    evt: {
+      t: "evt",
+      scope: "cache",
+      cacheId: "plain",
+      event: "cacheChanged",
+      payload: { cacheId: "plain", written: [], removed: [], cleared: false },
+    },
+  },
+  {
+    name: "mergeWarning",
+    evt: {
+      t: "evt",
+      scope: "request",
+      cacheId: "plain",
+      requestId: "c9:1",
+      event: "mergeWarning",
+      payload: {
+        cacheId: "plain",
+        requestId: "c9:1",
+        range: { start: 0, end: 0 },
+        fields: ["v"],
+      },
+    },
+  },
+];
+
+/** A fetcher module whose every fetch is refused for its auth. */
+const refusingModule = `data:text/javascript,${encodeURIComponent(`
+  export default {
+    async fetch() {
+      const error = new Error("401");
+      error.code = "tscache:auth-invalid";
+      throw error;
+    },
+  }; // refusing
+`)}`;
+
+/** A server that lists every feature, as the SharedWorker's does. */
+const listingServer = (engine = new Engine()) =>
+  new RpcServer(engine, LIB_VERSION, undefined, undefined, {
+    features: WORKER_FEATURES,
+  });
+
+/** Every event name of `startupEvents`, heard in order, with its payload. */
+function listenAll(client: TscacheClient) {
+  const heard: [string, unknown][] = [];
+  for (const { name } of startupEvents) {
+    client.on(name, (event: unknown) => heard.push([name, event]));
+  }
+  return heard;
+}
+
+describe("gate round 6: every event before the client takes over (R6-1, R6-2)", () => {
+  for (const budget of [undefined, 4 * PAGE_BYTES]) {
+    const hold: Op = budget === undefined ? "unsubscribe" : "memoryBudget";
+    const variant = budget === undefined ? "without a budget" : "with a budget";
+
+    it(`${variant}, each event posted during the join is heard once, in port order, after the client exists`, async () => {
+      const late: Evt = {
+        t: "evt",
+        scope: "cache",
+        cacheId: "late",
+        event: "cacheCleared",
+        payload: { cacheId: "late", reason: "clear-all" },
+      };
+      let tapped: ReturnType<typeof tap> | undefined;
+      const server = listingServer();
+      const { first } = installSharedWorker(server, {
+        hold,
+        // Posted once the client can exist: it follows the kept ones.
+        afterAnswer: {
+          op: hold,
+          run: () => tapped?.wrapped.postMessage(late),
+        },
+      });
+      const creating = createClient({
+        workerUrl,
+        ...(budget === undefined ? {} : { memoryBudget: budget }),
+      });
+      tapped = await first;
+      await tapped.arrived;
+      for (const { evt } of startupEvents) tapped.wrapped.postMessage(evt);
+      tapped.release();
+      const client = await creating;
+      open.push(client);
+      // The property is set from the start; nothing is delivered this turn.
+      expect(client.superseded).toEqual(payload);
+      const heard = listenAll(client);
+      expect(heard).toEqual([]);
+      const expected = [
+        ...startupEvents.map(({ name, evt }) => [name, evt.payload]),
+        ["cacheCleared", late.payload],
+      ];
+      await eventually(() => expect(heard).toEqual(expected));
+      await client.cache(plain);
+      await client.cache(plain);
+      expect(heard).toEqual(expected);
+      expect(tapped.sent.slice(0, 2)).toEqual(["hello", "init-ok"]);
+      expect(tapped.sent).toContain(`res:${hold}`);
+    });
+
+    it(`${variant}, a tab joining while another tab's fetch is refused hears authInvalid once`, async () => {
+      const server = listingServer();
+      // The refused tab connects on a port of its own, outside the taps.
+      const channel = new MessageChannel();
+      server.attach(channel.port1 as MessagePortLike);
+      const other = await PortClient.connect(channel.port2 as MessagePortLike, {
+        fetcher: { module: refusingModule, context: "old" },
+      });
+      open.push({ dispose: async () => other.dispose() } as TscacheClient);
+      await other.request("cache", plain);
+      const { first } = installSharedWorker(server, { hold });
+      const creating = createClient({
+        workerUrl,
+        fetcher: { module: refusingModule, context: "old" },
+        ...(budget === undefined ? {} : { memoryBudget: budget }),
+      });
+      const tapped = await first;
+      await tapped.arrived;
+      const refused = (await other.request("get", {
+        cacheId: "plain",
+        range: { start: 0, end: 3 },
+        options: {},
+      })) as { misses: { reason: string }[] };
+      expect(refused.misses.map(({ reason }) => reason)).toEqual([
+        "auth-pending",
+      ]);
+      tapped.release();
+      const client = await creating;
+      open.push(client);
+      const heard: unknown[] = [];
+      client.on("authInvalid", (event) => heard.push(event));
+      await eventually(() => expect(heard).toHaveLength(1));
+      expect(tapped.sent.indexOf("evt:authInvalid")).toBeLessThan(
+        tapped.sent.indexOf(`res:${hold}`),
+      );
+      const handle = await client.cache(plain);
+      const read = await handle.get({ start: 0, end: 3 });
+      expect(read.misses.map(({ reason }) => reason)).toEqual(["auth-pending"]);
+      expect(heard).toHaveLength(1);
+    });
+
+    it(`${variant}, kept events are never delivered once the client has ended`, async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const server = listingServer();
+      const { first } = installSharedWorker(server, { hold });
+      const creating = createClient({
+        workerUrl,
+        ...(budget === undefined ? {} : { memoryBudget: budget }),
+      });
+      const tapped = await first;
+      await tapped.arrived;
+      for (const { evt } of startupEvents) tapped.wrapped.postMessage(evt);
+      tapped.release();
+      const client = await creating;
+      open.push(client);
+      const heard = listenAll(client);
+      await client.dispose();
+      vi.runAllTimers();
+      vi.useRealTimers();
+      expect(heard).toEqual([]);
+    });
+  }
+
+  it("a budgetless join is acknowledged by unsubscribe and never calls engine.memoryStats", async () => {
+    const engine = new Engine();
+    engine.cache(plain);
+    const stats = vi.spyOn(engine, "memoryStats");
+    const { taps } = installSharedWorker(listingServer(engine));
+    const client = await make({ workerUrl });
+    expect(taps[0]?.sent).toEqual(["hello", "init-ok", "res:unsubscribe"]);
+    await client.cache(plain);
+    expect(stats).not.toHaveBeenCalled();
+  });
+
+  it("a kept event is delivered after the fallback chain's steps, in port order with the others", async () => {
+    const server = listingServer();
+    server.supersede(payload);
+    installDedicatedWorker(server);
+    const client = await make({ workerUrl });
+    expect(client.mode).toBe("dedicated");
+    const order: string[] = [];
+    client.on("modeFallback", (step: ClientEvents["modeFallback"]) =>
+      order.push(`modeFallback:${step.to}`),
+    );
+    client.on("superseded", () => order.push("superseded"));
+    await eventually(() =>
+      expect(order).toEqual(["modeFallback:dedicated", "superseded"]),
+    );
   });
 });

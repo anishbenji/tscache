@@ -35,7 +35,10 @@ each hosting in turn.
 
 The `modeFallback` events are emitted on the next macrotask after `createClient` resolves, so a listener
 added right after `await createClient(...)` still receives them. `client.mode` names the hosting that
-won.
+won. Any event the worker sends while `createClient` is still waiting for its last answer (a
+`superseded` event, an `authInvalid` that another tab's refused fetch caused, a `cacheCleared`) is
+kept and delivered on that same macrotask, once, after the `modeFallback` events and in the order the
+worker sent it.
 
 Drawn from:
 
