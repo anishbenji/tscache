@@ -114,3 +114,32 @@ export async function logSince(page: Page, marker: string): Promise<string> {
   const at = log.indexOf(marker);
   return at < 0 ? "" : log.slice(0, at);
 }
+
+/**
+ * Serves the page with its snapshot's first segment given twice, so the
+ * browser's `hydrate` refuses it part way through validation: the second
+ * segment overlaps the first (architecture §8, N35). Everything else in the
+ * page, the snapshot's range and coverage included, is as the server wrote
+ * it.
+ */
+export async function serveCorruptSnapshot(page: Page): Promise<void> {
+  const element =
+    /(<script id="tscache-hydration" type="application\/json">)(.*?)(<\/script>)/;
+  await page.route("/", async (route) => {
+    const response = await route.fetch();
+    const html = await response.text();
+    const found = element.exec(html);
+    if (found === null) throw new Error("the page carries no hydration");
+    const hydration = JSON.parse(found[2] ?? "") as {
+      snapshot: EncodedSnapshot;
+    };
+    const [first] = hydration.snapshot.segments;
+    if (first === undefined) throw new Error("the snapshot has no segment");
+    hydration.snapshot.segments = [first, ...hydration.snapshot.segments];
+    const json = JSON.stringify(hydration).replaceAll("<", "\\u003c");
+    await route.fulfill({
+      response,
+      body: html.replace(element, () => `${found[1]}${json}${found[3]}`),
+    });
+  });
+}

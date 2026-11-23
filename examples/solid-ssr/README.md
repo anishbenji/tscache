@@ -130,8 +130,13 @@ format, encoded as JSON.
 - The snapshot carries the dataset version the mock backend reports, so
   `hydrate` refuses a snapshot of another version (§2.8). A backend that
   reports no version gets no such check.
-- A seed that fails, for any reason but a worker without `hydrate`, fails
-  the cache memo: the page says the browser's cache failed and keeps the
+- A snapshot that fails to apply (a malformed or foreign one, a failed
+  write) leaves the cache not seeded, as a worker without `hydrate` does
+  (§2.8): the cache memo still hands the cache out, the log reads
+  `snapshot from the server: not applied`, and the cache fetches the whole
+  day. A development build also warns in the console with the error's
+  message, never the snapshot. Only a cache that cannot be opened fails the
+  cache memo: the page says the browser's cache failed and keeps the
   server's figures. It tries again only when a lost worker brings a new
   client, or on a reload.
 - Every `get` up to now fetches again. A `get` snaps its end outward to the

@@ -10,6 +10,7 @@ import {
   logSince,
   notices,
   recordNotices,
+  serveCorruptSnapshot,
   waitNotices,
 } from "./support";
 
@@ -122,6 +123,37 @@ test("after hydration the browser fetches only what the seeds do not cover", asy
   );
   expect(await count(page, "known-empty")).toBeGreaterThanOrEqual(
     figures.knownEmpty,
+  );
+  expect(problems).toEqual([]);
+});
+
+// Decision 98 C: a snapshot that fails to apply only means the cache is not
+// seeded (architecture §2.8). The cache memo still hands the cache out, and
+// it fetches what the snapshot would have covered.
+test("a snapshot that fails to apply leaves the cache to fetch the whole day", async ({
+  page,
+}) => {
+  const problems: string[] = [];
+  page.on("pageerror", (error) => problems.push(error.message));
+  page.on("console", (message) => {
+    // The warning is for development builds; this is a production build.
+    if (message.type() === "error" || message.type() === "warning") {
+      problems.push(message.text());
+    }
+  });
+  await serveCorruptSnapshot(page);
+  await open(page);
+  await expect(page.locator(".log")).toContainText(
+    "snapshot from the server: not applied",
+  );
+  // Nothing was seeded, so the first fetch starts at the window's first
+  // minute, where the snapshot's coverage would have begun.
+  const from = coveredSpan((await hydration(page)).snapshot).from;
+  const fetched = await waitNotices(page, 1);
+  expect(fetched[0]?.range.start).toBe(from);
+  const { figures } = await read(page);
+  expect(await count(page, "readings")).toBeGreaterThanOrEqual(
+    figures.readings,
   );
   expect(problems).toEqual([]);
 });

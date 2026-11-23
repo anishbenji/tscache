@@ -1,10 +1,12 @@
 // The browser's tscache client and the sensor's cache, as async memos. The
 // cache memo applies the server's snapshot to each client's cache before it
-// hands the cache out, so no get can run ahead of it. When the worker is
-// lost (docs/guides/worker-setup.md), refreshing the client memo connects a
-// new client, whose new worker starts empty: the snapshot seeds it too,
-// since hydrate refuses a snapshot of another dataset version and never
-// touches what a cache already covers.
+// hands the cache out, so no get can run ahead of it. A snapshot that fails
+// to apply leaves the cache not seeded: the memo still hands it out, and it
+// fetches what the snapshot would have covered (architecture §2.8). When the
+// worker is lost (docs/guides/worker-setup.md), refreshing the client memo
+// connects a new client, whose new worker starts empty: the snapshot seeds
+// it too, since hydrate refuses a snapshot of another dataset version and
+// never touches what a cache already covers.
 
 import {
   type CacheHandle,
@@ -38,9 +40,25 @@ export function createSession(log: (text: string) => void): Session {
     return next;
   });
   const cache = createMemo(async () => {
+    // Only a cache that cannot be opened fails the memo.
     const handle = await client().cache(config);
-    const { applied } = await seed(handle, hydration);
-    log(`snapshot from the server: ${applied.length} range(s) applied`);
+    try {
+      const { applied } = await seed(handle, hydration);
+      log(`snapshot from the server: ${applied.length} range(s) applied`);
+    } catch (error) {
+      // Hydration saves fetches; it is never needed for correct answers.
+      // Only the error's message is printed: the snapshot carries the
+      // page's data.
+      if (import.meta.env.DEV) {
+        const why = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `tscache: the server's snapshot for cache "${handle.id}" was not applied (${why}), so the cache fetches that range instead; printed in development builds only.`,
+        );
+      }
+      log(
+        "snapshot from the server: not applied; the cache fetches what it would have covered",
+      );
+    }
     return handle;
   });
   return { client, cache };

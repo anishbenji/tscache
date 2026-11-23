@@ -73,7 +73,9 @@ export function readHydration(): Hydration {
  * stale versioned snapshot is refused and covered slots are never touched.
  * A worker from before `hydrate` answers "unknown op": the cache then
  * fetches what it is asked for, so that counts as nothing applied. Any other
- * failure (a snapshot for another grid, say) is a bug and propagates.
+ * failure (a snapshot for another grid, say) propagates; the SSR examples'
+ * callers count it as "not seeded" too, so the cache fetches instead, and
+ * warn in development with the error's message only (architecture §2.8).
  */
 export async function seed(
   cache: CacheHandle,

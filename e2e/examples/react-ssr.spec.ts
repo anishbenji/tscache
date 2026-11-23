@@ -12,6 +12,7 @@ import {
   logSince,
   notices,
   recordNotices,
+  serveCorruptSnapshot,
   span,
   stats,
   waitNotices,
@@ -180,6 +181,37 @@ test("the browser fetches only what the seeds do not cover", async ({
   expect(bars).toBeLessThanOrEqual(expected + 1);
   // A hydration mismatch is reported as an error.
   expect(errors).toEqual([]);
+});
+
+// Decision 98 C: a snapshot that fails to apply only means the cache is not
+// seeded (architecture §2.8). The page still connects, and the cache
+// fetches what the snapshot would have covered.
+test("a snapshot that fails to apply leaves the cache to fetch the whole window", async ({
+  page,
+}) => {
+  const problems: string[] = [];
+  page.on("pageerror", (error) => problems.push(error.message));
+  page.on("console", (message) => {
+    // The warning is for development builds; this is a production build.
+    if (message.type() === "error" || message.type() === "warning") {
+      problems.push(message.text());
+    }
+  });
+  await serveCorruptSnapshot(page);
+  await open(page);
+  await expect(page.getByTestId("mode")).toHaveText("shared");
+  await expect(page.locator(".log")).toContainText(
+    "snapshot from the server: not applied",
+  );
+  const hydration = await hydrationOf(page);
+  // Nothing was seeded, so the one fetch starts at the window's first day.
+  const fetched = await waitNotices(page, 1);
+  expect(fetched.map((notice) => notice.range.start)).toEqual([
+    seededSpan(hydration).from,
+  ]);
+  await expect(page.getByTestId("fetches")).toHaveText("1");
+  expect(await value(page, "bars")).toBeGreaterThan(100);
+  expect(problems).toEqual([]);
 });
 
 test("loading the half-year before fetches only that half-year", async ({
