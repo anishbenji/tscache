@@ -67,8 +67,9 @@ A persistence failure never rejects a call. The cache stops persisting and goes 
 tab hears `persistStopped` with `reason` `'quota-exceeded'` (the origin's storage quota is full: the cache
 stops at the first refused write, without retrying, with the `QuotaExceededError`), `'unavailable'` (the
 database cannot be opened, or a write or the load did not finish in time) or `'error'` (a write or the load
-failed, with the error). A failed write deletes the cache's records, since the disk may still hold what
-memory removed. A load whose read fails or does not finish in time deletes nothing: the records stay,
+failed, with the error). A write that fails for a reason other than quota is retried for about five
+seconds, and the cache goes on persisting when a retry succeeds. A write that is refused for quota, or
+that still fails after those five seconds, stops the cache and deletes its records, since the disk may still hold what memory removed. A load whose read fails or does not finish in time deletes nothing: the records stay,
 and the next session loads them. A database that cannot be opened, or a persistence module that does
 not load, stops every persisted cache of the worker the same way. Such a cache keeps its records until
 its first later removal (`invalidate`, `clear`, a watermark moved back, a version change, `clearAll`):
