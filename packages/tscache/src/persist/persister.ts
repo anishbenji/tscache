@@ -453,17 +453,22 @@ export class Persister {
   /**
    * A change of a stopped cache counts only as a removal while a cleanup is
    * due: the first removal after a load's stop queues the cleanup the stop
-   * deferred (user decision 113 A), and every removal until the stop's
-   * cleanup settles, deferred or not, waits for it (N58).
+   * deferred (user decision 113 A), or, during a clearAll, waits for the
+   * clear instead, and every removal until the stop's cleanup settles,
+   * deferred or not, waits for it (N58).
    */
   #stoppedRemoval(cacheId: string, kind: CacheChange["kind"]): void {
     const cache = this.#tracked.get(cacheId);
     if (!cache || this.#closed || !REMOVALS.has(kind)) return;
     if (cache.deferred) {
       cache.deferred = cache.cleaned = false;
-      cache.absorbable = kind === "clear";
-      this.#queueCleanup(cache);
-      this.#arm();
+      cache.absorbable = kind === "clear" && this.#barrier === undefined;
+      // During a clearAll no cleanup job is created: the clear deletes the
+      // records and settles the removal (§4.10.6 (i), (l); round 3, R3-2).
+      if (this.#barrier === undefined) {
+        this.#queueCleanup(cache);
+        this.#arm();
+      } else this.#barrier.waiters.push(() => this.#cleaned(cache));
     } else {
       // A later removal: the cleanup was queued before it, and runs first.
       cache.absorbable = false;
@@ -631,9 +636,13 @@ export class Persister {
 
   async #startOpening(ifExists: boolean): Promise<PersistStore | undefined> {
     try {
-      const store = await (ifExists
-        ? this.#openStore({ ifExists: true })
-        : this.#openStore());
+      // The opener is called now; a throw is this opening's rejection, which
+      // the reset below forgets as any other (round 3, R3-3).
+      const store = await new Promise<PersistStore | undefined>((open) =>
+        open(
+          ifExists ? this.#openStore({ ifExists: true }) : this.#openStore(),
+        ),
+      );
       if (store !== undefined) {
         if (this.#closed) store.close();
         else this.#store = store;
@@ -745,8 +754,10 @@ export class Persister {
   #clearSucceeded(job: Job): void {
     this.#barrier = undefined;
     this.#current = undefined;
-    // The disk is empty, strict, and nothing was written after the clear.
+    // The disk is empty, strict, and nothing was written after the clear,
+    // which was the cleanup of a cache stopped meanwhile too (R3-2).
     for (const cache of this.#tracked.values()) {
+      if (cache.status === "stopped") cache.deferred = false;
       if (cache.status !== "running") continue;
       cache.durable = cache.removals;
       this.#release(cache);

@@ -57,7 +57,10 @@ const CLEANUP: WritePlan = {
 
 /** A cleanup the chunk's failure deferred, from its removal on. */
 interface Cleanup {
-  /** Removals recorded since it started, its own included; kept after it settles. */
+  /**
+   * Removals recorded since it started, its own included (none when a
+   * whole-store clear stands in for it); kept after it settles.
+   */
   removals: number;
   /** Until it settles: a later removal waits for nothing. */
   settled: Promise<void> | undefined;
@@ -188,9 +191,17 @@ export class HostedPersistence implements Persistence {
     // Earlier sessions may have persisted: the chunk loads to empty the disk,
     // or, when it fails to load, the store opener does.
     else {
-      cleared = this.#later((loaded) =>
-        loaded === undefined ? this.#clearStore() : loaded.clearAll(),
-      );
+      // Should the chunk fail, that clear is also the cleanup of the caches
+      // whose open waits, which the engine's clear just removed from (R3-1).
+      const pending = [...this.#pending];
+      cleared = this.#later((loaded) => {
+        if (loaded !== undefined) return loaded.clearAll();
+        const store = this.#clearStore();
+        for (const cacheId of pending) {
+          if (!this.#cleanups.has(cacheId)) this.#cleanup(cacheId, 0, store);
+        }
+        return store;
+      });
     }
     return cleared.then(() => {
       if (failure !== undefined) throw failure.error;
@@ -320,12 +331,18 @@ export class HostedPersistence implements Persistence {
       return;
     }
     if (!this.#stopped.has(cacheId)) return;
+    this.#cleanup(
+      cacheId,
+      1,
+      this.#clearing ?? this.#bounded((store) => store.write(cacheId, CLEANUP)),
+    );
+  }
+
+  /** Records a cache's one cleanup, `run`, with the removals counted so far. */
+  #cleanup(cacheId: string, removals: number, run: Promise<void>): void {
     const cleanup: Cleanup = {
-      removals: 1,
-      settled: (
-        this.#clearing ??
-        this.#bounded((store) => store.write(cacheId, CLEANUP))
-      ).then(() => {
+      removals,
+      settled: run.then(() => {
         cleanup.settled = undefined;
       }),
     };
