@@ -1,6 +1,6 @@
 # Step 141 — a check that parses every mermaid diagram
 
-Branch: `chore/141-mermaid-parse-check` · Reviewer: the director's review ladder · Rounds: 1 · Status: in review · Verdict after triage: pending
+Branch: `chore/141-mermaid-parse-check` · Reviewer: the director's review ladder · Rounds: 2 · Status: in review · Verdict after triage: pending
 
 ## Scope
 
@@ -47,6 +47,19 @@ Test changes: `lines` and the reader's other callers now await it, as the reader
 Follow-up, outside this step: `site/scripts/check-doc-anchors.ts:448` on `main` lists pages the same way (`git ls-files` without `-z`, split on newlines), so it would drop a non-ASCII page name too.
 
 `docs:check` now takes about 0.96 s for the mermaid check (four warm runs of `bun site/scripts/check-mermaid.ts`: 0.97, 0.96, 0.96, 0.96 s), up from about 0.25 s: each page is rendered to expand its includes, and there are 105 pages (42 tracked, 63 generated) instead of 42. The run prints `mermaid: 12 diagrams in 105 pages parse`.
+
+## Round 2 (Codex) — reviewer verdict: merge after fixes
+
+The director's finding check (Fable 5.2) rated R2-1 partly valid (P2, not P1: the site has no dynamic route, no `*.paths.*` file and no `<!-- @content -->`) and R2-2 valid; neither triggers on the current site or the current CLI. Both are fixed in 406c34a7, each test written first and seen failing before the fix.
+
+| #    | Sev | Finding                                                         | Decision        | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---- | --- | --------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R2-1 | P1  | The checker still misses diagrams on generated VitePress routes | accepted, as P2 | The check fails closed instead of resolving the routes: with no arguments, a listed page whose path under `site/` matches VitePress's dynamic-route pattern (`/\[(\w+?)\]/`) is named, with the reason (the check cannot see the content its paths loader injects), and the run returns 1. VitePress's config and route loaders are not loaded. The script's header and `site/README.md` state the limit. `site/README.md` stays checked: it is an extra page, not a missed one. Test: a listing with `site/guide/[topic].md` holding `<!-- @content -->` makes `run([], list, root)` return 1 naming the page (it returned 0) |
+| R2-2 | P2  | Overlapping parses can remove the temporary `window` too early  | accepted        | `withWindow` counts its holders: the stand-in is installed when the count goes from 0 to 1 and removed when it returns to 0, and a `window` it did not install is left in place. Tests: two overlapping calls on hand-resolved promises keep `window` after the first settles and remove it after the second (the first assertion failed before the fix); a `window` already present is still the same object after a call                                                                                                                                                                                                     |
+
+Test changes: three tests added; `withWindow` is exported for them. No test or assertion was removed or loosened.
+
+`bun site/scripts/check-mermaid.ts` still prints `mermaid: 12 diagrams in 105 pages parse`.
 
 ## Security lane (Claude), not the gate
 
