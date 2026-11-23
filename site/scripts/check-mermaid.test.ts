@@ -284,6 +284,25 @@ describe("check-mermaid: the command", () => {
     );
   });
 
+  it("exits 1 on a fence Mermaid reads as its error diagram, also after a comment", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const dir = fixture({
+      "bare.md": `# Bare\n\n${fence("error")}`,
+      "comment.md": `# Comment\n\n${fence("%% A note\nerror")}`,
+    });
+    try {
+      expect(await run([dir])).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+    const printed = error.mock.calls.map((call) => String(call[0]));
+    expect(printed).toHaveLength(3);
+    expect(printed[0]).toContain(`${join(dir, "bare.md")}:3: `);
+    expect(printed[0]).toContain("error diagram");
+    expect(printed[1]).toContain(`${join(dir, "comment.md")}:3: `);
+    expect(printed[2]).toContain("2 of 2 diagram(s) do not parse");
+  });
+
   it("passes a valid flowchart and a valid sequence diagram", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const dir = fixture({ "page.md": `# Page\n\n${FLOWCHART}\n${SEQUENCE}` });

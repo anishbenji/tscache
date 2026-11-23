@@ -22,7 +22,8 @@
 //   - Diagrams are parsed by `mermaid.parse`, which applies the diagram's own config and runs its
 //     grammar without rendering, and then by the parse step `mermaid.render` runs
 //     (`mermaidAPI.getDiagramFromText`): the two preprocess the text differently, so a diagram
-//     must pass both. Outside a browser, Mermaid's DOMPurify has no window and leaves out
+//     must pass both. Text that Mermaid reads as its internal `error` diagram (the word `error`
+//     alone), which parses and draws the syntax error box, fails too. Outside a browser, Mermaid's DOMPurify has no window and leaves out
 //     `sanitize`, `addHook` and `removeHook`, which parsing calls. The check fills them in as
 //     no-ops on the very instance Mermaid imports, resolved from Mermaid's own package, before
 //     Mermaid loads. Parsing only reads the text, so nothing it sanitises is ever shown. The
@@ -224,13 +225,20 @@ export async function mermaidParser(): Promise<ParseDiagram> {
   const { default: api } = (await import(importOf(mermaid))) as {
     default: {
       parse: ParseDiagram;
-      mermaidAPI: { getDiagramFromText: ParseDiagram };
+      mermaidAPI: {
+        getDiagramFromText: (text: string) => Promise<{ type: string }>;
+      };
     };
   };
   return (text) =>
     withWindow(async () => {
       await api.parse(text);
-      return api.mermaidAPI.getDiagramFromText(text);
+      const diagram = await api.mermaidAPI.getDiagramFromText(text);
+      if (diagram.type === "error")
+        throw new Error(
+          "Mermaid reads this fence as its error diagram, which draws the syntax error box; the fence holds no diagram",
+        );
+      return diagram;
     });
 }
 
