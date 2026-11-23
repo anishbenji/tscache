@@ -684,17 +684,19 @@ export class Persister {
     this.#drop(cache);
     this.#dropJobs(cache);
     cache.resolveOpened();
-    this.#report(
-      error === undefined
-        ? { cacheId: cache.id, reason }
-        : { cacheId: cache.id, reason, error },
-    );
     if (cleanup === true && this.#store !== undefined) {
       this.#queueCleanup(cache);
     } else {
       cache.deferred = cleanup === "deferred";
       this.#cleaned(cache);
     }
+    // After the cleanup is set up: a removal the callback makes at once
+    // waits for it (round 4, R4-4).
+    this.#report(
+      error === undefined
+        ? { cacheId: cache.id, reason }
+        : { cacheId: cache.id, reason, error },
+    );
     this.#pump();
   }
 

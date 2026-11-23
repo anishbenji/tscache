@@ -318,3 +318,46 @@ describe("the deferred cleanup across the failure paths (step 132 class map)", (
     expect(h.store.log.slice(before)).toEqual([]);
   });
 });
+
+// Codex gate round 4, R4-4: the stop's deferred cleanup is armed before
+// `onStopped` is called, so a removal the callback makes at once waits for it.
+describe("a removal made by onStopped itself (Codex gate round 4, R4-4)", () => {
+  it("waits for the deferred cleanup, and a later removal writes nothing", async () => {
+    let removal: ReturnType<typeof tracked> | undefined;
+    const h = harness({
+      onStopped: () => {
+        removal = tracked(
+          Promise.resolve(
+            durably(h.persister, "persist", () =>
+              h.engine.invalidate("persist", { start: 0, end: 0 }),
+            ),
+          ).then(() => undefined),
+        );
+      },
+    });
+    h.engine.cache(config());
+    h.store.seed("persist", fixture({}, [0, 4]));
+    h.store.fail("read");
+    const cleanup = h.store.gate("write");
+    await h.persister.open("persist");
+    expect(h.stopped[0]?.reason).toBe("error");
+    await tick();
+    expect(removal?.done).toBe(false);
+    expect(writes(h.store)).toHaveLength(1);
+    await cleanup.entered;
+    await tick();
+    expect(removal?.done).toBe(false);
+    cleanup.release();
+    await finish((removal as NonNullable<typeof removal>).promise);
+    expect(h.store.records("persist")).toEqual({ cache: undefined, pages: [] });
+
+    await finish(
+      Promise.resolve(
+        durably(h.persister, "persist", () =>
+          h.engine.invalidate("persist", { start: 0, end: 0 }),
+        ),
+      ).then(() => undefined),
+    );
+    expect(writes(h.store)).toHaveLength(1);
+  });
+});
