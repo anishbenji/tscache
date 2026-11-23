@@ -57,8 +57,9 @@ covers anything nor holds a provisional point, in one call inside the worker, so
 fetch is never replaced. A snapshot of another dataset version is refused (`skipped:
 'version-mismatch'`), and a worker from before `hydrate` rejects it with "unknown op hydrate": treat both
 as nothing applied, and the cache fetches. Any other failure to apply it, a malformed snapshot for
-example, counts as not seeded too: the snippet warns in development with the error's message only, never
-the snapshot, which carries the page's data. [Snapshots](/usage/snapshots) has the rules.
+example, counts as not seeded too: the snippet warns in development with the error's name only, never its
+message, which can quote the snapshot, and the snapshot carries the page's data.
+[Snapshots](/usage/snapshots) has the rules.
 
 The snapshot stays usable after `hydrate`, so the client that replaces a lost one can be seeded from it
 too; the integrations' `connect(open, seeds)` does that.

@@ -24,6 +24,11 @@ export async function startCache(
   text: string | null | undefined,
 ): Promise<GetResult> {
   const client = await createClient(options);
+  // A worker lost meanwhile fails every pending call, hydrate included.
+  let lost = false;
+  client.on("workerLost", () => {
+    lost = true;
+  });
   const cache = await client.cache(candles);
   if (text != null) {
     try {
@@ -31,15 +36,17 @@ export async function startCache(
       const { applied, skipped } = await cache.hydrate(seed);
       console.log(applied, skipped); // skipped: "version-mismatch" when refused
     } catch (error) {
+      // The client is gone: no read follows, so the loss is the answer.
+      if (lost) throw error;
       // Not seeded: hydration saves fetches and is never needed for correct
       // answers, so the read below fetches instead. A worker from before
       // hydrate (a stale cached script) refuses the op; any other failure
-      // is worth a warning in development, with the message only, since
-      // the snapshot carries the page's data.
+      // is worth a warning in development. It names the error and never
+      // prints its message, which can quote the snapshot: the page's data.
       const old =
         error instanceof TscacheError && error.message === "unknown op hydrate";
       if (!old && development()) {
-        const why = error instanceof Error ? error.message : String(error);
+        const why = error instanceof Error ? error.name : typeof error;
         console.warn(`snapshot not applied (${why}); the cache fetches`);
       }
     }

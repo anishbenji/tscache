@@ -58,6 +58,18 @@ function checkFetched(result: GetResult): void {
   check(failed.length === 0, `misses ${JSON.stringify(failed)}`);
 }
 
+/** `run`'s result, with NODE_ENV "development" while it runs. */
+async function developing<T>(run: () => Promise<T>): Promise<T> {
+  const mode = process.env.NODE_ENV;
+  process.env.NODE_ENV = "development";
+  try {
+    return await run();
+  } finally {
+    if (mode === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = mode;
+  }
+}
+
 /** Resolves when `arm` calls its callback; rejects after `ms`. */
 function within(
   ms: number,
@@ -761,38 +773,107 @@ const RUNS: Record<string, Run> = {
     checkColumns(result, CANDLE_FIELDS);
     // A snapshot that fails to apply (its one segment given twice, which
     // hydrate refuses as overlapping) leaves the cache not seeded: the read
-    // fetches, and a development build warns once, with the message only.
+    // fetches, and a development build warns once, naming the error.
     const encoded = JSON.parse(text) as EncodedSnapshot;
     const corrupt = JSON.stringify({
       ...encoded,
       segments: [...encoded.segments, ...encoded.segments],
     });
-    const mode = process.env.NODE_ENV;
-    process.env.NODE_ENV = "development";
     const warned = logs.length;
-    try {
-      const fetched: GetResult = await startCache(
+    const fetched: GetResult = await developing(() =>
+      startCache(
         {
           mode: "in-process",
           fetcher: { module: FETCHER, context: { origin } },
         },
         sixHours,
         corrupt,
-      );
-      check(
-        fetched.timestamps.length > 300,
-        `after a failed seed, the browser read ${fetched.timestamps.length} points`,
-      );
-    } finally {
-      if (mode === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = mode;
-    }
+      ),
+    );
+    check(
+      fetched.timestamps.length > 300,
+      `after a failed seed, the browser read ${fetched.timestamps.length} points`,
+    );
     const warning = logs.slice(warned);
+    // The error's name only: its message can quote the snapshot.
     check(
       warning.length === 1 &&
         warning[0]?.length === 1 &&
-        String(warning[0]?.[0]).includes("invalid snapshot"),
+        String(warning[0]?.[0]).includes("(TscacheError)") &&
+        !String(warning[0]?.[0]).includes("invalid snapshot"),
       `after a failed seed, logged ${JSON.stringify(warning)}`,
+    );
+    // Snapshots whose errors would quote them: one encoded twice, which
+    // decodeSnapshot refuses as a string and quotes whole, and one whose
+    // field lost its opening quote, which JSON.parse quotes in part. The
+    // read fetches, and the one warning carries none of the snapshot.
+    const MARKER = "SECRETMARKER";
+    for (const spoiled of [
+      JSON.stringify(`${text}${MARKER}`),
+      text.replace('"mask":"', `"mask":${MARKER}`),
+    ]) {
+      check(spoiled.includes(MARKER), "the marker is not in the snapshot");
+      const before = logs.length;
+      const answer: GetResult = await developing(() =>
+        startCache(
+          {
+            mode: "in-process",
+            fetcher: { module: FETCHER, context: { origin } },
+          },
+          sixHours,
+          spoiled,
+        ),
+      );
+      check(
+        answer.timestamps.length > 300,
+        `after a spoiled snapshot, the browser read ${answer.timestamps.length} points`,
+      );
+      const said = logs.slice(before);
+      check(
+        said.length === 1 && !JSON.stringify(said).includes(MARKER),
+        `after a spoiled snapshot, logged ${JSON.stringify(said)}`,
+      );
+    }
+    // A worker lost while hydrate is pending fails hydrate, and every later
+    // call: that is no news about the snapshot, so nothing is warned, and
+    // startCache rejects. The port is told the worker left (a "bye") in
+    // place of the hydrate request.
+    const post = MessagePort.prototype.postMessage;
+    MessagePort.prototype.postMessage = function (
+      this: MessagePort,
+      message: unknown,
+      ...rest: never[]
+    ) {
+      if ((message as { op?: unknown } | null)?.op !== "hydrate") {
+        return post.call(this, message, ...rest);
+      }
+      this.dispatchEvent(new MessageEvent("message", { data: { t: "bye" } }));
+    };
+    const lostAt = logs.length;
+    try {
+      const outcome: string = await developing(() =>
+        startCache(
+          {
+            mode: "in-process",
+            fetcher: { module: FETCHER, context: { origin } },
+          },
+          sixHours,
+          text,
+        ).then(
+          () => "resolved",
+          (error: unknown) => String(error),
+        ),
+      );
+      check(
+        outcome.includes("port closed"),
+        `with the worker lost during hydrate, startCache gave ${outcome}`,
+      );
+    } finally {
+      MessagePort.prototype.postMessage = post;
+    }
+    check(
+      logs.length === lostAt,
+      `with the worker lost during hydrate, logged ${JSON.stringify(logs.slice(lostAt))}`,
     );
     // The page entry, with the server's script element in its document.
     const page = globalThis as Record<string, unknown>;

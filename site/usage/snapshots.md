@@ -65,7 +65,10 @@ transferred, so it stays usable: the client that replaces a lost one can be seed
 A worker from before `hydrate` (a stale cached script) rejects the call with `TscacheError`
 "unknown op hydrate", and a `get` with `snapshot: true` returns no `snapshot`. Treat that as nothing
 applied: the cache fetches instead. Treat any other failure to apply a snapshot as not seeded too, and
-warn in development with the error's message only, as the snippet above does.
+warn in development with the error's name only, as the snippet above does: the message can quote the
+snapshot (`decodeSnapshot` and `JSON.parse` both quote what they refuse), which carries the page's data.
+A worker lost while `hydrate` is pending fails it too; that is no news about the snapshot, so the
+snippet gives up without a warning.
 :::
 
 With an `Engine`, `engine.snapshot(cacheId, range)` takes a snapshot without a read, for persistence
