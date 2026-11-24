@@ -114,7 +114,9 @@ export function dehydrate({ range, result, snapshot }: ServerRead): Dehydrated {
  * seeded" like any snapshot that fails to apply (decision 98 C), rather than
  * stop the page from mounting. Reading `snapshot` then throws that
  * TscacheError, each time; `hydrateRead` reads it inside its own call, so
- * `connect` sees a rejection. A decoded snapshot is kept.
+ * `connect` sees a rejection. A decoded snapshot is kept, and the encoded
+ * one released: the read lives as long as its connection, which reseeds
+ * replacement clients from it, and need not keep the page's text too.
  */
 export function rehydrate(config: CacheConfig, value: Dehydrated): ServerRead {
   const fields = mapFields(value.fields, (text, name) => {
@@ -128,6 +130,7 @@ export function rehydrate(config: CacheConfig, value: Dehydrated): ServerRead {
     }
     return new ARRAYS[dtype](fromBase64(text));
   });
+  let encoded: EncodedSnapshot | undefined = value.snapshot;
   let snapshot: Snapshot | undefined;
   return {
     range: value.range,
@@ -138,7 +141,11 @@ export function rehydrate(config: CacheConfig, value: Dehydrated): ServerRead {
       misses: value.misses,
     },
     get snapshot() {
-      snapshot ??= decodeSnapshot(value.snapshot);
+      if (snapshot === undefined) {
+        // Defined until the decode succeeds, which clears it.
+        snapshot = decodeSnapshot(encoded as EncodedSnapshot);
+        encoded = undefined;
+      }
       return snapshot;
     },
   };
