@@ -4,10 +4,11 @@
 // store, a signal, a ref) and reads through `cache()`; the rest of its job
 // is turning the read's promise into that reactivity too.
 
-import type {
-  CacheConfig,
-  CacheHandle,
-  TscacheClient,
+import {
+  type CacheConfig,
+  type CacheHandle,
+  type TscacheClient,
+  TscacheError,
 } from "@anishbenji/tscache";
 import { hydrateRead, type ServerRead } from "./hydration";
 
@@ -49,13 +50,71 @@ export interface Connection {
 
 const CONNECTING: ConnectionState = { status: "connecting" };
 
+// Bundlers replace the exact text `process.env.NODE_ENV` at build time (Vite
+// in development and production, webpack, Bun with --production), so it is
+// read bare, as the library's own development warnings read it. A page
+// without `process` that no bundler prepared counts as production.
+declare const process: { env: { NODE_ENV?: string } };
+
+/** Whether this is a development build. */
+function development(): boolean {
+  try {
+    return process.env.NODE_ENV !== "production";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What a warning says of `error`: its name, and a TscacheError's `code` when
+ * it has one. Never its message, which can quote the snapshot it refused
+ * (`decodeSnapshot` quotes one that is not an object), and the snapshot
+ * carries the page's data.
+ */
+function nameOf(error: unknown): string {
+  if (!(error instanceof Error)) return "a non-Error rejection";
+  const code: unknown =
+    error instanceof TscacheError
+      ? (error as { code?: unknown }).code
+      : undefined;
+  return typeof code === "string" ? `${error.name} ${code}` : error.name;
+}
+
+/**
+ * Says, in development builds only, that cache `id`'s seed was not applied.
+ * Only the error's name goes to the console (`nameOf`), never the error, its
+ * message or the snapshot: the snapshot carries the page's data.
+ */
+function warnNotSeeded(id: string, error: unknown): void {
+  if (!development()) return;
+  const why = nameOf(error);
+  console.warn(
+    `tscache: the server's snapshot for cache "${id}" was not applied (${why}), so the cache fetches that range instead; printed in development builds only.`,
+  );
+}
+
+/**
+ * Whether `error` is a disposed client's answer, which every pending and
+ * later call gets: the application disposed the client itself, which fires
+ * no workerLost, so `live` cannot tell.
+ */
+function closed(error: unknown): boolean {
+  return error instanceof TscacheError && error.message === "client disposed";
+}
+
 /**
  * The applying of `seeds`: given a client and a cache id, the applying of
  * that cache's seed to that client, started on the first ask and shared by
- * every later one; undefined for a cache without a seed.
+ * every later one; undefined for a cache without a seed. It rejects only
+ * when the cache cannot be opened: a snapshot that fails to apply leaves
+ * the cache not seeded (decision 98 C). The warning is given only while
+ * `live` holds for the client and the client was not disposed: a client
+ * lost or disposed meanwhile fails every pending call, `hydrate` included,
+ * and that is no news about the snapshot.
  */
 function seeder(
   seeds: readonly Seed[],
+  live: (client: TscacheClient) => boolean,
 ): (client: TscacheClient, id: string) => Promise<void> | undefined {
   const byId = new Map(seeds.map((seed) => [seed.config.id, seed]));
   /** Per client, the applying of each cache's seed, started on the first ask. */
@@ -70,10 +129,14 @@ function seeder(
     }
     let applying = ofClient.get(id);
     if (applying === undefined) {
-      applying = client
-        .cache(seed.config)
-        .then((cache) => hydrateRead(cache, seed.read))
-        .then(() => {});
+      applying = client.cache(seed.config).then((cache) =>
+        hydrateRead(cache, seed.read).then(
+          () => {},
+          (error: unknown) => {
+            if (live(client) && !closed(error)) warnNotSeeded(id, error);
+          },
+        ),
+      );
       ofClient.set(id, applying);
     }
     return applying;
@@ -93,10 +156,23 @@ function seeder(
  * data (N39). Each seed is applied once per client, when its cache is
  * first asked for, into the cache opened with the seed's own config: a
  * reader asking for a conflicting config is refused by the client's check,
- * rather than handed coverage read on another grid. A seeding that fails
- * stays failed for its client: every later `cache()` call for that cache
- * rejects with the same error until a replacement client seeds afresh
- * (`hydrateRead` counts only a worker without `hydrate` as not seeded).
+ * rather than handed coverage read on another grid.
+ *
+ * A snapshot that fails to apply counts as "not seeded" (decision 98 C,
+ * architecture §2.8: hydration is an optimisation, never a requirement for
+ * correctness): `cache()` still hands out the cache, which fetches what the
+ * seed would have filled, and a development build warns once per client
+ * and cache with the error's name (never its message, which can quote the
+ * snapshot), unless the client was lost or disposed or the connection
+ * disposed meanwhile. `hydrate` validates the whole
+ * snapshot before it changes anything, so a refused snapshot leaves
+ * nothing behind; a write that fails part way (an allocation failure)
+ * keeps only the parts it finished, each recorded as coverage. A worker
+ * without `hydrate` is not seeded either, without a warning
+ * (`hydrateRead`). The seed is not applied again on that client. Only a
+ * seed's cache that cannot be opened with the seed's config rejects: every
+ * later `cache()` call for it on that client rejects with the same error
+ * until a replacement client seeds afresh.
  */
 export function connect(
   open: () => Promise<TscacheClient>,
@@ -104,7 +180,11 @@ export function connect(
 ): Connection {
   let state = CONNECTING;
   let disposed = false;
-  const seeding = seeder(seeds);
+  const seeding = seeder(
+    seeds,
+    (client) =>
+      !disposed && state.status === "connected" && state.client === client,
+  );
   const listeners = new Set<() => void>();
 
   function set(next: ConnectionState): void {
