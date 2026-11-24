@@ -352,6 +352,15 @@ describe("seedCache", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it("is silent about a client disposed while hydrate was pending", async () => {
+    // A pagehide outside the back/forward cache disposes the client, which
+    // rejects every pending call with "client disposed" and fires no
+    // workerLost, so `live` still holds: the error itself must tell.
+    const cache = refusing(new TscacheError("client disposed"));
+    expect(await seedCache(cache, hydration, () => true)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("is silent in production", async () => {
     vi.stubEnv("DEV", false);
     const cache = refusing(new Error("invalid snapshot: overlaps"));

@@ -875,6 +875,62 @@ const RUNS: Record<string, Run> = {
       logs.length === lostAt,
       `with the worker lost during hydrate, logged ${JSON.stringify(logs.slice(lostAt))}`,
     );
+    // A pagehide outside the back/forward cache while hydrate is pending:
+    // the client disposes itself, which fails hydrate and fires no
+    // workerLost. That is no news about the snapshot either: nothing is
+    // warned, and startCache rejects. Only the client startCache creates
+    // hears the event: its pagehide listener is caught as it is added, and
+    // called once the hydrate request is posted.
+    const scope = globalThis as unknown as {
+      addEventListener: (type: string, listener: unknown) => void;
+    };
+    const listen = scope.addEventListener;
+    const hiders: ((event: Event) => void)[] = [];
+    scope.addEventListener = function (type: string, listener: unknown) {
+      if (type === "pagehide") hiders.push(listener as (event: Event) => void);
+      return listen.call(this, type, listener);
+    };
+    MessagePort.prototype.postMessage = function (
+      this: MessagePort,
+      message: unknown,
+      ...rest: never[]
+    ) {
+      post.call(this, message, ...rest);
+      if ((message as { op?: unknown } | null)?.op === "hydrate") {
+        for (const hide of hiders) hide(new Event("pagehide"));
+      }
+    };
+    const hiddenAt = logs.length;
+    try {
+      const outcome: string = await developing(() =>
+        startCache(
+          {
+            mode: "in-process",
+            fetcher: { module: FETCHER, context: { origin } },
+          },
+          sixHours,
+          text,
+        ).then(
+          () => "resolved",
+          (error: unknown) => String(error),
+        ),
+      );
+      check(
+        hiders.length === 1,
+        `startCache's client added ${hiders.length} pagehide listeners`,
+      );
+      check(
+        outcome.includes("client disposed"),
+        `with the page hidden during hydrate, startCache gave ${outcome}`,
+      );
+    } finally {
+      MessagePort.prototype.postMessage = post;
+      scope.addEventListener = listen;
+    }
+    check(
+      logs.length === hiddenAt,
+      `with the page hidden during hydrate, logged ${JSON.stringify(logs.slice(hiddenAt))}`,
+    );
     // The page entry, with the server's script element in its document.
     const page = globalThis as Record<string, unknown>;
     page.document = {

@@ -65,3 +65,20 @@ export function attempts<T>(
     stopped = true;
   };
 }
+
+/**
+ * Calls `stop` when the page is hidden for good: a `pagehide` outside the
+ * back/forward cache. tscache disposes the client itself on that event, so
+ * its pending calls, `hydrate` included, reject with "client disposed" and
+ * no workerLost fires; once stopped, an attempt that resolves anyway is
+ * dropped rather than reported as connected. A page entering the
+ * back/forward cache keeps its client. Returns the function that stops
+ * listening.
+ */
+export function untilPageGone(page: EventTarget, stop: () => void): () => void {
+  const hide = (event: Event) => {
+    if ((event as { persisted?: unknown }).persisted !== true) stop();
+  };
+  page.addEventListener("pagehide", hide);
+  return () => page.removeEventListener("pagehide", hide);
+}

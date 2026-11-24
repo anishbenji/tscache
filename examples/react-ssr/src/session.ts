@@ -16,7 +16,7 @@ import { pageContext } from "@examples/mock-backend/insights";
 import { onFetchNotice } from "@examples/mock-backend/notices";
 import { useEffect, useState } from "react";
 import { candles, type Summary, summarize, utcDay } from "./candles";
-import { type Attempt, attempts } from "./connecting";
+import { type Attempt, attempts, untilPageGone } from "./connecting";
 import { insights } from "./insights";
 import { log, message } from "./log";
 
@@ -100,7 +100,10 @@ export function useConnection(hydration: Hydration): Connection | undefined {
       failed: (error) => log(`could not connect: ${message(error)}`),
       drop: (next) => void next.client.dispose(),
     });
+    // A page hidden for good disposes the client, which is no connection.
+    const unlisten = untilPageGone(window, stop);
     return () => {
+      unlisten();
       stop();
       void current?.dispose();
     };

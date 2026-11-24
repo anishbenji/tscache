@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { type Attempt, attempts, type Outcomes } from "../src/connecting";
+import {
+  type Attempt,
+  attempts,
+  type Outcomes,
+  untilPageGone,
+} from "../src/connecting";
 
 /** A promise and the functions that settle it. */
 function deferred<T>() {
@@ -106,5 +111,46 @@ describe("attempts", () => {
     started[0]?.reject(new Error("unmounted"));
     await settle();
     expect(seen).toEqual([]);
+  });
+});
+
+describe("untilPageGone", () => {
+  /** A `pagehide` event, `persisted` as given. */
+  const pagehide = (persisted: boolean) =>
+    Object.assign(new Event("pagehide"), { persisted });
+
+  it("stops the attempts when the page is hidden for good", async () => {
+    // tscache disposes the client on this event: its pending hydrate rejects
+    // with "client disposed" and no workerLost fires, so seedCache counts it
+    // as not applied. The attempt must not report that client as connected.
+    const page = new EventTarget();
+    const { started, seen, stop } = harness();
+    untilPageGone(page, stop);
+    page.dispatchEvent(pagehide(false));
+    expect(started[0]?.attempt.live()).toBe(false);
+    started[0]?.resolve("first");
+    await settle();
+    expect(seen).toEqual(["dropped first"]);
+  });
+
+  it("keeps them going when the page enters the back/forward cache", async () => {
+    const page = new EventTarget();
+    const { started, seen, stop } = harness();
+    untilPageGone(page, stop);
+    page.dispatchEvent(pagehide(true));
+    started[0]?.resolve("first");
+    await settle();
+    expect(seen).toEqual(["connected first"]);
+  });
+
+  it("stops listening when told to", () => {
+    const page = new EventTarget();
+    let stops = 0;
+    const unlisten = untilPageGone(page, () => {
+      stops += 1;
+    });
+    unlisten();
+    page.dispatchEvent(pagehide(false));
+    expect(stops).toBe(0);
   });
 });

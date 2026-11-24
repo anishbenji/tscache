@@ -136,6 +136,14 @@ export async function seed(
 }
 
 /**
+ * Whether `error` is a disposed client's answer, which every pending and
+ * later call gets.
+ */
+function closed(error: unknown): boolean {
+  return error instanceof TscacheError && error.message === "client disposed";
+}
+
+/**
  * Applies the server's snapshot to `cache` and returns the ranges it
  * filled, or undefined when the snapshot was not applied. A snapshot that
  * fails to apply (a malformed or foreign one, a failed write) only means
@@ -143,10 +151,12 @@ export async function seed(
  * correct answers (architecture §2.8), so the cache fetches what it lacks
  * instead. A development build says why, with the error's name only
  * (`nameOf`: its message can quote the snapshot, which carries the page's
- * data), and only while `live` holds: a
+ * data), and only while `live` holds and the client was not disposed: a
  * lost or disposed client fails every pending call, `hydrate` included, and
  * that is no news about the snapshot. `live` is asked after the failure, so
- * a client lost while `hydrate` was pending counts as lost.
+ * a client lost while `hydrate` was pending counts as lost. A disposed
+ * client fires no workerLost (a `pagehide` outside the back/forward cache
+ * disposes it), so `live` cannot tell: its error does.
  */
 export async function seedCache(
   cache: CacheHandle,
@@ -156,7 +166,7 @@ export async function seedCache(
   try {
     return (await seed(cache, hydration)).applied;
   } catch (error) {
-    if (import.meta.env.DEV && live()) {
+    if (import.meta.env.DEV && live() && !closed(error)) {
       const why = nameOf(error);
       console.warn(
         `tscache: the server's snapshot for cache "${cache.id}" was not applied (${why}), so the cache fetches that range instead; printed in development builds only.`,

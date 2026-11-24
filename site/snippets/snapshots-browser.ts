@@ -24,7 +24,8 @@ export async function startCache(
   text: string | null | undefined,
 ): Promise<GetResult> {
   const client = await createClient(options);
-  // A worker lost meanwhile fails every pending call, hydrate included.
+  // A worker lost meanwhile fails every pending call, hydrate included, as
+  // does a page hidden for good: pagehide disposes the client.
   let lost = false;
   client.on("workerLost", () => {
     lost = true;
@@ -37,7 +38,7 @@ export async function startCache(
       console.log(applied, skipped); // skipped: "version-mismatch" when refused
     } catch (error) {
       // The client is gone: no read follows, so the loss is the answer.
-      if (lost) throw error;
+      if (lost || disposed(error)) throw error;
       // Not seeded: hydration saves fetches and is never needed for correct
       // answers, so the read below fetches instead. A worker from before
       // hydrate (a stale cached script) refuses the op; any other failure
@@ -52,6 +53,11 @@ export async function startCache(
     }
   }
   return cache.get(range);
+}
+
+/** Whether `error` is a disposed client's answer to every call. */
+function disposed(error: unknown): boolean {
+  return error instanceof TscacheError && error.message === "client disposed";
 }
 
 // Bundlers replace the exact text `process.env.NODE_ENV` at build time, so
