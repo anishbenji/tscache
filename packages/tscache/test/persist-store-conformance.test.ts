@@ -384,6 +384,79 @@ describe("IndexedDB request failures (§4.10.3)", () => {
   });
 });
 
+// Step 132 close-out, residual 2 (user decision #145 A): `failureOf` reports
+// a value whose `message` getter throws as `{ Error, Error }`, which loses a
+// quota error's name. The shipped adapter cannot reach that: every rejection
+// it surfaces is a DOMException whose name and message read as strings. This
+// test pins that guard for each way the adapter rejects.
+describe("IndexedDB rejections keep a readable name and message (§4.10.6 Failures)", () => {
+  it("an aborted write, an uncloneable plan, a closed store and a newer database", async () => {
+    const { IDBObjectStore: Store } = await import("fake-indexeddb");
+    const { failureOf } = await import("../src/persist/failure");
+    const factory = await idbFactory();
+    const store = await openIdbStore(factory);
+    if (store === undefined) throw new Error("normal open must return store");
+    const rejections: unknown[] = [];
+    const caught = (error: unknown) => {
+      rejections.push(error);
+    };
+    const put = Store.prototype.put;
+    try {
+      const data = fixture();
+      const plan: WritePlan = {
+        deletePages: [],
+        putPages: data.pages,
+        putCache: requireCache(data),
+        strict: false,
+      };
+      await store.write("persist", plan);
+      // A request that fails asynchronously aborts the transaction: the
+      // path a quota or abort error takes (`settled`).
+      Store.prototype.put = function (
+        this: IDBObjectStore,
+        value: unknown,
+        key?: IDBValidKey,
+      ) {
+        return this.name === "pages"
+          ? this.add(value, key)
+          : put.call(this, value, key);
+      } as typeof put;
+      await store.write("persist", plan).catch(caught);
+      Store.prototype.put = put;
+      const bad = { ...requireCache(data), uncloneable: () => {} };
+      await store
+        .write("persist", { ...plan, putPages: [], putCache: bad })
+        .catch(caught);
+      store.close();
+      await store.read("persist").catch(caught);
+      await store.write("persist", plan).catch(caught);
+      await store.clearAll().catch(caught);
+    } finally {
+      Store.prototype.put = put;
+      store.close();
+    }
+    (await database(factory, "tscache", 2)).close();
+    await openIdbStore(factory).catch(caught);
+    expect(rejections.map((e) => failureOf(e).name)).toEqual([
+      "ConstraintError",
+      "DataCloneError",
+      "InvalidStateError",
+      "InvalidStateError",
+      "InvalidStateError",
+      "VersionError",
+    ]);
+    for (const error of rejections) {
+      expect(error).toBeInstanceOf(DOMException);
+      const { message } = error as DOMException;
+      expect(typeof message).toBe("string");
+      expect(failureOf(error)).toEqual({
+        name: (error as DOMException).name,
+        message,
+      });
+    }
+  });
+});
+
 describe("MemoryStore controls used by the contracts (§4.10.3)", () => {
   it("injects the next n failures, then recovers; every-call failures are explicit", async () => {
     const s = new MemoryStore();
