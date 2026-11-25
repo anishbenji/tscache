@@ -31,6 +31,9 @@ const cleared = (cacheId: string): Evt => ({
   payload: { cacheId, reason: "clear-all" },
 });
 
+/** Detaches the server from the latest hosting: its client hears a bye. */
+let detachWorker: (() => void) | undefined;
+
 /**
  * The in-process hosting with its own engine, whose server posts two
  * events once the connection is ready: they reach the port before the
@@ -41,6 +44,7 @@ async function inProcessWithKeptEvents(): Promise<Hosting> {
   const server = new RpcServer(new Engine(), LIB_VERSION);
   const port = channel.port1 as MessagePortLike;
   server.attach(port);
+  detachWorker = () => server.detach(port);
   const client = await PortClient.connect(channel.port2 as MessagePortLike);
   port.postMessage(cleared("a"));
   port.postMessage(cleared("b"));
@@ -125,4 +129,88 @@ describe("the startup delivery's rules (§2.7): a listener at each position", ()
       });
     }
   }
+});
+
+/** What `fn` throws, or a marker when it returns. */
+function thrownBy(fn: (() => void) | undefined): unknown {
+  try {
+    fn?.();
+  } catch (error) {
+    return error;
+  }
+  return "returned";
+}
+
+// The realm without reportError (§2.7, architecture line "thrown from a
+// microtask otherwise"; step 135, round 9, user decision #144): a listener
+// error that nobody can catch is thrown from a microtask, never at the
+// caller whose answer ran the delivery. The 0 ms timer is faked and never
+// advanced, so the first RPC response runs the startup delivery; the
+// microtasks the client queues are captured, not run, so the test can run
+// the one it queued and see what it throws.
+describe("without reportError, a listener's synchronous throw (§2.7)", () => {
+  const plain = { id: "c", interval: 1, fields: { v: "f64" } } as const;
+
+  it("in the startup delivery's modeFallback steps: the call resolves, one microtask throws it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubGlobal("reportError", undefined);
+    const createClient = await load();
+    const client = await createClient({ workerUrl, memoryBudget: 1 << 20 });
+    clients.push(client);
+    expect(client.mode).toBe("in-process");
+    const failure = new Error("modeFallback listener failed");
+    const steps: string[] = [];
+    client.on("modeFallback", (step: ClientEvents["modeFallback"]) => {
+      steps.push(step.to);
+      throw failure;
+    });
+    const queued: (() => void)[] = [];
+    vi.stubGlobal("queueMicrotask", (fn: () => void) => {
+      queued.push(fn);
+    });
+    // The first response runs the startup delivery before it is handled.
+    await expect(client.cache(plain)).resolves.toBeDefined();
+    expect(steps).toEqual(["dedicated", "in-process"]);
+    expect(queued).toHaveLength(1);
+    expect(thrownBy(queued[0])).toBe(failure);
+    // The delivery ran once: the timer adds nothing.
+    vi.runAllTimers();
+    expect(steps).toEqual(["dedicated", "in-process"]);
+    expect(queued).toHaveLength(1);
+  });
+
+  it("in workerLost: the pending call rejects, every listener hears it, one microtask throws it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubGlobal("reportError", undefined);
+    const createClient = await load();
+    const client = await createClient({ workerUrl, memoryBudget: 1 << 20 });
+    clients.push(client);
+    expect(client.mode).toBe("in-process");
+    // The startup delivery runs here, with no listener to throw.
+    await client.cache(plain);
+    const failure = new Error("workerLost listener failed");
+    const heard: string[] = [];
+    client.on("workerLost", ({ reason }) => {
+      heard.push(`first:${reason}`);
+      throw failure;
+    });
+    client.on("workerLost", ({ reason }) => heard.push(`second:${reason}`));
+    const queued: (() => void)[] = [];
+    vi.stubGlobal("queueMicrotask", (fn: () => void) => {
+      queued.push(fn);
+    });
+    detachWorker?.();
+    await expect(client.memoryStats()).rejects.toMatchObject({
+      name: "TscacheError",
+      message: "port closed",
+    });
+    expect(heard).toEqual(["first:port closed", "second:port closed"]);
+    expect(queued).toHaveLength(1);
+    expect(thrownBy(queued[0])).toBe(failure);
+    vi.runAllTimers();
+    expect(heard).toEqual(["first:port closed", "second:port closed"]);
+    expect(queued).toHaveLength(1);
+  });
 });
