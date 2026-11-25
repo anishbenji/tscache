@@ -283,3 +283,36 @@ describe("snapshot HTML encoding — architecture §2.8, §4.5(e), N38", () => {
     },
   );
 });
+
+describe("decodeSnapshot error text — step 146", () => {
+  const marker = "SNAPSHOT-TEXT-MARKER-146";
+
+  it.each([
+    { name: "a string", input: `{"marker":"${marker}"}`, text: marker },
+    { name: "a number", input: 987_654_321, text: "987654321" },
+    { name: "a boolean", input: true, text: "true" },
+    { name: "a bigint", input: 123_456_789n, text: "123456789" },
+    { name: "a symbol", input: Symbol(marker), text: marker },
+  ])(
+    "C07 names $name input by its type and never quotes its value",
+    ({ name, input, text }) => {
+      const message = thrown(() =>
+        decodeSnapshot(input as unknown as EncodedSnapshot),
+      ).message;
+      expect(message).toBe(
+        `invalid encoded snapshot: must be an object, got ${name}`,
+      );
+      expect(message).not.toContain(text);
+    },
+  );
+
+  it.each([
+    { name: "null", input: null },
+    { name: "undefined", input: undefined },
+    { name: "an array", input: [marker] },
+  ])("C07 names $name input", ({ name, input }) => {
+    expect(
+      thrown(() => decodeSnapshot(input as unknown as EncodedSnapshot)).message,
+    ).toBe(`invalid encoded snapshot: must be an object, got ${name}`);
+  });
+});

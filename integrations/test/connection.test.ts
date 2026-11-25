@@ -365,7 +365,7 @@ describe("connect, when a seed fails to apply", () => {
   });
 
   it("never quotes a snapshot whose error would quote it", async () => {
-    // decodeSnapshot quotes a snapshot that is not an object whole.
+    // decodeSnapshot names a non-object snapshot by its type only, step 146.
     const marker = "SECRETMARKER";
     const value = dehydrate(seed);
     const spoiled = `${JSON.stringify(value.snapshot)}${marker}`;
@@ -375,7 +375,8 @@ describe("connect, when a seed fails to apply", () => {
     } catch (error) {
       message = (error as Error).message;
     }
-    expect(message).toContain(marker);
+    expect(message).toMatch(/^invalid encoded snapshot/);
+    expect(message).not.toContain(marker);
 
     const read = rehydrate(config, {
       ...value,
@@ -390,6 +391,45 @@ describe("connect, when a seed fails to apply", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     const [text] = warn.mock.calls[0] ?? [];
     expect(text).toContain("(TscacheError)");
+    expect(text).not.toContain(marker);
+  });
+
+  it("never quotes a snapshot whose hydrate error quotes a field it supplies", async () => {
+    // A payload field's dtype is any string to decodeSnapshot, and hydrate's
+    // error prints the one that differs from the schema.
+    const marker = "SECRETMARKER";
+    const value = dehydrate(seed);
+    const [first, ...others] = value.snapshot.segments;
+    const [field, ...rest] = first?.fields ?? [];
+    if (first === undefined || field === undefined) {
+      throw new Error("the seed has no segment field");
+    }
+    const spoiled: EncodedSnapshot = {
+      ...value.snapshot,
+      segments: [
+        {
+          ...first,
+          fields: [{ ...field, dtype: marker as typeof field.dtype }, ...rest],
+        },
+        ...others,
+      ],
+    };
+    const { message, name } = await refusal(
+      rehydrate(config, { ...value, snapshot: spoiled }),
+    );
+    expect(message).toMatch(/^invalid segment payload/);
+    expect(message).toContain(marker);
+
+    const read = rehydrate(config, { ...value, snapshot: spoiled });
+    const { connection, connected } = lossyConnection([read], { options });
+    await until(() => connected() !== null);
+    const handle = await connection.cache(connected() as TscacheClient, config);
+    const answer = await handle.get(seed.range);
+    expect(fetched).toEqual([seed.range]);
+    expect(Array.from(answer.fields.v ?? [])).toEqual([7, 7, 7]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [text] = warn.mock.calls[0] ?? [];
+    expect(text).toContain(`(${name})`);
     expect(text).not.toContain(marker);
   });
 
