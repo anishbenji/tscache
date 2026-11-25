@@ -1,0 +1,29 @@
+# Step 145 — a Playwright check that the built docs site draws every Mermaid diagram
+
+Branch: `chore/145-mermaid-render-check` · Reviewer: the director's review ladder · Rounds: 0 · Status: implemented, not yet reviewed · Verdict after triage: pending
+
+## Scope
+
+User decision 139 C (2026-11-25): step 141's syntax check (`site/scripts/check-mermaid.ts`, in `docs:check`) is not a render, so a diagram that parses but fails to draw, or draws an error box, passes it. This step adds a check over the built site, in a real browser, that fails on any Mermaid error box. No dependency is added: Playwright and its Chromium are already installed for `e2e/`.
+
+`playwright.config.ts` is a protected path. This is the user-approved tooling change of decision 139 C, and the pull request is for the user's merge. `scripts/ci.sh` and the root `package.json` are unchanged: `bun run ci` already builds the site (`bun run docs:build`) before it runs `bunx playwright test`, which runs every project.
+
+## What changed
+
+- **`e2e/docs/mermaid.spec.ts`**, in a new Playwright project, `docs` (Desktop Chrome, like the others). It opens every page of the built site that holds a `mermaid` fence, in the light and the dark colour scheme (the site draws its diagrams with Mermaid's dark theme while it is dark), and waits, on a condition and never a timer, until every diagram element holds an SVG and no render is under way, or Mermaid has drawn an error mark, or the page has logged an error. It then fails, naming the page and the scheme, when the page logged a console error or threw; when Mermaid's error marks (`.error-icon`, `.error-text`, from its error diagram and its error renderer) were added to the page at any point while it loaded, which an init script's `MutationObserver` counts, so an error box that a later render replaces still fails; when an error mark or Mermaid's error diagram is still shown; when a render left its temporary `dmermaid-*` element behind; when the page has a different number of diagram elements than its Markdown has fences; or when a diagram element holds no SVG. A further test fails when the built site has no page with a diagram, so the check cannot pass vacuously.
+- **`e2e/docs/pages.ts`** lists the pages: every HTML file of the built site (`site/.vitepress/dist`) except `404.html`, so the list follows the site's config (`srcExclude`, the generated `api/` pages) without repeating it. Each page's fences are counted in the Markdown it was built from, by `diagramReader` from `check-mermaid.ts` (includes expanded). It throws when the site is not built, and when a built page has no Markdown page behind it (a rewrite or a dynamic route, which the site has neither of), rather than miss that page's diagrams. Today it finds 8 pages with 12 diagrams, the same as `docs:check`.
+- **`playwright.config.ts`**: the `docs` project (`testMatch: docs/**/*.spec.ts`; the `chromium` project now ignores `docs/**`) and its server, `vitepress preview` of the built site on port 5300 plus the checkout's offset, under the site's base (`/tscache/`). Like the demo, it runs when `E2E_EXAMPLES` is unset or names `docs`. It needs the site built first.
+- **`site/.vitepress/theme/index.ts`** sets `mermaid.startOnLoad = false`. The new check found that every diagram page drew Mermaid's error box for a moment on every load: Mermaid registers a `load` handler that, while `startOnLoad` is on, renders every `.mermaid` element from its contents. `vitepress-plugin-mermaid` turns `startOnLoad` off only in its first `mermaid.initialize`, which comes after awaits in its `onMounted` hook and so after the window's `load` event. Mermaid's pass therefore rendered each plugin element while it was still empty and drew "Syntax error in text / No diagram type detected" into it, until the plugin's own render replaced it. In a probe of all 8 pages, three loads per page in each scheme, all 48 loads showed the box and none kept it. The theme module runs before the `load` event, so the pass no longer runs; the plugin still draws every diagram.
+- **`site/README.md`** and **`site/contributing.md`**: beside the syntax check's "not a render" limit, a line on the render check; the theme bullet in `site/README.md` mentions `startOnLoad`.
+
+## Verification
+
+- `E2E_EXAMPLES=docs bunx playwright test --project docs` (through `heavy-run.sh`) on the site built before the theme change: all 16 page tests failed with `site/how-it-works/<page>.md (<scheme>): Mermaid drew its error box (marks added while loading)`. After the theme change and `bun run docs:build`: 17 passed (5.1 s).
+- Broken diagram: with `A ->>> ((broken` added after `participant A as Tab A` in `site/how-it-works/read.md` and the site rebuilt, the two `read.md` tests failed with `site/how-it-works/read.md (light) logged errors` and the same for dark, the console error being Mermaid's `Parse error on line 4: ... Expecting 'link', '+', '-', '()', 'ACTOR', got 'INVALID'`; the other 15 passed. The line was removed with the Edit tool and the site rebuilt; it was never committed.
+- `bun scripts/test-clocks.ts`: 216 files clean (it reads `e2e/`). `tsc -p e2e` and `tsc -p site` pass.
+- `bun run ci`: see the step report for the full run and the time the `docs` project adds.
+
+## Decision concerns
+
+- The spec fails on any console error or uncaught error on a diagram page, not only one that Mermaid logs: a console error the page logs for another reason fails it too, naming the page and quoting the error. Today the 8 pages log none.
+- The theme change is a fix to the site, not only a check: without it the new check fails on every diagram page. It is the smallest fix found (one assignment, on the Mermaid instance the plugin uses), and it changes no diagram's look.

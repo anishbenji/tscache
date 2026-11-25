@@ -76,7 +76,9 @@ catches syntax errors in the published Mermaid diagrams, outside a browser: it p
 fence on the tracked pages and the generated `site/api/` pages after their includes are expanded, and
 fails on a syntax error, which the browser would otherwise show only as an error box on the page. Today
 those pages are every page the site publishes. It is a syntax check, not a render, so a diagram
-that parses but draws wrongly passes. It does not load the site's config or run a dynamic route's
+that parses but draws wrongly passes; `bun run ci` also opens each built page with a diagram in
+Playwright (`e2e/docs/mermaid.spec.ts`) and fails when a diagram is not drawn or Mermaid draws its
+error box. It does not load the site's config or run a dynamic route's
 loader, and fails on any symbolic link under `site/` and on any Markdown file under `site/` with a
 bracket name (VitePress's dynamic-route form, such as `[param].md`), excluded files included: replace
 the link with the files or rename the file, or extend the check first. It does not read a

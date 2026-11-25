@@ -30,6 +30,11 @@ import { hubPort } from "./scripts/demo/catalog";
 // comes last: Playwright starts the servers in order, so the examples'
 // servers have built every app it can reuse. It runs when E2E_EXAMPLES is
 // unset or names `demo`.
+//
+// The docs project (e2e/docs/) opens the built documentation site, served
+// by `vitepress preview`, and checks that every Mermaid diagram draws. It
+// needs the site built first (`bun run docs:build`; `bun run ci` builds it
+// before Playwright), and runs when E2E_EXAMPLES is unset or names `docs`.
 const requested = process.env.E2E_EXAMPLES?.split(",");
 const selected = (requested ?? Object.keys(apps)).filter((name): name is App =>
   Object.hasOwn(apps, name),
@@ -37,6 +42,10 @@ const selected = (requested ?? Object.keys(apps)).filter((name): name is App =>
 const demo = requested === undefined || requested.includes("demo");
 const demoPort = hubPort(process.env) + (process.env.DEMO_PORT ? 0 : offset);
 const hub = `http://127.0.0.1:${demoPort}/`;
+const docs = requested === undefined || requested.includes("docs");
+const docsPort = 5300 + offset;
+// The site's base (site/.vitepress/config.ts), which the server keeps.
+const docsUrl = `http://127.0.0.1:${docsPort}/tscache/`;
 
 export default defineConfig({
   testDir: "e2e",
@@ -49,7 +58,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: ["examples/**", "reference/**", "demo/**"],
+      testIgnore: ["examples/**", "reference/**", "demo/**", "docs/**"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -73,6 +82,11 @@ export default defineConfig({
       retries: 0,
       use: { ...devices["Desktop Chrome"], baseURL: hub },
     },
+    {
+      name: "docs",
+      testMatch: ["docs/**/*.spec.ts"],
+      use: { ...devices["Desktop Chrome"], baseURL: docsUrl },
+    },
   ],
   webServer: [
     {
@@ -88,6 +102,16 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     })),
+    ...(docs
+      ? [
+          {
+            command: `bun run --cwd site preview --port ${docsPort}`,
+            url: docsUrl,
+            reuseExistingServer: !process.env.CI,
+            timeout: 60_000,
+          },
+        ]
+      : []),
     ...(demo
       ? [
           {
