@@ -20,6 +20,7 @@ import { pageOf } from "../engine/merge";
 import { restore } from "../engine/restore";
 import type { SlotRange } from "../grid";
 import type { ClientEvents } from "../types";
+import { type Failure, failureOf } from "./failure";
 import { cacheRecordOf, pageRecordsOf } from "./records";
 import type { PageRange, PersistStore, StoredCache, WritePlan } from "./store";
 
@@ -46,7 +47,6 @@ type StopEvent = ClientEvents["persistStopped"];
  */
 type Cleanup = boolean | "deferred";
 type Reason = StopEvent["reason"];
-type Failure = { name: string; message: string };
 type OpenStore = (options?: {
   ifExists?: boolean;
 }) => Promise<PersistStore | undefined>;
@@ -133,17 +133,6 @@ interface Job {
   error: Failure | undefined;
   /** The flush attempt running at a clearAll() call: no retry, no stop (§4.10.6). */
   final: boolean;
-}
-
-function failureOf(error: unknown): Failure {
-  if (typeof error === "object" && error !== null) {
-    const { name, message } = error as { name?: unknown; message?: unknown };
-    return {
-      name: typeof name === "string" ? name : "Error",
-      message: typeof message === "string" ? message : String(error),
-    };
-  }
-  return { name: "Error", message: String(error) };
 }
 
 /** Adds `range` to merged, ascending page ranges; adjacent ranges join. */

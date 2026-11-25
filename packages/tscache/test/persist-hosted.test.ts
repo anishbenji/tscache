@@ -15,6 +15,7 @@ import {
   fixture,
   recordsOf,
   tracked,
+  unreadable,
 } from "./persist-test-helpers";
 
 // Implementer tests (architecture §4.10.8): the SharedWorker hosting's
@@ -827,7 +828,10 @@ describe("a second logout held for a chunk that fails (Codex gate round 5, R5-2)
 // value that cannot be turned into a string still fails the import: the
 // calls waiting for it take the failure path (§4.10.8).
 describe("a chunk loader failing with a value without a string form (Codex gate round 5, R5-3)", () => {
-  function failing(form: "throws" | "rejects") {
+  function failing(
+    form: "throws" | "rejects",
+    value: () => unknown = () => Object.create(null),
+  ) {
     const store = new MemoryStore();
     store.seed("never", fixture({ id: "never" }, [0, 4]));
     const engine = new Engine();
@@ -836,8 +840,8 @@ describe("a chunk loader failing with a value without a string form (Codex gate 
     const persistence = new HostedPersistence(
       engine,
       () => {
-        if (form === "throws") throw Object.create(null);
-        return Promise.reject(Object.create(null));
+        if (form === "throws") throw value();
+        return Promise.reject(value());
       },
       open,
       { onStopped: (event) => stops.push(event) },
@@ -867,6 +871,39 @@ describe("a chunk loader failing with a value without a string form (Codex gate 
     async (form) => {
       vi.useFakeTimers({ now: 0 });
       const h = failing(form);
+      const cleared = tracked(
+        Promise.resolve(h.persistence.clearAll()).then(() => undefined),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(cleared.done).toBe(true);
+      expect(h.open.mock.calls).toEqual([[{ ifExists: true }]]);
+      expect(h.store.records("never")).toEqual({ cache: undefined, pages: [] });
+    },
+  );
+
+  // Security lane run 4, S4.1: a value whose property reads throw.
+  const throwingReads = ["revoked proxy", "throwing getter"] as const;
+
+  it.each(throwingReads)(
+    "a first open answers and reports 'unavailable' (loader rejects with a %s)",
+    async (kind) => {
+      vi.useFakeTimers({ now: 0 });
+      const h = failing("rejects", () => unreadable(kind));
+      const opening = tracked(h.persistence.open("persist"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(opening.done).toBe(true);
+      expect(h.stops).toEqual([
+        { cacheId: "persist", reason: "unavailable", error },
+      ]);
+      expect(h.open).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(throwingReads)(
+    "a first clearAll answers with one ifExists opener call (loader rejects with a %s)",
+    async (kind) => {
+      vi.useFakeTimers({ now: 0 });
+      const h = failing("rejects", () => unreadable(kind));
       const cleared = tracked(
         Promise.resolve(h.persistence.clearAll()).then(() => undefined),
       );

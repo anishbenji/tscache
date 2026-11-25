@@ -14,6 +14,8 @@ import {
   expectRecords,
   fixture,
   tracked,
+  type Unreadable,
+  unreadable,
 } from "./persist-test-helpers";
 
 fakeTime();
@@ -233,6 +235,52 @@ describe("Persister.open (§4.10.6 Open, N46, N59)", () => {
     });
     expectRecords(h.store.records("persist"), h.engine);
   });
+});
+
+// Security lane run 4, S4.1 (and pre-review 3): an opener rejecting with a
+// value whose name and message cannot be read as usual still fails the
+// opening at once, with no unhandled rejection (Vitest fails the run on one).
+describe("an opener rejecting with an unreadable value (S4.1)", () => {
+  const kinds = ["null prototype", "revoked proxy"] as const;
+  const error = { name: "Error", message: "Error" };
+  function failing(kind: Unreadable) {
+    const engine = new Engine();
+    engine.cache(config());
+    const stopped: unknown[] = [];
+    const openStore = vi.fn(() => Promise.reject(unreadable(kind)));
+    const persister = new Persister(engine, openStore, {
+      onStopped: (e: unknown) => stopped.push(e),
+    });
+    return { engine, persister, openStore, stopped };
+  }
+
+  it.each(kinds)(
+    "clearAll fails at once with 'unavailable' (%s)",
+    async (kind) => {
+      const h = failing(kind);
+      const clearing = tracked(h.persister.clearAll());
+      await tick();
+      expect(clearing.done).toBe(true);
+      expect(h.openStore.mock.calls).toEqual([[{ ifExists: true }]]);
+      await h.persister.open("persist");
+      expect(h.stopped).toEqual([
+        { cacheId: "persist", reason: "unavailable", error },
+      ]);
+    },
+  );
+
+  it.each(kinds)(
+    "open stops with 'unavailable' without waiting for its deadline (%s)",
+    async (kind) => {
+      const h = failing(kind);
+      const opening = tracked(h.persister.open("persist"));
+      await tick();
+      expect(opening.done).toBe(true);
+      expect(h.stopped).toEqual([
+        { cacheId: "persist", reason: "unavailable", error },
+      ]);
+    },
+  );
 });
 
 const invalidated = { start: 0, end: 0 };

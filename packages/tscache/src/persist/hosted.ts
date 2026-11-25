@@ -30,11 +30,11 @@ import type { CacheChange } from "../engine/cache";
 import { type Engine, observeCaches } from "../engine/engine";
 import type { Persistence } from "../rpc/server";
 import type { ClientEvents } from "../types";
+import { type Failure, failureOf } from "./failure";
 import type { durably, Persister, PersisterOptions } from "./persister";
 import type { PersistStore, WritePlan } from "./store";
 
 type StopEvent = ClientEvents["persistStopped"];
-type Failure = { name: string; message: string };
 
 /** Opens the store; `ifExists` for a clear (§4.10.6). */
 export type OpenStore = (options?: {
@@ -64,23 +64,6 @@ interface Cleanup {
   removals: number;
   /** Until it settles: a later removal waits for nothing. */
   settled: Promise<void> | undefined;
-}
-
-/** Total: a value without a string form becomes "Error" (round 5, R5-3). */
-function failureOf(error: unknown): Failure {
-  const { name, message } = (
-    typeof error === "object" && error !== null ? error : {}
-  ) as { name?: unknown; message?: unknown };
-  let text = "Error";
-  if (typeof message === "string") text = message;
-  else {
-    try {
-      text = String(error);
-    } catch {
-      // Keeps "Error".
-    }
-  }
-  return { name: typeof name === "string" ? name : "Error", message: text };
 }
 
 export class HostedPersistence implements Persistence {

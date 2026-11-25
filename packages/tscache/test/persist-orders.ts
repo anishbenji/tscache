@@ -37,7 +37,7 @@ import * as lazy from "../src/persist/lazy";
 import { durably, Persister } from "../src/persist/persister";
 import type { PersistStore, WritePlan } from "../src/persist/store";
 import { deferred, MemoryStore, type StoreKind } from "./persist-memory-store";
-import { all, config, fixture } from "./persist-test-helpers";
+import { all, config, fixture, unreadable } from "./persist-test-helpers";
 
 /** The persister's deadline and retry delay: two attempts fit in a deadline. */
 const TIMEOUT_MS = 1500;
@@ -354,14 +354,22 @@ class Run {
       return chunk;
     }
     // The loader may throw instead of returning a promise (round 4, R4-3),
-    // or throw a value without a string form (round 5, R5-3).
+    // or throw an odd value: one without a string form (round 5, R5-3), or,
+    // in the runs that start with clearAll, one whose `message` getter
+    // throws (security lane run 4, S4.1). Keyed on the first event, not a
+    // choice, so the orders stay the same.
     const outcome = (["hold", "throw", "odd"] as const)[this.choices.pick(3)];
     const op = this.#op("import", outcome ?? "hold");
     if (outcome === "throw" || outcome === "odd") {
       void Promise.resolve().then(() => {
         op.end = { ...this.point(), ok: false };
       });
-      throw outcome === "odd" ? Object.create(null) : planted();
+      if (outcome === "throw") throw planted();
+      throw unreadable(
+        this.calls[0]?.kind === "clearAll"
+          ? "throwing getter"
+          : "null prototype",
+      );
     }
     const chunk = deferred<LazyPersist>();
     this.#hold(op, (ok) =>
