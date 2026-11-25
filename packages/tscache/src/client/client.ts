@@ -265,9 +265,9 @@ class Client implements TscacheClient {
     // every later message. The chain's steps come first, every one even if
     // a listener throws, and their first error is reported; then the kept
     // events in port order, each reporting its own first error (§2.7).
-    // Nothing is delivered once the client has ended (§2.7): the worker was
-    // lost or the client disposed first, or a listener of an earlier step
-    // disposed it.
+    // No later step or event is delivered once the client has ended (§2.7;
+    // the listeners of the one being emitted all run): the worker was lost or
+    // the client disposed first, or a listener of an earlier step disposed it.
     if (fallbacks.length > 0 || kept.length > 0) {
       this.#startup = () => {
         let failure: { error: unknown } | undefined;

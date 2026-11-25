@@ -391,3 +391,14 @@ The counted budgets of `packages/tscache/test/perf/` (messages per read, memory,
 | `read-transfer`          | 1.000 (0.985–1.008)      | 1.004 (0.981–1.013)           |
 
 `append-bars` reads 2.3 % slower in Bun on a run the tool itself calls noisy, and 0.1 % in Chromium; the step changes nothing on the put path, and the gate did not fail it.
+
+### Pre-review (Claude) and security lane, before round 9
+
+Opus pre-review on 574d55d3: no start-up P0 or P1; two P2s and two nits, all documentation, fixed by the director. Security lane run 6: no findings.
+
+| Finding                                                                                              | Verdict     | Fix                                                                                                                                               |
+| ---------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `site/guides/fetcher.md` still says a relative URL resolves against the worker script                | Valid (P2)  | The sentence the two guides got in round 8.                                                                                                       |
+| The relative-fetcher limit is recorded only in this file                                             | Valid (P2)  | A known-limit bullet in §4.7 beside the unnamed-worker one, and the `fetcher` field comment points at it.                                         |
+| §4.8 hosting notes: "a reload joins the old worker" after the R8-4 rewrite                           | Valid (nit) | Limited to a reload of the same generation.                                                                                                       |
+| "Nothing is delivered once the client has ended" reads broader than the emitter rule within one emit | Valid (nit) | §4.8 and the `client.ts` comment say no later step or event is delivered; every listener of the emit in progress still runs (§2.7), as on `main`. |
