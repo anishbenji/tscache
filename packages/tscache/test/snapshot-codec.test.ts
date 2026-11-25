@@ -315,4 +315,26 @@ describe("decodeSnapshot error text — step 146", () => {
       thrown(() => decodeSnapshot(input as unknown as EncodedSnapshot)).message,
     ).toBe(`invalid encoded snapshot: must be an object, got ${name}`);
   });
+
+  // Array.isArray throws a TypeError on a revoked proxy; a revoked callable
+  // proxy is a function and must still get the TscacheError (round 1, P1).
+  it.each([
+    { name: "a plain function", input: () => marker },
+    {
+      name: "a revoked callable proxy",
+      input: (() => {
+        const { proxy, revoke } = Proxy.revocable(() => {}, {});
+        revoke();
+        return proxy;
+      })(),
+    },
+  ])("C07 names $name input as a function", ({ input }) => {
+    const message = thrown(() =>
+      decodeSnapshot(input as unknown as EncodedSnapshot),
+    ).message;
+    expect(message).toBe(
+      "invalid encoded snapshot: must be an object, got a function",
+    );
+    expect(message).not.toContain(marker);
+  });
 });

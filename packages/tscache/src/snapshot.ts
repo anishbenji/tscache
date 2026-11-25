@@ -46,7 +46,8 @@ function fromBase64(text: unknown, what: string): Uint8Array<ArrayBuffer> {
  */
 function kindOf(value: unknown): string {
   if (value === null || value === undefined) return String(value);
-  if (Array.isArray(value)) return "an array";
+  // Array.isArray throws on a revoked proxy; a callable one is a function.
+  if (typeof value === "object" && Array.isArray(value)) return "an array";
   return `a ${typeof value}`;
 }
 
