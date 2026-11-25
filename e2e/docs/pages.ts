@@ -27,6 +27,12 @@ export interface DiagramPage {
   source: string;
   /** How many `mermaid` fences the page holds, includes expanded. */
   diagrams: number;
+  /**
+   * How many diagram elements the built HTML has, before Mermaid draws:
+   * fewer than `diagrams` when a fence is shown as code, as an untitled
+   * `mermaid` fence in a `::: code-group` is.
+   */
+  elements: number;
 }
 
 /**
@@ -86,7 +92,12 @@ export async function diagramPages(): Promise<DiagramPage[]> {
     );
     const elements = diagramElements(readFileSync(join(DIST, html), "utf8"));
     if (diagrams.length > 0 || elements > 0) {
-      pages.push({ path: servedPath(html), source, diagrams: diagrams.length });
+      pages.push({
+        path: servedPath(html),
+        source,
+        diagrams: diagrams.length,
+        elements,
+      });
     }
   }
   return pages;

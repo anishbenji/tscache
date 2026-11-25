@@ -36,6 +36,14 @@ const ERROR_MARKS = ".error-icon, .error-text";
  */
 const RENDERING = 'body > [id^="dmermaid-"]';
 
+/**
+ * The text of the diagram Mermaid draws in place of one whose text, comments
+ * stripped, is longer than its `maxTextSize` (50,000 characters by default):
+ * an ordinary flowchart, drawn without an error, so no other check here sees
+ * it.
+ */
+const SIZE_LIMIT = "Maximum text size in diagram exceeded";
+
 /** The element vitepress-plugin-mermaid renders each diagram into. */
 const DIAGRAM = `div.${MERMAID_CLASS}`;
 
@@ -49,8 +57,15 @@ for (const colorScheme of ["light", "dark"] as const) {
   test.describe(`${colorScheme} scheme`, () => {
     test.use({ colorScheme });
 
-    for (const { path, source, diagrams } of pages) {
+    for (const { path, source, diagrams, elements } of pages) {
       test(`${source} draws its ${diagrams} diagram(s)`, async ({ page }) => {
+        const where = `${source} (${colorScheme})`;
+        // A fence shown as code has no diagram element, so the wait below
+        // would last to the test's time limit: fail at once instead.
+        expect(
+          elements,
+          `${where}: diagram elements in the built HTML, against the page's mermaid fences. Fewer elements than fences means a fence is shown as code, as an untitled mermaid fence in a ::: code-group is: give the fence a title or write it as mmd`,
+        ).toBe(diagrams);
         const errors: string[] = [];
         page.on("console", (message) => {
           if (message.type() === "error") errors.push(message.text());
@@ -105,10 +120,13 @@ for (const colorScheme of ["light", "dark"] as const) {
         );
 
         const found = await page.evaluate(
-          ({ diagram, marks, rendering }) => ({
+          ({ diagram, marks, rendering, sizeLimit }) => ({
             drawn: [...document.querySelectorAll(diagram)].map(
               (box) => box.querySelector("svg") !== null,
             ),
+            sizeLimited: [...document.querySelectorAll(diagram)].filter((box) =>
+              box.textContent?.includes(sizeLimit),
+            ).length,
             marksAdded: window.__docErrorMarks ?? 0,
             marksShown: document.querySelectorAll(marks).length,
             rendering: document.querySelectorAll(rendering).length,
@@ -119,9 +137,13 @@ for (const colorScheme of ["light", "dark"] as const) {
             // the colour scheme and the plugin draws Mermaid's dark theme by.
             dark: document.documentElement.classList.contains("dark"),
           }),
-          { diagram: DIAGRAM, marks: ERROR_MARKS, rendering: RENDERING },
+          {
+            diagram: DIAGRAM,
+            marks: ERROR_MARKS,
+            rendering: RENDERING,
+            sizeLimit: SIZE_LIMIT,
+          },
         );
-        const where = `${source} (${colorScheme})`;
         expect(
           found.dark,
           `${where}: the page's html element has the class dark`,
@@ -139,6 +161,10 @@ for (const colorScheme of ["light", "dark"] as const) {
           `${where}: Mermaid drew its error diagram`,
         ).toBe(false);
         expect(found.rendering, `${where}: a render did not finish`).toBe(0);
+        expect(
+          found.sizeLimited,
+          `${where}: Mermaid drew "${SIZE_LIMIT}" in place of a diagram whose text, comments stripped, is over its 50,000-character limit; shorten or split the diagram`,
+        ).toBe(0);
         expect(
           found.drawn.length,
           `${where}: diagram elements on the page, against the page's mermaid fences`,
