@@ -542,6 +542,44 @@ describe("hydrate error text — step 148", () => {
     },
   );
 
+  it("V14b refuses a positive integer count above the slot cap without printing the count", () => {
+    const { c } = receiver();
+    // The receiver's slot cap is 8; these digits appear nowhere else in the message.
+    const count = 987_654;
+    const payload = { ...snapshotPayload(), count };
+    const input = { ...snapshotFixture(), segments: [payload] } as Snapshot;
+    const { message } = thrown(() => c.hydrate(input));
+    expect(message).toMatch(
+      /^invalid segment payload: count exceeds the slot cap\b/,
+    );
+    expect(message).not.toContain(String(count));
+  });
+
+  it("V15b prints the validated start, not a second read of it, in the startSlot message", () => {
+    const daily = { unit: "day", zone: "UTC" } as const;
+    const writer = calendarEngine(daily);
+    writer.put(ID, { timestamps: [DAY], fields: { value: [12] } });
+    const snapshot = format2(writer.snapshot(ID, span(DAY)));
+    const payload = snapshot.segments[0];
+    if (payload === undefined || payload.format !== 2)
+      throw new Error("Missing calendar fixture segment");
+    // A valid start on the first read, the marker on every later one: an
+    // Engine.hydrate caller can pass an accessor or a Proxy.
+    let reads = 0;
+    const segment = { ...payload, startSlot: payload.startSlot + 1 };
+    Object.defineProperty(segment, "start", {
+      enumerable: true,
+      get: () => (reads++ === 0 ? payload.start : marker),
+    });
+    const input = { ...snapshot, segments: [segment] };
+    const reader = calendarEngine(daily);
+    const { message } = thrown(() => hydrate(reader, input));
+    expect(message).toMatch(
+      /^invalid segment payload: startSlot must be the slot of start\b/,
+    );
+    expect(message).not.toContain(marker);
+  });
+
   it("V16 names the received type of a payload field dtype without quoting it", () => {
     const { c } = receiver();
     const payload = snapshotPayload();

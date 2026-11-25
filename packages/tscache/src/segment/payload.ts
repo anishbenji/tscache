@@ -106,16 +106,18 @@ function checkGrid(p: DenseSegmentPayload, options: SegmentOptions): void {
 
 /**
  * Checks start and count; returns the slot of the payload's first entry.
- * `start` is converted once: an anchor costs one conversion (N113).
+ * `start` is read and converted once: an anchor costs one conversion (N113),
+ * and the message below prints the value that was checked.
  */
 function checkSpan(p: DenseSegmentPayload, options: SegmentOptions): number {
   const { grid, slotCap } = options;
+  const { start } = p;
   let first: number;
   try {
-    first = slotOf(p.start, grid);
+    first = slotOf(start, grid);
   } catch {
     return fail(
-      `start must be an aligned safe-integer timestamp, got ${kindOf(p.start)}`,
+      `start must be an aligned safe-integer timestamp, got ${kindOf(start)}`,
     );
   }
   if (!Number.isSafeInteger(p.count) || p.count < 1) {
@@ -128,7 +130,7 @@ function checkSpan(p: DenseSegmentPayload, options: SegmentOptions): number {
   // data that places the instant in another slot refuses it (§4.5).
   if (p.format === 2 && p.startSlot !== first) {
     fail(
-      `startSlot must be the slot of start ${p.start} here, got ${kindOf(p.startSlot)}`,
+      `startSlot must be the slot of start ${start} here, got ${kindOf(p.startSlot)}`,
     );
   }
   // (count - 1) first: `first + count` can round before the subtraction.
