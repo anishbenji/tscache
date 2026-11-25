@@ -319,8 +319,8 @@ What to notice:
   memory alone (`Persister.#plan`) without reading the disk.
 - `durably` holds an op's answer until a removal it, or another op meanwhile, recorded is on disk or
   the cache's persistence has stopped, so an `invalidate` or a `clear` is not answered while the disk
-  still holds what it removed, except on a superseded worker, where it answers at once and the records
-  stay for the newer worker; `clearAll` still waits for its disk clear there.
+  still holds what it removed; a superseded worker is the exception
+  ([Failures](/guides/persistence#failures)).
 - A `QuotaExceededError` stops the cache's persistence at once rather than retrying
   (`Persister.#rejected`); the stop reaches every tab as `persistStopped`.
 - `openIdbStore` opens one database per origin, `tscache` at version 1, with a `caches` and a `pages`

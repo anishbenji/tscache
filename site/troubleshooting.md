@@ -43,8 +43,9 @@ modules, or a stale page is being served: check that every page passes the same 
 ## `createClient` rejects naming the fetcher module
 
 The worker could not `import()` it, or its default export has no `fetch` function. With Vite, import it
-with `?fetcher`, not `?worker&url`, which drops the exports. A relative URL resolves against the worker
-script, not the page: pass an absolute path.
+with `?fetcher`, not `?worker&url`, which drops the exports. A relative URL resolves against tscache's own
+file, not the page; that file sits beside the worker script unless you wrap the worker or re-chunk tscache's
+code. Pass an absolute path.
 If the message says `Cannot find module` and your build is not Vite, a bundler rewrote the import:
 check that nothing strips the `/* webpackIgnore: true */` comment from tscache's code (see
 [webpack 5 and Rspack](/guides/workers#webpack-5-and-rspack)).

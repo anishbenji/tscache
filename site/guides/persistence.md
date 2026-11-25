@@ -31,18 +31,15 @@ resolves, to the listeners attached by then. Check `client.mode` if persistence 
 - Additions are written behind: about a second after the last change, and at most five seconds after the
   first. A live tail that only rewrites provisional points writes nothing.
 - A removal (`invalidate`, `clear`, a watermark moved back, a version change) is written at once, and the
-  call that made it resolves only once it is durable, or once persistence of the cache has stopped and its
-  records were deleted, except after `'superseded'` ([Failures](#failures)), when the call resolves at
-  once and the records stay. `clearAll()` empties the disk and resolves once that clear has settled, in a
-  superseded tab too: use it to remove data from the disk. Either call takes at most about ten seconds on
+  call that made it resolves only once it is durable, or once persistence of the cache has stopped (what
+  each stop does with the records, `'superseded'` included, is under [Failures](#failures)). `clearAll()`
+  empties the disk and resolves once that clear has settled: use it to remove data from the disk. Either call takes at most about ten seconds on
   a failing disk.
 - When the last tab closes, the worker writes what was still waiting. Where the browser supports it
   (Chromium), tscache creates the worker with `extendedLifetime`, which keeps it running about 30 seconds
   after its last tab so that write can land. Elsewhere the option is ignored, and a worker that ends
   first loses the additions still waiting, at most five seconds of them; the disk keeps the earlier state.
-  A removal is not exposed to this, since its call resolves only once it is durable; in a superseded
-  worker a per-cache removal is not written at all, and only `clearAll()` still reaches the disk
-  ([Failures](#failures)).
+  A removal is not exposed to this, since its call waits for the disk as above.
 
 ## Loading
 

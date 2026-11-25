@@ -94,8 +94,10 @@ const client = await createClient({ workerUrl: "/vendor/tscache/worker.js" });
 
 `fetcher.module` is a URL too: the worker loads it with `import()` and uses
 its default export (`docs/architecture.md` §2.5). Serve it as an ES module
-from your origin, with that export intact. The worker resolves a relative
-URL against its own script, not the page, so pass an absolute URL or path.
+from your origin, with that export intact. A relative URL resolves against
+tscache's own file, not the page; that file sits beside the worker script
+unless you wrap the worker or re-chunk tscache's code. Pass an absolute URL
+or path.
 
 Bound how long each request may take, for example with
 `AbortSignal.timeout()` on the fetcher's `fetch`, and throw when the bound
