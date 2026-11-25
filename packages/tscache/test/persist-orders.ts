@@ -1255,10 +1255,10 @@ const env = (globalThis as { process?: { env: Record<string, string> } })
  * Events per order: 3 in the normal suite and in `bun run ci`, 7,442 orders
  * (4,577 persister, 2,865 hosted) in about a second. TSCACHE_EVENT_ORDERS=5
  * runs every order that the round 1-3 reproductions fit (R3-2, the longest:
- * openA, clearAll, openB, invB, fail): 1,166,766 orders (650,904 and
- * 515,862), about 160 s and 205 s for the two files on an idle machine, side
- * by side (step 132, round 4: two more outcomes and the arrival-order
- * replay).
+ * openA, clearAll, openB, invB, fail): 1,166,766 orders at round 4 (650,904
+ * and 515,862); the hosted file has more since round 5's third loader
+ * outcome. About 364 s for the two files side by side under the heavy-job
+ * lock (step 132, round 5).
  */
 const BOUND = Number(env?.TSCACHE_EVENT_ORDERS ?? 3);
 
