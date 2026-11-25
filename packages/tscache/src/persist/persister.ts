@@ -688,7 +688,12 @@ export class Persister {
       this.#queueCleanup(cache);
     } else {
       cache.deferred = cleanup === "deferred";
-      this.#cleaned(cache);
+      // During a clearAll the clear is this cache's deletion: a removal it
+      // recorded before the stop settles with the job, as one after it does
+      // (§4.10.6 (l), Success; round 5, R5-1).
+      if (this.#barrier !== undefined && cache.deferred) {
+        this.#barrier.waiters.push(() => this.#cleaned(cache));
+      } else this.#cleaned(cache);
     }
     // After the cleanup is set up: a removal the callback makes at once
     // waits for it (round 4, R4-4).

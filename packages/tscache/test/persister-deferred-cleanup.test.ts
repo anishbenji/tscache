@@ -10,7 +10,7 @@ import {
   writes,
 } from "./persist-harness";
 import { deferred, type MemoryStore } from "./persist-memory-store";
-import { config, fixture, tracked } from "./persist-test-helpers";
+import { batch, config, fixture, tracked } from "./persist-test-helpers";
 
 // Implementer tests (user decision 113 A, §4.10.6 Failures): a clearAll is
 // the first removal of a cache stopped by its load. Its clear job deletes
@@ -360,4 +360,141 @@ describe("a removal made by onStopped itself (Codex gate round 4, R4-4)", () => 
     );
     expect(writes(h.store)).toHaveLength(1);
   });
+});
+
+// Codex gate round 5, R5-1: a cache stopped by a failed store opening while a
+// clearAll is pending. The clear is its deletion, so a removal it recorded
+// before the stop answers with the clear job, not at the stop (§4.10.6 (l),
+// Success; N58). Orders G (the gate's) and S (the check's shorter one), each
+// with the clear's own opening held, resolving and rejecting.
+describe("a removal pending when a clearAll's cache stops (Codex gate round 5, R5-1)", () => {
+  type Opening = {
+    ifExists: boolean;
+    gate: ReturnType<typeof deferred<MemoryStore | undefined>>;
+  };
+  function gatedOpenings(h: ReturnType<typeof harness>): Opening[] {
+    const openings: Opening[] = [];
+    h.openStore.mockImplementation((options?: { ifExists?: boolean }) => {
+      const gate = deferred<MemoryStore | undefined>();
+      openings.push({ ifExists: options?.ifExists === true, gate });
+      return gate.promise;
+    });
+    return openings;
+  }
+  /** A call's answer and the fake time it came at. */
+  function answered(promise: unknown): { done: boolean; at: number } {
+    const result = { done: false, at: Number.NaN };
+    void Promise.resolve(promise).then(() => {
+      result.done = true;
+      result.at = Date.now();
+    });
+    return result;
+  }
+  const failed = (): DOMException =>
+    new DOMException("open failed", "UnknownError");
+
+  /** Settles the clear's own opening as `outcome`, then checks the answers. */
+  async function settle(
+    h: ReturnType<typeof harness>,
+    clearOpening: Opening | undefined,
+    outcome: "hold" | "resolve" | "reject",
+    clearing: { done: boolean },
+    clearAt: number,
+    removals: { done: boolean; at: number }[],
+  ): Promise<void> {
+    expect(clearOpening?.ifExists).toBe(true);
+    expect(clearing.done).toBe(false);
+    for (const removal of removals) expect(removal.done).toBe(false);
+    if (outcome === "hold") {
+      await tick(clearAt + 5000 - Date.now() - 1);
+      expect(clearing.done).toBe(false);
+      for (const removal of removals) expect(removal.done).toBe(false);
+      await tick(1);
+    } else if (outcome === "resolve") {
+      clearOpening?.gate.resolve(h.store);
+      await tick();
+    } else {
+      clearOpening?.gate.reject(failed());
+      await tick();
+    }
+    expect(clearing.done).toBe(true);
+    for (const removal of removals) {
+      expect(removal.done).toBe(true);
+      expect(removal.at).toBeLessThanOrEqual(clearAt + 5000);
+    }
+    expect(h.store.records("persist").pages).toHaveLength(
+      outcome === "resolve" ? 0 : 2,
+    );
+  }
+
+  for (const outcome of ["hold", "resolve", "reject"] as const) {
+    it(`order G: an invalidate during the second clear's barrier, the clear's opening ${outcome}`, async () => {
+      const h = harness();
+      const openings = gatedOpenings(h);
+      h.engine.clearAll();
+      const first = answered(h.persister.clearAll());
+      h.engine.cache(config());
+      const loading = answered(h.persister.open("persist"));
+      await tick();
+      openings[0]?.gate.resolve(undefined); // no database
+      await tick();
+      expect(first.done && loading.done).toBe(true);
+      h.engine.put("persist", batch([0, 1, 2, 3, 4, 5]));
+      // Another writer creates the database meanwhile.
+      h.store.seed("persist", fixture({}, [0, 4]));
+      await tick(1000); // the flush starts and opens the store
+      expect(openings.map((o) => o.ifExists)).toEqual([true, false]);
+
+      const clearAt = Date.now();
+      const clearing = answered(clearAll(h));
+      await tick(10);
+      h.engine.put("persist", batch([0, 1, 2, 3]));
+      const removal = answered(
+        durably(h.persister, "persist", () =>
+          h.engine.invalidate("persist", { start: 0, end: 1 }),
+        ),
+      );
+      await tick(10);
+      openings[1]?.gate.reject(failed());
+      await tick();
+      expect(h.stopped).toMatchObject([
+        { cacheId: "persist", reason: "unavailable" },
+      ]);
+
+      await settle(h, openings[2], outcome, clearing, clearAt, [removal]);
+    });
+
+    it(`order S: removals before and during the barrier, the clear's opening ${outcome}`, async () => {
+      const h = harness();
+      const openings = gatedOpenings(h);
+      h.store.seed("persist", fixture({}, [0, 4]));
+      h.engine.cache(config());
+      answered(h.persister.open("persist"));
+      await tick();
+      const before = answered(
+        durably(h.persister, "persist", () => h.engine.clear("persist")),
+      );
+      await tick(10);
+      const clearAt = Date.now();
+      const clearing = answered(clearAll(h));
+      await tick(10);
+      h.engine.put("persist", batch([0, 1, 2, 3]));
+      const during = answered(
+        durably(h.persister, "persist", () =>
+          h.engine.invalidate("persist", { start: 0, end: 1 }),
+        ),
+      );
+      await tick(10);
+      openings[0]?.gate.reject(failed());
+      await tick();
+      expect(h.stopped).toMatchObject([
+        { cacheId: "persist", reason: "unavailable" },
+      ]);
+
+      await settle(h, openings[1], outcome, clearing, clearAt, [
+        before,
+        during,
+      ]);
+    });
+  }
 });

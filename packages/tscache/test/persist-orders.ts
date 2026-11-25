@@ -712,10 +712,12 @@ function check(run: Run, final: boolean): void {
           `${name(own)}, removal ${id} at ${r.start.step}`,
         );
       }
+      // A removal made on a running cache answers no earlier than the
+      // clearAll that owns it, even when the cache stops meanwhile: the clear
+      // is then its deletion (round 5, R5-1).
       if (
         r.end !== undefined &&
         runningAt(id, made(r)) &&
-        !stoppedAt(id, r.end.seq) &&
         (c.end === undefined || r.end.step < c.end.step)
       ) {
         run.fail(
@@ -849,7 +851,23 @@ function check(run: Run, final: boolean): void {
           o.end.seq > from &&
           o.end.seq < to,
       );
+    // Not while a persister's clearAll that owns the removal is pending at
+    // the answer: the removal was made on a running cache during its
+    // barrier, or the cache stopped during it, so the clear is the cache's
+    // deletion and settles the removal (§4.10.6 (l), Success; round 5,
+    // R5-1). A cleanup queued before the call runs ahead of the clear, and
+    // a removal of the stopped cache waits for it instead.
+    const clearPending = clears.some((c) => {
+      const bs = barrierStart(c).seq;
+      return (
+        c.start.seq < a.seq &&
+        (c.end === undefined ? run.loaded() : c.loadedAtEnd) &&
+        (c.end?.step ?? Infinity) > a.step &&
+        ((made(r) > bs && runningAt(id, made(r))) || (stop?.seq ?? -1) > bs)
+      );
+    });
     const openFailed =
+      !clearPending &&
       stopped &&
       stop !== undefined &&
       !storeOpenAt(Math.min(a.seq, stop.seq)) &&
