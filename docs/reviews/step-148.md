@@ -88,13 +88,16 @@ Messages that print only values derived from validated input or from configurati
 `rangeSlots must be the slots [a, b] of the range here` and `coverageSlots[i] must be the slots [a, b] …`
 (slots computed from the validated range and coverage); the charge message (entry counts, the charge and the
 budget); `mask must be a Uint8Array of <n> bytes` and `field "<name>" data must be an ArrayBuffer of <n>
-bytes` (sizes from the validated count and the schema); `field "<name>" is missing` (the schema's name).
+bytes` (sizes from the checked count and the schema: until security lane run 2 below, these sizes came
+from a second read of `count`, which an accessor could change; now every input gets the checked value);
+`field "<name>" is missing` (the schema's name).
 Every other `fail` in both files prints fixed text and array indices. The RPC server passes `hydrate`
 through to the engine without its own value checks, and `decodeSnapshot` was settled in step 146.
 
 ## Contract-test changes
 
-None.
+None in the original change. V21 (security lane run 2, below) received a type annotation on its callback
+so that `tsc --noEmit` accepts its case union; no input or assertion changed.
 
 ## Decision concerns
 
@@ -157,3 +160,26 @@ changed.
 Size after the fixes (`bun run size`, brotli): `index (lazy)` 18 545 bytes against a budget of 18 576, the
 same as before the round: the two P1 fixes (with `startSlot` in the nested `if` form) save 7 bytes and the
 watermark's grid branch costs 7. Every other entry is within its budget.
+
+## Security lane run 2 (Claude)
+
+Run at `d83cf11e` over `a2fa9f6e..d83cf11e` (`~/code/tscache-reports/reviews/step-148/security-2.md`,
+outside the repo). Verdict: one P2.
+
+| Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Decision      | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `count` is still read again after its checked local (`payload.ts` `checkMask`, `checkFields`, `presentPoints`; a raw `RangeError` from `DenseSegment.mergeFrom`): a `count` getter that returns a valid value first can put a later value into the mask or data size message, mix a bigint into the size arithmetic (a raw `TypeError`), or pass sizes no check saw to the segment. `mask`, `fields`, each field's `data` and `format` are read again too. Reachable only by an in-process `Engine.hydrate` caller; `main` read the same way | accepted (P2) | The class fix: every payload field `segmentFromPayload` reads is read once, and only the checked value is used afterwards. `checkSpan` returns the checked count with the first slot; `checkMask` reads `mask` once and returns it; `entriesByName` reads `fields` once; `checkFields` reads each entry's `data` once and keeps that buffer; `presentPoints` takes the checked mask and count; the `startSlot` check keys on the grid (format 2 exactly when the grid is a calendar, which `checkGrid` has already checked) instead of reading `format` again. `engine/snapshot.ts` reads no payload field itself and is unchanged |
+
+Tests: V21, the contract-test author's six cases in the step 148 block of
+`packages/tscache/test/cache-hydrate-rejections.test.ts`. Each replaces one field (`count` three times:
+a larger integer, a bigint, Infinity; then `mask`, `fields`, and the `volume` entry's `data`) with a getter
+that returns the valid value on the first read and the other value afterwards. Hydration must either
+succeed with exactly one read and the expected points, or throw a `TscacheError` that prints neither the
+later value nor a size derived from it, after at most one read, with the cache unchanged. All six failed at
+`d83cf11e` (the size messages printed the later count, or the read counter reached 2) and pass with the fix;
+V13 to V20 and every other assertion pass unchanged.
+
+Size after the fix (`bun run size`, brotli): `index (lazy)` 18 549 bytes against a budget of 18 576, 4 bytes
+above the run's start. The first form, which also walked `fields` by index, measured 18 587 and was over
+the budget; the list is now read once and iterated as read, which keeps each entry as checked. `worker`
+19 859 of 19 888 and `engine` 15 765 of 16 016; every other entry is unchanged and within its budget.
