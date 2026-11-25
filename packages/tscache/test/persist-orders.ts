@@ -16,9 +16,10 @@
  * that turn's work. The outcomes: the store opener resolves, rejects,
  * throws, finds no database (the store is then empty) or is held; a store
  * read, write or clearAll succeeds, fails or is held; the chunk loader
- * throws, or its import is held until `ok`, `fail` or its deadline (step
- * 132, Codex gate round 4, R4-2 and R4-3). After the last event time runs
- * out: held calls never settle, and every later call succeeds.
+ * throws an error or a value without a string form, or its import is held
+ * until `ok`, `fail` or its deadline (step 132, Codex gate rounds 4 and 5,
+ * R4-2, R4-3 and R5-3). After the last event time runs out: held calls never
+ * settle, and every later call succeeds.
  *
  * After every event the run checks the properties below, each named after
  * the rule it comes from (docs/architecture.md §4.10.6 and §4.10.8, N58, N59
@@ -89,7 +90,7 @@ interface Point {
   time: number;
 }
 
-type Outcome = "ok" | "fail" | "throw" | "hold" | "absent";
+type Outcome = "ok" | "fail" | "throw" | "hold" | "absent" | "odd";
 
 interface Op {
   kind: "opener" | "import" | StoreKind;
@@ -107,7 +108,14 @@ interface Call {
   kind: "open" | "removal" | "clearAll";
   cacheId: string | undefined;
   start: Point;
-  end: (Point & { error: unknown; records: boolean }) | undefined;
+  end:
+    | (Point & {
+        error: unknown;
+        records: boolean;
+        /** How many store and opener calls had settled at the answer. */
+        settled: number;
+      })
+    | undefined;
   /** The error the op throws after its removal, if it throws. */
   planted: Error | undefined;
   /** Hosted: whether the persister existed when the call answered. */
@@ -345,14 +353,15 @@ class Run {
       this.#track(op, chunk);
       return chunk;
     }
-    // The loader may throw instead of returning a promise (round 4, R4-3).
-    const outcome = (["hold", "throw"] as const)[this.choices.pick(2)];
+    // The loader may throw instead of returning a promise (round 4, R4-3),
+    // or throw a value without a string form (round 5, R5-3).
+    const outcome = (["hold", "throw", "odd"] as const)[this.choices.pick(3)];
     const op = this.#op("import", outcome ?? "hold");
-    if (outcome === "throw") {
+    if (outcome === "throw" || outcome === "odd") {
       void Promise.resolve().then(() => {
         op.end = { ...this.point(), ok: false };
       });
-      throw planted();
+      throw outcome === "odd" ? Object.create(null) : planted();
     }
     const chunk = deferred<LazyPersist>();
     this.#hold(op, (ok) =>
@@ -386,7 +395,10 @@ class Run {
       call.cacheId === undefined
         ? IDS.some((id) => this.hasRecords(id))
         : this.hasRecords(call.cacheId);
-    call.end = { ...this.point(), error, records };
+    const settled = this.ops.filter(
+      (o) => o.kind !== "import" && o.end !== undefined,
+    ).length;
+    call.end = { ...this.point(), error, records, settled };
     call.loadedAtEnd = this.loaded();
     if (error !== call.planted) {
       this.fail(
@@ -536,7 +548,8 @@ class Run {
   }
 
   /**
-   * The store log, every call's answer (its error, or pending) and each
+   * The store log, every call's answer (its error, or pending, and how many
+   * store and opener calls had settled when it came: round 5, R5-2) and each
    * cache's records at the end, as the replay compares them. Whether records
    * were left at an answer is not compared: within one turn it depends on
    * how many promise steps an answer takes, which the spec leaves open.
@@ -555,9 +568,7 @@ class Run {
         `${c.kind}${c.cacheId === undefined ? "" : ` ${c.cacheId}`} ${
           c.end === undefined
             ? "pending"
-            : c.end.error === undefined
-              ? "answered"
-              : String(c.end.error)
+            : `${c.end.error === undefined ? "answered" : String(c.end.error)}@${c.end.settled}`
         }`,
     );
     const left = IDS.filter((id) => this.hasRecords(id));

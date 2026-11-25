@@ -3,6 +3,7 @@ import { Engine } from "../src/engine/engine";
 import { HostedPersistence, type LazyPersist } from "../src/persist/hosted";
 import * as lazy from "../src/persist/lazy";
 import type { Persister } from "../src/persist/persister";
+import type { PersistStore } from "../src/persist/store";
 import type { ClientEvents } from "../src/types";
 import { writes } from "./persist-harness";
 import { deferred, MemoryStore } from "./persist-memory-store";
@@ -758,6 +759,121 @@ describe("calls held for a chunk that fails take effect in arrival order", () =>
       expect(held).toEqual(await sixCalls(true, clear));
       expect(held.log).toEqual(["write:A", "clearAll", "write:B"]);
       expect(held.after).toEqual({ cache: undefined, pages: [] });
+    },
+  );
+});
+
+// Codex gate round 5, R5-2: two logouts made while the chunk loads, which
+// then fails. The first one's whole-store clear is the opened cache's
+// cleanup; the second waits for it as the same calls made after the failure
+// do, even when its own store clear fails at once (§4.10.8 arrival order).
+describe("a second logout held for a chunk that fails (Codex gate round 5, R5-2)", () => {
+  async function twoLogouts(failFirst: boolean) {
+    vi.useFakeTimers({ now: 0 });
+    const memory = new MemoryStore();
+    memory.seed("A", fixture({ id: "A" }, [0, 4]));
+    const first = deferred<void>();
+    let clears = 0;
+    const store: PersistStore = {
+      read: (cacheId, pages) => memory.read(cacheId, pages),
+      write: (cacheId, plan) => memory.write(cacheId, plan),
+      clearAll: () => {
+        clears++;
+        if (clears === 1) return first.promise.then(() => memory.clearAll());
+        return Promise.reject(new DOMException("closed", "InvalidStateError"));
+      },
+      close: () => memory.close(),
+    };
+    const engine = new Engine();
+    const chunk = deferred<LazyPersist>();
+    const persistence = new HostedPersistence(
+      engine,
+      () => chunk.promise,
+      async () => store,
+    );
+    engine.cache(config({ id: "A" }));
+    const opening = tracked(persistence.open("A"));
+    const failure = new TypeError("chunk 404");
+    if (failFirst) {
+      chunk.reject(failure);
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    const logouts = [
+      tracked(Promise.resolve(persistence.clearAll()).then(() => undefined)),
+      tracked(Promise.resolve(persistence.clearAll()).then(() => undefined)),
+    ];
+    if (!failFirst) chunk.reject(failure);
+    await vi.advanceTimersByTimeAsync(10);
+    return { memory, first, opening, logouts, clears: () => clears };
+  }
+
+  it.each([false, true])(
+    "the second waits for the first's gated clear (failure first: %s)",
+    async (failFirst) => {
+      const h = await twoLogouts(failFirst);
+      expect(h.opening.done).toBe(true);
+      expect(h.clears()).toBe(2);
+      expect(h.logouts.map((logout) => logout.done)).toEqual([false, false]);
+      expect(h.memory.records("A").pages).toHaveLength(2);
+      h.first.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.logouts.map((logout) => logout.done)).toEqual([true, true]);
+      expect(h.memory.records("A")).toEqual({ cache: undefined, pages: [] });
+    },
+  );
+});
+
+// Codex gate round 5, R5-3: a chunk loader that throws, or rejects with, a
+// value that cannot be turned into a string still fails the import: the
+// calls waiting for it take the failure path (§4.10.8).
+describe("a chunk loader failing with a value without a string form (Codex gate round 5, R5-3)", () => {
+  function failing(form: "throws" | "rejects") {
+    const store = new MemoryStore();
+    store.seed("never", fixture({ id: "never" }, [0, 4]));
+    const engine = new Engine();
+    const open = vi.fn(async (_options?: { ifExists?: boolean }) => store);
+    const stops: Stop[] = [];
+    const persistence = new HostedPersistence(
+      engine,
+      () => {
+        if (form === "throws") throw Object.create(null);
+        return Promise.reject(Object.create(null));
+      },
+      open,
+      { onStopped: (event) => stops.push(event) },
+    );
+    engine.cache(config());
+    return { store, open, stops, persistence };
+  }
+  const error = { name: "Error", message: "Error" };
+
+  it.each(["throws", "rejects"] as const)(
+    "a first open answers and reports 'unavailable' (loader %s)",
+    async (form) => {
+      vi.useFakeTimers({ now: 0 });
+      const h = failing(form);
+      const opening = tracked(h.persistence.open("persist"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(opening.done).toBe(true);
+      expect(h.stops).toEqual([
+        { cacheId: "persist", reason: "unavailable", error },
+      ]);
+      expect(h.open).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["throws", "rejects"] as const)(
+    "a first clearAll answers with one ifExists opener call (loader %s)",
+    async (form) => {
+      vi.useFakeTimers({ now: 0 });
+      const h = failing(form);
+      const cleared = tracked(
+        Promise.resolve(h.persistence.clearAll()).then(() => undefined),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(cleared.done).toBe(true);
+      expect(h.open.mock.calls).toEqual([[{ ifExists: true }]]);
+      expect(h.store.records("never")).toEqual({ cache: undefined, pages: [] });
     },
   );
 });

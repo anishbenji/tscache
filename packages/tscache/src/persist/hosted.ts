@@ -66,14 +66,21 @@ interface Cleanup {
   settled: Promise<void> | undefined;
 }
 
+/** Total: a value without a string form becomes "Error" (round 5, R5-3). */
 function failureOf(error: unknown): Failure {
   const { name, message } = (
     typeof error === "object" && error !== null ? error : {}
   ) as { name?: unknown; message?: unknown };
-  return {
-    name: typeof name === "string" ? name : "Error",
-    message: typeof message === "string" ? message : String(error),
-  };
+  let text = "Error";
+  if (typeof message === "string") text = message;
+  else {
+    try {
+      text = String(error);
+    } catch {
+      // Keeps "Error".
+    }
+  }
+  return { name: typeof name === "string" ? name : "Error", message: text };
 }
 
 export class HostedPersistence implements Persistence {
@@ -181,13 +188,7 @@ export class HostedPersistence implements Persistence {
     const persister = this.#persister;
     let cleared: Promise<unknown>;
     if (persister !== undefined) cleared = persister.clearAll();
-    else if (store !== undefined) {
-      // Cleanups started before the call are waited for too.
-      cleared = Promise.all([
-        store,
-        ...[...this.#cleanups.values()].map((cleanup) => cleanup.settled),
-      ]);
-    }
+    else if (store !== undefined) cleared = this.#withCleanups(store);
     // Earlier sessions may have persisted: the chunk loads to empty the disk,
     // or, when it fails to load, the store opener does.
     else {
@@ -200,7 +201,7 @@ export class HostedPersistence implements Persistence {
         for (const cacheId of pending) {
           if (!this.#cleanups.has(cacheId)) this.#cleanup(cacheId, 0, store);
         }
-        return store;
+        return this.#withCleanups(store);
       });
     }
     return cleared.then(() => {
@@ -338,6 +339,18 @@ export class HostedPersistence implements Persistence {
       1,
       this.#clearing ?? this.#bounded((store) => store.write(cacheId, CLEANUP)),
     );
+  }
+
+  /**
+   * A whole-store clear after the chunk failed, settled once the cleanups
+   * started before it settled too, whether the call waited for the chunk or
+   * not (§4.10.8 arrival order; round 5, R5-2).
+   */
+  #withCleanups(store: Promise<void>): Promise<unknown> {
+    return Promise.all([
+      store,
+      ...[...this.#cleanups.values()].map((cleanup) => cleanup.settled),
+    ]);
   }
 
   /** Records a cache's one cleanup, `run`, with the removals counted so far. */
