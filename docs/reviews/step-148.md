@@ -103,3 +103,35 @@ None.
    disclose data) they could go too. Options: (a) keep them, as the brief allows, since each is context
    for the rejected field and the coverage message is the documented example; (b) drop them in a follow-up,
    amending the N69 example. Recommended: (a).
+
+## Pre-review and security lane, before round 1
+
+Fable pre-review at `a2fa9f6e`: one P1 and one P2, both valid and fixed. Security lane (Claude), run 1:
+no findings (`~/code/tscache-reports/reviews/step-148/pre-review-1.md` and `security-1.md`, outside the
+repo).
+
+| Finding                                                                                                                                                                                        | Verdict    | Fix                                                                                                                                    | Test                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The over-cap message (`payload.ts` `checkSpan`) lost the count, but no test pinned it: every V14 `count` input stops at "must be a positive integer", so restoring the old text failed nothing | Valid (P1) | None needed in the source: the message already prints only the cap. It keeps its wording, with no `got` clause, so no bytes are added. | V14b: a count of 987 654 against a cap of 8; the message starts `invalid segment payload: count exceeds the slot cap` and does not contain `987654`. Red-checked by restoring `count ${p.count} exceeds the slot cap`; it failed, and passes on the restored source. |
+| The release note said `hydrate` prints "no value the snapshot supplies", while three messages still print a validated value as context                                                         | Valid (P2) | `docs/releases/0.3.0.md` now says the errors no longer print the value of a field they refuse, as `site/usage/snapshots.md` says.      | Prose only.                                                                                                                                                                                                                                                          |
+| Decision concern: `start` in the `startSlot` message is validated on the first read, but the message read `p.start` again; an `Engine.hydrate` caller passing an accessor printed text         | Valid      | Director decision #149 C (below): `checkSpan` reads `start` once into a local, converts and validates that local, and prints it.       | V15b: a calendar payload whose `start` returns the valid instant on the first read and the marker afterwards, with a wrong `startSlot`. The message must name the `startSlot` check and not contain the marker. It failed before the fix (it printed the marker).    |
+
+## Director decision #149 C (2026-11-26, overnight grant)
+
+Question: four `hydrate` messages still print an already-validated value as context: `start` in the
+`startSlot` message, `finalizedUntil` in "coverage[i] reaches past finalizedUntil", the slot pairs in the
+`rangeSlots` and `coverageSlots` messages (a slot maps back to a timestamp through the cache's grid), and
+`format`, which can only be 1 or 2. Keep them, or drop them?
+
+- **A: keep all four as validated context.** No spec change and useful messages; none is the rejected value,
+  which is what #142 A asked for. But a snapshot's timestamps can appear in a logged error, and the second
+  read of `start` leaves the accessor case open.
+- **B: drop all four (type only everywhere).** One rule for every message, matching the contract-test
+  author's reason, and fewer bytes. But it amends architecture §4.5 rule 4 and the N69 example, normative
+  wording of a decided rule, and the messages say less.
+- **C: A, plus reuse the validated local for `start`.** Closes the only path that printed text, with no spec
+  change and no added bytes. Timestamps can still appear as context.
+
+Taken: **C**, by the director under the user's overnight grant, because it closes the only demonstrated
+text leak without amending a normative rule while the user is away. **B stays open for the user** as a
+follow-up, which would cover all four messages together.
