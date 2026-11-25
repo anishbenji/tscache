@@ -27,7 +27,8 @@ bun run docs:run     # runs the snippets against the mock backend and checks the
 - `.vitepress/theme/` extends the default theme to load `diagrams.css`, the stylesheet of the How it works
   SVGs, which draw with the theme's colour variables. `mermaid` code fences are rendered in the
   browser by `vitepress-plugin-mermaid` (`withMermaid` in `.vitepress/config.ts`), with Mermaid's
-  `securityLevel` set to `'strict'`. A syntax error in a diagram still builds and shows only as an error
+  `securityLevel` set to `'strict'` and settings that keep Mermaid 11's diagram look under Mermaid 12
+  (explained in the comment there). A syntax error in a diagram still builds and shows only as an error
   box on the page, so `docs:check` catches syntax errors in the published diagrams, outside a browser
   (`scripts/check-mermaid.ts`): it parses the `mermaid` fences with the Mermaid this workspace pins,
   through `mermaid.parse` and the parse step `mermaid.render` runs, and fails naming the page and the
