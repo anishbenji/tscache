@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { durably } from "../src/persist/persister";
 import {
   clearAll,
@@ -386,10 +386,12 @@ describe("a removal pending when a clearAll's cache stops (Codex gate round 5, R
     const result = { done: false, at: Number.NaN };
     void Promise.resolve(promise).then(() => {
       result.done = true;
-      result.at = Date.now();
+      result.at = now();
     });
     return result;
   }
+  /** The fake clock's time. */
+  const now = (): number => vi.getMockedSystemTime()?.getTime() ?? 0;
   const failed = (): DOMException =>
     new DOMException("open failed", "UnknownError");
 
@@ -406,7 +408,7 @@ describe("a removal pending when a clearAll's cache stops (Codex gate round 5, R
     expect(clearing.done).toBe(false);
     for (const removal of removals) expect(removal.done).toBe(false);
     if (outcome === "hold") {
-      await tick(clearAt + 5000 - Date.now() - 1);
+      await tick(clearAt + 5000 - now() - 1);
       expect(clearing.done).toBe(false);
       for (const removal of removals) expect(removal.done).toBe(false);
       await tick(1);
@@ -445,7 +447,7 @@ describe("a removal pending when a clearAll's cache stops (Codex gate round 5, R
       await tick(1000); // the flush starts and opens the store
       expect(openings.map((o) => o.ifExists)).toEqual([true, false]);
 
-      const clearAt = Date.now();
+      const clearAt = now();
       const clearing = answered(clearAll(h));
       await tick(10);
       h.engine.put("persist", batch([0, 1, 2, 3]));
@@ -475,7 +477,7 @@ describe("a removal pending when a clearAll's cache stops (Codex gate round 5, R
         durably(h.persister, "persist", () => h.engine.clear("persist")),
       );
       await tick(10);
-      const clearAt = Date.now();
+      const clearAt = now();
       const clearing = answered(clearAll(h));
       await tick(10);
       h.engine.put("persist", batch([0, 1, 2, 3]));
