@@ -14,12 +14,14 @@
 //     under `site/` that is a symbolic link, and on any Markdown file under `site/` with a
 //     bracket-named segment (VitePress's dynamic-route form), whatever it holds and excluded
 //     files included; a link or a dynamic route needs the check extended first.
-//   - It reads `mermaid` fences only, not a hand-written `<Mermaid>` tag or raw HTML. A
-//     `mermaid` fence that a `::: code-group` shows as code is still parsed: write a deliberately
-//     broken example as an `mmd` fence or give it a title.
+//   - It reads `mermaid` fences only. A page with a hand-written `<Mermaid>` tag in its raw HTML
+//     fails, naming the page, rather than go unchecked. A `mermaid` fence that a `::: code-group`
+//     shows as code is still parsed: write a deliberately broken example as an `mmd` fence or give
+//     it a title.
 //   - It parses with Mermaid's default options, not the site's (`securityLevel`, `sequence`),
-//     and does not apply the 50,000-character limit above which `mermaid.render` draws an error
-//     box instead of the diagram.
+//     and does not apply the 50,000-character limit above which `mermaid.render` draws its
+//     "Maximum text size in diagram exceeded" box instead of the diagram; the render check
+//     (`e2e/docs/mermaid.spec.ts`) fails on that box.
 //   - A `details` statement, whose parsing reads an element of the page, is parsed without it.
 //
 // How it reads and parses:
@@ -114,6 +116,11 @@ export async function diagramReader(): Promise<FindDiagrams> {
     const tokens = md.parse(src, env);
     const first = firstLine(src, env.content);
     const toPage = pageLines(markdown, src);
+    if (tokens.some(holdsMermaidTag)) {
+      throw new Error(
+        `mermaid: ${file} has a hand-written <Mermaid> tag, which neither the syntax check nor the render check reads; write the diagram as a mermaid fence`,
+      );
+    }
     return tokens.flatMap((token) => {
       if (token.type !== "fence" || token.info.trim() !== "mermaid") return [];
       const line = first + (token.map?.[0] ?? 0);
@@ -125,6 +132,29 @@ export async function diagramReader(): Promise<FindDiagrams> {
       ];
     });
   };
+}
+
+/** A tag that opens or closes vitepress-plugin-mermaid's `<Mermaid>` component, in any case. */
+const MERMAID_TAG = /<mermaid[\s/>]/i;
+
+/** The parts of a markdown-it token the tag search reads. */
+interface HtmlToken {
+  type: string;
+  content: string;
+  children: HtmlToken[] | null;
+}
+
+/**
+ * Whether a token, or an inline token's children, is raw HTML holding a `<Mermaid>` tag. The tag
+ * in inline code or a fence is a code or fence token, so it is not matched.
+ */
+function holdsMermaidTag(token: HtmlToken): boolean {
+  if (
+    (token.type === "html_block" || token.type === "html_inline") &&
+    MERMAID_TAG.test(token.content)
+  )
+    return true;
+  return token.children?.some(holdsMermaidTag) ?? false;
 }
 
 /**

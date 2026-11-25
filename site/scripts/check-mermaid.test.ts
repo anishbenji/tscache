@@ -123,6 +123,25 @@ describe("check-mermaid: pages", () => {
     }
   });
 
+  it("rejects a page with a hand-written Mermaid tag, naming the page", async () => {
+    const tag = '<Mermaid id="m1" graph="x" />';
+    for (const page of [
+      `# Page\n\n${tag}\n`,
+      `# Page\n\nA diagram: ${tag} here.\n`,
+      `::: details Diagram\n\n${tag}\n\n:::\n`,
+    ]) {
+      await expect(find("site/page.md", page)).rejects.toThrow(
+        /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+      );
+    }
+  });
+
+  it("accepts a Mermaid tag shown as inline code or in a fence", async () => {
+    const tag = '<Mermaid id="m1" graph="x" />';
+    const page = `# Page\n\nWrite \`${tag}\` rarely.\n\n\`\`\`vue\n${tag}\n\`\`\`\n`;
+    expect(await lines(page)).toEqual([]);
+  });
+
   it("counts a fence that an include brings in on the expanded page", async () => {
     const dir = fixture({
       "part.txt": FLOWCHART,

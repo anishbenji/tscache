@@ -81,8 +81,8 @@ Playwright (`e2e/docs/mermaid.spec.ts`) and fails when a diagram is not drawn or
 error box. It does not load the site's config or run a dynamic route's
 loader, and fails on any symbolic link under `site/` and on any Markdown file under `site/` with a
 bracket name (VitePress's dynamic-route form, such as `[param].md`), excluded files included: replace
-the link with the files or rename the file, or extend the check first. It does not read a
-hand-written `<Mermaid>` tag, and it parses a `mermaid` fence that a code group shows as code (use an
-`mmd` fence or a title for a deliberately broken example). It parses with Mermaid's default options,
-not the site's, without Mermaid's 50,000-character limit, and parses a `details` statement without
-the page's element.
+the link with the files or rename the file, or extend the check first. It fails on a page with a
+hand-written `<Mermaid>` tag rather than skip it, and it parses a `mermaid` fence that a code group
+shows as code (use an `mmd` fence or a title for a deliberately broken example). It parses with
+Mermaid's default options, not the site's, without Mermaid's 50,000-character limit (the render check
+fails on its size-limit box), and parses a `details` statement without the page's element.
