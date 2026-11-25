@@ -15,10 +15,13 @@ promise to the framework's reactivity. The lifecycle is the same everywhere, so 
   is lost (a crashed tab hosting the SharedWorker), and disposes it on teardown. Every client, a
   replacement included, gets the server's seeds: `hydrate` refuses a snapshot of another dataset
   version and never touches what a cache covers (architecture §2.8, N39).
-  A seeding that fails stays failed for its client: `hydrateRead` counts only a worker without
-  `hydrate` as "not seeded", and any other failure (a cache config the worker refuses, a malformed
-  snapshot) rejects that cache's `cache()` calls on that client until a replacement client seeds
-  afresh; nothing tries again sooner.
+  A snapshot that fails to apply (a malformed or foreign snapshot, a failed write) counts as "not
+  seeded" (architecture §2.8): `cache()` still hands out the cache, which fetches instead, and a
+  development build warns once per client and cache with the error's name, never its message, which can
+  quote the snapshot. A client lost or disposed while its seed applies is not warned about.
+  A worker without `hydrate` is not seeded either, silently. Only a seed's cache that cannot be
+  opened (a config the worker refuses) rejects that cache's `cache()` calls on that client until a
+  replacement client seeds afresh. Each seed is applied at most once per client.
   `open` runs once per client, so it can read the fetcher's current credentials.
 - `hydration.ts`: `dehydrate` and `rehydrate` carry a server's read through JSON: its columns (typed
   arrays as base64, so NaN survives), which the hydration render shows, and its snapshot

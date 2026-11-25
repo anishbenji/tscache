@@ -10,6 +10,8 @@ import {
   logSince,
   notices,
   recordNotices,
+  serveCorruptSnapshot,
+  serveTruncatedHydration,
   waitNotices,
 } from "./support";
 
@@ -25,6 +27,36 @@ const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
 const minuteOf = (t: number) => Math.floor(t / MINUTE) * MINUTE;
+
+declare global {
+  interface Window {
+    /** Set when the page withheld its first `hydrate` request. */
+    __hydrateHeld?: boolean;
+  }
+}
+
+/**
+ * Withholds the page's first `hydrate` request: it is never posted to the
+ * worker, so it stays pending until the client fails it. `page.route`
+ * cannot hold it, as it travels on the SharedWorker's port.
+ */
+async function holdFirstHydrate(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const post = MessagePort.prototype.postMessage;
+    MessagePort.prototype.postMessage = function (
+      this: MessagePort,
+      message: unknown,
+      ...rest: never[]
+    ) {
+      const op = (message as { op?: unknown } | null)?.op;
+      if (op === "hydrate" && window.__hydrateHeld !== true) {
+        window.__hydrateHeld = true;
+        return;
+      }
+      post.call(this, message, ...rest);
+    };
+  });
+}
 
 async function count(page: Page, id: string): Promise<number> {
   return Number(await page.getByTestId(id).textContent());
@@ -126,6 +158,66 @@ test("after hydration the browser fetches only what the seeds do not cover", asy
   expect(problems).toEqual([]);
 });
 
+// Decision 98 C: a snapshot that fails to apply only means the cache is not
+// seeded (architecture §2.8). The cache memo still hands the cache out, and
+// it fetches what the snapshot would have covered.
+test("a snapshot that fails to apply leaves the cache to fetch the whole day", async ({
+  page,
+}) => {
+  const problems: string[] = [];
+  page.on("pageerror", (error) => problems.push(error.message));
+  page.on("console", (message) => {
+    // The warning is for development builds; this is a production build.
+    if (message.type() === "error" || message.type() === "warning") {
+      problems.push(message.text());
+    }
+  });
+  await serveCorruptSnapshot(page);
+  await open(page);
+  await expect(page.locator(".log")).toContainText(
+    "snapshot from the server: not applied",
+  );
+  // Nothing was seeded, so the first fetch starts at the window's first
+  // minute, where the snapshot's coverage would have begun.
+  const from = coveredSpan((await hydration(page)).snapshot).from;
+  const fetched = await waitNotices(page, 1);
+  expect(fetched[0]?.range.start).toBe(from);
+  const { figures } = await read(page);
+  expect(await count(page, "readings")).toBeGreaterThanOrEqual(
+    figures.readings,
+  );
+  expect(problems).toEqual([]);
+});
+
+// A hydration that is not JSON, beside valid props, is not seeded either:
+// the cache memo hands the cache out, and it fetches the day.
+test("a hydration that is not JSON leaves the cache to fetch the whole day", async ({
+  page,
+}) => {
+  const problems: string[] = [];
+  page.on("pageerror", (error) => problems.push(error.message));
+  page.on("console", (message) => {
+    // The warning is for development builds; this is a production build.
+    if (message.type() === "error" || message.type() === "warning") {
+      problems.push(message.text());
+    }
+  });
+  const served = await serveTruncatedHydration(page);
+  await open(page);
+  await expect(page.locator(".log")).toContainText(
+    "snapshot from the server: not applied",
+  );
+  // The page carries half the text; the server wrote all of it.
+  const written = JSON.parse(served[0] ?? "null") as Hydration;
+  const fetched = await waitNotices(page, 1);
+  expect(fetched[0]?.range.start).toBe(coveredSpan(written.snapshot).from);
+  const { figures } = await read(page);
+  expect(await count(page, "readings")).toBeGreaterThanOrEqual(
+    figures.readings,
+  );
+  expect(problems).toEqual([]);
+});
+
 test("the server's cache serves later renders", async ({ page }) => {
   async function render(): Promise<{ props: ServerRead; shown: number }> {
     const html = await (await page.request.get("/")).text();
@@ -186,6 +278,41 @@ test("loading the previous day fetches only that day", async ({ page }) => {
   for (const notice of all.filter((n) => !isOlder(n))) {
     expect(notice.range.start).toBeGreaterThanOrEqual(tail.range.end - MINUTE);
   }
+});
+
+// The worker lost while the seed applies fails `hydrate`, which is no news
+// about the snapshot: the lost client's seeding logs nothing, and its
+// replacement seeds (session.ts, the set of lost clients).
+test("a worker lost while the seed applies logs no failure, and the replacement seeds", async ({
+  context,
+}) => {
+  test.setTimeout(60_000);
+  // The first tab to connect creates the SharedWorker, in its own renderer.
+  const host = await context.newPage();
+  await open(host);
+  const survivor = await context.newPage();
+  await holdFirstHydrate(survivor);
+  await recordNotices(survivor);
+  await survivor.goto("/");
+  await expect
+    .poll(() => survivor.evaluate(() => window.__hydrateHeld === true))
+    .toBe(true);
+
+  const dead = host.waitForEvent("crash");
+  const cdp = await context.newCDPSession(host);
+  // The target dies before it can answer.
+  cdp.send("Page.crash").catch(() => {});
+  await dead;
+
+  await expect(survivor.locator(".log")).toContainText("worker lost");
+  await expect(survivor.locator(".log")).toContainText(
+    /snapshot from the server: [1-9]\d* range\(s\) applied/,
+  );
+  await expect(survivor.getByTestId("status")).toHaveText("ready");
+  // The lost client's seeding failed before its replacement connected, so
+  // any line it logged is in the log by now.
+  expect(await logCount(survivor, "snapshot from the server")).toBe(1);
+  expect(await logCount(survivor, "not applied")).toBe(0);
 });
 
 test("when the worker's host tab crashes, another tab connects a new client and goes on", async ({

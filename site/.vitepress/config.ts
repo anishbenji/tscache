@@ -152,9 +152,30 @@ const config = defineConfig({
 // neither. Sequence diagrams wrap their text and keep their natural size
 // (the page scrolls them sideways, diagrams.css): scaled to the column, the
 // flows' text would shrink to a few pixels.
+//
+// Mermaid 12 changed its defaults; these settings keep the 11.x look
+// (docs/reviews/step-139.md):
+// - theme 'default': 12 gives flowcharts and sequence diagrams their own
+//   theme ('redux-color'), used whenever the site sets none. The plugin
+//   still switches to 'dark' while the site is dark.
+// - look 'classic': 12's per-diagram default is 'neo' (square black-bordered
+//   nodes, drop shadows).
+// - layout 'dagre': 12 lays out with ELK by default, which routes the package
+//   map's edges at right angles and makes it three times taller.
+// - flowchart wrappingWidth 200 and minNodeWidth 0: 12 wraps node labels at
+//   120 px and widens every node to at least 120 px.
+// - themeCSS: VitePress sets a 28 px line height on every paragraph in the
+//   page, so a label's <p> grew past the box Mermaid measured at 1.5 lines
+//   and its last line was cut off (on 11.x too); the label keeps Mermaid's
+//   own line height instead.
 export default withMermaid({
   ...config,
   mermaid: {
+    theme: "default",
+    look: "classic",
+    layout: "dagre",
+    themeCSS: "p { line-height: inherit; }",
+    flowchart: { wrappingWidth: 200, minNodeWidth: 0 },
     securityLevel: "strict",
     sequence: {
       useMaxWidth: false,
