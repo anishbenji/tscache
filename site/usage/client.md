@@ -82,10 +82,13 @@ const { budget, bytes, evictedPages } = await client.memoryStats();
 
 `undefined`, until a worker of a newer generation of the application (another tscache version, fetcher
 module or worker build) runs in the origin; then `{ lib }`, with that worker's tscache version. The
-`superseded` event fires when it is set. Against a worker that is already superseded, it is set when
-`createClient` resolves and the event follows on the next macrotask, as `modeFallback` does, so a
-listener attached right after `await createClient()` hears it. This tab's worker no longer persists, the tab keeps working
-from memory and its fetcher, and a reload joins the newer worker
+`superseded` event fires when it is set. When the event reached the tab before `createClient`
+resolved, the property is set from the start and the event follows on the next macrotask or with the
+worker's next message, whichever comes first, so a listener attached right after
+`await createClient()` hears it. An event still on its way then (the worker was superseded, but its
+message had not reached the tab) arrives live and sets the property when it does. This tab's worker
+no longer persists, the tab keeps working from memory and its fetcher, and a reload joins the newer
+worker
 ([Stale scripts after a deploy](/guides/workers#older-tabs-are-told-superseded)).
 
 Only a SharedWorker reports it. Where `client.features.has('superseded')` is false (a dedicated worker,

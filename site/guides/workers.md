@@ -190,10 +190,12 @@ generations, the one with the higher tscache version is current; for one version
 later. The other is **superseded**, for as long as it runs:
 
 - Its tabs hear the `superseded` event, with the newer worker's tscache version as `lib`, and
-  `client.superseded` holds that payload from then on, for code that runs later. A tab that connects
-  to a worker already superseded has the property set when `createClient` resolves, and hears the
-  event on the next macrotask: attach the listener right after `await createClient()`, and it is
-  called.
+  `client.superseded` holds that payload from then on, for code that runs later. When a tab connects
+  to a worker already superseded and the event reaches it during start-up, the property is set when
+  `createClient` resolves and the event follows on the next macrotask or with the worker's next
+  message, whichever comes first: attach the listener right after `await createClient()`, and it is
+  called. An event still on its way then (the worker was superseded, but its message had not reached
+  the tab) arrives live and sets the property when it does.
 - It stops persisting. Each persisted cache reports `persistStopped` with `reason: 'superseded'`, and
   nothing is deleted: the records belong to the newer worker now. How its removals and `clearAll()`
   answer then is under [Persistence](/guides/persistence#failures).

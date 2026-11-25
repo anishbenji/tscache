@@ -44,8 +44,11 @@ backend at its own interval. Put the interval in the id (`candles/ACME/1m`) so t
 
 ## A clear reaches every tab
 
-`clear()` and `clearAll()` empty the shared cache for every tab ([Invalidation and
-clearing](/concepts/invalidation)). For one view's housekeeping, `invalidate` instead.
+`clear()` and `clearAll()` empty the shared cache for every tab of the worker ([Invalidation and
+clearing](/concepts/invalidation)). For one view's housekeeping, `invalidate` instead. `clear()`
+reaches its own worker only; for a logout across workers, call `clearAll()`, which also reaches the
+other SharedWorkers of the origin of 0.3.0 or later, within its
+[documented limits](/guides/persistence#sensitive-data-and-logout).
 
 ## Memory
 

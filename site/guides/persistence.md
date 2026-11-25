@@ -117,6 +117,13 @@ tscache 0.1.0 or 0.2.0 is not reached and writes back what it still holds. If a 
 the disk within five seconds, every persisted cache stops, and that worker persists nothing more until
 it ends.
 
+One chain of late workers is not covered yet. With three or more workers of 0.3.0 or later, one of
+them writing late, a worker that has already cleared can open a persisted cache, load the late
+writer's records and write the page back after the late writer's own clear. That worker's next clear
+posts nothing more for the same logout, so a newer worker that loaded the written-back page never
+hears a clear and keeps serving the pre-logout data until the next `clearAll`. Step 152 closes this
+with a logout fence: 0.3.0 is not released before steps 150 and 152 merge.
+
 A client hosted in a dedicated worker or in-process persists nothing, but its `clearAll` empties the
 database too, so a logout from any page removes what a SharedWorker session stored. It loads the
 clearing code only then, and creates no database where there is none, except in a browser without

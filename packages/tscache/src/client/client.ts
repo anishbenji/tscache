@@ -94,11 +94,15 @@ export interface TscacheClient {
    * the browser has IndexedDB it also empties the persisted records, from
    * any hosting (N54, N66), and resolves once the disk is empty or the
    * clear gave up at its deadline; it never rejects for a disk failure.
-   * So it does in a tab whose worker is superseded, where a cache's own
-   * removals (`invalidate`, `clear`) answer at once and leave its records
-   * for the newer worker. It also reaches the other SharedWorkers of the origin (N135), which
-   * clear their caches and the disk too; the promise does not wait for
-   * them. Their tabs hear `cacheCleared`, possibly more than once.
+   * So it does in a tab whose worker is superseded, where, until step 150,
+   * a cache's own removals (`invalidate`, `clear`) answer at once and leave
+   * its records on disk, which a later load can serve. It also reaches the
+   * other SharedWorkers of the origin of 0.3.0 or later (N135), which clear
+   * their caches and the disk too; a 0.1.0 or 0.2.0 worker is not reached,
+   * and the promise does not wait for them. Their tabs hear `cacheCleared`,
+   * possibly more than once. The logout's limits, one chain of late workers
+   * until step 152 among them, are in the persistence guide, "Sensitive data
+   * and logout" (site/guides/persistence.md).
    */
   clearAll(): Promise<void>;
   /** Delivers new auth material to the fetcher (step ⑪). */

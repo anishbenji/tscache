@@ -63,11 +63,14 @@ the [roadmap](../roadmap.md).
 
 ## `clear` reaches every tab
 
-With a SharedWorker every same-origin tab reads the same caches. `cache.clear()` and `client.clearAll()`
-empty them for all tabs, and every tab hears `cacheCleared`. Use them for resets that should apply
-everywhere (a logout, a version change you detected yourself), not for one view's housekeeping; to
-refetch a range for one view, `invalidate` it. In a browser without SharedWorker (Samsung Internet, for
-example), each tab has its own dedicated worker and a clear stays in that tab.
+With a SharedWorker every tab of that worker reads the same caches. `cache.clear()` and
+`client.clearAll()` empty them for all its tabs, and every one of them hears `cacheCleared`. Use them
+for resets that should apply everywhere (a version change you detected yourself), not for one view's
+housekeeping; to refetch a range for one view, `invalidate` it. `cache.clear()` reaches its own worker
+only. For a logout, call `client.clearAll()`: it also reaches the other SharedWorkers of the origin of
+0.3.0 or later, with the limits in the persistence guide ("Sensitive data and logout",
+`site/guides/persistence.md`). In a browser without SharedWorker (Samsung Internet, for example), each
+tab has its own dedicated worker and a `cache.clear()` stays in that tab.
 
 ## Credentials
 

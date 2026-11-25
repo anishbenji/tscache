@@ -469,16 +469,23 @@ export interface ClientEvents {
    * from memory and its fetcher. Reload the tab to join the newer worker:
    * show the user a prompt, since the library never reloads a page. `lib`
    * is the newer worker's tscache version. At most once per client;
-   * `client.superseded` holds the payload afterwards. A client created
-   * against a worker that is already superseded hears it on the macrotask
-   * after `createClient` resolves, as `modeFallback` is delivered, with
-   * `client.superseded` already set.
+   * `client.superseded` holds the payload afterwards. When the event
+   * reached this tab before `createClient` resolved, `client.superseded` is
+   * set from the start and the event follows on the next macrotask or with
+   * the worker's next message, whichever comes first, so a listener
+   * attached in the same turn as `await createClient()` hears it. An event
+   * still on its way then (the worker was superseded, but its message had
+   * not reached this tab) arrives live and sets `client.superseded` when it
+   * does.
    */
   superseded: { lib: string };
   /**
    * A cache was cleared; in SharedWorker mode one tab's clear affects all,
-   * and a `clearAll` reaches the other SharedWorkers of the origin too
-   * (N135), so one call can be heard more than once.
+   * and a `clearAll` reaches the other SharedWorkers of the origin of 0.3.0
+   * or later too (N135), so one call can be heard more than once. A 0.1.0
+   * or 0.2.0 worker is not reached; the logout's limits are in the
+   * persistence guide, "Sensitive data and logout"
+   * (site/guides/persistence.md).
    */
   cacheCleared: {
     cacheId: string;
