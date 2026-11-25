@@ -92,7 +92,7 @@ export function format(offences: Offence[]): string {
     "",
     "To fix, set the address and re-author the unpushed commits, then push again:",
     `  git config user.email ${ALLOWED_EMAIL}`,
-    "  git rebase -r <base> --exec 'git commit --amend --no-edit --reset-author'",
+    "  git rebase -r --exec 'git commit --amend --no-edit --reset-author' <base>",
     "where <base> is the last pushed commit (for example origin/main).",
   ].join("\n");
 }
