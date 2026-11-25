@@ -11,11 +11,12 @@ import {
 } from "@anishbenji/tscache";
 import workerUrl from "@anishbenji/tscache/worker?worker&url";
 import fetcherModule from "@examples/mock-backend/fetcher?fetcher";
-import { type Hydration, seed } from "@examples/mock-backend/hydration";
+import { type Hydration, seedCache } from "@examples/mock-backend/hydration";
 import { pageContext } from "@examples/mock-backend/insights";
 import { onFetchNotice } from "@examples/mock-backend/notices";
 import { useEffect, useState } from "react";
 import { candles, type Summary, summarize, utcDay } from "./candles";
+import { type Attempt, attempts, untilPageGone } from "./connecting";
 import { insights } from "./insights";
 import { log, message } from "./log";
 
@@ -40,21 +41,23 @@ const span = ({ start, end }: Range) => `${utcDay(start)} – ${utcDay(end)}`;
  * Connects a client, opens the cache and applies the server's snapshot to
  * it, so the cache covers what the server read; hydrate skips what the cache
  * already covers, which another tab may have fetched later than the server
- * did. `onLost` is subscribed at once: the worker can be lost while the
- * cache is still being opened and seeded.
+ * did. A snapshot that fails to apply leaves the cache to fetch instead
+ * (`seedCache`); only a cache that cannot be opened fails the connection.
+ * The attempt's `lose` is subscribed at once: the worker can be lost while
+ * the cache is still being opened and seeded.
  */
 async function connect(
   hydration: Hydration,
-  onLost: (reason: string) => void,
-): Promise<Connection & { applied: Range[] }> {
+  attempt: Attempt,
+): Promise<Connection & { applied: Range[] | undefined }> {
   const client = await createClient({
     workerUrl,
     fetcher: { module: fetcherModule, context: pageContext({}) },
   });
-  client.on("workerLost", ({ reason }) => onLost(reason));
+  client.on("workerLost", ({ reason }) => attempt.lose(reason));
   try {
     const cache = await client.cache(candles);
-    const { applied } = await seed(cache, hydration);
+    const applied = await seedCache(cache, hydration, attempt.live);
     return { client, cache: insights.instrument(cache, client), applied };
   } catch (error) {
     void client.dispose();
@@ -73,32 +76,35 @@ async function connect(
 export function useConnection(hydration: Hydration): Connection | undefined {
   const [connection, setConnection] = useState<Connection>();
   useEffect(() => {
-    let mounted = true;
     let current: TscacheClient | undefined;
-    const connectNext = () => {
-      const onLost = (reason: string) => {
-        if (!mounted) return;
-        log(`worker lost (${reason}); connecting a new client`);
-        setConnection(undefined);
-        connectNext();
-      };
-      connect(hydration, onLost).then(
-        (next) => {
-          if (!mounted) return void next.client.dispose();
-          current = next.client;
-          log(`client connected (${next.client.mode})`);
+    const stop = attempts((attempt) => connect(hydration, attempt), {
+      connected(next) {
+        current = next.client;
+        log(`client connected (${next.client.mode})`);
+        if (next.applied === undefined) {
+          log(
+            "snapshot from the server: not applied; the cache fetches what it would have covered",
+          );
+        } else {
           const applied = next.applied.map(span);
           log(
             `snapshot from the server: ${applied.length > 0 ? applied.join(", ") : "nothing"} applied where the cache had no coverage`,
           );
-          setConnection({ client: next.client, cache: next.cache });
-        },
-        (error) => log(`could not connect: ${message(error)}`),
-      );
-    };
-    connectNext();
+        }
+        setConnection({ client: next.client, cache: next.cache });
+      },
+      lost(reason) {
+        log(`worker lost (${reason}); connecting a new client`);
+        setConnection(undefined);
+      },
+      failed: (error) => log(`could not connect: ${message(error)}`),
+      drop: (next) => void next.client.dispose(),
+    });
+    // A page hidden for good disposes the client, which is no connection.
+    const unlisten = untilPageGone(window, stop);
     return () => {
-      mounted = false;
+      unlisten();
+      stop();
       void current?.dispose();
     };
   }, [hydration]);
