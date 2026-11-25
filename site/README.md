@@ -25,13 +25,14 @@ bun run docs:run     # runs the snippets against the mock backend and checks the
   runs it with `--check` and fails when the page is out of date; regenerate with
   `bun site/scripts/module-graph.ts`.
 - `.vitepress/theme/` extends the default theme to load `diagrams.css`, the stylesheet of the How it works
-  SVGs, which draw with the theme's colour variables, and turns off Mermaid's `startOnLoad`, whose pass
-  at page load otherwise draws an error box into every diagram until the plugin draws it. `mermaid`
-  code fences are rendered in the browser by `vitepress-plugin-mermaid` (`withMermaid` in
-  `.vitepress/config.ts`), with Mermaid's `securityLevel` set to `'strict'` and settings that keep Mermaid 11's diagram look under Mermaid 12
-  (explained in the comment there). A syntax error in a diagram still builds and shows only as an error
-  box on the page, so `docs:check` catches syntax errors in the published diagrams, outside a browser
-  (`scripts/check-mermaid.ts`): it parses the `mermaid` fences with the Mermaid this workspace pins,
+  SVGs, which draw with the theme's colour variables. `mermaid` code fences are rendered in the browser
+  by `vitepress-plugin-mermaid` (`withMermaid` in `.vitepress/config.ts`), with Mermaid's
+  `securityLevel` set to `'strict'` and settings that keep Mermaid 11's diagram look under Mermaid 12
+  (explained in the comment there). Each diagram's element has the class `mermaid-diagram`
+  (`.vitepress/mermaid-class.ts`) rather than the plugin's default, `mermaid`, which Mermaid's own pass
+  at page load would render into while still empty, drawing an error box until the plugin draws it.
+  A syntax error in a diagram still builds and shows only as an error box on the page, so `docs:check`
+  catches syntax errors in the published diagrams, outside a browser (`scripts/check-mermaid.ts`): it parses the `mermaid` fences with the Mermaid this workspace pins,
   through `mermaid.parse` and the parse step `mermaid.render` runs, and fails naming the page and the
   fence's line. It reads the regular Markdown files Git lists under `site/` and the generated `api/`
   pages, each after VitePress expands its `<!-- @include -->` directives; on this site today that is
@@ -40,7 +41,9 @@ bun run docs:run     # runs the snippets against the mock backend and checks the
     in Playwright covers what parsing cannot (`e2e/docs/mermaid.spec.ts`, run by `bun run ci` after
     `docs:build`): it opens each built page with a diagram, in the light and dark schemes, and fails
     when a diagram is not drawn, when Mermaid draws its error box, even briefly, or when the page logs
-    an error.
+    an error. It serves the built site on 127.0.0.1 (`scripts/docs-server.ts`), so it needs
+    `bun run docs:build` first: a Playwright run runs it when the site is built or when `E2E_EXAMPLES`
+    names `docs`, which fails at once without a build.
   - It does not load the site's config (`srcExclude`, rewrites, extra pages) or run a dynamic route's
     paths loader, so it also reads excluded files. Rather than follow a link or model a route, it
     fails `docs:check` on any symbolic link under `site/` and on any Markdown file under `site/` with

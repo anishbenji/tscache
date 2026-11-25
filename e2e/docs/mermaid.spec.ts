@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { MERMAID_CLASS } from "../../site/.vitepress/mermaid-class";
 import { diagramPages } from "./pages";
 
 // The documentation site's Mermaid diagrams, drawn in a browser. The syntax
@@ -7,10 +8,11 @@ import { diagramPages } from "./pages";
 // and fails, naming the page, when a diagram is not drawn, when Mermaid draws
 // its error box, even for a moment, or when the page logs an error. Each page
 // is opened in the light and the dark colour scheme, since the site draws its
-// diagrams with Mermaid's dark theme while the site is dark.
+// diagrams with Mermaid's dark theme while the site is dark, and the run
+// checks that the site took the scheme.
 //
 // The site is served as built (`bun run docs:build`, which `bun run ci` runs
-// before Playwright) by `vitepress preview` (playwright.config.ts).
+// before Playwright) by scripts/docs-server.ts (playwright.config.ts).
 
 declare global {
   interface Window {
@@ -35,7 +37,7 @@ const ERROR_MARKS = ".error-icon, .error-text";
 const RENDERING = 'body > [id^="dmermaid-"]';
 
 /** The element vitepress-plugin-mermaid renders each diagram into. */
-const DIAGRAM = "div.mermaid";
+const DIAGRAM = `div.${MERMAID_CLASS}`;
 
 const pages = await diagramPages();
 
@@ -85,12 +87,14 @@ for (const colorScheme of ["light", "dark"] as const) {
         await page.goto(path);
         // Drawn, failed or erred: every diagram's element holds an SVG and
         // no render is under way, or Mermaid has drawn an error mark, or the
-        // page has logged an error.
+        // page has logged an error, or it has more diagram elements than
+        // fences (an element with no fence, which no render would fill).
         await page.waitForFunction(
           ({ expected, diagram, rendering }) => {
             if ((window.__docErrors ?? 0) > 0) return true;
             if ((window.__docErrorMarks ?? 0) > 0) return true;
             const boxes = [...document.querySelectorAll(diagram)];
+            if (boxes.length > expected) return true;
             return (
               boxes.length >= expected &&
               boxes.every((box) => box.querySelector("svg") !== null) &&
@@ -111,10 +115,17 @@ for (const colorScheme of ["light", "dark"] as const) {
             errorDiagram:
               document.querySelector('svg[aria-roledescription="error"]') !==
               null,
+            // VitePress's class for its dark appearance, which it sets from
+            // the colour scheme and the plugin draws Mermaid's dark theme by.
+            dark: document.documentElement.classList.contains("dark"),
           }),
           { diagram: DIAGRAM, marks: ERROR_MARKS, rendering: RENDERING },
         );
         const where = `${source} (${colorScheme})`;
+        expect(
+          found.dark,
+          `${where}: the page's html element has the class dark`,
+        ).toBe(colorScheme === "dark");
         expect(errors, `${where} logged errors`).toEqual([]);
         expect(
           found.marksAdded,

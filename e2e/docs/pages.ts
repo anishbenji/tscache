@@ -2,13 +2,17 @@
 // check (mermaid.spec.ts). The pages are those of the built site
 // (site/.vitepress/dist, from `bun run docs:build`), so the list follows the
 // site's config (`srcExclude`, the generated api/ pages) without repeating
-// it. Each page's diagrams are counted in the Markdown it was built from, by
-// the reader the syntax check uses (site/scripts/check-mermaid.ts), so a
-// diagram the browser never draws is missed, not skipped.
+// it. A page is checked when its built HTML has a diagram element or the
+// Markdown it was built from has a `mermaid` fence. The fences, counted by
+// the reader the syntax check uses (site/scripts/check-mermaid.ts), are the
+// number of diagrams the page must draw: a diagram the browser never draws
+// fails the count rather than going unchecked, and so does a diagram element
+// with no fence behind it.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { MERMAID_CLASS } from "../../site/.vitepress/mermaid-class";
 import { diagramReader } from "../../site/scripts/check-mermaid";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -26,6 +30,18 @@ export interface DiagramPage {
 }
 
 /**
+ * How many elements of the built HTML have the diagram class: the elements
+ * as server-rendered, before Mermaid draws into them.
+ */
+function diagramElements(html: string): number {
+  let count = 0;
+  for (const [, classes = ""] of html.matchAll(/\sclass="([^"]*)"/g)) {
+    if (classes.split(/\s+/).includes(MERMAID_CLASS)) count++;
+  }
+  return count;
+}
+
+/**
  * The served path of a built HTML file: the site sets `cleanUrls`, so
  * `guide/demo.html` is served at `guide/demo` and `how-it-works/index.html`
  * at `how-it-works/`.
@@ -37,7 +53,8 @@ function servedPath(html: string): string {
 }
 
 /**
- * Every page of the built site that holds a `mermaid` fence, in path order.
+ * Every page of the built site with a `mermaid` fence or a diagram element,
+ * in path order.
  * Throws when the site is not built, or when a built page has no Markdown
  * page behind it, which a page from a dynamic route or a rewrite would be:
  * the list would then miss its diagrams.
@@ -67,7 +84,8 @@ export async function diagramPages(): Promise<DiagramPage[]> {
       readFileSync(markdown, "utf8"),
       markdown,
     );
-    if (diagrams.length > 0) {
+    const elements = diagramElements(readFileSync(join(DIST, html), "utf8"));
+    if (diagrams.length > 0 || elements > 0) {
       pages.push({ path: servedPath(html), source, diagrams: diagrams.length });
     }
   }

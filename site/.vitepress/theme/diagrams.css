@@ -133,8 +133,9 @@
   stroke-width: 2.5;
 }
 
-/* Mermaid diagrams: a sequence diagram keeps its natural width (config.ts)
-   and scrolls sideways when it is wider than the column. */
-.mermaid {
+/* Mermaid diagrams (MERMAID_CLASS, mermaid-class.ts): a sequence diagram
+   keeps its natural width (config.ts) and scrolls sideways when it is wider
+   than the column. */
+.mermaid-diagram {
   overflow-x: auto;
 }
