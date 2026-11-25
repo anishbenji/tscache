@@ -649,8 +649,7 @@ function check(run: Run, final: boolean): void {
    * The cleanup of `id` was queued before the barrier starting at `bs`: its
    * cache stopped before it, and the stop queued it (not a load's stop) or a
    * removal between the stop and `bs` did. It runs ahead of the clear, so a
-   * removal of the cache waits for it; any other removal during the barrier
-   * belongs to the clear (§4.10.6 (l); pre-review 3).
+   * removal of the cache waits for it (§4.10.6 (i), (l)).
    */
   const queuedBefore = (id: string, bs: number): boolean => {
     const stop = stopOf(id);
@@ -686,6 +685,51 @@ function check(run: Run, final: boolean): void {
   const cleared = (c: Call) => emptied(c) !== undefined;
   const failedClear = (c: Call) => c.end !== undefined && !cleared(c);
   const name = (op: Op) => `${op.kind} ${op.cacheId ?? ""} at ${op.start.step}`;
+  /**
+   * The cleanup of `id` was still deferred at the barrier starting at `bs`:
+   * a load's stop came before it, and no removal and no other clearAll
+   * since (that clearAll's engine clear took the deferral, and the clear,
+   * failed or not, was the cache's deletion), nor a clearAll pending at the
+   * stop or failed before it (the stop then had no cleanup).
+   */
+  const deferredAt = (id: string, bs: number): boolean => {
+    const stop = stopOf(id);
+    return (
+      stop !== undefined &&
+      stop.seq < bs &&
+      loadStop(id) &&
+      !removalsOf(id).some((x) => made(x) > stop.seq && made(x) < bs) &&
+      !clears.some(
+        (k) =>
+          k.start.seq < bs &&
+          (k.start.seq > stop.seq ||
+            (k.end?.seq ?? Infinity) > stop.seq ||
+            failedClear(k)),
+      )
+    );
+  };
+  /**
+   * The clearAll whose barrier starts at `bs` owns the removal `r` (§4.10.6
+   * (l), Success): it was made during the barrier on a running cache, even
+   * one that stops meanwhile (round 5, R5-1), on a cache that stopped during
+   * the barrier, or on one whose cleanup was still deferred at its start
+   * (pre-review 3). The clear is then the cache's deletion and settles it.
+   * Not a cache stopped after a failed clearAll: that stop has no cleanup,
+   * and its removals wait for nothing (§4.10.6 clearAll, Failure).
+   */
+  const ownedBy = (r: Call, bs: number): boolean => {
+    const id = r.cacheId as string;
+    const stop = stopOf(id);
+    const afterFailedClear =
+      stop !== undefined &&
+      clears.some((k) => failedClear(k) && (k.end?.seq ?? Infinity) < stop.seq);
+    return (
+      made(r) > bs &&
+      (runningAt(id, made(r)) ||
+        ((stop?.seq ?? -1) > bs && !afterFailedClear) ||
+        deferredAt(id, bs))
+    );
+  };
 
   for (const c of clears) {
     const bs = barrierStart(c);
@@ -736,13 +780,10 @@ function check(run: Run, final: boolean): void {
           `${name(own)}, removal ${id} at ${r.start.step}`,
         );
       }
-      // A removal the clearAll owns answers no earlier than it: one made on a
-      // running cache, even when the cache stops meanwhile (round 5, R5-1),
-      // or on a cache stopped before the barrier whose deferred cleanup was
-      // not queued; the clear is then its deletion (pre-review 3).
+      // A removal the clearAll owns answers no earlier than it (ownedBy).
       if (
         r.end !== undefined &&
-        !before &&
+        ownedBy(r, bs.seq) &&
         (c.end === undefined || r.end.step < c.end.step)
       ) {
         run.fail(
@@ -876,19 +917,19 @@ function check(run: Run, final: boolean): void {
           o.end.seq > from &&
           o.end.seq < to,
       );
-    // Not while a persister's clearAll that owns the removal is pending at
-    // the answer: the removal was made during its barrier with no cleanup
-    // queued before it, or the cache stopped during it, so the clear is the
-    // cache's deletion and settles the removal (§4.10.6 (l), Success; round
-    // 5, R5-1; pre-review 3). A cleanup queued before the call runs ahead of
-    // the clear, and a removal of the stopped cache waits for it instead.
+    // Not while a persister's clearAll that owns the removal (ownedBy), or
+    // one its cache stopped during, is pending at the answer: the clear is
+    // the cache's deletion and settles the removal (§4.10.6 (l), Success;
+    // round 5, R5-1; pre-review 3). A cleanup queued before the call runs
+    // ahead of the clear, and a removal of the stopped cache waits for it
+    // instead.
     const clearPending = clears.some((c) => {
       const bs = barrierStart(c).seq;
       return (
         c.start.seq < a.seq &&
         (c.end === undefined ? run.loaded() : c.loadedAtEnd) &&
         (c.end?.step ?? Infinity) > a.step &&
-        ((made(r) > bs && !queuedBefore(id, bs)) || (stop?.seq ?? -1) > bs)
+        (ownedBy(r, bs) || (stop?.seq ?? -1) > bs)
       );
     });
     const openFailed =
