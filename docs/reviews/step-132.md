@@ -586,3 +586,9 @@ At the step's final head unless noted:
 | Close-out: `bunx vitest run` on `rpc-persist.test.ts` and `persist-store-conformance.test.ts`                                              | 2 files, 45 passed; each new test failed against its mutant (Close-out, above)                                                                                                                                                    |
 | Close-out: `tsc -p packages/tscache --noEmit`; `bun scripts/test-clocks.ts`                                                                | no errors (TS2554 with the type mutant); `test-clocks: 221 files clean`                                                                                                                                                           |
 | Close-out: `~/code/tscache-reports/bin/heavy-run.sh "132 child: ci closeout" bun run ci`                                                   | runs on the head that commits these docs; its result is reported to the director                                                                                                                                                  |
+
+## Merge of `main` for the pull request (2026-11-26)
+
+PR #175 was 29 commits behind `main` (9029423b, with #171, #172 and #174), and GitHub reported a conflict. `origin/main` was merged in with a merge commit (no rebase: the branch is pushed). One file conflicted:
+
+- **`docs/INDEX.md`, the `site/` size row only.** The merge base said 283.7 KB, this branch 284.9 KB and `main` 286.9 KB. Resolved to `main`'s value plus this branch's own change to the site's Markdown, measured from the files (`git ls-tree` of `site/*.md` at the merge base and at 6640d494: +1,883 bytes): **288.8 KB**. No other row differed. No file this step changed for its own fixes conflicted.
