@@ -68,8 +68,8 @@ function development(): boolean {
 /**
  * What a warning says of `error`: its name, and a TscacheError's `code` when
  * it has one. Never its message, which can quote the snapshot it refused
- * (`decodeSnapshot` quotes one that is not an object), and the snapshot
- * carries the page's data.
+ * (`hydrate` quotes a payload field it refuses, such as a mismatching dtype),
+ * and the snapshot carries the page's data.
  */
 function nameOf(error: unknown): string {
   if (!(error instanceof Error)) return "a non-Error rejection";

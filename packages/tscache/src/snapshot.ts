@@ -6,7 +6,7 @@
  */
 
 import { fromBase64 as decodeBase64, toBase64 } from "./base64";
-import { show, TscacheError } from "./errors";
+import { TscacheError } from "./errors";
 import type {
   DenseSegmentPayload,
   EncodedSegmentPayload,
@@ -36,6 +36,19 @@ function fromBase64(text: unknown, what: string): Uint8Array<ArrayBuffer> {
   } catch {
     return fail(`${what} is not valid base64`);
   }
+}
+
+/**
+ * The kind of a value that is not an object, for an error message: its type
+ * only, never its text. A snapshot that arrives as a string (a server read
+ * never parsed) would otherwise be printed whole, and an app that logs the
+ * message would log the snapshot.
+ */
+function kindOf(value: unknown): string {
+  if (value === null || value === undefined) return String(value);
+  // Array.isArray throws on a revoked proxy; a callable one is a function.
+  if (typeof value === "object" && Array.isArray(value)) return "an array";
+  return `a ${typeof value}`;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -213,7 +226,7 @@ function decodePayload(value: unknown, i: number): DenseSegmentPayload {
 export function decodeSnapshot(encoded: EncodedSnapshot): Snapshot {
   requireLittleEndian();
   const e: unknown = encoded;
-  if (!isObject(e)) fail(`must be an object, got ${show(e)}`);
+  if (!isObject(e)) fail(`must be an object, got ${kindOf(e)}`);
   const format = checkFormat(e.format, "format");
   const fields = e.fields;
   if (

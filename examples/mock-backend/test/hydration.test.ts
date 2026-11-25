@@ -312,8 +312,8 @@ describe("seedCache", () => {
     expect(warn.mock.calls[0]?.[0]).not.toContain("0123");
   });
 
-  it("never quotes a snapshot whose error would quote it", async () => {
-    // decodeSnapshot quotes a snapshot that is not an object whole.
+  it("never quotes a snapshot that is not an object", async () => {
+    // decodeSnapshot names a non-object snapshot by its type only (step 146).
     const cache = await cacheOf();
     const spoiled = {
       range: hydration.range,
