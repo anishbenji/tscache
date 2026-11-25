@@ -12,7 +12,7 @@ Step 137 (PR #173, note 2) found that `decodeSnapshot` quoted a non-object input
 - **`packages/tscache/src/errors.ts`** is unchanged. `show` has callers that rely on the value it prints (`grid.ts`, `segment/payload.ts`, `engine/snapshot.ts`, `engine/validate.ts`, `engine/cache.ts`, `engine/batch.ts`, `rpc/port-client.ts`, `rpc/server.ts`, `rpc/protocol.ts`): configuration errors that print the offending option, and protocol errors that print a version or op. Changing it would change those messages.
 - **`docs/releases/0.3.0.md`.** One Compatibility bullet describes the new message.
 
-No guide, TSDoc or `site/` page quoted the old message (`git grep "must be an object, got"` finds only source). `docs/INDEX.md` is unchanged: its single `docs/reviews/` row covers every step file and carries no size.
+No guide, TSDoc or `site/` page quoted the old message (`git grep "must be an object, got"` finds only source). Three places described the behaviour instead; the Claude pre-review found them and they now name what still quotes (see Pre-review). `docs/INDEX.md` is unchanged: its single `docs/reviews/` row covers every step file and carries no size.
 
 ## Tests
 
@@ -44,3 +44,16 @@ None.
 ## Decision concerns
 
 1. **Hydrate-path messages that print input text** (listed above). Options: (a) a follow-up step that names the type only in those messages, as here, with a test for each (engine logic, so Codex writes the failing contract tests first; both files are protected, so the user approves the edit); (b) bound the printed text instead, for example to its first 32 characters; (c) leave them, since they print one field's value and not the snapshot. Recommended: (a), for the same reason as this step: an application that logs `hydrate`'s error should not log text the snapshot supplied.
+
+## Pre-review (Claude), before round 1
+
+Fable pre-review on the fix commit and its triage commit: no P0 or P1, two P2s, both fixed by the director.
+
+| Finding                                                                                                                                                                                       | Verdict    | Fix                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Docs and TSDoc still say `decodeSnapshot` quotes a non-object input (`site/usage/snapshots.md`, `nameOf` in `integrations/shared/connection.ts` and `examples/mock-backend/src/hydration.ts`) | Valid (P2) | Each now names what still quotes: `JSON.parse`, and `hydrate` for a payload field it refuses.                                           |
+| Test names and comments still claim a quoting `decodeSnapshot` error (`integrations/test/connection.test.ts`, `examples/mock-backend/test/hydration.test.ts`, `site/scripts/run-snippets.ts`) | Valid (P2) | Retitled and recommented; assertions unchanged. The leak class stays covered by the `JSON.parse` cases and the integrations dtype case. |
+
+Security lane (Claude), run 1: no findings (`~/code/tscache-reports/reviews/step-146/security-1.md`, outside the repo).
+
+The pre-review also noted that the integrations dtype case pins `hydrate` quoting its input; if user decision #142 goes with option A, that step changes the precondition (for example to a constructed error).

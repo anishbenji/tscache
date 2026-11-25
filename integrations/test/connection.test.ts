@@ -364,7 +364,7 @@ describe("connect, when a seed fails to apply", () => {
     expect(text).toContain(`"${config.id}"`);
   });
 
-  it("never quotes a snapshot whose error would quote it", async () => {
+  it("never quotes a snapshot that is not an object", async () => {
     // decodeSnapshot names a non-object snapshot by its type only, step 146.
     const marker = "SECRETMARKER";
     const value = dehydrate(seed);
