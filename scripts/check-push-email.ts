@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 /**
  * Pre-push check (step 149): refuses a push whose outgoing commits carry an
- * author or committer address that is not a GitHub noreply address (user
- * decisions #141 A and #147 A). GitHub's own check is opt-in and looks only at
+ * author or committer address, or whose pushed annotated tags carry a tagger
+ * address, that is not a GitHub noreply address (user decisions #141 A, #147 A
+ * and #153 A). GitHub's own check is opt-in, ignores tags and looks only at
  * the most recent commit's author, against the pusher's own private addresses
  * ("push declined due to email privacy restrictions"); nothing repeats this
  * check after the hook. Allowed: any address ending in
@@ -21,6 +22,14 @@
  *   (`<local sha> --not --remotes`);
  * - a deleted ref (local sha all zeros): nothing.
  *
+ * When `<local sha>` is an annotated tag object, the tagger of that tag, and of
+ * each tag it names in turn (a tag of a tag), is checked as well; a tag object
+ * with no tagger line is refused. A lightweight tag is no object of its own and
+ * is checked as the commits it names.
+ *
+ * Every git call runs with `--no-replace-objects`: a replace ref (`git
+ * replace`) changes only the local view, and git pushes the original objects.
+ *
  * Limit (user decision #147 A): a commit already on another remote's tracking
  * ref is not checked when it is pushed to a different remote.
  *
@@ -29,7 +38,7 @@
  * four fields is an error (exit 1). With no non-empty line it prints that nothing
  * was checked and exits 0.
  *
- * Only the author and committer fields count; `Co-Authored-By:` trailers are
+ * Only the author, committer and tagger fields count; `Co-Authored-By:` trailers are
  * message text. Run by Lefthook as a `script` job (`lefthook.yml`, pre-push,
  * `use_stdin`). A manual `lefthook run pre-push` needs stdin closed
  * (`</dev/null`, docs/workflow.md): Lefthook itself waits for its stdin to
@@ -44,7 +53,8 @@ const NOREPLY_SUFFIX = "@users.noreply.github.com";
 const GITHUB_EMAIL = "noreply@github.com";
 
 /**
- * Whether outgoing commits may carry `email` as author or committer: an
+ * Whether outgoing commits and tags may carry `email` as author, committer
+ * or tagger: an
  * address ending exactly in `@users.noreply.github.com`, or exactly
  * `noreply@github.com`, in any letter case (user decision #147 A).
  */
@@ -55,8 +65,10 @@ export function isAllowed(email: string): boolean {
 
 export interface Offence {
   sha: string;
-  field: "author" | "committer";
+  field: "author" | "committer" | "tagger";
   email: string;
+  /** For a tagger row, the tag's name as its tag object records it. */
+  tag?: string;
 }
 
 interface GitOptions {
@@ -68,7 +80,8 @@ const ZERO = /^0+$/;
 
 function git(args: string[], options: GitOptions) {
   // No output limit: a first push of a long history prints megabytes.
-  return spawnSync("git", args, {
+  // No replace refs: they change the local view, not the objects pushed.
+  return spawnSync("git", ["--no-replace-objects", ...args], {
     ...options,
     encoding: "utf8",
     maxBuffer: Number.POSITIVE_INFINITY,
@@ -115,6 +128,60 @@ function rowsOf(stdin: string): Row[] {
     });
 }
 
+/** The type of the object `sha` names, or undefined when git cannot read it. */
+function typeOf(sha: string, options: GitOptions): string | undefined {
+  const result = git(["cat-file", "-t", sha], options);
+  return result.status === 0 ? result.stdout.trim() : undefined;
+}
+
+/**
+ * The header fields of the tag object `sha` (`object`, `type`, `tag`,
+ * `tagger`); the header ends at the first empty line, and a continuation line
+ * (a leading space) is not a field.
+ */
+function tagHeader(sha: string, options: GitOptions): Map<string, string> {
+  const raw = git(["cat-file", "tag", sha], options);
+  if (raw.status !== 0) {
+    const cause = raw.error?.message ?? raw.stderr;
+    throw new Error(`git cat-file tag ${sha} failed: ${cause}`);
+  }
+  const header = new Map<string, string>();
+  for (const row of raw.stdout.split("\n")) {
+    if (row === "") break;
+    const space = row.indexOf(" ");
+    if (space > 0) header.set(row.slice(0, space), row.slice(space + 1));
+  }
+  return header;
+}
+
+/** The address in an identity, `Name <address> <time> <zone>`, or "" without one. */
+const addressOf = (identity = "") => /<([^>]*)>/.exec(identity)?.[1] ?? "";
+
+/**
+ * The tagger offences of `sha` when it is an annotated tag: its own, then
+ * those of each tag it names in turn, down to the first object that is not a
+ * tag. Anything else, or an object git cannot read, has none here; `git log`
+ * then reads the commits, or fails.
+ */
+function tagOffences(sha: string, options: GitOptions): Offence[] {
+  const offences: Offence[] = [];
+  let current: string | undefined = sha;
+  while (current !== undefined && typeOf(current, options) === "tag") {
+    const header = tagHeader(current, options);
+    const email = addressOf(header.get("tagger"));
+    if (!isAllowed(email)) {
+      offences.push({
+        sha: current,
+        field: "tagger",
+        email,
+        tag: header.get("tag") ?? "",
+      });
+    }
+    current = header.get("object");
+  }
+  return offences;
+}
+
 /** One `git log` entry's fields that do not carry the allowed address. */
 function offencesOf(entry: string): Offence[] {
   const [sha = "", author = "", committer = ""] = entry.split("\x1f");
@@ -153,10 +220,14 @@ function offencesIn(revisions: string[], options: GitOptions): Offence[] {
 /** The offences of one pushed ref. */
 function rowOffences({ local, remote }: Row, options: GitOptions): Offence[] {
   const revisions = outgoing(local, remote, options);
-  return revisions === undefined ? [] : offencesIn(revisions, options);
+  if (revisions === undefined) return [];
+  return [...tagOffences(local, options), ...offencesIn(revisions, options)];
 }
 
-/** Every outgoing commit's author or committer address that is not allowed. */
+/**
+ * Every outgoing commit's author or committer address, and every pushed
+ * annotated tag's tagger address, that is not allowed.
+ */
 export function check(stdin: string, options: GitOptions = {}): Offence[] {
   return rowsOf(stdin).flatMap((row) => rowOffences(row, options));
 }
@@ -164,21 +235,11 @@ export function check(stdin: string, options: GitOptions = {}): Offence[] {
 /** The branch name `git rebase` takes for a pushed local ref. */
 const branchOf = (ref: string) => ref.replace(/^refs\/heads\//, "");
 
-/**
- * The refusal message: each offence, then how to rewrite the commits of the
- * offending local `refs` (full ref names, as on the pre-push line).
- */
-export function format(offences: Offence[], refs: string[] = []): string {
-  const rows = offences.map(
-    (o) => `  ${o.sha.slice(0, 12)} ${o.field} ${o.email}`,
-  );
+/** How to rewrite the offending commits of the local `refs`. */
+function commitAdvice(refs: string[]): string[] {
   const branches = [...new Set(refs.map(branchOf))];
   const named = branches.length > 0 ? `: ${branches.join(", ")}` : "";
   return [
-    "push refused: each outgoing commit's author and committer must be a GitHub noreply address,",
-    `an address ending in ${NOREPLY_SUFFIX} or exactly ${GITHUB_EMAIL}`,
-    "(GitHub's opt-in check covers only the latest commit's author; nothing checks after this):",
-    ...rows,
     "",
     "To fix, set your GitHub noreply address (github.com/settings/emails) and rewrite the",
     "unpushed commits, then push again:",
@@ -189,6 +250,40 @@ export function format(offences: Offence[], refs: string[] = []): string {
     "The amend sets you as committer and keeps each author.",
     "Use --reset-author only for author rows that are your own commits:",
     "it makes you the author of every commit in the range.",
+  ];
+}
+
+/** How to re-create an offending annotated tag before it is pushed. */
+const TAG_ADVICE = [
+  "",
+  "For a tagger row, set your GitHub noreply address and re-create the tag on the",
+  "object it names (git opens an editor for its message), then push again:",
+  `  git config user.email <you>${NOREPLY_SUFFIX}`,
+  "  git tag -f -a <tag> <tag>^{}",
+  "Never re-create a tag that is already pushed: others may have fetched it.",
+];
+
+/**
+ * The refusal message: each offence, then how to rewrite the commits of the
+ * offending local `refs` (full ref names, as on the pre-push line) when a
+ * commit is refused, and how to re-create a tag when a tagger is refused.
+ */
+export function format(offences: Offence[], refs: string[] = []): string {
+  const rows = offences.map(
+    (o) =>
+      `  ${o.sha.slice(0, 12)} ${o.field} ${o.email}` +
+      (o.tag === undefined ? "" : ` (tag ${o.tag})`),
+  );
+  const commits = offences.some((o) => o.field !== "tagger");
+  const tags = offences.some((o) => o.field === "tagger");
+  return [
+    "push refused: each outgoing commit's author and committer, and each pushed tag's tagger,",
+    "must be a GitHub noreply address,",
+    `an address ending in ${NOREPLY_SUFFIX} or exactly ${GITHUB_EMAIL}`,
+    "(GitHub's opt-in check covers only the latest commit's author; nothing checks after this):",
+    ...rows,
+    ...(commits ? commitAdvice(refs) : []),
+    ...(tags ? TAG_ADVICE : []),
   ].join("\n");
 }
 
@@ -202,7 +297,7 @@ function main(stdin: string): number {
   const refs: string[] = [];
   const offences = rows.flatMap((row) => {
     const found = rowOffences(row, {});
-    if (found.length > 0) refs.push(row.ref);
+    if (found.some((o) => o.field !== "tagger")) refs.push(row.ref);
     return found;
   });
   if (offences.length > 0) console.error(format(offences, refs));

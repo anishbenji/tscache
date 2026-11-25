@@ -68,6 +68,16 @@ function commit(
   return git(["rev-parse", "HEAD"]);
 }
 
+/** Creates the annotated tag `name` on `target`, tagged by `tagger`; returns the tag object's SHA. */
+function tag(name: string, target: string, tagger = ALLOWED_EMAIL): string {
+  // A tag of a tag is meant here; the hint git prints for one is noise.
+  git(["-c", "advice.nestedTag=false", "tag", "-a", name, "-m", name, target], {
+    GIT_COMMITTER_NAME: "T",
+    GIT_COMMITTER_EMAIL: tagger,
+  });
+  return git(["rev-parse", `refs/tags/${name}`]);
+}
+
 /** Marks `sha` as already on the remote, as `git fetch` would. */
 function onRemote(branch: string, sha: string): void {
   git(["update-ref", `refs/remotes/origin/${branch}`, sha]);
@@ -354,6 +364,95 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     expect(passed.status).toBe(0);
   });
 
+  // Decision #153 A: an annotated tag's tagger is checked with the same rule.
+  it("refuses a new annotated tag by another tagger on a pushed commit (#153 A)", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const v1 = tag("v1", base, OTHER);
+    expect(run(line(v1, ZERO, "refs/tags/v1"))).toEqual([
+      { sha: v1, field: "tagger", email: OTHER, tag: "v1" },
+    ]);
+  });
+
+  it("passes the same annotated tag by an allowed tagger", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const v1 = tag("v1", base, ALLOWED_EMAIL.toUpperCase());
+    expect(run(line(v1, ZERO, "refs/tags/v1"))).toEqual([]);
+  });
+
+  it("checks a lightweight tag as the commits it names, as before", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    git(["tag", "light", base]);
+    expect(run(line(base, ZERO, "refs/tags/light"))).toEqual([]);
+    const bad = commit("b", OTHER);
+    git(["tag", "light2", bad]);
+    expect(run(line(bad, ZERO, "refs/tags/light2"))).toEqual([
+      { sha: bad, field: "author", email: OTHER },
+    ]);
+  });
+
+  it("checks each level of a nested tag, and the commits under it", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const bad = commit("b", OTHER);
+    const inner = tag("inner", bad, "third@example.com");
+    const outer = tag("outer", inner, OTHER);
+    expect(run(line(outer, ZERO, "refs/tags/outer"))).toEqual([
+      { sha: outer, field: "tagger", email: OTHER, tag: "outer" },
+      { sha: inner, field: "tagger", email: "third@example.com", tag: "inner" },
+      { sha: bad, field: "author", email: OTHER },
+    ]);
+    const clean = tag("clean", tag("cleaninner", base));
+    expect(run(line(clean, ZERO, "refs/tags/clean"))).toEqual([]);
+  });
+
+  it("ignores replace refs: a refused commit stays refused after git replace", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const bad = commit("b", OTHER, OTHER);
+    const v1 = tag("v1", base, OTHER);
+    const before = run(line(bad, base));
+    expect(before).toEqual([
+      { sha: bad, field: "author", email: OTHER },
+      { sha: bad, field: "committer", email: OTHER },
+    ]);
+    // What `git replace --edit` does, without an editor: a copy of each object
+    // with the allowed address, recorded as its replacement.
+    for (const [sha, type] of [
+      [bad, "commit"],
+      [v1, "tag"],
+    ] as const) {
+      const raw = git(["cat-file", type, sha]).replaceAll(OTHER, ALLOWED_EMAIL);
+      const copy = execFileSync(
+        "git",
+        ["hash-object", "-t", type, "-w", "--stdin"],
+        { cwd: dir, env, input: `${raw}\n`, encoding: "utf8" },
+      ).trim();
+      git(["replace", sha, copy]);
+    }
+    expect(git(["log", "-1", "--format=%ae %ce", bad])).toBe(
+      `${ALLOWED_EMAIL} ${ALLOWED_EMAIL}`,
+    );
+    expect(run(line(bad, base))).toEqual(before);
+    expect(run(line(v1, ZERO, "refs/tags/v1"))).toEqual([
+      { sha: v1, field: "tagger", email: OTHER, tag: "v1" },
+    ]);
+  });
+
+  it("advises re-creating a refused tag, and no rebase when only tags are refused", () => {
+    const text = format(
+      [{ sha: "b".repeat(40), field: "tagger", email: OTHER, tag: "v1" }],
+      ["refs/tags/v1"],
+    );
+    expect(text).toContain(`bbbbbbbbbbbb tagger ${OTHER} (tag v1)`);
+    expect(text).toContain("tagger");
+    expect(text).toContain("  git tag -f -a <tag> <tag>^{}");
+    expect(text).toContain("Never re-create a tag that is already pushed");
+    expect(text).not.toContain("git rebase");
+  });
+
   /** Runs the script as a Bun script with `stdin`. */
   function script(stdin: string) {
     const result = spawnSync("bun", [SCRIPT], {
@@ -372,6 +471,18 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     const result = script("\n");
     expect(result.status).toBe(0);
     expect(result.stderr).toContain("no pre-push input; nothing checked");
+  });
+
+  it("exits 1 naming a refused tag's tagger as a Bun script", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const v1 = tag("v1", base, OTHER);
+    const result = script(line(v1, ZERO, "refs/tags/v1"));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      `${v1.slice(0, 12)} tagger ${OTHER} (tag v1)`,
+    );
+    expect(result.stderr).toContain("git tag -f -a <tag> <tag>^{}");
   });
 
   it("exits 1 for a malformed row and for an unknown local SHA", () => {
