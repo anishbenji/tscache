@@ -183,3 +183,7 @@ Size after the fix (`bun run size`, brotli): `index (lazy)` 18 549 bytes against
 above the run's start. The first form, which also walked `fields` by index, measured 18 587 and was over
 the budget; the list is now read once and iterated as read, which keeps each entry as checked. `worker`
 19 859 of 19 888 and `engine` 15 765 of 16 016; every other entry is unchanged and within its budget.
+
+## Security lane run 3
+
+No P0 or P1. One P2: the `checkSpan` TSDoc claimed that a field changing between reads cannot change what is checked or merged; a buffer that another field's accessor detaches or resizes after its own check is not re-checked (reproduced by the lane: a raw `TypeError` on a detached buffer, or NaN values after a resize, both from an in-process `Engine.hydrate` caller only; structured clone carries no accessors; same as `main`). Fixed by the director in the comment only: it now promises that each field is read once and names the case it does not cover. The lane graded the remaining raw-error case (a throwing getter on `count`, `mask`, `fields` or `data`) P2 at most: `validateSnapshot` finishes before any state changes, no snapshot data is quoted, and only an in-process caller can reach it. A later step can wrap those throws if the byte budget allows.

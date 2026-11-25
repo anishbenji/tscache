@@ -112,9 +112,11 @@ function checkGrid(p: DenseSegmentPayload, options: SegmentOptions): void {
 /**
  * Checks start and count; returns the slot of the payload's first entry and
  * the count. Each is read and converted once, and every later check uses
- * the returned values: an anchor costs one conversion (N113), the messages
- * print the values that were checked, and a field that changes between
- * reads cannot change what is checked or merged.
+ * the returned values: an anchor costs one conversion (N113), and the
+ * messages print the values that were checked. Each payload field is read
+ * once; a buffer an accessor detaches or resizes after its check is not
+ * re-checked (an in-process caller only; structured clone carries no
+ * accessors).
  */
 function checkSpan(
   p: DenseSegmentPayload,
