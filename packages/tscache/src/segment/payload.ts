@@ -4,7 +4,7 @@
  * field is checked against the cache's own config before any byte is used.
  */
 
-import { show, TscacheError } from "../errors";
+import { TscacheError } from "../errors";
 import { inDomain, sameCalendar, slotOf } from "../grid";
 import type { FieldArray, ResolvedCalendarInterval } from "../types";
 import { DenseSegment } from "./dense";
@@ -16,6 +16,27 @@ import type {
   Segment,
   SegmentOptions,
 } from "./types";
+
+/**
+ * The kind of a value a payload, snapshot or record supplied, for an error
+ * message: its type only, never its text or digits (user decision #142 A).
+ * A number is named finite or not but never printed: an identifier or a
+ * timestamp in its place would be data an app that logs the message logs.
+ */
+export function kindOf(value: unknown): string {
+  if (value === null || value === undefined) return String(value);
+  switch (typeof value) {
+    case "number":
+      return Number.isFinite(value) ? "a finite number" : "a non-finite number";
+    case "string":
+      return value.length === 0 ? "an empty string" : "a string";
+    case "object":
+      // Array.isArray throws on a revoked proxy, as show() does.
+      return Array.isArray(value) ? "an array" : "an object";
+    default:
+      return `a ${typeof value}`;
+  }
+}
 
 function fail(message: string): never {
   throw new TscacheError(`invalid segment payload: ${message}`);
@@ -55,7 +76,9 @@ export function gridMismatch(
 ): string | undefined {
   const { format } = stored;
   const calendar = typeof own.interval !== "number";
-  if (format !== 1 && format !== 2) return `unsupported format ${show(format)}`;
+  if (format !== 1 && format !== 2) {
+    return `format must be 1 or 2, got ${kindOf(format)}`;
+  }
   if (format !== (calendar ? 2 : 1)) {
     return `format ${format} names another kind of grid than the cache's`;
   }
@@ -65,18 +88,20 @@ export function gridMismatch(
       : "grid differs from the cache grid";
   }
   if (stored.interval !== own.interval) {
-    return `interval ${show(stored.interval)} differs from the cache grid`;
+    return `interval must be the cache grid's ${own.interval}, got ${kindOf(stored.interval)}`;
   }
   return stored.alignmentOffset === own.alignmentOffset
     ? undefined
-    : `alignmentOffset ${show(stored.alignmentOffset)} differs from the cache grid`;
+    : `alignmentOffset must be the cache grid's ${own.alignmentOffset}, got ${kindOf(stored.alignmentOffset)}`;
 }
 
 /** The payload must describe the cache's own grid, in the grid's format. */
 function checkGrid(p: DenseSegmentPayload, options: SegmentOptions): void {
   const mismatch = gridMismatch(p, options.grid);
   if (mismatch !== undefined) fail(mismatch);
-  if (p.layout !== "dense") fail(`unsupported layout ${show(p.layout)}`);
+  if (p.layout !== "dense") {
+    fail(`layout must be "dense", got ${kindOf(p.layout)}`);
+  }
 }
 
 /**
@@ -90,20 +115,20 @@ function checkSpan(p: DenseSegmentPayload, options: SegmentOptions): number {
     first = slotOf(p.start, grid);
   } catch {
     return fail(
-      `start ${show(p.start)} is not an aligned safe-integer timestamp`,
+      `start must be an aligned safe-integer timestamp, got ${kindOf(p.start)}`,
     );
   }
   if (!Number.isSafeInteger(p.count) || p.count < 1) {
-    fail(`count must be a positive integer, got ${show(p.count)}`);
+    fail(`count must be a positive integer, got ${kindOf(p.count)}`);
   }
   if (p.count > slotCap) {
-    fail(`count ${p.count} exceeds the slot cap ${slotCap}`);
+    fail(`count exceeds the slot cap ${slotCap}`);
   }
   // A format 2 payload also says which slot its writer gave `start`: zone
   // data that places the instant in another slot refuses it (§4.5).
   if (p.format === 2 && p.startSlot !== first) {
     fail(
-      `startSlot ${show(p.startSlot)} is not the slot of start ${p.start} here`,
+      `startSlot must be the slot of start ${p.start} here, got ${kindOf(p.startSlot)}`,
     );
   }
   // (count - 1) first: `first + count` can round before the subtraction.
@@ -167,7 +192,7 @@ function checkFields(
     if (entry === undefined) fail(`field "${name}" is missing`);
     if (entry.dtype !== dtype) {
       fail(
-        `field "${name}" has dtype ${show(entry.dtype)}, the schema says ${dtype}`,
+        `field "${name}" dtype must be ${dtype} as the schema says, got ${kindOf(entry.dtype)}`,
       );
     }
     const bytes = p.count * FIELD_ARRAYS[dtype].BYTES_PER_ELEMENT;

@@ -17,7 +17,7 @@ import {
   toMs,
 } from "../grid";
 import { DenseSegment } from "../segment/dense";
-import { gridMismatch, segmentFromPayload } from "../segment/payload";
+import { gridMismatch, kindOf, segmentFromPayload } from "../segment/payload";
 import type { Segment, SegmentOptions } from "../segment/types";
 import type {
   DenseSegmentPayload,
@@ -289,20 +289,23 @@ function checkMeta(
     version !== undefined &&
     (typeof version !== "string" || version.length === 0)
   ) {
-    fail(`version must be a non-empty string, got ${show(version)}`);
+    fail(`version must be a non-empty string, got ${kindOf(version)}`);
   }
   const valid = version as string | undefined;
   if (finalizedUntil === undefined)
     return { version: valid, watermark: undefined };
   if (typeof finalizedUntil !== "number") {
-    fail(`finalizedUntil must be a number, got ${show(finalizedUntil)}`);
+    fail(`finalizedUntil must be a number, got ${kindOf(finalizedUntil)}`);
   }
   try {
     const slot = slotAtOrAfter(finalizedUntil, grid);
     return { version: valid, watermark: { t: finalizedUntil, slot } };
   } catch (error) {
     if (!(error instanceof InvalidRangeError)) throw error;
-    return fail(`finalizedUntil: ${error.message}`);
+    // Not error.message, which prints the value (#142 A).
+    return fail(
+      `finalizedUntil must be a timestamp within ±(2^53 - 1) with a grid point at or after it, got ${kindOf(finalizedUntil)}`,
+    );
   }
 }
 

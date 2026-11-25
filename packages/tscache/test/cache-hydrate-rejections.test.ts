@@ -1,9 +1,20 @@
+// Step 148, decision #142 A: describe rejected values by type, including
+// finite numbers. A caller logging the error should not log a numeric
+// identifier or timestamp supplied as the rejected value either.
 import { describe, expect, it, vi } from "vitest";
 import { CacheState } from "../src/engine/cache";
 import { resolveCacheConfig } from "../src/engine/validate";
 import { segmentFromPayload } from "../src/segment/payload";
 import type { DenseSegmentPayload, Snapshot } from "../src/types";
 import { batch, malformedRanges, observe } from "./cache-test-helpers";
+import {
+  engine as calendarEngine,
+  DAY,
+  format2,
+  hydrate,
+  ID,
+  span,
+} from "./calendar-contract-helpers";
 import {
   payloadField,
   snapshotFixture,
@@ -440,4 +451,146 @@ describe("hydrate validates in full before changing state — architecture §4.5
       segments: [{ ...snapshotPayload(), start: 43 }],
     });
   });
+});
+
+describe("hydrate error text — step 148", () => {
+  const marker = "SNAPSHOT-TEXT-MARKER-148";
+  const markerInput = { label: "marker string", value: marker, kind: "string" };
+  const nan = { label: "NaN", value: Number.NaN, kind: "number" };
+  const infinity = { label: "Infinity", value: Infinity, kind: "number" };
+  const finite = {
+    label: "a finite number",
+    value: 987_654_321,
+    kind: "number",
+  };
+  const numericFieldInputs = [markerInput, nan, infinity, finite];
+  const gridFields = ["format", "interval", "alignmentOffset"];
+  const gridErrors = gridFields.flatMap((field) =>
+    numericFieldInputs.map((input) => ({ field, ...input })),
+  );
+
+  function expectTypeOnly(
+    action: () => unknown,
+    prefix: RegExp,
+    { field, kind, value }: { field: string; kind: string; value: unknown },
+  ) {
+    const { message } = thrown(action);
+    expect(message).toMatch(prefix);
+    expect(message).toMatch(new RegExp(`\\b${field}\\b`));
+    expect(message).not.toContain(marker);
+    if (typeof value === "number") expect(message).not.toContain(String(value));
+    // An expected type (e.g. "must be a number") does not identify what arrived.
+    expect(message).toMatch(
+      new RegExp(
+        `\\b(?:got|received|found) (?:an? )?(?:empty |(?:non-)?finite )?${kind}\\b`,
+      ),
+    );
+  }
+
+  it.each(gridErrors)(
+    "V13 names the received type of envelope $field for $label without quoting it",
+    (failure) => {
+      const { c } = receiver();
+      const { field, value } = failure;
+      const input = { ...snapshotFixture(), [field]: value } as Snapshot;
+      expectTypeOnly(() => c.hydrate(input), /^invalid snapshot:/, failure);
+    },
+  );
+
+  it.each([
+    ...gridErrors,
+    { field: "layout", ...markerInput },
+    ...numericFieldInputs.map((input) => ({ field: "start", ...input })),
+    ...[markerInput, nan, infinity, { ...finite, value: -finite.value }].map(
+      (input) => ({ field: "count", ...input }),
+    ),
+  ])(
+    "V14 names the received type of payload $field for $label without quoting it",
+    (failure) => {
+      const { c } = receiver();
+      const { field, value } = failure;
+      const payload = { ...snapshotPayload(), [field]: value };
+      const input = { ...snapshotFixture(), segments: [payload] } as Snapshot;
+      expectTypeOnly(
+        () => c.hydrate(input),
+        /^invalid segment payload:/,
+        failure,
+      );
+    },
+  );
+
+  it.each(numericFieldInputs)(
+    "V15 names the received type of calendar payload startSlot for $label without quoting it",
+    (failure) => {
+      const daily = { unit: "day", zone: "UTC" } as const;
+      const writer = calendarEngine(daily);
+      writer.put(ID, { timestamps: [DAY], fields: { value: [12] } });
+      const snapshot = format2(writer.snapshot(ID, span(DAY)));
+      const payload = snapshot.segments[0];
+      if (payload === undefined)
+        throw new Error("Missing calendar fixture segment");
+      const input = {
+        ...snapshot,
+        segments: [{ ...payload, startSlot: failure.value }],
+      };
+      const reader = calendarEngine(daily);
+      expectTypeOnly(
+        () => hydrate(reader, input),
+        /^invalid segment payload:/,
+        { field: "startSlot", ...failure },
+      );
+    },
+  );
+
+  it("V16 names the received type of a payload field dtype without quoting it", () => {
+    const { c } = receiver();
+    const payload = snapshotPayload();
+    const fields = payload.fields.map((field) =>
+      field.name === "volume" ? { ...field, dtype: marker } : field,
+    );
+    const input = {
+      ...snapshotFixture(),
+      segments: [{ ...payload, fields }],
+    } as unknown as Snapshot;
+    expectTypeOnly(() => c.hydrate(input), /^invalid segment payload:/, {
+      field: "dtype",
+      ...markerInput,
+    });
+  });
+
+  it.each([
+    // Nonempty strings are valid versions. Use an empty string for the string
+    // diagnostic and put the marker in a non-string version for the leak check.
+    { field: "version", label: "an empty string", value: "", kind: "string" },
+    {
+      field: "version",
+      label: "a marker object",
+      value: { marker },
+      kind: "object",
+    },
+    { field: "version", ...finite },
+    { field: "finalizedUntil", ...markerInput },
+    { field: "finalizedUntil", ...nan },
+    { field: "finalizedUntil", ...infinity },
+    {
+      field: "finalizedUntil",
+      label: "a finite out-of-domain number",
+      value: 2 ** 53 + 2,
+      kind: "number",
+    },
+    {
+      field: "finalizedUntil",
+      label: "a finite number with no following grid point",
+      value: Number.MAX_SAFE_INTEGER,
+      kind: "number",
+    },
+  ])(
+    "V17 names the received type of metadata $field for $label without quoting it",
+    (failure) => {
+      const { c } = receiver();
+      const { field, value } = failure;
+      const input = { ...snapshotFixture(), [field]: value } as Snapshot;
+      expectTypeOnly(() => c.hydrate(input), /^invalid snapshot:/, failure);
+    },
+  );
 });
