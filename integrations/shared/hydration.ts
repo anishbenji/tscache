@@ -106,7 +106,18 @@ export function dehydrate({ range, result, snapshot }: ServerRead): Dehydrated {
   };
 }
 
-/** The server's read as it was, typed arrays and all. */
+/**
+ * The server's read as it was, typed arrays and all. The snapshot is
+ * decoded when `snapshot` is first read, not here: a page calls this before
+ * `connect`, and a snapshot that `decodeSnapshot` refuses (a format this
+ * library does not know, a mask that is not base64) must count as "not
+ * seeded" like any snapshot that fails to apply (decision 98 C), rather than
+ * stop the page from mounting. Reading `snapshot` then throws that
+ * TscacheError, each time; `hydrateRead` reads it inside its own call, so
+ * `connect` sees a rejection. A decoded snapshot is kept, and the encoded
+ * one released: the read lives as long as its connection, which reseeds
+ * replacement clients from it, and need not keep the page's text too.
+ */
 export function rehydrate(config: CacheConfig, value: Dehydrated): ServerRead {
   const fields = mapFields(value.fields, (text, name) => {
     const dtype = Object.hasOwn(config.fields, name)
@@ -119,6 +130,8 @@ export function rehydrate(config: CacheConfig, value: Dehydrated): ServerRead {
     }
     return new ARRAYS[dtype](fromBase64(text));
   });
+  let encoded: EncodedSnapshot | undefined = value.snapshot;
+  let snapshot: Snapshot | undefined;
   return {
     range: value.range,
     result: {
@@ -127,7 +140,14 @@ export function rehydrate(config: CacheConfig, value: Dehydrated): ServerRead {
       coverage: value.coverage,
       misses: value.misses,
     },
-    snapshot: decodeSnapshot(value.snapshot),
+    get snapshot() {
+      if (snapshot === undefined) {
+        // Defined until the decode succeeds, which clears it.
+        snapshot = decodeSnapshot(encoded as EncodedSnapshot);
+        encoded = undefined;
+      }
+      return snapshot;
+    },
   };
 }
 
@@ -138,14 +158,17 @@ export function rehydrate(config: CacheConfig, value: Dehydrated): ServerRead {
  * another dataset version is refused. The snapshot is cloned, so one read
  * can seed every client. A worker from before `hydrate` answers "unknown
  * op": that counts as nothing applied, and the cache fetches instead (N37).
- * Any other failure is a bug and propagates.
+ * Any other failure propagates, a snapshot `rehydrate` could not decode
+ * included; `connect` (connection.ts) counts it as
+ * "not seeded" too and warns in development (decision 98 C).
  */
 export async function hydrateRead(
   cache: CacheHandle,
-  { snapshot }: ServerRead,
+  read: ServerRead,
 ): Promise<HydrateResult> {
   try {
-    return await cache.hydrate(snapshot);
+    // Read here, so a snapshot `rehydrate` could not decode rejects.
+    return await cache.hydrate(read.snapshot);
   } catch (error) {
     // Exactly the RPC server's answer to an op it lacks (§4.7).
     if (

@@ -115,6 +115,17 @@ describe("dehydrate / rehydrate", () => {
     expect(own(known.fields, "constructor")).toEqual([3, 4]);
   });
 
+  it("decodes the snapshot once and keeps it, and refuses a bad one on every read", async () => {
+    const value = JSON.parse(JSON.stringify(dehydrate(await serverRead())));
+    const back = rehydrate(config, value);
+    const first = back.snapshot;
+    expect(back.snapshot).toBe(first);
+    // A snapshot decodeSnapshot refuses: a string, not an encoded object.
+    const bad = rehydrate(config, { ...value, snapshot: "not a snapshot" });
+    expect(() => bad.snapshot).toThrow(TscacheError);
+    expect(() => bad.snapshot).toThrow(TscacheError);
+  });
+
   it("refuses a field the cache config lacks", async () => {
     const value = dehydrate(await serverRead());
     expect(() => rehydrate({ ...config, fields: { v: "f64" } }, value)).toThrow(

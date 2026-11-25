@@ -1,6 +1,7 @@
 import {
   type CacheConfig,
   type ClientEvents,
+  type ClientOptions,
   createClient,
   type TscacheClient,
 } from "@anishbenji/tscache";
@@ -21,10 +22,10 @@ export interface Lossy {
 /**
  * An in-process client, whose worker cannot be lost, behind a facade that
  * fakes the loss: `lose()` fires workerLost and fails every later call, as
- * a lost client does.
+ * a lost client does. `options` go to the client, a fetcher for example.
  */
-export async function lossy(): Promise<Lossy> {
-  const real = await createClient({ mode: "in-process" });
+export async function lossy(options: ClientOptions = {}): Promise<Lossy> {
+  const real = await createClient({ ...options, mode: "in-process" });
   const listeners = new Set<(e: ClientEvents["workerLost"]) => void>();
   let lost = false;
   const live = <T>(call: () => Promise<T>): Promise<T> =>

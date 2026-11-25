@@ -150,10 +150,19 @@ provisional day.
   `hydrate` refuses a snapshot of another version (architecture §2.8). A
   backend that reports no version gets no such check: a restatement between
   the server's read and the browser's hydrate is undetectable (§2.4).
-- A seed that fails, for any reason but a worker without `hydrate`, fails
-  the connection: the log reads `could not connect`, and the page does not
-  try again until it is reloaded, unless the worker was lost during the
-  seeding, which connects a new client.
+- A snapshot that fails to apply (a malformed or foreign one, a failed
+  write) leaves the cache not seeded (architecture §2.8): the page connects,
+  the log reads `snapshot from the server: not applied`, and the cache
+  fetches whatever of the window it does not already cover: all of it in a
+  fresh tab, less beside a tab that already filled the shared cache.
+  Hydration text that is not JSON counts so too. A development build also
+  warns in the console with the error's name, never its message, which can
+  quote the snapshot. A worker without `hydrate` (a stale cached script) is
+  not seeded either, silently: the log reads `snapshot from the server:
+  nothing applied where the cache had no coverage`, and nothing is warned.
+  Only a cache that cannot be opened fails the connection: the log reads
+  `could not connect`, and the page does not try again until it is reloaded,
+  unless the worker is lost meanwhile, which connects a new client.
 
 ## What else is in here
 
