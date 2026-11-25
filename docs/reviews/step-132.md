@@ -1,6 +1,6 @@
 # Step 132 — a failed or slow load deleted the records it could not read (user decisions 95, B, and 113, A)
 
-Branch: `fix/132-load-timeout-cleanup` · Reviewer: the director's Codex gate · Rounds: 0 (built by a child; no review round run here) · Status: decided (user decision 95, 2026-11-21) and applied in phase B · Verdict after triage: merge after the director's Codex gate
+Branch: `fix/132-load-timeout-cleanup` · Reviewer: Codex (gate), with Claude pre-reviews, the security lane and Fable finding checks · Rounds: 6 · Status: closed out after round 6 without a round 7 (user decision #145 A, 2026-11-25; three residuals carried to step 144, see Close-out) · Verdict after triage: merge
 
 ## The report
 
