@@ -304,7 +304,7 @@ function checkMeta(
     if (!(error instanceof InvalidRangeError)) throw error;
     // Not error.message, which prints the value (#142 A).
     return fail(
-      `finalizedUntil must be a timestamp within ±(2^53 - 1) with a grid point at or after it, got ${kindOf(finalizedUntil)}`,
+      `finalizedUntil must be a timestamp ${grid.calendar === undefined ? "within ±(2^53 - 1)" : "inside the calendar's domain"} with a grid point at or after it, got ${kindOf(finalizedUntil)}`,
     );
   }
 }

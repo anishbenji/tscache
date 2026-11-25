@@ -74,7 +74,7 @@ export function gridMismatch(
     alignmentOffset: number;
   },
 ): string | undefined {
-  const { format } = stored;
+  const { format, interval, alignmentOffset } = stored;
   const calendar = typeof own.interval !== "number";
   if (format !== 1 && format !== 2) {
     return `format must be 1 or 2, got ${kindOf(format)}`;
@@ -87,20 +87,21 @@ export function gridMismatch(
       ? undefined
       : "grid differs from the cache grid";
   }
-  if (stored.interval !== own.interval) {
-    return `interval must be the cache grid's ${own.interval}, got ${kindOf(stored.interval)}`;
+  if (interval !== own.interval) {
+    return `interval must be the cache grid's ${own.interval}, got ${kindOf(interval)}`;
   }
-  return stored.alignmentOffset === own.alignmentOffset
+  return alignmentOffset === own.alignmentOffset
     ? undefined
-    : `alignmentOffset must be the cache grid's ${own.alignmentOffset}, got ${kindOf(stored.alignmentOffset)}`;
+    : `alignmentOffset must be the cache grid's ${own.alignmentOffset}, got ${kindOf(alignmentOffset)}`;
 }
 
 /** The payload must describe the cache's own grid, in the grid's format. */
 function checkGrid(p: DenseSegmentPayload, options: SegmentOptions): void {
   const mismatch = gridMismatch(p, options.grid);
   if (mismatch !== undefined) fail(mismatch);
-  if (p.layout !== "dense") {
-    fail(`layout must be "dense", got ${kindOf(p.layout)}`);
+  const { layout } = p;
+  if (layout !== "dense") {
+    fail(`layout must be "dense", got ${kindOf(layout)}`);
   }
 }
 
@@ -111,30 +112,35 @@ function checkGrid(p: DenseSegmentPayload, options: SegmentOptions): void {
  */
 function checkSpan(p: DenseSegmentPayload, options: SegmentOptions): number {
   const { grid, slotCap } = options;
-  const { start } = p;
+  let start: number | undefined;
   let first: number;
   try {
+    start = p.start;
     first = slotOf(start, grid);
   } catch {
     return fail(
       `start must be an aligned safe-integer timestamp, got ${kindOf(start)}`,
     );
   }
-  if (!Number.isSafeInteger(p.count) || p.count < 1) {
-    fail(`count must be a positive integer, got ${kindOf(p.count)}`);
+  const { count } = p;
+  if (!Number.isSafeInteger(count) || count < 1) {
+    fail(`count must be a positive integer, got ${kindOf(count)}`);
   }
-  if (p.count > slotCap) {
+  if (count > slotCap) {
     fail(`count exceeds the slot cap ${slotCap}`);
   }
   // A format 2 payload also says which slot its writer gave `start`: zone
   // data that places the instant in another slot refuses it (§4.5).
-  if (p.format === 2 && p.startSlot !== first) {
-    fail(
-      `startSlot must be the slot of start ${start} here, got ${kindOf(p.startSlot)}`,
-    );
+  if (p.format === 2) {
+    const { startSlot } = p;
+    if (startSlot !== first) {
+      fail(
+        `startSlot must be the slot of start ${start} here, got ${kindOf(startSlot)}`,
+      );
+    }
   }
   // (count - 1) first: `first + count` can round before the subtraction.
-  const last = first + (p.count - 1);
+  const last = first + (count - 1);
   if (!inDomain(last, grid)) {
     fail(
       grid.calendar === undefined
@@ -192,9 +198,10 @@ function checkFields(
   for (const [name, dtype] of schema) {
     const entry = entries.get(name);
     if (entry === undefined) fail(`field "${name}" is missing`);
-    if (entry.dtype !== dtype) {
+    const got: unknown = entry.dtype;
+    if (got !== dtype) {
       fail(
-        `field "${name}" dtype must be ${dtype} as the schema says, got ${kindOf(entry.dtype)}`,
+        `field "${name}" dtype must be ${dtype} as the schema says, got ${kindOf(got)}`,
       );
     }
     const bytes = p.count * FIELD_ARRAYS[dtype].BYTES_PER_ELEMENT;

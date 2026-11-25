@@ -14,6 +14,7 @@ import {
   hydrate,
   ID,
   span,
+  utc,
 } from "./calendar-contract-helpers";
 import {
   payloadField,
@@ -631,4 +632,98 @@ describe("hydrate error text — step 148", () => {
       expectTypeOnly(() => c.hydrate(input), /^invalid snapshot:/, failure);
     },
   );
+
+  function onFirstRead(target: object, field: string, read: () => unknown) {
+    const valid: unknown = Reflect.get(target, field);
+    let reads = 0;
+    Object.defineProperty(target, field, {
+      enumerable: true,
+      get: () => (reads++ === 0 ? read() : valid),
+    });
+  }
+
+  it("V18 wraps a throwing first read of payload start without printing its value", () => {
+    const { c } = receiver();
+    const payload = snapshotPayload();
+    const { start } = payload;
+    onFirstRead(payload, "start", () => {
+      throw new RangeError(marker);
+    });
+    const input = { ...snapshotFixture(), segments: [payload] };
+    const { message } = thrown(() => c.hydrate(input));
+    expect(message).toMatch(
+      /^invalid segment payload: start must be an aligned safe-integer timestamp\b/,
+    );
+    expect(message).not.toContain(marker);
+    expect(message).not.toMatch(new RegExp(`\\b${start}\\b`));
+  });
+
+  it.each([
+    { location: "envelope", field: "interval", ...markerInput },
+    { location: "envelope", field: "alignmentOffset", ...markerInput },
+    { location: "payload", field: "interval", ...markerInput },
+    { location: "payload", field: "alignmentOffset", ...markerInput },
+    { location: "payload", field: "layout", ...finite },
+    { location: "payload", field: "count", ...markerInput },
+  ])(
+    "V19 names the first-read type of $location $field without quoting it",
+    (failure) => {
+      const { c } = receiver();
+      const payload = snapshotPayload();
+      const input = { ...snapshotFixture(), segments: [payload] };
+      const envelopeField = failure.location === "envelope";
+      onFirstRead(
+        envelopeField ? input : payload,
+        failure.field,
+        () => failure.value,
+      );
+      expectTypeOnly(
+        () => c.hydrate(input),
+        envelopeField ? /^invalid snapshot:/ : /^invalid segment payload:/,
+        failure,
+      );
+    },
+  );
+
+  const dailyUtc = { unit: "day", zone: "UTC" } as const;
+
+  function dailySnapshot() {
+    const writer = calendarEngine(dailyUtc);
+    writer.put(ID, { timestamps: [DAY], fields: { value: [12] } });
+    return format2(writer.snapshot(ID, span(DAY)));
+  }
+
+  it("V19 names the first-read type of calendar payload startSlot without quoting it", () => {
+    const input = dailySnapshot();
+    const payload = input.segments[0];
+    if (payload === undefined || payload.format !== 2)
+      throw new Error("Missing calendar fixture segment");
+    onFirstRead(payload, "startSlot", () => marker);
+    const reader = calendarEngine(dailyUtc);
+    expectTypeOnly(() => hydrate(reader, input), /^invalid segment payload:/, {
+      field: "startSlot",
+      ...markerInput,
+    });
+  });
+
+  it("V19 names the first-read type of payload field dtype without quoting it", () => {
+    const { c } = receiver();
+    const payload = snapshotPayload();
+    onFirstRead(payloadField(payload, "volume"), "dtype", () => finite.value);
+    const input = { ...snapshotFixture(), segments: [payload] };
+    expectTypeOnly(() => c.hydrate(input), /^invalid segment payload:/, {
+      field: "dtype",
+      ...finite,
+    });
+  });
+
+  it("V20 names the calendar domain for a watermark before the first slot without printing a number", () => {
+    const finalizedUntil = utc("0001-01-01T00:00:00.000Z") - 1;
+    const input = { ...dailySnapshot(), finalizedUntil };
+    const reader = calendarEngine(dailyUtc);
+    const { message } = thrown(() => hydrate(reader, input));
+    expect(message).toMatch(/^invalid snapshot: finalizedUntil\b/);
+    expect(message).toMatch(/\bcalendar(?: grid)?(?:'s)? domain\b/i);
+    expect(message).not.toMatch(/\d/);
+  });
 });
