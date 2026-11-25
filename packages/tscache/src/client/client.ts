@@ -71,11 +71,13 @@ export interface TscacheClient {
    * origin (N132): `lib` is that worker's tscache version. This tab's worker
    * no longer persists; the tab keeps working from memory and its fetcher,
    * and a reload joins the newer worker. Undefined until then. When the
-   * worker was superseded before `createClient` resolved, this is set from
-   * the start and the `superseded` event follows on the next macrotask, so
-   * a listener attached right after `await createClient()` hears it;
-   * otherwise the event fires when this is set. Read this in code that may
-   * run after the event. Only a worker that lists the feature can report
+   * `superseded` event reached this tab before `createClient` resolved, this
+   * is set from the start and the event follows on the next macrotask or
+   * with the worker's next message, whichever comes first, so a listener
+   * attached in the same turn as `await createClient()` hears it. An event still on its way then (the
+   * worker was superseded, but its message had not reached this tab)
+   * arrives live and sets this when it does. Read this in code that may run
+   * after the event. Only a worker that lists the feature can report
    * it: where `client.features.has('superseded')` is false (a dedicated
    * worker, the in-process hosting, an older worker script), this stays
    * undefined for good and means "not known", not "current".

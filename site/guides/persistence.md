@@ -78,8 +78,12 @@ A fourth reason, `'superseded'`, is not a failure: a newer deploy's worker is ru
 owns the records now ([Stale scripts after a deploy](/guides/workers#older-tabs-are-told-superseded)).
 The older worker stops writing, for every persisted cache at once, and deletes nothing of its own
 accord; a cache it opens later loads nothing. Its `invalidate`, `clear` and other removals resolve at
-once and leave the records, while `clearAll()` still empties the disk and resolves once that clear has
-settled. Its tabs keep working from memory until they are reloaded.
+once and do not currently reach the disk; their deletion is restored before 0.3.0 is released. Until
+then a later load, the newer worker's or a later session's, can serve those records as current, until
+a newer dataset version, a watermark change, a rewrite of that range or `clearAll()` clears them.
+`clearAll()` still empties the disk and resolves once that clear has settled. A deletion still waiting when the worker is superseded, for a cache that stopped earlier for
+one of the reasons above, does not run, and those records stay too. The older worker's tabs keep
+working from memory until they are reloaded.
 
 ## Versions across sessions
 
@@ -87,8 +91,8 @@ A stored range is served in every later session without asking the backend, so a
 does not announce lasts across reloads too. Set `version` when the dataset has one: records of another
 version are never loaded. Without one, `invalidate` or `clear` on your own clock removes stored ranges as
 well ([Expiry and other patterns](/guides/patterns)), except in a tab whose worker is superseded
-([Failures](#failures)): there the records stay, for the newer worker to load, and only `clearAll()`
-removes them.
+([Failures](#failures)): there, until 0.3.0 is released, the records stay and a later load can serve
+them, and `clearAll()` removes them.
 
 ## Keeping the storage
 

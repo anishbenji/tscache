@@ -77,12 +77,15 @@ for another worker's call sends its tabs `cacheCleared` with `'clear-all'` and `
 `cleared: true` and no `requestId`, for every cache, once each time it clears, which can be more than
 once for one call. Read again as the rule says: a fetching read. With k other workers running, a worker
 clears up to k + 1 times for one `clearAll`, so a view that follows the rule fetches up to k + 1 times
-and can show misses in between; the read after the last event fills it. k is 0 unless tabs of two
-deploys are open.
+and can show misses in between; the read after the last event fills it. k is 0 while one SharedWorker
+runs in the origin. More run while tabs of two deploys that differ in the worker URL, the tscache
+version or the fetcher URL are open
+([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)), or when pages name one
+fetcher module by two strings ([One SharedWorker per generation](/guides/workers#one-sharedworker-per-generation)).
 
 ### Hostings and older workers
 
-With a SharedWorker a change in any tab reaches every listening tab of the origin. A dedicated worker
+With a SharedWorker a change in any tab reaches every listening tab of that worker. A dedicated worker
 or the in-process hosting has a cache per tab, so a tab hears only its own changes. A worker script
 from before change events (a stale cached script during a deploy) never sends one: `client.features`
 then lacks `'cacheChanged'`, the listener is never called, and a development build warns once. Check

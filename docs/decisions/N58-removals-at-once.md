@@ -8,4 +8,12 @@ Row N58 of the decision table in `docs/architecture.md` §8, whose introduction 
 
 ## Amendment, 2026-11-25
 
-User decision #143 (option A, step 135): a note, the decision itself unchanged. After a worker is superseded (N129), its per-cache removals (`invalidate`, `clear`, a watermark moved back or set first) answer at once and leave the records: the superseded worker writes nothing more, and the newer worker owns the disk. Its `clearAll` still runs the job above and waits for its disk clear. The one rule for when a removal answers, this exception included, is architecture §4.10.6 (Durability of removals; Superseding).
+As of 2026-11-25, N129 narrows N58 for superseded workers: per-cache removals are answered at once and records stay on disk. This is temporary: step 150 restores strict deletion for those removals (decision #146 B), and M5 is not released before it.
+
+- N129 is user decision 71, row F5 option (a), 2026-11-16.
+- The narrowing of N58 is user decision #143, 2026-11-25.
+- The fix is user decision #146 B, 2026-11-25.
+
+See [N129](N129-superseded-stops-persisting.md).
+
+`clearAll` is unaffected: on a superseded worker it still runs the job above and waits for its disk clear.

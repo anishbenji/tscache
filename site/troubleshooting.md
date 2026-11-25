@@ -25,12 +25,12 @@ of its own ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a
 
 ## `createClient` rejects with `this worker already runs fetcher`
 
-A `ConfigError` whose `code` is `'fetcher-conflict'`: the worker already runs another fetcher module,
-and a worker runs one. From 0.3.0 a deploy that changes the fetcher's URL no longer does this, because
-the fetcher URL is part of the SharedWorker's name and the newer tab gets a worker of its own. It
+A `ConfigError`: the worker already runs another fetcher module, and a worker runs one. From 0.3.0 a
+deploy that changes the fetcher's URL no longer does this, because the fetcher URL is part of the SharedWorker's name and the newer tab gets a worker of its own. It
 remains for a page of 0.2.0 that reaches a later release's worker script at a fixed URL: reload that
-page ([A stale worker script](/guides/workers#a-stale-worker-script)). Recognise the error by its
-`code`, not by its message.
+page ([A stale worker script](/guides/workers#a-stale-worker-script)). Clients from 0.3.0 set the
+error's `code` to `'fetcher-conflict'`; recognise it by that code, not by its message. A 0.2.0 page,
+the one that meets it now, sees the same `ConfigError` with the message only.
 
 ## A tab hears `superseded`, or `persistStopped` with `'superseded'`
 

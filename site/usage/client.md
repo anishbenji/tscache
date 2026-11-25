@@ -58,10 +58,11 @@ Empties every cache, keeping their configs ([Invalidation and clearing](/concept
 the browser has IndexedDB it also empties the [persisted](/guides/persistence) records, from a client of
 any hosting, and resolves once they are gone or the clear gave up; it never rejects for a disk failure.
 
-From 0.3.0 it also reaches every other SharedWorker of the origin, such as an older deploy's that tabs
-left open still use: each clears its caches and the disk too, so a logout leaves no tab with the data.
-The promise does not wait for those workers, and their tabs can hear `cacheCleared` more than once for
-one call ([Sensitive data and logout](/guides/persistence#sensitive-data-and-logout)).
+From 0.3.0 it also reaches every other SharedWorker of the origin of 0.3.0 or later, such as an older
+deploy's that tabs left open still use: each clears its caches and the disk too, so none of their tabs
+keeps the data. A 0.1.0 or 0.2.0 worker is not reached
+([Sensitive data and logout](/guides/persistence#sensitive-data-and-logout)). The promise does not wait
+for those workers, and their tabs can hear `cacheCleared` more than once for one call.
 
 <<< @/snippets/client.ts#clear-all{ts}
 

@@ -155,8 +155,10 @@ a worker runs:
 - Tabs that agree on the worker URL, the tscache version and the fetcher URL share one worker. A deploy
   that changes only application code changes none of the three, and its tabs join the running worker,
   as before.
-- A deploy that changes the fetcher's URL, the tscache version or the worker bundle starts a worker of
-  its own. Its tabs are never refused by the old worker and never run the old worker's code. Until
+- A deploy that changes the fetcher's URL, the tscache version or the worker URL starts a worker of
+  its own. Its tabs are never refused by the old worker and never run the old worker's code. A worker
+  rebuilt behind a fixed URL, with the tscache version and the fetcher URL unchanged, is joined as it
+  runs: new tabs use the running worker's code until it ends. Until
   0.2.0 a deploy that changed only the fetcher was refused with `ConfigError` in every new tab until
   the old tabs had closed, and at a fixed worker URL new tabs ran against the old worker's code.
 
@@ -258,9 +260,10 @@ one served from an old HTTP cache entry, or one replaced at a fixed URL under a 
   naming both versions.
 
 The refusal of a second fetcher module still exists, for a connection that arrives without the name:
-a page of 0.2.0 that loads a later release's worker script at a fixed URL. It is a `ConfigError` whose
-`code` is `'fetcher-conflict'`. Recognise it by that code, not by its message: every other
-`ConfigError` has no `code`.
+a page of 0.2.0 that loads a later release's worker script at a fixed URL. It is a `ConfigError`.
+Clients from 0.3.0 set its `code` to `'fetcher-conflict'`; recognise it by that code, not by its
+message, since every other `ConfigError` has no `code`. A 0.2.0 page, the one that meets it now, sees
+the same `ConfigError` with the message only.
 
 ## Losing the worker
 
