@@ -21,7 +21,7 @@ User decision 139 C (2026-11-25): step 141's syntax check (`site/scripts/check-m
 - `E2E_EXAMPLES=docs bunx playwright test --project docs` (through `heavy-run.sh`) on the site built before the theme change: all 16 page tests failed with `site/how-it-works/<page>.md (<scheme>): Mermaid drew its error box (marks added while loading)`. After the theme change and `bun run docs:build`: 17 passed (5.1 s).
 - Broken diagram: with `A ->>> ((broken` added after `participant A as Tab A` in `site/how-it-works/read.md` and the site rebuilt, the two `read.md` tests failed with `site/how-it-works/read.md (light) logged errors` and the same for dark, the console error being Mermaid's `Parse error on line 4: ... Expecting 'link', '+', '-', '()', 'ACTOR', got 'INVALID'`; the other 15 passed. The line was removed with the Edit tool and the site rebuilt; it was never committed.
 - `bun scripts/test-clocks.ts`: 216 files clean (it reads `e2e/`). `tsc -p e2e` and `tsc -p site` pass.
-- `bun run ci`: see the step report for the full run and the time the `docs` project adds.
+- `bun run ci` on 1f326ba7 (through `heavy-run.sh`): exit 0 in about 6 minutes; Playwright 219 passed (2.1 m), 17 of them in the `docs` project. Those 17 tests took 3.0 s together and run beside the other projects' tests, so the wall time they add is a few seconds, plus `vitepress preview` starting alongside the other servers.
 
 ## Decision concerns
 
