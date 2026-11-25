@@ -4,9 +4,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { CacheState } from "../src/engine/cache";
 import { resolveCacheConfig } from "../src/engine/validate";
+import { TscacheError } from "../src/errors";
 import { segmentFromPayload } from "../src/segment/payload";
 import type { DenseSegmentPayload, Snapshot } from "../src/types";
-import { batch, malformedRanges, observe } from "./cache-test-helpers";
+import {
+  batch,
+  cache,
+  malformedRanges,
+  observe,
+  result,
+} from "./cache-test-helpers";
 import {
   engine as calendarEngine,
   DAY,
@@ -726,4 +733,71 @@ describe("hydrate error text — step 148", () => {
     expect(message).toMatch(/\bcalendar(?: grid)?(?:'s)? domain\b/i);
     expect(message).not.toMatch(/\d/);
   });
+
+  const laterCount = 123_456;
+
+  it.each([
+    {
+      field: "count",
+      label: "a much larger integer",
+      value: laterCount,
+      derivedSizes: [laterCount / 8, laterCount * 8, laterCount * 2],
+    },
+    { field: "count", label: "a bigint", value: 987_654n },
+    { field: "count", ...infinity },
+    ...["mask", "fields", "data"].map((field) => ({ field, ...markerInput })),
+  ])(
+    "V21 reads payload $field once when a later read would return $label",
+    ({
+      field,
+      value,
+      derivedSizes,
+    }: {
+      field: string;
+      value: unknown;
+      derivedSizes?: number[];
+    }) => {
+      const c = cache({ segmentSlotCap: 8 });
+      const before = observe(c);
+      const payload = snapshotPayload();
+      const target =
+        field === "data" ? payloadField(payload, "volume") : payload;
+      const valid: unknown = Reflect.get(target, field);
+      let reads = 0;
+      Object.defineProperty(target, field, {
+        enumerable: true,
+        get: () => (reads++ === 0 ? valid : value),
+      });
+      const input = { ...snapshotFixture(), segments: [payload] };
+      const coverage = [{ start: 3, end: 43 }];
+
+      let outcome: ReturnType<CacheState["hydrate"]>;
+      try {
+        outcome = c.hydrate(input);
+      } catch (error) {
+        if (!(error instanceof TscacheError)) throw error;
+        for (const undisclosed of [value, ...(derivedSizes ?? [])]) {
+          expect(error.message).not.toContain(String(undisclosed));
+        }
+        expect(reads).toBeLessThanOrEqual(1);
+        expect(observe(c)).toEqual(before);
+        return;
+      }
+
+      expect(reads).toBe(1);
+      expect(outcome).toEqual({ applied: coverage });
+      expect(c.get(input.range)).toEqual(
+        result(
+          [3, 23, 43],
+          coverage,
+          [
+            { start: -7, end: -7 },
+            { start: 53, end: 73 },
+          ],
+          [10, Number.NaN, 30],
+          [1, 2, 3],
+        ),
+      );
+    },
+  );
 });
