@@ -272,7 +272,7 @@ class Client implements TscacheClient {
       this.#startup = () => {
         let failure: { error: unknown } | undefined;
         for (const step of fallbacks) {
-          if (this.#ended !== undefined) return;
+          if (this.#ended !== undefined) break;
           try {
             this.#events.emit("modeFallback", step);
           } catch (error) {
