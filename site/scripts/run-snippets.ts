@@ -803,8 +803,8 @@ const RUNS: Record<string, Run> = {
         !String(warning[0]?.[0]).includes("invalid snapshot"),
       `after a failed seed, logged ${JSON.stringify(warning)}`,
     );
-    // Snapshots whose errors would quote them: one encoded twice, which
-    // decodeSnapshot refuses as a string and quotes whole, and one whose
+    // Snapshots that are refused: one encoded twice, which decodeSnapshot
+    // refuses as a string (naming its type only, step 146), and one whose
     // field lost its opening quote, which JSON.parse quotes in part. The
     // read fetches, and the one warning carries none of the snapshot.
     const MARKER = "SECRETMARKER";
