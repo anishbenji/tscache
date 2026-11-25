@@ -1,6 +1,6 @@
 # Step 146 — `decodeSnapshot` stops quoting its input in the error
 
-Branch: `fix/146-snapshot-error-no-input` · Reviewer: director (one-line fix on a protected path, user-approved) · Rounds: 0 · Status: settled · Verdict after triage: merge
+Branch: `fix/146-snapshot-error-no-input` · Reviewer: Codex (gate), with a Claude pre-review and the security lane · Rounds: 2 · Status: settled after round 2 (its one P2 fixed; no further gate round) · Verdict after triage: merge
 
 ## Scope
 
@@ -66,3 +66,15 @@ Verdict: merge after fixes. The director's finding check (Fable) found both find
 | ---- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R1-1 | P1  | A revoked callable proxy throws the wrong error. `kindOf` in `snapshot.ts` called `Array.isArray` on every non-null value, and `Array.isArray` throws a native `TypeError` on a revoked proxy. On `main`, `decodeSnapshot` throws the documented `TscacheError` for it (checklist §10, architecture §2.8) | accepted (finding check: VALID) | `kindOf` calls `Array.isArray` only when `typeof value === "object"`, so a callable proxy, revoked or not, is named "a function". Tests first, in the step 146 block of `snapshot-codec.test.ts`: a plain function and a revoked callable proxy (`Proxy.revocable(() => {}, {})`, revoked) each throw `TscacheError` with exactly "invalid encoded snapshot: must be an object, got a function". Before the fix the proxy case failed (`expected TypeError: Cannot perform 'IsArray' on a … to be an instance of TscacheError`); the plain function passed. Revoked object and array proxies are unchanged: they throw `TypeError` on `main` too (`isObject`), so they are not a regression of this step |
 | R1-2 | nit | Two intermediate commits left CI red: the fix commit and the triage commit changed the decoder while `integrations/test/connection.test.ts` still asserted the old quoting message, until a later test commit corrected it (AGENTS.md: the repo is green after every commit)                              | accepted (finding check: VALID) | The unpublished history was rebuilt from `main`: the fix commit now carries the connection test change, the triage commit carries its triage lines, and the docs commit follows unchanged except that the pre-review line names the reviewed commits in words instead of a hash that no longer exists. Every rewritten commit is authored and committed with the GitHub noreply address. At the new fix commit, `bunx vitest run integrations/test/connection.test.ts packages/tscache/test/snapshot-codec.test.ts` passed (79 tests)                                                                                                                                                                    |
+
+Security lane (Claude), run 2, on the rewritten history: no findings.
+
+## Round 2 (Codex)
+
+Verdict: merge after fixes. Both round 1 fixes confirmed; no new code findings. The director's finding check (Fable) found the one finding valid.
+
+| #    | Sev | Finding                                                                                                              | Decision                        | Resolution                                                    |
+| ---- | --- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------- |
+| R2-1 | P2  | This file's header said `Rounds: 0 · Status: settled` while the file recorded a round 1 P1 that required a re-review | accepted (finding check: VALID) | Header updated to two Codex rounds and settled after round 2. |
+
+Settled after round 2: no P0 or P1 in round 2 (docs/workflow.md, step 6).
