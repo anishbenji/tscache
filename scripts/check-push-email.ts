@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 /**
  * Pre-push check (step 149): refuses a push whose outgoing commits carry an
  * author or committer address other than the repository's noreply address.
@@ -6,14 +7,23 @@
  *
  * Reads git's pre-push stdin, one `<local ref> <local sha> <remote ref>
  * <remote sha>` line per pushed ref, and checks for each:
- * - an existing remote ref: `<remote sha>..<local sha>`;
+ * - an existing remote ref: the commits of `<local sha>` on neither that
+ *   ref nor any remote-tracking ref (`<local sha> --not <remote sha>
+ *   --remotes`), so commits merged in from, say, `origin/main` are not
+ *   checked again;
  * - a new remote ref (remote sha all zeros), or a remote sha this clone does
  *   not have: the commits of `<local sha>` on no remote-tracking ref
  *   (`<local sha> --not --remotes`);
  * - a deleted ref (local sha all zeros): nothing.
  *
+ * A non-empty line that is not four fields is an error (exit 1). With no
+ * non-empty line it prints that nothing was checked and exits 0.
+ *
  * Only the author and committer fields count; `Co-Authored-By:` trailers are
- * message text. Run by Lefthook (`lefthook.yml`, pre-push, `use_stdin`).
+ * message text. Run by Lefthook as a `script` job (`lefthook.yml`, pre-push,
+ * `use_stdin`). A manual `lefthook run pre-push` needs stdin closed
+ * (`</dev/null`, docs/workflow.md): Lefthook itself waits for its stdin to
+ * end before it finishes a `use_stdin` job, whatever the job reads.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -46,16 +56,24 @@ function isCommit(sha: string, options: GitOptions): boolean {
 function outgoing(local: string, remote: string, options: GitOptions) {
   if (ZERO.test(local)) return undefined;
   if (!ZERO.test(remote) && isCommit(remote, options)) {
-    return [`${remote}..${local}`];
+    return [local, "--not", remote, "--remotes"];
   }
   return [local, "--not", "--remotes"];
 }
 
-/** The revision arguments for one pre-push stdin line, or none. */
-function revisionsOf(row: string, options: GitOptions) {
-  const [, local, , remote] = row.trim().split(/\s+/);
-  if (local === undefined || remote === undefined) return undefined;
-  return outgoing(local, remote, options);
+/** The non-empty pre-push stdin lines, each split into its four fields. */
+function rowsOf(stdin: string): string[][] {
+  return stdin
+    .split("\n")
+    .map((row) => row.trim())
+    .filter((row) => row !== "")
+    .map((row) => {
+      const fields = row.split(/\s+/);
+      if (fields.length !== 4) {
+        throw new Error(`malformed pre-push line: ${row}`);
+      }
+      return fields;
+    });
 }
 
 /** One `git log` entry's fields that do not carry the allowed address. */
@@ -88,8 +106,8 @@ function offencesIn(revisions: string[], options: GitOptions): Offence[] {
 
 /** Every outgoing commit's author or committer address that is not allowed. */
 export function check(stdin: string, options: GitOptions = {}): Offence[] {
-  return stdin.split("\n").flatMap((row) => {
-    const revisions = revisionsOf(row, options);
+  return rowsOf(stdin).flatMap(([, local = "", , remote = ""]) => {
+    const revisions = outgoing(local, remote, options);
     return revisions === undefined ? [] : offencesIn(revisions, options);
   });
 }
@@ -111,16 +129,22 @@ export function format(offences: Offence[]): string {
   ].join("\n");
 }
 
-if (import.meta.main) {
-  // A terminal on stdin means no push is under way (`lefthook run pre-push`
-  // by hand, docs/workflow.md): there is no input to wait for.
-  if (process.stdin.isTTY) {
-    console.error("check-push-email: no pre-push input on stdin; skipped");
-    process.exit(0);
+/** The hook's exit code for its stdin. */
+function main(stdin: string): number {
+  if (rowsOf(stdin).length === 0) {
+    console.error("check-push-email: no pre-push input; nothing checked");
+    return 0;
   }
-  const offences = check(readFileSync(0, "utf8"));
-  if (offences.length > 0) {
-    console.error(format(offences));
+  const offences = check(stdin);
+  if (offences.length > 0) console.error(format(offences));
+  return offences.length > 0 ? 1 : 0;
+}
+
+if (import.meta.main) {
+  try {
+    process.exit(main(readFileSync(0, "utf8")));
+  } catch (error) {
+    console.error(`check-push-email: ${(error as Error).message}`);
     process.exit(1);
   }
 }

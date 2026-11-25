@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ALLOWED_EMAIL, check, format } from "./check-push-email";
 
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
+
 // Each test builds a throwaway repository and feeds the check the lines git
 // gives a pre-push hook on stdin. No network: "remote" refs are written
 // straight into refs/remotes/.
@@ -186,6 +188,41 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     expect(run("")).toEqual([]);
   });
 
+  it("does not check commits merged in from another remote-tracking ref", () => {
+    const base = commit("a");
+    onRemote("feat", base);
+    git(["checkout", "-q", "-b", "other"]);
+    const merged = commit("b", OTHER, OTHER);
+    onRemote("main", merged);
+    git(["checkout", "-q", "main"]);
+    git(["merge", "-q", "--no-ff", "-m", "merge", "other"], {
+      GIT_AUTHOR_NAME: "A",
+      GIT_AUTHOR_EMAIL: ALLOWED_EMAIL,
+      GIT_COMMITTER_NAME: "C",
+      GIT_COMMITTER_EMAIL: ALLOWED_EMAIL,
+    });
+    const head = git(["rev-parse", "HEAD"]);
+    const feat = "refs/heads/feat";
+    expect(run(line(head, base, feat))).toEqual([]);
+    const bad = commit("c", OTHER);
+    expect(run(line(bad, base, feat))).toEqual([
+      { sha: bad, field: "author", email: OTHER },
+    ]);
+  });
+
+  it("refuses a non-empty row that is not four fields", () => {
+    const base = commit("a");
+    expect(() => run(`refs/heads/main ${base} refs/heads/main\n`)).toThrow(
+      /malformed pre-push line/,
+    );
+  });
+
+  it("throws when git log fails, for a local SHA this clone does not have", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    expect(() => run(line("2".repeat(40), base))).toThrow(/git log/);
+  });
+
   it("formats each offence with the short hash, field, address and a fix", () => {
     const text = format([
       { sha: "a".repeat(40), field: "author", email: OTHER },
@@ -220,5 +257,62 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     });
     expect(passed.error).toBeUndefined();
     expect(passed.status).toBe(0);
+  });
+
+  /** Runs the script as a Bun script with `stdin`. */
+  function script(stdin: string) {
+    const result = spawnSync("bun", [SCRIPT], {
+      cwd: dir,
+      env,
+      input: stdin,
+      encoding: "utf8",
+      // Only ends a hung child; no assertion depends on it.
+      timeout: 60_000,
+    });
+    expect(result.error).toBeUndefined();
+    return result;
+  }
+
+  it("exits 0 and says nothing was checked for empty pre-push input", () => {
+    const result = script("\n");
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("no pre-push input; nothing checked");
+  });
+
+  it("exits 1 for a malformed row and for an unknown local SHA", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const malformed = script(`refs/heads/main ${base}\n`);
+    expect(malformed.status).toBe(1);
+    expect(malformed.stderr).toContain("malformed pre-push line");
+    const unknown = script(line("2".repeat(40), base));
+    expect(unknown.status).toBe(1);
+    expect(unknown.stderr).toContain("git log");
+  });
+});
+
+describe("lefthook.yml pre-push", () => {
+  it("runs the check first, as a script job with stdin, under a piped hook", () => {
+    const env: NodeJS.ProcessEnv = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (!key.startsWith("GIT_")) env[key] = value;
+    }
+    const dump = JSON.parse(
+      execFileSync("bunx", ["lefthook", "dump", "--format", "json"], {
+        cwd: ROOT,
+        env,
+        encoding: "utf8",
+      }),
+    );
+    const hook = dump["pre-push"];
+    expect(hook.piped).toBe(true);
+    expect(hook.parallel).toBeUndefined();
+    expect(hook.jobs[0]).toEqual({
+      name: "push-email",
+      script: "../check-push-email.ts",
+      runner: "bun",
+      use_stdin: true,
+    });
+    expect(dump.source_dir).toBe("scripts/");
   });
 });

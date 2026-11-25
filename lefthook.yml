@@ -14,13 +14,21 @@ commit-msg:
     - name: commitlint
       run: bunx commitlint --edit {1}
 
+# Script jobs live in <source_dir>/<hook>/; the one script job,
+# scripts/check-push-email.ts, is named relative to scripts/pre-push/.
+source_dir: scripts/
+
 # The address check runs first and alone: it reads git's pre-push stdin
 # (use_stdin), and the piped top level skips the heavy checks when it fails.
+# It is a script job, not a run job: Lefthook 2.2.2 skips a pre-push run job
+# when it finds no push files (an empty commit, a commit that only deletes a
+# file, a branch other than HEAD), never a script job.
 pre-push:
   piped: true
   jobs:
     - name: push-email
-      run: bun scripts/check-push-email.ts
+      script: ../check-push-email.ts
+      runner: bun
       use_stdin: true
     - name: checks
       group:
