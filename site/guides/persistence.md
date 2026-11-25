@@ -32,13 +32,14 @@ resolves, to the listeners attached by then. Check `client.mode` if persistence 
   first. A live tail that only rewrites provisional points writes nothing.
 - A removal (`invalidate`, `clear`, a watermark moved back, a version change, `clearAll`) is written at
   once, and the call that made it resolves only once it is durable, or once persistence of the cache has
-  stopped and the one attempt to delete its records has settled. Such a call takes at most about ten
+  stopped and any attempt to delete its records has settled. Such a call takes at most about ten
   seconds on a failing disk.
 - When the last tab closes, the worker writes what was still waiting. Where the browser supports it
   (Chromium), tscache creates the worker with `extendedLifetime`, which keeps it running about 30 seconds
   after its last tab so that write can land. Elsewhere the option is ignored, and a worker that ends
   first loses the additions still waiting, at most five seconds of them; the disk keeps the earlier state.
-  A removal is not exposed to this, since its call resolves only once it is durable.
+  A removal is not exposed to this, since its call resolves only once it is durable or its cache's
+  persistence has stopped.
 
 ## Loading
 
