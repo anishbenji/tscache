@@ -617,6 +617,33 @@ function check(run: Run, final: boolean): void {
     const open = openOf(id)?.end;
     return stop !== undefined && (open === undefined || stop.seq < open.seq);
   };
+  /**
+   * Stopped by a failed opening of the store, with none open: an opening
+   * that rejected, threw or found no database, settled earlier in the same
+   * event. A clear's or cleanup's opening that found no database fails
+   * nothing (a load or a flush then opens one).
+   */
+  const openingStop = (id: string) => {
+    const stop = stopOf(id);
+    return (
+      stop !== undefined &&
+      !storeOpenAt(stop.seq) &&
+      openers.some(
+        (o) =>
+          o.end !== undefined &&
+          !o.end.ok &&
+          !(o.outcome === "absent" && o.ifExists) &&
+          o.end.seq < stop.seq &&
+          o.end.step === stop.step,
+      )
+    );
+  };
+  /**
+   * The stop deferred the cache's cleanup to its first later removal: a
+   * load's stop, or a stop at a failed opening with no store open, which
+   * stops a running cache too (§4.10.6 Failures, user decision 113 A).
+   */
+  const deferredStop = (id: string) => loadStop(id) || openingStop(id);
   const removalsOf = (id: string) => removals.filter((r) => r.cacheId === id);
   /** When a removal was made: its op may make it after an await. */
   const made = (r: Call) => (r.removed ?? r.start).seq;
@@ -687,17 +714,18 @@ function check(run: Run, final: boolean): void {
   const name = (op: Op) => `${op.kind} ${op.cacheId ?? ""} at ${op.start.step}`;
   /**
    * The cleanup of `id` was still deferred at the barrier starting at `bs`:
-   * a load's stop came before it, and no removal and no other clearAll
-   * since (that clearAll's engine clear took the deferral, and the clear,
-   * failed or not, was the cache's deletion), nor a clearAll pending at the
-   * stop or failed before it (the stop then had no cleanup).
+   * a stop that deferred it came before it (`deferredStop`: a load's, or a
+   * failed opening's, of a running cache too), and no removal and no other
+   * clearAll since (that clearAll's engine clear took the deferral, and the
+   * clear, failed or not, was the cache's deletion), nor a clearAll pending
+   * at the stop or failed before it (the stop then had no cleanup).
    */
   const deferredAt = (id: string, bs: number): boolean => {
     const stop = stopOf(id);
     return (
       stop !== undefined &&
       stop.seq < bs &&
-      loadStop(id) &&
+      deferredStop(id) &&
       !removalsOf(id).some((x) => made(x) > stop.seq && made(x) < bs) &&
       !clears.some(
         (k) =>
@@ -1025,14 +1053,16 @@ function check(run: Run, final: boolean): void {
     if (r.end === undefined || stop === undefined || open === undefined)
       continue;
     const m = made(r);
+    // A clearAll since the load's open, or since a failed opening's stop.
+    const since = loadStop(id) ? open.start.seq : stop.seq;
     const deferredAt =
-      loadStop(id) &&
+      deferredStop(id) &&
       stop.seq < m &&
       !removalsOf(id).some((x) => made(x) > stop.seq && made(x) < m) &&
       !clears.some(
         (c) =>
           c.start.seq < m &&
-          (c.start.seq > open.start.seq ||
+          (c.start.seq > since ||
             failedClear(c) ||
             // The persister's clear that succeeded after the cache stopped
             // during its barrier was its cleanup (§4.10.6 Success, R3-2).
