@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
 import {
   type App,
@@ -32,9 +33,13 @@ import { hubPort } from "./scripts/demo/catalog";
 // unset or names `demo`.
 //
 // The docs project (e2e/docs/) opens the built documentation site, served
-// by `vitepress preview`, and checks that every Mermaid diagram draws. It
-// needs the site built first (`bun run docs:build`; `bun run ci` builds it
-// before Playwright), and runs when E2E_EXAMPLES is unset or names `docs`.
+// on 127.0.0.1 by scripts/docs-server.ts, and checks that every Mermaid
+// diagram draws. It needs the site built first (`bun run docs:build`), and
+// runs when E2E_EXAMPLES names `docs`, or when E2E_EXAMPLES is unset and the
+// site is built, so that a run of other specs in a checkout that never built
+// the site still runs. `bun run ci` builds the site before Playwright, so it
+// always runs the project; a run that names `docs` fails, rather than skips
+// it, when the site is not built.
 const requested = process.env.E2E_EXAMPLES?.split(",");
 const selected = (requested ?? Object.keys(apps)).filter((name): name is App =>
   Object.hasOwn(apps, name),
@@ -42,7 +47,10 @@ const selected = (requested ?? Object.keys(apps)).filter((name): name is App =>
 const demo = requested === undefined || requested.includes("demo");
 const demoPort = hubPort(process.env) + (process.env.DEMO_PORT ? 0 : offset);
 const hub = `http://127.0.0.1:${demoPort}/`;
-const docs = requested === undefined || requested.includes("docs");
+const docsBuilt = existsSync(
+  new URL("site/.vitepress/dist/index.html", import.meta.url),
+);
+const docs = requested === undefined ? docsBuilt : requested.includes("docs");
 const docsPort = 5300 + offset;
 // The site's base (site/.vitepress/config.ts), which the server keeps.
 const docsUrl = `http://127.0.0.1:${docsPort}/tscache/`;
@@ -82,11 +90,15 @@ export default defineConfig({
       retries: 0,
       use: { ...devices["Desktop Chrome"], baseURL: hub },
     },
-    {
-      name: "docs",
-      testMatch: ["docs/**/*.spec.ts"],
-      use: { ...devices["Desktop Chrome"], baseURL: docsUrl },
-    },
+    ...(docs
+      ? [
+          {
+            name: "docs",
+            testMatch: ["docs/**/*.spec.ts"],
+            use: { ...devices["Desktop Chrome"], baseURL: docsUrl },
+          },
+        ]
+      : []),
   ],
   webServer: [
     {
@@ -105,7 +117,8 @@ export default defineConfig({
     ...(docs
       ? [
           {
-            command: `bun run --cwd site preview --port ${docsPort}`,
+            command: "bun scripts/docs-server.ts",
+            env: { DOCS_PORT: String(docsPort) },
             url: docsUrl,
             reuseExistingServer: !process.env.CI,
             timeout: 60_000,
