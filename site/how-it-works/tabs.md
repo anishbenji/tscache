@@ -61,8 +61,9 @@ context that is not the identical value (`Object.is`) the worker holds, the cont
 material (`sameMaterial`: equal primitives, or plain arrays and objects equal member by member) as the
 one the last refusal named changes nothing, whatever the auth state: auth stays invalid until the next
 `updateAuth`, or a joining tab with other material, and a refresh that took effect first stays in place ([Auth refresh](./auth)). If it names another module, its `init` is refused
-with a `ConfigError` (`code: 'fetcher-conflict'`) and its `createClient` rejects; with the fetcher in the
-worker's name, only a connection made without that name gets this far.
+with a `ConfigError` and its `createClient` rejects; with the fetcher in the worker's name, only a
+connection made without that name gets this far, which is a 0.2.0 page, and a 0.2.0 client sees the
+message only (clients from 0.3.0 set `code: 'fetcher-conflict'`).
 
 From then on the tabs share everything the engine holds: data, coverage, versions, watermarks, the
 fetches in flight (a read in one tab can join a fetch started for another,

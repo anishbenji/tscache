@@ -131,7 +131,7 @@ const candles = await client.cache({
   written behind about a second after the last change (at most five seconds). The provisional tail is
   never stored, so a reload fetches it again. A removal (`invalidate`, `clear`, a watermark moved back, a
   version change) is written at once, and its call waits for the disk as architecture §4.10.6
-  (Durability of removals) says, a tab whose worker is superseded included. `clearAll()` empties the
+  (Durability of removals) says; in a tab whose worker is superseded it answers at once, for now (below). `clearAll()` empties the
   disk in every tab and resolves once that clear has settled: use it to remove data from the disk.
 - **Loading.** `cache()` of a persisted cache resolves once its records are loaded (at most five seconds),
   so the first `get` sees them. A range the records do not cover reads as uncached, never as a gap.
@@ -142,8 +142,9 @@ const candles = await client.cache({
 - **Restatements need a version, across sessions too.** A stored range is served in every later session
   without asking the backend. Set `version` when the dataset has one: records of another version are
   never loaded. Without one, `invalidate` or `clear` on your own clock removes stored ranges as well,
-  except in a tab whose worker is superseded: there the records stay, for the newer worker to load, and
-  only `clearAll()` removes them.
+  except in a tab whose worker is superseded: there, until 0.3.0 is released (step 150), the records stay
+  and a later load can serve them as current, until a newer version, a watermark moved back, a rewrite
+  of that range or `clearAll()` removes them.
 - **Durable storage is your call.** Browsers evict best-effort storage under pressure, and a range whose
   record was evicted is simply fetched again. To keep the cache, call `navigator.storage.persist()` from
   the page; tscache never does, since some browsers prompt the user.

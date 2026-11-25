@@ -80,7 +80,7 @@ The older worker stops writing, for every persisted cache at once, and deletes n
 accord; a cache it opens later loads nothing. Its `invalidate`, `clear` and other removals resolve at
 once and do not currently reach the disk; their deletion is restored before 0.3.0 is released. Until
 then a later load, the newer worker's or a later session's, can serve those records as current, until
-a newer dataset version, a watermark change, a rewrite of that range or `clearAll()` clears them.
+a newer dataset version, a watermark moved back, a rewrite of that range or `clearAll()` clears them.
 `clearAll()` still empties the disk and resolves once that clear has settled. A deletion still waiting when the worker is superseded, for a cache that stopped earlier for
 one of the reasons above, does not run, and those records stay too. The older worker's tabs keep
 working from memory until they are reloaded.

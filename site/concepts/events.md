@@ -70,7 +70,8 @@ read. Coalesce bursts, for example one read per animation frame, as the
 
 ### A `clearAll` from another worker
 
-From 0.3.0 a `clearAll` reaches every SharedWorker of the origin, whichever tab or hosting called it:
+From 0.3.0 a `clearAll` reaches every SharedWorker of 0.3.0 or later in the origin (a 0.1.0 or 0.2.0
+worker is not reached), whichever tab or hosting called it:
 tabs of two deploys have a worker each for a while
 ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)). A worker that clears
 for another worker's call sends its tabs `cacheCleared` with `'clear-all'` and `cacheChanged` with
