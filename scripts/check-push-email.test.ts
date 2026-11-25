@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -246,6 +246,86 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     expect(text).toContain("--reset-author");
   });
 
+  it("advises a rebase of the offending branch that keeps authors by default", () => {
+    const text = format(
+      [{ sha: "a".repeat(40), field: "committer", email: OTHER }],
+      ["refs/heads/topic"],
+    );
+    const command = text.split("\n").find((row) => row.includes("git rebase"));
+    expect(command).toBe(
+      "  git rebase -r --exec 'git commit --amend --no-edit' <base> <branch>",
+    );
+    expect(command).not.toContain("--reset-author");
+    expect(text).toMatch(/<branch> the local branch that holds them: topic\b/);
+    expect(text).toContain(
+      "Use --reset-author only for author rows that are your own commits",
+    );
+  });
+
+  it("passes a clean SSH-signed commit when log.showSignature is set", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const key = join(dir, ".git", "signing-key");
+    execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", key]);
+    const pub = readFileSync(`${key}.pub`, "utf8").trim();
+    const signers = join(dir, ".git", "allowed-signers");
+    writeFileSync(signers, `${ALLOWED_EMAIL} namespaces="git" ${pub}\n`);
+    git(["config", "gpg.format", "ssh"]);
+    git(["config", "user.signingkey", key]);
+    git(["config", "gpg.ssh.allowedSignersFile", signers]);
+    git(["config", "log.showSignature", "true"]);
+    git(["config", "commit.gpgSign", "true"]);
+    const head = commit("b");
+    // The commit is signed and verifies; the config makes plain git log print
+    // the signature next to every formatted record.
+    expect(
+      git(["log", "-1", "--no-show-signature", "--format=%G?", head]),
+    ).toBe("G");
+    expect(git(["log", "-1", "--format=%H", head])).not.toBe(head);
+    expect(run(line(head, base))).toEqual([]);
+  });
+
+  it("parses ref names with a no-break space or a reflog expression", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const bad = commit("b", OTHER);
+    const nbsp = "refs/heads/fix email";
+    expect(run(line(bad, ZERO, nbsp))).toEqual([
+      { sha: bad, field: "author", email: OTHER },
+    ]);
+    const reflog = `HEAD@{1 day ago} ${bad} refs/heads/main ${base}\n`;
+    expect(run(reflog)).toEqual([{ sha: bad, field: "author", email: OTHER }]);
+    expect(() => run(`HEAD@{1 day ago} ${bad} refs/heads/main\n`)).toThrow(
+      /malformed pre-push line/,
+    );
+  });
+
+  it("passes a large clean history, beyond the default output buffer", () => {
+    // About 10,000 commits print roughly 1.1 MB through the check's git log,
+    // above spawnSync's 1 MiB default. fast-import writes them in one process.
+    const count = 10_000;
+    const ident = `A <${ALLOWED_EMAIL}> 1767225600 +0000`;
+    const stream = Array.from({ length: count }, (_, i) =>
+      [
+        "commit refs/heads/main",
+        `committer ${ident}`,
+        "data 1",
+        `${i % 10}`,
+        "",
+      ].join("\n"),
+    ).join("");
+    execFileSync("git", ["fast-import", "--quiet"], {
+      cwd: dir,
+      env,
+      input: stream,
+    });
+    const head = git(["rev-parse", "refs/heads/main"]);
+    expect(run(line(head, ZERO))).toEqual([]);
+    const result = script(line(head, ZERO));
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  });
+
   it("exits 1 naming the commit as a Bun script, and 0 when clean", () => {
     const base = commit("a");
     onRemote("main", base);
@@ -261,6 +341,7 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     expect(refused.error).toBeUndefined();
     expect(refused.status).toBe(1);
     expect(refused.stderr).toContain(`${bad.slice(0, 12)} author ${OTHER}`);
+    expect(refused.stderr).toContain("the local branch that holds them: main.");
 
     const passed = spawnSync("bun", [SCRIPT], {
       cwd: dir,
