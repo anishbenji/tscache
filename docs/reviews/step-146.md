@@ -56,7 +56,7 @@ Fable pre-review on the fix commit and its triage commit: no P0 or P1, two P2s, 
 
 Security lane (Claude), run 1: no findings (`~/code/tscache-reports/reviews/step-146/security-1.md`, outside the repo).
 
-The pre-review also noted that the integrations dtype case pins `hydrate` quoting its input; if user decision #142 goes with option A, that step changes the precondition (for example to a constructed error).
+The pre-review also noted that the integrations dtype case pinned `hydrate` quoting its input; it was replaced by an injected error (see the last section).
 
 ## Round 1 (Codex), head before the history rewrite
 
@@ -78,3 +78,10 @@ Verdict: merge after fixes. Both round 1 fixes confirmed; no new code findings. 
 | R2-1 | P2  | This file's header said `Rounds: 0 · Status: settled` while the file recorded a round 1 P1 that required a re-review | accepted (finding check: VALID) | Header updated to two Codex rounds and settled after round 2. |
 
 Settled after round 2: no P0 or P1 in round 2 (docs/workflow.md, step 6).
+
+## The warning test made independent of engine wording (user conditions, 2026-11-25)
+
+The user approved the step-137 test change on two conditions, both met before merge:
+
+1. **The case no longer rests on an engine error that quotes its input.** The dtype case (a `hydrate` payload error that quoted a field) is replaced by "never prints a seed failure's message: %s carrying snapshot text", run for a `TscacheError` and a `TypeError`. The seed failure is injected through the test's `hydrate` stand-in and carries a known marker in its message; the test asserts that the read still fetches, the warning is given once and names the error (`(${name})`), and the marker never appears in it. User decision #142 makes more engine errors name the type only, so the old premise would have gone; this one does not depend on any library message.
+2. **Proved red on a break.** With `warnNotSeeded` in `integrations/shared/connection.ts` changed to append the error's message to the warning (the name left as it was), `bunx vitest run integrations/test/connection.test.ts -t "never prints a seed failure"` gave 2 failed: `AssertionError: expected 'tscache: the server's snapshot for c…' not to contain 'SECRETMARKER-146'`, once per case. The source was then restored (`git status` shows only the test file changed) and the whole file passed (28 tests).

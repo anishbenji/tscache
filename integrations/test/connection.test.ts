@@ -394,44 +394,35 @@ describe("connect, when a seed fails to apply", () => {
     expect(text).not.toContain(marker);
   });
 
-  it("never quotes a snapshot whose hydrate error quotes a field it supplies", async () => {
-    // A payload field's dtype is any string to decodeSnapshot, and hydrate's
-    // error prints the one that differs from the schema.
-    const marker = "SECRETMARKER";
-    const value = dehydrate(seed);
-    const [first, ...others] = value.snapshot.segments;
-    const [field, ...rest] = first?.fields ?? [];
-    if (first === undefined || field === undefined) {
-      throw new Error("the seed has no segment field");
-    }
-    const spoiled: EncodedSnapshot = {
-      ...value.snapshot,
-      segments: [
-        {
-          ...first,
-          fields: [{ ...field, dtype: marker as typeof field.dtype }, ...rest],
-        },
-        ...others,
-      ],
-    };
-    const { message, name } = await refusal(
-      rehydrate(config, { ...value, snapshot: spoiled }),
-    );
-    expect(message).toMatch(/^invalid segment payload/);
-    expect(message).toContain(marker);
-
-    const read = rehydrate(config, { ...value, snapshot: spoiled });
-    const { connection, connected } = lossyConnection([read], { options });
-    await until(() => connected() !== null);
-    const handle = await connection.cache(connected() as TscacheClient, config);
-    const answer = await handle.get(seed.range);
-    expect(fetched).toEqual([seed.range]);
-    expect(Array.from(answer.fields.v ?? [])).toEqual([7, 7, 7]);
-    expect(warn).toHaveBeenCalledTimes(1);
-    const [text] = warn.mock.calls[0] ?? [];
-    expect(text).toContain(`(${name})`);
-    expect(text).not.toContain(marker);
-  });
+  it.each([
+    ["a TscacheError", (text: string) => new TscacheError(text)],
+    ["a TypeError", (text: string) => new TypeError(text)],
+  ])(
+    "never prints a seed failure's message: %s carrying snapshot text",
+    async (_, make) => {
+      // The failure is injected, so the test does not rest on any engine
+      // message quoting its input (step 146; user decision #142 makes more of
+      // them name the type only).
+      const marker = "SECRETMARKER-146";
+      const error = make(`invalid snapshot near "${marker}"`);
+      const { connection, connected } = lossyConnection([seed], {
+        options,
+        hydrate: () => () => Promise.reject(error),
+      });
+      await until(() => connected() !== null);
+      const handle = await connection.cache(
+        connected() as TscacheClient,
+        config,
+      );
+      const answer = await handle.get(seed.range);
+      expect(fetched).toEqual([seed.range]);
+      expect(Array.from(answer.fields.v ?? [])).toEqual([7, 7, 7]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const [text] = warn.mock.calls[0] ?? [];
+      expect(text).toContain(`(${error.name})`);
+      expect(text).not.toContain(marker);
+    },
+  );
 
   it("is silent in production, and still hands out the cache", async () => {
     vi.stubEnv("NODE_ENV", "production");
