@@ -1,9 +1,13 @@
 #!/usr/bin/env bun
 /**
  * Pre-push check (step 149): refuses a push whose outgoing commits carry an
- * author or committer address other than the repository's noreply address.
- * GitHub declines such pushes ("push declined due to email privacy
- * restrictions"); this catches them locally first (user decision #141 A).
+ * author or committer address that is not a GitHub noreply address. GitHub
+ * declines pushes of commits that carry a private address ("push declined due
+ * to email privacy restrictions"); this catches them locally first (user
+ * decisions #141 A and #147 A). Allowed: any address ending in
+ * `@users.noreply.github.com` (the user's, a bot's such as Dependabot's, a
+ * contributor's own) and exactly `noreply@github.com` (GitHub's merge
+ * commits), compared case-insensitively; everything else is refused.
  *
  * Reads git's pre-push stdin, one `<local ref> <local sha> <remote ref>
  * <remote sha>` line per pushed ref, and checks for each:
@@ -28,8 +32,20 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-/** The one address outgoing commits may carry as author and committer. */
-export const ALLOWED_EMAIL = "anishbenji@users.noreply.github.com";
+/** The suffix of every GitHub noreply address, `@` included. */
+const NOREPLY_SUFFIX = "@users.noreply.github.com";
+/** The address GitHub itself commits as, for example on merge commits. */
+const GITHUB_EMAIL = "noreply@github.com";
+
+/**
+ * Whether outgoing commits may carry `email` as author or committer: an
+ * address ending exactly in `@users.noreply.github.com`, or exactly
+ * `noreply@github.com`, in any letter case (user decision #147 A).
+ */
+export function isAllowed(email: string): boolean {
+  const lower = email.toLowerCase();
+  return lower.endsWith(NOREPLY_SUFFIX) || lower === GITHUB_EMAIL;
+}
 
 export interface Offence {
   sha: string;
@@ -80,10 +96,10 @@ function rowsOf(stdin: string): string[][] {
 function offencesOf(entry: string): Offence[] {
   const [sha = "", author = "", committer = ""] = entry.split("\x1f");
   const offences: Offence[] = [];
-  if (author !== ALLOWED_EMAIL) {
+  if (!isAllowed(author)) {
     offences.push({ sha, field: "author", email: author });
   }
-  if (committer !== ALLOWED_EMAIL) {
+  if (!isAllowed(committer)) {
     offences.push({ sha, field: "committer", email: committer });
   }
   return offences;
@@ -118,12 +134,14 @@ export function format(offences: Offence[]): string {
     (o) => `  ${o.sha.slice(0, 12)} ${o.field} ${o.email}`,
   );
   return [
-    `push refused: outgoing commits must use ${ALLOWED_EMAIL} as author and committer`,
+    "push refused: each outgoing commit's author and committer must be a GitHub noreply address,",
+    `an address ending in ${NOREPLY_SUFFIX} or exactly ${GITHUB_EMAIL}`,
     "(GitHub declines pushes of commits that carry a private address):",
     ...rows,
     "",
-    "To fix, set the address and re-author the unpushed commits, then push again:",
-    `  git config user.email ${ALLOWED_EMAIL}`,
+    "To fix, set your GitHub noreply address (github.com/settings/emails) and re-author the",
+    "unpushed commits, then push again:",
+    `  git config user.email <you>${NOREPLY_SUFFIX}`,
     "  git rebase -r --exec 'git commit --amend --no-edit --reset-author' <base>",
     "where <base> is the last pushed commit (for example origin/main).",
   ].join("\n");

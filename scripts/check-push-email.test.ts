@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ALLOWED_EMAIL, check, format } from "./check-push-email";
+import { check, format, isAllowed } from "./check-push-email";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -15,6 +15,10 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SCRIPT = fileURLToPath(new URL("check-push-email.ts", import.meta.url));
 const ZERO = "0".repeat(40);
 const OTHER = "someone@example.com";
+/** The repository's own address (user decision #141 A); any noreply address passes. */
+const ALLOWED_EMAIL = "anishbenji@users.noreply.github.com";
+const DEPENDABOT = "49699333+dependabot[bot]@users.noreply.github.com";
+const GITHUB = "noreply@github.com";
 
 /**
  * The environment for the throwaway repository: none of the GIT_* variables
@@ -223,12 +227,22 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     expect(() => run(line("2".repeat(40), base))).toThrow(/git log/);
   });
 
-  it("formats each offence with the short hash, field, address and a fix", () => {
+  it("passes commits by a bot's and GitHub's noreply addresses (#147 A)", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    commit("b", DEPENDABOT, GITHUB);
+    const head = commit("c", ALLOWED_EMAIL.toUpperCase(), GITHUB.toUpperCase());
+    expect(run(line(head, base))).toEqual([]);
+  });
+
+  it("formats each offence with the short hash, field, address, the rule and a fix", () => {
     const text = format([
       { sha: "a".repeat(40), field: "author", email: OTHER },
     ]);
     expect(text).toContain(`aaaaaaaaaaaa author ${OTHER}`);
-    expect(text).toContain(ALLOWED_EMAIL);
+    expect(text).toContain("an address ending in @users.noreply.github.com");
+    expect(text).toContain(`or exactly ${GITHUB}`);
+    expect(text).toContain("<you>@users.noreply.github.com");
     expect(text).toContain("--reset-author");
   });
 
@@ -288,6 +302,37 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     const unknown = script(line("2".repeat(40), base));
     expect(unknown.status).toBe(1);
     expect(unknown.stderr).toContain("git log");
+  });
+});
+
+// User decision #147 A: any GitHub noreply address, or GitHub's own address,
+// matched exactly and case-insensitively; every lookalike is refused.
+describe("isAllowed", () => {
+  it.each([
+    ALLOWED_EMAIL,
+    DEPENDABOT,
+    GITHUB,
+    ALLOWED_EMAIL.toUpperCase(),
+    "Anishbenji@Users.NoReply.GitHub.com",
+    DEPENDABOT.toUpperCase(),
+    GITHUB.toUpperCase(),
+    "NoReply@GitHub.com",
+  ])("allows %j", (email) => {
+    expect(isAllowed(email)).toBe(true);
+  });
+
+  it.each([
+    "x@users.noreply.github.com.evil",
+    "users.noreply.github.com",
+    "x@xusers.noreply.github.com",
+    "x@users-noreply.github.com",
+    "noreply@github.com.evil",
+    "x@noreply.github.com",
+    "",
+    "someone@gmail.com",
+    OTHER,
+  ])("refuses %j", (email) => {
+    expect(isAllowed(email)).toBe(false);
   });
 });
 
