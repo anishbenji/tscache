@@ -51,33 +51,47 @@ function outgoing(local: string, remote: string, options: GitOptions) {
   return [local, "--not", "--remotes"];
 }
 
-/** Every outgoing commit's author or committer address that is not allowed. */
-export function check(stdin: string, options: GitOptions = {}): Offence[] {
+/** The revision arguments for one pre-push stdin line, or none. */
+function revisionsOf(row: string, options: GitOptions) {
+  const [, local, , remote] = row.trim().split(/\s+/);
+  if (local === undefined || remote === undefined) return undefined;
+  return outgoing(local, remote, options);
+}
+
+/** One `git log` entry's fields that do not carry the allowed address. */
+function offencesOf(entry: string): Offence[] {
+  const [sha = "", author = "", committer = ""] = entry.split("\x1f");
   const offences: Offence[] = [];
-  for (const row of stdin.split("\n")) {
-    const [, local, , remote] = row.trim().split(/\s+/);
-    if (local === undefined || remote === undefined) continue;
-    const revisions = outgoing(local, remote, options);
-    if (revisions === undefined) continue;
-    const log = git(
-      ["log", "--format=%H%x1f%ae%x1f%ce", ...revisions, "--"],
-      options,
-    );
-    if (log.status !== 0) {
-      throw new Error(`git log ${revisions.join(" ")} failed: ${log.stderr}`);
-    }
-    for (const entry of log.stdout.split("\n")) {
-      if (entry === "") continue;
-      const [sha = "", author = "", committer = ""] = entry.split("\x1f");
-      if (author !== ALLOWED_EMAIL) {
-        offences.push({ sha, field: "author", email: author });
-      }
-      if (committer !== ALLOWED_EMAIL) {
-        offences.push({ sha, field: "committer", email: committer });
-      }
-    }
+  if (author !== ALLOWED_EMAIL) {
+    offences.push({ sha, field: "author", email: author });
+  }
+  if (committer !== ALLOWED_EMAIL) {
+    offences.push({ sha, field: "committer", email: committer });
   }
   return offences;
+}
+
+/** The offences among the commits `revisions` selects. */
+function offencesIn(revisions: string[], options: GitOptions): Offence[] {
+  const log = git(
+    ["log", "--format=%H%x1f%ae%x1f%ce", ...revisions, "--"],
+    options,
+  );
+  if (log.status !== 0) {
+    throw new Error(`git log ${revisions.join(" ")} failed: ${log.stderr}`);
+  }
+  return log.stdout
+    .split("\n")
+    .filter((entry) => entry !== "")
+    .flatMap(offencesOf);
+}
+
+/** Every outgoing commit's author or committer address that is not allowed. */
+export function check(stdin: string, options: GitOptions = {}): Offence[] {
+  return stdin.split("\n").flatMap((row) => {
+    const revisions = revisionsOf(row, options);
+    return revisions === undefined ? [] : offencesIn(revisions, options);
+  });
 }
 
 /** The refusal message: each offence, then how to re-author the commits. */

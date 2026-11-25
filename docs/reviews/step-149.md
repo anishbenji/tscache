@@ -21,6 +21,7 @@ Not changed: `scripts/ci.sh`, `.github/` and the root `package.json` scripts (ou
 - `bun scripts/test-clocks.ts`: clean.
 - Lefthook end to end, in a throwaway repository with the same hook layout and a stand-in heavy job, the pre-push line piped into `lefthook run pre-push --force`: a clean range runs both jobs and exits 0; a commit by `someone@example.com` prints the refusal for its author and committer, skips the `checks` group and exits 1. From a pseudo-terminal with no push input, the check prints that it skipped and the group runs.
 - The fix the refusal suggests, in a throwaway repository with two unpushed commits by `someone@example.com` above `origin/main`: after `git config user.email anishbenji@users.noreply.github.com` and `git rebase -r --exec 'git commit --amend --no-edit --reset-author' origin/main`, both commits carry the noreply address as author and committer and the check exits 0.
+- `bun run ci` first failed at `fallow audit`: `check` had a cognitive complexity of 19, above the threshold. Its row parsing, `git log` call and per-commit test are now three small functions; behaviour and tests are unchanged.
 - By hand on this branch: the pre-push line for `origin/main..HEAD`, and for this branch as a new remote branch, both exit 0; in a scratch repository, a commit by `someone@example.com` pushed as a new ref is refused for its author and committer, exit 1.
 
 ## Decision concerns
