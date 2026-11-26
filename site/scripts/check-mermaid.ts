@@ -147,30 +147,35 @@ export async function diagramReader(): Promise<FindDiagrams> {
 
 /**
  * An HTML comment at the scan position, which renders nothing, whatever tags its text names. It
- * ends where Vue's template parser ends it: at `<!-->` or `<!--->`, at the first `-->` or `--!>`,
- * or at the end of the text when nothing closes it (matched in one pass, never rescanned).
+ * ends at `<!-->` or `<!--->`, at the first `-->`, or at the end of the text when nothing closes
+ * it, as in Vue's template parser (matched in one pass, never rescanned). It also ends at `--!>`,
+ * where HTML ends it and Vue does not: the scan then reads more of the text as tags, so it can
+ * only reject more than Vue would.
  */
 const COMMENT = /<!---?>|<!--[\s\S]*?(?:--!?>|$)/y;
 
 /**
- * Elements whose content is text up to their closing tag (raw text and RCDATA): a tag written
- * inside one renders as text, and a quote inside one opens no attribute value.
+ * Elements whose content Vue's template parser reads as text up to their closing tag (raw text
+ * and RCDATA): a tag written inside one is not a component, and a quote inside one opens no
+ * attribute value. Vue does so only for these four names, only when the tag's name starts with a
+ * lower-case letter, and only outside `svg` and `math`; it parses `iframe`, `noscript` and `xmp`
+ * content, and `<Textarea>` or `<TITLE>` content, as elements.
  */
-const RAW_TEXT = new Set([
-  "textarea",
-  "title",
-  "script",
-  "style",
-  "iframe",
-  "noscript",
-  "xmp",
-]);
+const RAW_TEXT = new Set(["textarea", "title", "script", "style"]);
+
+/** Each raw-text element's closing tag, in any case (a regex per name, moved with `lastIndex`). */
+const RAW_TEXT_CLOSE = new Map(
+  [...RAW_TEXT].map((name) => [name, new RegExp(`</${name}`, "gi")]),
+);
+
+/** Elements whose content Vue parses in a foreign (XML) namespace, where no element is raw text. */
+const FOREIGN = new Set(["svg", "math"]);
 
 /**
  * A `component` tag's static `is` (or `:is` / `v-bind:is` with a string literal) naming Mermaid in
  * any case: `<component is="Mermaid">`, which renders the same component as the tag.
  */
-const IS_MERMAID = /\s(?:v-bind)?:?is\s*=\s*["']?["']?mermaid/i;
+const IS_MERMAID = /\s(?:v-bind)?:?is\s*=\s*["']?["']?mermaid(?![\w$-])/i;
 
 /**
  * CommonMark's open tag (a name, then attributes, each value unquoted or quoted and consumed
@@ -185,9 +190,12 @@ const TAG =
  * component, in any case, or a `component` tag whose static `is` names it. The text is scanned
  * left to right, a comment or a tag at a time, so text between tags (an apostrophe included) is
  * read as text; the content of a raw-text element (`RAW_TEXT`) is skipped to its closing tag.
+ * Open `svg` and `math` tags are counted, and inside one no element is raw text. A
+ * `foreignObject` inside `svg`, which returns to HTML, is not modelled: a raw-text element
+ * inside one is read as elements, which can only reject more than Vue would.
  */
 function hasMermaidTag(text: string): boolean {
-  let lower: string | undefined;
+  let foreign = 0;
   for (let at = text.indexOf("<"); at !== -1; at = text.indexOf("<", at)) {
     COMMENT.lastIndex = at;
     if (COMMENT.exec(text) !== null) {
@@ -205,15 +213,21 @@ function hasMermaidTag(text: string): boolean {
     if (tag[1] !== undefined && name === "component" && IS_MERMAID.test(tag[0]))
       return true;
     at = TAG.lastIndex;
+    if (name === undefined || tag[0].endsWith("/>")) continue;
+    if (FOREIGN.has(name)) {
+      if (tag[1] !== undefined) foreign++;
+      else if (foreign > 0) foreign--;
+      continue;
+    }
+    const close = RAW_TEXT_CLOSE.get(name);
     if (
       tag[1] !== undefined &&
-      name !== undefined &&
-      RAW_TEXT.has(name) &&
-      !tag[0].endsWith("/>")
+      close !== undefined &&
+      foreign === 0 &&
+      /^[a-z]/.test(tag[1])
     ) {
-      lower ??= text.toLowerCase();
-      const close = lower.indexOf(`</${name}`, at);
-      at = close === -1 ? text.length : close;
+      close.lastIndex = at;
+      at = close.exec(text)?.index ?? text.length;
     }
   }
   return false;

@@ -168,6 +168,16 @@ describe("check-mermaid: pages", () => {
     expect(await lines('<component is="Badge" />\n')).toEqual([]);
   });
 
+  it("rejects an unquoted is=mermaid, and accepts an is that only starts with Mermaid", async () => {
+    await expect(
+      find("site/page.md", '<component is=mermaid graph="x" />\n'),
+    ).rejects.toThrow(
+      /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+    );
+    expect(await lines('<component is="MermaidLegend" />\n')).toEqual([]);
+    expect(await lines('<component :is="mermaidView" />\n')).toEqual([]);
+  });
+
   it("rejects a Mermaid tag that a comment or a raw-text element only seems to hide", async () => {
     for (const page of [
       '<div title="<!--"></div><Mermaid id="a" class="x" graph="g"/><div title="-->"></div>\n',
@@ -184,7 +194,42 @@ describe("check-mermaid: pages", () => {
 
   it("accepts a Mermaid tag inside a raw-text element, which renders it as text", async () => {
     expect(await lines("<textarea><Mermaid/></textarea>\n")).toEqual([]);
-    expect(await lines("<TEXTAREA><Mermaid/></TextArea>\n")).toEqual([]);
+    expect(await lines("<textArea><Mermaid/></TEXTAREA>\n")).toEqual([]);
+    expect(await lines("<div><title><Mermaid/></title></div>\n")).toEqual([]);
+  });
+
+  it("rejects a Mermaid tag in an element Vue parses as elements: a capitalised raw-text name, xmp, or an svg title", async () => {
+    for (const page of [
+      "<TEXTAREA><Mermaid/></TextArea>\n",
+      "<Title><Mermaid/></Title>\n",
+      '<xmp><Mermaid class="x" graph="g"/></xmp>\n',
+      "<noscript><Mermaid/></noscript>\n",
+      "<svg><title><Mermaid/></title></svg>\n",
+      "<math><style><Mermaid/></style></math>\n",
+    ]) {
+      await expect(find("site/page.md", page)).rejects.toThrow(
+        /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+      );
+    }
+    expect(await lines("<svg></svg><textarea><Mermaid/></textarea>\n")).toEqual(
+      [],
+    );
+  });
+
+  it("finds a raw-text element's close in the page's own text when U+0130 lower-cases to two units", async () => {
+    await expect(
+      find(
+        "site/page.md",
+        `<div><textarea>${"\u0130".repeat(12)}</textarea><Mermaid id="a" class="x" graph="g"/></div>\n`,
+      ),
+    ).rejects.toThrow(
+      /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+    );
+    expect(
+      await lines(
+        `<div><textarea>${"\u0130".repeat(13)}</textarea><a title="<Mermaid>">x</a></div>\n`,
+      ),
+    ).toEqual([]);
   });
 
   it("reads 160 kB of unterminated comment openers in one pass (a quadratic scan would stall here)", async () => {

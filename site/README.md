@@ -55,8 +55,8 @@ bun run docs:run     # runs the snippets against the mock backend and checks the
     too. That is an early message: the render check fails any built page with an element of the
     plugin's default `mermaid` class, which also catches a raw `.mermaid` element. Neither check
     sees a dynamic component given a class of its own, or a diagram rendered only in the browser
-    (inside `<ClientOnly>`, or behind a `v-if` on state set when the page mounts), which the built
-    HTML does not hold. Both checks are for trusted authors (the maintainer and agents): they catch
+    in a form the Markdown check cannot name (inside `<ClientOnly>`, or behind a `v-if` on state
+    set when the page mounts), which the built HTML does not hold. Both checks are for trusted authors (the maintainer and agents): they catch
     mistakes, not a diagram written to evade them. A `mermaid` fence that a `::: code-group` shows as code is still parsed, so write a
     deliberately broken example as an `mmd` fence or give it a title.
   - It parses with Mermaid's default options, not the site's, and does not apply the 50,000-character
