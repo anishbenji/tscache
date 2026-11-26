@@ -671,3 +671,22 @@ changed no other row.
 - `bun site/scripts/module-graph.ts --check`: passes. `bunx biome check packages/tscache/src/persist`: clean.
 - Targeted Vitest, 32 files: 515 passed, 5 failed (section A).
 - `bun.lock` is unchanged by the merge; no install needed.
+
+### After the merge: the N129 guards, the test updates and the budgets (user decision #158 A)
+
+- **Contract tests (Codex), committed with the guards in `ffe01753`.** Ten new N129 cases, failing on the merge:
+  six in `persister-supersede.test.ts` (`invalidate` and `clear` after a read rejection, a load deadline and a failed
+  store opening, then `supersede()`: the removal answers at once, no write runs, the records stay) and four in
+  `persist-deploy-skew.test.ts` (shared hosting, `supersede()` before or after a chunk rejection or deadline, then
+  `invalidate`: `store.log` stays empty and the records stay). Five updated cases, none weakened: test 8's four chunk
+  cases of the shared hosting now expect the one whole-store `clearAll` (user decision 123 A), and "drops a queued
+  cleanup" in `persist-supersede-choices.test.ts` gets its queued cleanup from a flush past its deadline instead of a
+  load deadline (user decision 95 B).
+- **The two guards (the one exception to #144 condition 3), `ffe01753`.** Section B1: `Persister.supersede()` now clears
+  `deferred` and `absorbable` on every tracked cache after stopping it, so a cache stopped by its load queues no cleanup
+  at a later removal. Section B2: `HostedPersistence.#changed` returns at once when `#superseded`. Two and one lines;
+  no other `src/` change.
+- **Budgets, `48ca012b`.** Section C's two entries raised by `budgetFor`: `index` 6,432 → 6,976 (6,458 B measured) and
+  `index (lazy, nested)` 6,000 → 6,608 (6,090 B measured; the guards add 5 B to the merged 6,085). Measured at
+  `5eb1c288`, the branch before `58008ce0`, `index` was 6,414 B, within its budget: the merge of main at `9029423b`
+  (#174, step 146) added the 44 B that put it over, which is why the branch's earlier `bun run ci` runs passed.
