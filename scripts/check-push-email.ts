@@ -43,6 +43,14 @@
  * Limit (user decision #147 A): a commit already on another remote's tracking
  * ref is not checked when it is pushed to a different remote.
  *
+ * Limits under the threat model, not fixed:
+ * - A local source expression that holds a newline (a revision built that way
+ *   on purpose, such as `HEAD@{0<newline>seconds ago}`) splits its pre-push
+ *   row, and the push is refused as malformed, never let through.
+ * - For an annotated tag that points at a blob, the blob is read whole
+ *   before the hook sees it is no tag and has no tagger: a large blob makes
+ *   the push slow and memory-hungry; nothing is let through.
+ *
  * Each line is split at its last three ASCII spaces (decision #154 A): the
  * local ref before them may hold any character and is not used. A non-empty
  * line whose last three fields are not a sha, a non-empty remote ref and a sha
