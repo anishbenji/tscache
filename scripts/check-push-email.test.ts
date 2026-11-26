@@ -551,6 +551,173 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     expect(text).not.toContain("git rebase");
   });
 
+  /** Writes `raw` as a loose object of `type` without git's checks; returns its SHA. */
+  function literally(type: "commit" | "tag", raw: string | Buffer): string {
+    return execFileSync(
+      "git",
+      ["hash-object", "-t", type, "-w", "--literally", "--stdin"],
+      { cwd: dir, env, input: raw, encoding: "utf8" },
+    ).trim();
+  }
+
+  /** Makes a throwaway SSH key in the test's repository and signs with it. */
+  function sshSigning(): void {
+    const key = join(dir, ".git", "signing-key");
+    execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", key]);
+    git(["config", "gpg.format", "ssh"]);
+    git(["config", "user.signingkey", key]);
+  }
+
+  // Security lane run 3 and decision #155 A: the identities are read from each
+  // outgoing commit's raw header, so the bytes checked are the bytes pushed.
+  it("reads the stored address of an ISO-2022-JP commit, not a re-encoded one (S3.1)", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const email = "a\x1b$Bme@gmail.com\x1b(Bx@users.noreply.github.com";
+    git(
+      [
+        "-c",
+        "i18n.commitEncoding=ISO-2022-JP",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "bad",
+      ],
+      {
+        GIT_AUTHOR_NAME: "A",
+        GIT_AUTHOR_EMAIL: email,
+        GIT_COMMITTER_NAME: "C",
+        GIT_COMMITTER_EMAIL: email,
+      },
+    );
+    const bad = git(["rev-parse", "HEAD"]);
+    expect(git(["cat-file", "commit", bad])).toContain("encoding ISO-2022-JP");
+    expect(run(line(bad, base))).toEqual([
+      { sha: bad, field: "author", email },
+      { sha: bad, field: "committer", email },
+    ]);
+  });
+
+  it("refuses a commit whose header is not UTF-8, without printing its bytes", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const tree = git(["rev-parse", `${base}^{tree}`]);
+    const ident = `<${ALLOWED_EMAIL}> 1767225600 +0000`;
+    const raw = Buffer.concat([
+      Buffer.from(`tree ${tree}\nparent ${base}\nauthor Ren`),
+      Buffer.from([0xe9]),
+      Buffer.from(` ${ident}\ncommitter C ${ident}\n\nlatin-1\n`),
+    ]);
+    const bad = literally("commit", raw);
+    const offences = run(line(bad, base));
+    expect(offences).toEqual([{ sha: bad, field: "header", email: "" }]);
+    const text = format(offences);
+    expect(text).toContain(`${bad.slice(0, 12)} header (not valid UTF-8)`);
+    expect(text).not.toContain("�");
+  });
+
+  it("refuses a merged signed tag's tagger in the mergetag header (S3.2, #155 A)", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    sshSigning();
+    git(["checkout", "-q", "-b", "side"]);
+    const side = commit("b");
+    const signed = (name: string, tagger: string) =>
+      git(["tag", "-s", "-m", name, name, side], {
+        GIT_COMMITTER_NAME: "T",
+        GIT_COMMITTER_EMAIL: tagger,
+      });
+    signed("st", OTHER);
+    signed("clean", ALLOWED_EMAIL);
+    git(["checkout", "-q", "main"]);
+    const merge = (name: string) => {
+      git(["merge", "-q", "--no-ff", "-m", `merge ${name}`, name], {
+        GIT_AUTHOR_NAME: "A",
+        GIT_AUTHOR_EMAIL: ALLOWED_EMAIL,
+        GIT_COMMITTER_NAME: "C",
+        GIT_COMMITTER_EMAIL: ALLOWED_EMAIL,
+      });
+      return git(["rev-parse", "HEAD"]);
+    };
+    const bad = merge("st");
+    expect(git(["cat-file", "commit", bad])).toContain(
+      `\n tagger T <${OTHER}>`,
+    );
+    expect(run(line(bad, base))).toEqual([
+      { sha: bad, field: "merged tagger", email: OTHER, tag: "st" },
+    ]);
+    git(["reset", "-q", "--hard", base]);
+    const good = merge("clean");
+    expect(git(["cat-file", "commit", good])).toContain("\nmergetag object ");
+    expect(run(line(good, base))).toEqual([]);
+  });
+
+  it("checks every tagger line of a tag object, the first one included (S3.3)", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const tagObject = (first: string, second: string) =>
+      literally(
+        "tag",
+        [
+          `object ${base}`,
+          "type commit",
+          "tag v1",
+          `tagger n <${first}> 1 +0000`,
+          `tagger n <${second}> 1 +0000`,
+          "",
+          "msg",
+          "",
+        ].join("\n"),
+      );
+    const firstBad = tagObject(OTHER, ALLOWED_EMAIL);
+    expect(run(line(firstBad, ZERO, "refs/tags/v1"))).toEqual([
+      { sha: firstBad, field: "tagger", email: OTHER, tag: "v1" },
+    ]);
+    const secondBad = tagObject(ALLOWED_EMAIL, OTHER);
+    expect(run(line(secondBad, ZERO, "refs/tags/v1"))).toEqual([
+      { sha: secondBad, field: "tagger", email: OTHER, tag: "v1" },
+    ]);
+  });
+
+  it("names a tag object's first tag line, as git does (S3.3)", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const v1 = literally(
+      "tag",
+      `object ${base}\ntype commit\ntag v1\ntag v2\ntagger n <${OTHER}> 1 +0000\n\nmsg\n`,
+    );
+    expect(run(line(v1, ZERO, "refs/tags/v1"))).toEqual([
+      { sha: v1, field: "tagger", email: OTHER, tag: "v1" },
+    ]);
+  });
+
+  it("prints addresses and tag names with control characters escaped (S3.4)", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const email = "me\x1b[2K\x1b[1A@gmail.com";
+    const bad = commit("b", email);
+    const result = script(line(bad, base));
+    expect(result.status).toBe(1);
+    expect(
+      [...result.stderr].filter((c) => c !== "\n" && c.charCodeAt(0) < 0x20),
+    ).toEqual([]);
+    expect(result.stderr).toContain(
+      `${bad.slice(0, 12)} author me\\u{1b}[2K\\u{1b}[1A@gmail.com`,
+    );
+    const text = format([
+      {
+        sha: "d".repeat(40),
+        field: "tagger",
+        email: "x\u009b\x7f@gmail.com",
+        tag: "a\x1b]0;TITLE\x07b",
+      },
+    ]);
+    expect(text).toContain(
+      "dddddddddddd tagger x\\u{9b}\\u{7f}@gmail.com (tag a\\u{1b}]0;TITLE\\u{7}b)",
+    );
+  });
+
   /** Runs the script as a Bun script with `stdin`. */
   function script(stdin: string) {
     const result = spawnSync("bun", [SCRIPT], {
@@ -628,6 +795,7 @@ describe("isAllowed", () => {
     "a@b@users.noreply.github.com",
     "x@users.noreply.github.com\n",
     "x\x7f@users.noreply.github.com",
+    "a\u009Bb@users.noreply.github.com",
   ])("refuses %j", (email) => {
     expect(isAllowed(email)).toBe(false);
   });

@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Pre-push check (step 149): refuses a push whose outgoing commits carry an
- * author or committer address, or whose pushed annotated tags carry a tagger
- * address, that is not a GitHub noreply address (user decisions #141 A, #147 A
- * and #153 A). GitHub's own check is opt-in, ignores tags and looks only at
+ * Pre-push check (step 149): refuses a push that carries an address that is
+ * not a GitHub noreply address in any of the identities it checks: each
+ * outgoing commit's author and committer, the tagger of each pushed annotated
+ * tag, and the tagger of each signed tag a merge commit embeds (user
+ * decisions #141 A, #147 A, #153 A and #155 A). GitHub's own check is opt-in, ignores tags and looks only at
  * the most recent commit's author, against the pusher's own private addresses
  * ("push declined due to email privacy restrictions"); nothing repeats this
  * check after the hook. Allowed: a well-formed address ending in
@@ -12,6 +13,13 @@
  * commits), compared case-insensitively; everything else is refused
  * (decision #154 A: a well-formed address has one `@` and no whitespace,
  * control character, `<` or `>`).
+ *
+ * Threat model: the check guards against the maintainer or an agent publishing
+ * a private address by accident. It is no defence against someone hiding one
+ * on purpose: anyone with push access can skip hooks (the agents' guard blocks
+ * that for agents; the maintainer can). An escape that needs a deliberately
+ * built commit (an odd encoding, control bytes, a hand-made header) is a limit,
+ * graded P3 at most, not a blocker.
  *
  * Reads git's pre-push stdin, one `<local ref> <local sha> <remote ref>
  * <remote sha>` line per pushed ref, and checks for each:
@@ -41,15 +49,23 @@
  * is an error (exit 1). With no non-empty line it prints that nothing was
  * checked and exits 0.
  *
- * `git log` runs NUL-framed (`-z`, fields split by NUL) in UTF-8 whatever
- * `i18n.logOutputEncoding` says: git cannot store a NUL in an address, so no
- * byte inside one can shift the fields, and output of the wrong shape is an
- * error (exit 1).
+ * `git log -z --format=%H` lists the outgoing commits, NUL-framed and in UTF-8
+ * whatever `i18n.logOutputEncoding` says; each name must be a full sha. One
+ * `git cat-file --batch` then reads their raw objects (decision #155 A), each
+ * checked against its name and size, and every identity line of each header
+ * is checked: `author`, `committer`, and each `tagger` line of a tag embedded
+ * in a `mergetag` field (`git merge` of a signed tag). Pushed tag objects are
+ * read the same way, and every `tagger` line counts, the first one (which git
+ * shows) included. The bytes checked are the bytes pushed: a header is decoded
+ * as strict UTF-8, not re-encoded by its `encoding` field, and a header that
+ * is not valid UTF-8 is refused (fails closed) without its bytes being shown.
+ * Output of the wrong shape is an error (exit 1).
  *
- * The refusal lists each offence (sha, field, address) and then fixed advice
- * that names no ref; the common branch case is in docs/workflow.md.
+ * The refusal lists each offence (sha, field, address, with control
+ * characters written as `\u{..}`) and then fixed advice that names no ref; the
+ * common branch case is in docs/workflow.md.
  *
- * Only the author, committer and tagger fields count; `Co-Authored-By:` trailers are
+ * Only these identity fields count; `Co-Authored-By:` trailers are
  * message text. Run by Lefthook as a `script` job (`lefthook.yml`, pre-push,
  * `use_stdin`). A manual `lefthook run pre-push` needs stdin closed
  * (`</dev/null`, docs/workflow.md): Lefthook itself waits for its stdin to
@@ -69,9 +85,23 @@ const GITHUB_EMAIL = "noreply@github.com";
  */
 const NOREPLY = /^[^\s@<>]+@users\.noreply\.github\.com$/i;
 
-/** Whether `text` holds an ASCII control character (U+0000–U+001F, U+007F). */
-const hasControl = (text: string) =>
-  [...text].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
+/**
+ * A control character, C0, DEL or C1 (U+0000–U+001F, U+007F–U+009F). No `i`
+ * flag: with `u` it would turn on Unicode case folding.
+ */
+const CONTROL = /\p{Cc}/u;
+/** Every control character, for {@link printable}. */
+const CONTROLS = /\p{Cc}/gu;
+
+/** Whether `text` holds a control character (decision #154 A, security lane S3.5). */
+const hasControl = (text: string) => CONTROL.test(text);
+
+/**
+ * `text` with each control character written as `\u{..}`, so a refusal
+ * cannot move the cursor or set a terminal's title (security lane S3.4).
+ */
+const printable = (text: string) =>
+  text.replace(CONTROLS, (c) => `\\u{${c.codePointAt(0)?.toString(16)}}`);
 
 /**
  * Whether outgoing commits and tags may carry `email` as author, committer
@@ -86,7 +116,12 @@ export function isAllowed(email: string): boolean {
 
 export interface Offence {
   sha: string;
-  field: "author" | "committer" | "tagger";
+  /**
+   * `merged tagger` is the tagger of a signed tag a merge commit embeds in
+   * its `mergetag` header; `header` is a commit or tag header that is not
+   * valid UTF-8 (its email is empty).
+   */
+  field: "author" | "committer" | "tagger" | "merged tagger" | "header";
   email: string;
   /** For a tagger row, the tag's name as its tag object records it. */
   tag?: string;
@@ -156,93 +191,208 @@ function rowsOf(stdin: string): Row[] {
     .map(rowOf);
 }
 
-/** The type of the object `sha` names, or undefined when git cannot read it. */
-function typeOf(sha: string, options: GitOptions): string | undefined {
-  const result = git(["cat-file", "-t", sha], options);
-  return result.status === 0 ? result.stdout.trim() : undefined;
+/** One object as `git cat-file --batch` prints it. */
+interface GitObject {
+  type: string;
+  body: Buffer;
+}
+
+/** The ASCII header line `git cat-file --batch` prints before each object. */
+const BATCH_INFO = /^([0-9a-f]{40,64}) ([a-z]+) ([0-9]+)$/;
+
+/**
+ * The raw objects `shas` name, in order, read by one `git cat-file --batch`
+ * (undefined for an object this clone does not have). Each object is checked
+ * against its name and size; output of any other shape is an error.
+ */
+function readObjects(
+  shas: string[],
+  options: GitOptions,
+): (GitObject | undefined)[] {
+  if (shas.length === 0) return [];
+  const batch = spawnSync(
+    "git",
+    ["--no-replace-objects", "cat-file", "--batch"],
+    {
+      ...options,
+      input: shas.map((sha) => `${sha}\n`).join(""),
+      maxBuffer: Number.POSITIVE_INFINITY,
+    },
+  );
+  if (batch.status !== 0) {
+    const cause = batch.error?.message ?? batch.stderr.toString();
+    throw new Error(`git cat-file --batch failed: ${cause}`);
+  }
+  const out = batch.stdout;
+  let at = 0;
+  const objects = shas.map((sha) => {
+    const end = out.indexOf(0x0a, at);
+    const info = end < 0 ? "" : out.toString("latin1", at, end);
+    at = end + 1;
+    if (info === `${sha} missing`) return undefined;
+    const match = BATCH_INFO.exec(info);
+    const size = Number(match?.[3]);
+    if (match?.[1] !== sha || out[at + size] !== 0x0a) {
+      throw new Error(
+        `git cat-file printed output of an unexpected shape for ${sha}`,
+      );
+    }
+    const body = out.subarray(at, at + size);
+    at += size + 1;
+    return { type: match[2] ?? "", body };
+  });
+  if (at !== out.length) {
+    throw new Error("git cat-file printed output of an unexpected shape");
+  }
+  return objects;
+}
+
+/** A header field: its key and its value, continuation lines joined by `\n`. */
+interface Field {
+  key: string;
+  value: string;
+}
+
+/** Decodes strictly: a byte sequence that is not UTF-8 throws. */
+const UTF8 = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * The header fields of an object's text, up to its first empty line. A line
+ * that starts with a space continues the field before it (as in `gpgsig` and
+ * `mergetag`), without that space.
+ */
+function fieldsOf(lines: string[]): Field[] {
+  const fields: Field[] = [];
+  for (const row of lines) {
+    if (row === "") break;
+    const last = fields.at(-1);
+    if (row.startsWith(" ") && last !== undefined) {
+      last.value += `\n${row.slice(1)}`;
+      continue;
+    }
+    const space = row.indexOf(" ");
+    fields.push(
+      space < 0
+        ? { key: row, value: "" }
+        : { key: row.slice(0, space), value: row.slice(space + 1) },
+    );
+  }
+  return fields;
 }
 
 /**
- * The header fields of the tag object `sha` (`object`, `type`, `tag`,
- * `tagger`); the header ends at the first empty line, and a continuation line
- * (a leading space) is not a field.
+ * The header fields of a raw commit or tag object, decoded as strict UTF-8,
+ * or undefined when the header (everything before the first empty line) is
+ * not valid UTF-8.
  */
-function tagHeader(sha: string, options: GitOptions): Map<string, string> {
-  const raw = git(["cat-file", "tag", sha], options);
-  if (raw.status !== 0) {
-    const cause = raw.error?.message ?? raw.stderr;
-    throw new Error(`git cat-file tag ${sha} failed: ${cause}`);
+function headerOf(body: Buffer): Field[] | undefined {
+  const end = body[0] === 0x0a ? 0 : body.indexOf("\n\n");
+  try {
+    const text = UTF8.decode(body.subarray(0, end < 0 ? body.length : end));
+    return fieldsOf(text.split("\n"));
+  } catch {
+    return undefined;
   }
-  const header = new Map<string, string>();
-  for (const row of raw.stdout.split("\n")) {
-    if (row === "") break;
-    const space = row.indexOf(" ");
-    if (space > 0) header.set(row.slice(0, space), row.slice(space + 1));
-  }
-  return header;
 }
 
+/** The value of the first field named `key`, as git reads it, if any. */
+const first = (fields: Field[], key: string) =>
+  fields.find((field) => field.key === key)?.value;
+
 /** The address in an identity, `Name <address> <time> <zone>`, or "" without one. */
-const addressOf = (identity = "") => /<([^>]*)>/.exec(identity)?.[1] ?? "";
+const addressOf = (identity: string) => /<([^>]*)>/.exec(identity)?.[1] ?? "";
+
+/**
+ * The offences of every `tagger` line in a tag's header fields, each named
+ * by the tag's first `tag` line; a tag with no tagger line is refused (an
+ * empty address).
+ */
+function taggerOffences(
+  sha: string,
+  fields: Field[],
+  field: "tagger" | "merged tagger",
+): Offence[] {
+  const tag = first(fields, "tag") ?? "";
+  const taggers = fields.filter((f) => f.key === "tagger");
+  const emails =
+    taggers.length === 0 ? [""] : taggers.map((f) => addressOf(f.value));
+  return emails
+    .filter((email) => !isAllowed(email))
+    .map((email) => ({ sha, field, email, tag }));
+}
+
+/** The refusal of an object whose header is not UTF-8; its bytes are not shown. */
+const undecodable = (sha: string): Offence => ({
+  sha,
+  field: "header",
+  email: "",
+});
 
 /**
  * The tagger offences of `sha` when it is an annotated tag: its own, then
  * those of each tag it names in turn, down to the first object that is not a
- * tag. Anything else, or an object git cannot read, has none here; `git log`
- * then reads the commits, or fails.
+ * tag. Anything else, or an object git cannot read, has none here; the
+ * commits are then read through `git log`, which fails for an unknown sha.
  */
 function tagOffences(sha: string, options: GitOptions): Offence[] {
   const offences: Offence[] = [];
   let current: string | undefined = sha;
-  while (current !== undefined && typeOf(current, options) === "tag") {
-    const header = tagHeader(current, options);
-    const email = addressOf(header.get("tagger"));
-    if (!isAllowed(email)) {
-      offences.push({
-        sha: current,
-        field: "tagger",
-        email,
-        tag: header.get("tag") ?? "",
-      });
+  while (current !== undefined) {
+    const [object] = readObjects([current], options);
+    if (object?.type !== "tag") break;
+    const fields = headerOf(object.body);
+    if (fields === undefined) {
+      offences.push(undecodable(current));
+      break;
     }
-    current = header.get("object");
-  }
-  return offences;
-}
-
-/** One commit's fields that do not carry an allowed address. */
-function offencesOf(sha: string, author: string, committer: string): Offence[] {
-  const offences: Offence[] = [];
-  if (!isAllowed(author)) {
-    offences.push({ sha, field: "author", email: author });
-  }
-  if (!isAllowed(committer)) {
-    offences.push({ sha, field: "committer", email: committer });
+    offences.push(...taggerOffences(current, fields, "tagger"));
+    const next = first(fields, "object") ?? "";
+    current = SHA.test(next) ? next : undefined;
   }
   return offences;
 }
 
 /**
- * The offences in NUL-framed `git log` output, `<sha> NUL <author> NUL
- * <committer> NUL` per commit; any other shape is an error.
+ * One commit's offences, from its raw header: every `author` and `committer`
+ * line, and every `tagger` line of each tag a `mergetag` field embeds (a
+ * merge of a signed tag, decision #155 A).
  */
-function offencesInLog(stdout: string): Offence[] {
-  const fields = stdout.split("\0");
-  if (fields.pop() !== "" || fields.length % 3 !== 0) {
-    throw new Error("git log printed output of an unexpected shape");
-  }
-  const offences: Offence[] = [];
-  for (let i = 0; i < fields.length; i += 3) {
-    const [sha = "", author = "", committer = ""] = fields.slice(i, i + 3);
-    if (!SHA.test(sha)) {
-      throw new Error(`git log printed an unexpected commit name: ${sha}`);
+function commitOffences(sha: string, body: Buffer): Offence[] {
+  const fields = headerOf(body);
+  if (fields === undefined) return [undecodable(sha)];
+  return fields.flatMap((field): Offence[] => {
+    if (field.key === "author" || field.key === "committer") {
+      const email = addressOf(field.value);
+      return isAllowed(email) ? [] : [{ sha, field: field.key, email }];
     }
-    offences.push(...offencesOf(sha, author, committer));
-  }
-  return offences;
+    if (field.key === "mergetag") {
+      const tag = fieldsOf(field.value.split("\n"));
+      return taggerOffences(sha, tag, "merged tagger");
+    }
+    return [];
+  });
 }
 
-/** The offences among the commits `revisions` selects. */
+/**
+ * The commit names in NUL-framed `git log --format=%H` output, `<sha> NUL`
+ * per commit; any other shape is an error.
+ */
+function shasInLog(stdout: string): string[] {
+  const shas = stdout.split("\0");
+  if (shas.pop() !== "") {
+    throw new Error("git log printed output of an unexpected shape");
+  }
+  for (const sha of shas) {
+    if (!SHA.test(sha)) {
+      throw new Error(
+        `git log printed an unexpected commit name: ${printable(sha)}`,
+      );
+    }
+  }
+  return shas;
+}
+
+/** The offences among the commits `revisions` selects, read from their raw objects. */
 function offencesIn(revisions: string[], options: GitOptions): Offence[] {
   const log = git(
     [
@@ -250,7 +400,7 @@ function offencesIn(revisions: string[], options: GitOptions): Offence[] {
       "-z",
       "--encoding=UTF-8",
       "--no-show-signature",
-      "--format=%H%x00%ae%x00%ce",
+      "--format=%H",
       ...revisions,
       "--",
     ],
@@ -260,7 +410,15 @@ function offencesIn(revisions: string[], options: GitOptions): Offence[] {
     const cause = log.error?.message ?? log.stderr;
     throw new Error(`git log ${revisions.join(" ")} failed: ${cause}`);
   }
-  return offencesInLog(log.stdout);
+  const shas = shasInLog(log.stdout);
+  const objects = readObjects(shas, options);
+  return shas.flatMap((sha, i) => {
+    const object = objects[i];
+    if (object?.type !== "commit") {
+      throw new Error(`git cat-file could not read commit ${sha}`);
+    }
+    return commitOffences(sha, object.body);
+  });
 }
 
 /** The offences of one pushed ref. */
@@ -271,8 +429,9 @@ function rowOffences({ local, remote }: Row, options: GitOptions): Offence[] {
 }
 
 /**
- * Every outgoing commit's author or committer address, and every pushed
- * annotated tag's tagger address, that is not allowed.
+ * Every address that is not allowed among outgoing commits' authors and
+ * committers, pushed annotated tags' taggers and merged signed tags' taggers,
+ * and every such commit or tag header that is not valid UTF-8.
  */
 export function check(stdin: string, options: GitOptions = {}): Offence[] {
   return rowsOf(stdin).flatMap((row) => rowOffences(row, options));
@@ -296,14 +455,15 @@ const ADVICE = [
 export function format(offences: Offence[]): string {
   const rows = offences.map(
     (o) =>
-      `  ${o.sha.slice(0, 12)} ${o.field} ${o.email}` +
-      (o.tag === undefined ? "" : ` (tag ${o.tag})`),
+      `  ${o.sha.slice(0, 12)} ${o.field} ` +
+      (o.field === "header" ? "(not valid UTF-8)" : printable(o.email)) +
+      (o.tag === undefined ? "" : ` (tag ${printable(o.tag)})`),
   );
   return [
-    "push refused: each outgoing commit's author and committer, and each pushed tag's tagger,",
-    "must be a GitHub noreply address,",
+    "push refused: each outgoing commit's author and committer, each pushed tag's tagger",
+    "and each merged signed tag's tagger must be a GitHub noreply address,",
     `an address ending in ${NOREPLY_SUFFIX} or exactly ${GITHUB_EMAIL}`,
-    "(one @, no whitespace, control character, < or >;",
+    "(one @, no whitespace, control character, < or >; a header that is not UTF-8 is refused;",
     "GitHub's opt-in check covers only the latest commit's author; nothing checks after this):",
     ...rows,
     ...ADVICE,
