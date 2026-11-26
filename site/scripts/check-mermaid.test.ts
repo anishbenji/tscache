@@ -136,6 +136,24 @@ describe("check-mermaid: pages", () => {
     }
   });
 
+  it("rejects a Mermaid tag after quoted text in the same HTML block", async () => {
+    const page = "<p>don't</p> <Mermaid id='a' graph='x' />\n";
+    await expect(find("site/page.md", page)).rejects.toThrow(
+      /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+    );
+  });
+
+  it("accepts a Mermaid tag in a comment or in a quoted attribute value", async () => {
+    for (const page of [
+      "<!-- Example: <Mermaid /> -->\n",
+      "# Page\n\nText <!-- Example: <Mermaid /> --> here.\n",
+      '# Page\n\n<span aria-label="Example <Mermaid /> markup"></span>\n',
+      "# Page\n\nText <span title='<Mermaid id=\"a\" />'>x</span> here.\n",
+    ]) {
+      expect(await lines(page)).toEqual([]);
+    }
+  });
+
   it("accepts a Mermaid tag shown as inline code or in a fence", async () => {
     const tag = '<Mermaid id="m1" graph="x" />';
     const page = `# Page\n\nWrite \`${tag}\` rarely.\n\n\`\`\`vue\n${tag}\n\`\`\`\n`;

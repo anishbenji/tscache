@@ -15,9 +15,12 @@
 //     bracket-named segment (VitePress's dynamic-route form), whatever it holds and excluded
 //     files included; a link or a dynamic route needs the check extended first.
 //   - It reads `mermaid` fences only. A page with a hand-written `<Mermaid>` tag in its raw HTML
-//     fails, naming the page, rather than go unchecked. A `mermaid` fence that a `::: code-group`
-//     shows as code is still parsed: write a deliberately broken example as an `mmd` fence or give
-//     it a title.
+//     (outside a comment and a quoted attribute value) fails, naming the page, rather than go
+//     unchecked. That is an early, friendlier message: the authority is the render check's count
+//     of the plugin's default `mermaid` class in the built HTML (`e2e/docs/pages.ts`), which also
+//     catches `<component is="Mermaid">` and a raw `.mermaid` element. A `mermaid` fence that a
+//     `::: code-group` shows as code is still parsed: write a deliberately broken example as an
+//     `mmd` fence or give it a title.
 //   - It parses with Mermaid's default options, not the site's (`securityLevel`, `sequence`),
 //     and does not apply the 50,000-character limit above which `mermaid.render` draws its
 //     "Maximum text size in diagram exceeded" box instead of the diagram; the render check
@@ -134,8 +137,36 @@ export async function diagramReader(): Promise<FindDiagrams> {
   };
 }
 
-/** A tag that opens or closes vitepress-plugin-mermaid's `<Mermaid>` component, in any case. */
-const MERMAID_TAG = /<mermaid[\s/>]/i;
+/** An HTML comment, which renders nothing, whatever tags its text names. */
+const COMMENT = /<!--[\s\S]*?-->/g;
+
+/**
+ * CommonMark's open tag (a name, then attributes, each value unquoted or quoted and consumed
+ * whole, then an optional `/`) or closing tag, at the scan position: a tag named in a quoted
+ * value is part of the attribute, not a tag of its own. The name is group 1 or group 2.
+ */
+const TAG =
+  /<(?:([A-Za-z][A-Za-z0-9-]*)(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|\/([A-Za-z][A-Za-z0-9-]*)\s*>)/y;
+
+/**
+ * Whether raw HTML holds a tag that opens or closes vitepress-plugin-mermaid's `<Mermaid>`
+ * component, in any case. Comments are dropped first; the rest is scanned left to right, a tag at
+ * a time, so text between tags (an apostrophe included) is read as text.
+ */
+function hasMermaidTag(html: string): boolean {
+  const text = html.replace(COMMENT, "");
+  for (let at = text.indexOf("<"); at !== -1; at = text.indexOf("<", at)) {
+    TAG.lastIndex = at;
+    const tag = TAG.exec(text);
+    if (tag === null) {
+      at++;
+      continue;
+    }
+    if ((tag[1] ?? tag[2])?.toLowerCase() === "mermaid") return true;
+    at = TAG.lastIndex;
+  }
+  return false;
+}
 
 /** The parts of a markdown-it token the tag search reads. */
 interface HtmlToken {
@@ -146,12 +177,14 @@ interface HtmlToken {
 
 /**
  * Whether a token, or an inline token's children, is raw HTML holding a `<Mermaid>` tag. The tag
- * in inline code or a fence is a code or fence token, so it is not matched.
+ * in inline code or a fence is a code or fence token, so it is not matched. This is an early,
+ * friendlier message: the render check's reading of the built HTML (`e2e/docs/pages.ts`) is the
+ * authority on hand-written diagrams, and catches the forms this misses.
  */
 function holdsMermaidTag(token: HtmlToken): boolean {
   if (
     (token.type === "html_block" || token.type === "html_inline") &&
-    MERMAID_TAG.test(token.content)
+    hasMermaidTag(token.content)
   )
     return true;
   return token.children?.some(holdsMermaidTag) ?? false;
