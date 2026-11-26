@@ -109,6 +109,69 @@ describe("M5 §6: Persister supersedes", () => {
     expect(h.store.records("persist")).toEqual(records);
   });
 
+  it.each(
+    (["invalidate", "clear"] as const).flatMap((removal) =>
+      (["read rejection", "load deadline", "store open failure"] as const).map(
+        (failure) => ({ removal, failure }),
+      ),
+    ),
+  )(
+    "N129: $removal answers at once and keeps the records after $failure and supersede",
+    async ({ removal, failure }) => {
+      const timeoutMs = 25;
+      const h = harness({ timeoutMs });
+      const records = fixture({}, [0, 4]);
+      h.store.seed("persist", records);
+      h.engine.cache(config());
+      if (failure === "load deadline") {
+        const read = h.store.gate("read");
+        const opening = h.persister.open("persist");
+        await tick();
+        await read.entered;
+        await tick(timeoutMs);
+        await opening;
+        read.release();
+        await tick();
+      } else {
+        if (failure === "read rejection") h.store.fail("read");
+        else h.openStore.mockRejectedValueOnce(new Error("store unavailable"));
+        await h.persister.open("persist");
+      }
+      expect(h.stopped).toEqual([
+        expect.objectContaining({
+          cacheId: "persist",
+          reason: failure === "read rejection" ? "error" : "unavailable",
+        }),
+      ]);
+      expect(h.store.records("persist")).toEqual(records);
+      h.engine.put("persist", batch([0]));
+
+      h.persister.supersede();
+      const cleanup = h.store.gate("write");
+      const answer = tracked(
+        Promise.resolve(
+          durably(h.persister, "persist", () => {
+            if (removal === "invalidate")
+              h.engine.invalidate("persist", span(0));
+            else h.engine.clear("persist");
+          }),
+        ).then(() => undefined),
+      );
+      await tick();
+      const answeredBeforeRelease = answer.done;
+      cleanup.release();
+      await tick(timeoutMs);
+      await answer.promise;
+
+      expect(h.engine.coverage("persist", all)).toEqual([]);
+      expect({
+        answeredBeforeRelease,
+        writes: writes(h.store),
+        records: h.store.records("persist"),
+      }).toEqual({ answeredBeforeRelease: true, writes: [], records });
+    },
+  );
+
   it.each(["succeeds", "fails"])(
     "4: a clear after superseding waits for its disk job when it %s",
     async (outcome) => {

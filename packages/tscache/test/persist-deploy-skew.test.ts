@@ -141,6 +141,46 @@ describe("M5 §6: superseding a lazy SharedWorker persister", () => {
       expect(store.log).toEqual([]);
     },
   );
+
+  it.each(
+    (["chunk rejection", "chunk deadline"] as const).flatMap((failure) =>
+      (["before", "after"] as const).map((when) => ({ failure, when })),
+    ),
+  )(
+    "N129: invalidate keeps the records when supersede comes $when $failure",
+    async ({ failure, when }) => {
+      const store = new MemoryStore();
+      const records = fixture({}, [0, 4]);
+      store.seed("persist", records);
+      const h = hosted(new Engine(), store);
+      h.engine.cache(config());
+
+      const opening = h.persistence.open("persist");
+      if (when === "before") h.persistence.supersede();
+      if (failure === "chunk rejection")
+        h.chunk.reject(new Error("chunk unavailable"));
+      else await tick(timeoutMs);
+      await opening;
+      expect(h.stops).toEqual([
+        expect.objectContaining({
+          cacheId: "persist",
+          reason: when === "before" ? "superseded" : "unavailable",
+        }),
+      ]);
+      if (when === "after") h.persistence.supersede();
+      h.engine.put("persist", batch([0]));
+
+      await h.persistence.durably("persist", () =>
+        h.engine.invalidate("persist", span(0)),
+      );
+      await tick(timeoutMs);
+      expect(h.engine.coverage("persist", all)).toEqual([]);
+      expect({ log: store.log, records: store.records("persist") }).toEqual({
+        log: [],
+        records,
+      });
+    },
+  );
 });
 
 describe.each([
@@ -244,7 +284,11 @@ describe.each([
       expect(clearMemory).toHaveBeenCalledTimes(1);
       expect(nextClearId).toHaveBeenCalledTimes(local ? 1 : 0);
       expect(order).toEqual(local ? ["memory", id, id] : ["memory", id]);
-      const after = path === "disk success" ? empty : stored;
+      // User decision 123 A: shared hosting clears the store once after a chunk failure.
+      const clearsAfterChunkFailure =
+        Hosting === HostedPersistence && path.startsWith("chunk");
+      const after =
+        path === "disk success" || clearsAfterChunkFailure ? empty : stored;
       expect(statesAtPost.map(({ records }) => records)).toEqual(
         local ? [stored, after] : [after],
       );
@@ -254,7 +298,13 @@ describe.each([
         );
       }
       expect(store.records("persist")).toEqual(after);
-      if (path.startsWith("chunk")) expect(store.log).toEqual([]);
+      if (path.startsWith("chunk")) {
+        expect(store.log).toEqual(
+          clearsAfterChunkFailure ? [{ kind: "clearAll", settled: true }] : [],
+        );
+        if (clearsAfterChunkFailure)
+          expect(statesAtPost.at(-1)?.transactionSettled).toBe(true);
+      }
     },
   );
 

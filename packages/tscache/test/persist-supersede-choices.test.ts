@@ -19,21 +19,23 @@ describe("a cleanup pending when the worker is superseded", () => {
     h.engine.cache(config());
     h.engine.cache(config({ id: "other" }));
     await h.persister.open("persist");
+    await h.persister.open("other");
 
-    // "other" stays loading behind its read, so it stops at its deadline.
-    const read = h.store.gate("read");
-    const opening = h.persister.open("other");
+    // User decision 95 B: load stops defer cleanup, so use a flush deadline.
+    const stalled = h.store.gate("write");
+    h.engine.put("other", batch([8]));
+    const expiring = h.persister.flush("other");
     await tick();
-    await read.entered;
+    await stalled.entered;
     await tick(10);
-    // The writer is busy with this flush when "other" stops.
+    // This removal is due before the cleanup that the deadline will queue.
     const write = h.store.gate("write");
-    h.engine.put("persist", batch([0]));
-    const flushing = h.persister.flush();
-    await tick();
-    await write.entered;
+    h.engine.put("persist", batch([0, 4]));
+    h.engine.invalidate("persist", { start: 0, end: 0 });
+    const flushing = h.persister.flush("persist");
     await tick(15);
-    await opening;
+    await expiring;
+    await write.entered;
     expect(h.stopped).toEqual([{ cacheId: "other", reason: "unavailable" }]);
     const waiting = tracked(h.persister.durable("other"));
     await Promise.resolve();
@@ -42,7 +44,7 @@ describe("a cleanup pending when the worker is superseded", () => {
     h.persister.supersede();
     await waiting.promise;
     await flushing;
-    read.release();
+    stalled.reject(new Error("late write rejection"));
     write.release();
     await tick(10_000);
 
@@ -50,8 +52,11 @@ describe("a cleanup pending when the worker is superseded", () => {
       { cacheId: "other", reason: "unavailable" },
       { cacheId: "persist", reason: "superseded" },
     ]);
-    // The one write is the flush abandoned at supersede(); no cleanup ran.
-    expect(writes(h.store).map(({ cacheId }) => cacheId)).toEqual(["persist"]);
+    // Since the stalled write, only the flush abandoned at supersede() ran.
+    expect(writes(h.store).map(({ cacheId }) => cacheId)).toEqual([
+      "other",
+      "persist",
+    ]);
     expect(h.store.records("other")).toEqual(other);
   });
 

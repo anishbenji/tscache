@@ -374,6 +374,8 @@ export class Persister {
       };
       for (const cache of this.#tracked.values()) {
         this.#stop(cache, "superseded", undefined, false);
+        // A cache stopped before keeps no cleanup for a later removal.
+        cache.deferred = cache.absorbable = false;
       }
       this.#dropCleanups();
       // A dropped cleanup may have been the running job: what was queued

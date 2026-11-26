@@ -362,6 +362,8 @@ export class HostedPersistence implements Persistence {
 
   /** A change after the chunk failed: a removal starts a deferred cleanup. */
   #changed(cacheId: string, change: CacheChange): void {
+    // Superseded: a removal answers at once and starts no write (N129).
+    if (this.#superseded) return;
     if (change.kind !== "remove" && change.kind !== "clear") return;
     const started = this.#cleanups.get(cacheId);
     if (started !== undefined) {
