@@ -2,6 +2,10 @@
 
 Branch: `chore/145-mermaid-render-check` · Reviewer: the director's review ladder · Rounds: 2 · Status: security lane run 3 triaged · Verdict after triage: pending
 
+## Threat model
+
+The render check and the syntax check guard against mistakes by trusted authors (the maintainer and agents), not against a diagram written to evade them. An escape that needs such a diagram (crafted markup, raw HTML injection, a client-only wrapper, a hand-built comment, a dynamic component with a class of its own) is a limit: grade it P3 at most and report it as a limit, not a blocker. A fix for one is still welcome when the chosen design closes it at no extra cost; no review round is spent on that class. The same text is in the headers of `e2e/docs/pages.ts` and `site/scripts/check-mermaid.ts` and in `site/contributing.md`.
+
 ## Scope
 
 User decision 139 C (2026-11-25): step 141's syntax check (`site/scripts/check-mermaid.ts`, in `docs:check`) is not a render, so a diagram that parses but fails to draw, or draws an error box, passes it. This step adds a check over the built site, in a real browser, that fails on any Mermaid error box. No dependency is added: Playwright and its Chromium are already installed for `e2e/`.
