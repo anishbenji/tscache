@@ -720,3 +720,25 @@ changed no other row.
   deadline is `timeoutMs` after its call. Superseding the worker answers it at once (Superseding, below), except a
   removal of a cache whose load had stopped (Stopping, below): the pending clear deletes that cache's records, so the
   removal still waits for the clear, within the same deadline." Nothing else in the section changed.
+
+### #167 A wording: the `clearAll` sentence and §4.10.8 made exact (merge review lane 2, Neon lane)
+
+Wording only, no `src/` or test change (user decision #167 A). It answers merge review lane 2's two P2s (the
+persister's exception held only where the clear is the cache's deletion; the hosting releases every waiting removal)
+and the Neon lane's P3 (§4.10.8 did not state the hosting's release or its skipped write). It replaces the #163 A
+wording above. Checked against `Persister.supersede()` and `#dropCleanups()` (only cleanup jobs are released, never a
+`clearAll` barrier waiter) and against `HostedPersistence.supersede()`, `#changed` and `#cleanup` (every stored
+`Cleanup` is released; no cleanup starts after `supersede()`; a pending opening writes nothing).
+
+- §4.10.6, Durability of removals. Before: "Superseding the worker answers it at once (Superseding, below), except a
+  removal of a cache whose load had stopped (Stopping, below): the pending clear deletes that cache's records, so the
+  removal still waits for the clear, within the same deadline." After: "Superseding the worker answers it at once
+  (Superseding, below), except in the persister a removal of a cache whose load had stopped (Stopping, below) and whose
+  deletion is that clear, meaning no cleanup of its own was queued before the call: the pending clear deletes that
+  cache's records, so the removal still waits for the clear, within the same deadline. The hosting's fallback after a
+  chunk failure (§4.10.8) has no such exception: its `supersede()` answers every waiting removal at once, and the
+  pending clear still deletes the records."
+- §4.10.8, the chunk-failure bullet. Before: "The same holds for a per-cache cleanup." After: "The same holds for a
+  per-cache cleanup, unless the worker has been superseded."
+- §4.10.8, the `supersede()` bullet. Before: none (new last sentence). After: "After a chunk failure, `supersede()`
+  releases any waiting deferred cleanup at once and starts no per-cache cleanup write."
