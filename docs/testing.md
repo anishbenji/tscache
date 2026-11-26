@@ -42,6 +42,8 @@ Never race an operation against a timer to prove it answers promptly. Await it: 
 
 Timeouts detect hangs. They are never an assertion of speed, and raising one never fixes a flake.
 
+The one exception is a deterministic, CPU-bound test whose cost is the work it checks, such as an exhaustive enumeration or a scan the test measures: its time is measured under load, and it sets its own timeout, about twice the worst case, at the call site with a comment giving the numbers. Today these are the event-order harness at bound 3 (`persist-orders.ts`) and the O(log n) test in `cache-reader-ranges.test.ts`, both 30 s (step 154, the parent's request under the user's standing grant, and director decision #166 for the reader test; `docs/reviews/step-154.md`). Any other test that crosses Vitest's 5 s default is a slowdown to investigate.
+
 ## Shared state
 
 Each app of the examples project has one mock backend and one server process for all its tests, and its spec runs serially (`test.describe.configure({ mode: "serial" })`). A test that changes the backend (its clock, failures, latency, the dataset version) undoes it in `afterEach` or before it ends. A test that needs a precondition sets it up itself: the server-rendered tests first have the server render once (`serverReadsCurrentVersion`), because its in-process cache outlives tests and a test may have restated the data.

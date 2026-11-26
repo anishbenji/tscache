@@ -43,6 +43,14 @@ export default defineConfig({
     // raised it to 20 s after two runs at load 20-28 crossed 5 s; with
     // every core busy the slowest test now takes 1.6 s (chore 28), and
     // heavy jobs on the shared machine run one at a time. A test that
-    // crosses 5 s again is a slowdown to investigate, not to raise.
+    // crosses 5 s again is a slowdown to investigate, not to raise. The one
+    // exception is a deterministic, CPU-bound test whose cost is the work it
+    // checks (an exhaustive enumeration, or a scan the test measures): its
+    // time is measured under load and its own timeout, about twice the worst
+    // case, is named and explained at the call site. Today that is the
+    // event-order harness at bound 3 (test/persist-orders.ts) and the
+    // O(log n) test in test/cache-reader-ranges.test.ts, both 30 s (step
+    // 154, the parent's request under the user's standing grant; director
+    // decision #166 for the reader test; docs/testing.md, Waiting).
   },
 });
