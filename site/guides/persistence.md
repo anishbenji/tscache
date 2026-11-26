@@ -31,10 +31,11 @@ resolves, to the listeners attached by then. Check `client.mode` if persistence 
 - Additions are written behind: about a second after the last change, and at most five seconds after the
   first. A live tail that only rewrites provisional points writes nothing.
 - A removal (`invalidate`, `clear`, a watermark moved back, a version change) is written at once, and the
-  call that made it resolves only once it is durable, or once persistence of the cache has stopped (what
-  each stop does with the records, `'superseded'` included, is under [Failures](#failures)). `clearAll()`
-  empties the disk and resolves once that clear has settled: use it to remove data from the disk. Either call takes at most about ten seconds on
-  a failing disk.
+  call that made it resolves only once it is durable, or once persistence of the cache has stopped and
+  any attempt to delete its records has settled (what each stop does with the records, `'superseded'`
+  included, is under [Failures](#failures)). `clearAll()` empties the disk and resolves once that clear
+  has settled: use it to remove data from the disk. Either call takes at most about ten seconds on a
+  failing disk.
 - When the last tab closes, the worker writes what was still waiting. Where the browser supports it
   (Chromium), tscache creates the worker with `extendedLifetime`, which keeps it running about 30 seconds
   after its last tab so that write can land. Elsewhere the option is ignored, and a worker that ends
@@ -65,12 +66,23 @@ only the newest pages are applied.
 
 ## Failures
 
-A persistence failure never rejects a call. The cache stops persisting, its records are deleted, and every
+A persistence failure never rejects a call. The cache stops persisting and goes on in memory, and every
 tab hears `persistStopped` with `reason` `'quota-exceeded'` (the origin's storage quota is full: the cache
 stops at the first refused write, without retrying, with the `QuotaExceededError`), `'unavailable'` (the
 database cannot be opened, or a write or the load did not finish in time) or `'error'` (a write or the load
-failed, with the error); the cache goes on in memory. A stop while `cache()` loads is emitted before the
-handle exists, so listen on the client:
+failed, with the error). A write that fails for a reason other than quota is retried while a
+retry fits inside about five seconds of the write being due, and the cache goes on persisting when a
+retry succeeds. A write that is refused for quota, or that still fails after those five seconds, stops
+the cache and tries once to delete its records, since the disk may still hold what memory removed;
+when that fails too, the records stay. A load whose read fails or does not finish in time deletes nothing: the records stay,
+and the next session loads them. A database that cannot be opened, or a persistence module that does
+not load, stops every persisted cache of the worker the same way. Such a cache keeps its records until
+its first later removal (`invalidate`, `clear`, a watermark moved back, a version change, `clearAll`):
+that removal deletes them, strict, and its call resolves once the deletion has settled, within about
+five seconds. When the deletion fails as well, the records stay. Later removals write nothing. After
+the browser closes the database connection, a later load or write stops its cache with `'error'`, and
+the records stay, since the deletion fails too. A stop while `cache()` loads is emitted before the handle
+exists, so listen on the client:
 
 <<< @/snippets/persistence.ts#stopped{ts}
 
@@ -115,7 +127,12 @@ included: each clears its memory and the disk too, so none of them writes the da
 resolves when the calling worker's own clear is done and does not wait for the others. A worker of
 tscache 0.1.0 or 0.2.0 is not reached and writes back what it still holds. If a `clearAll` cannot empty
 the disk within five seconds, every persisted cache stops, and that worker persists nothing more until
-it ends.
+it ends. When the logout comes while the worker's persistence module is still loading, as on the
+worker's first use of persistence or soon after a first `cache()`, the call waits for that loading
+first, so it can take up to ten seconds. When the module failed to load, `clearAll` still tries once to
+empty the database, within five seconds; when that fails as well, the records stay. In that case only, a
+database that opens after the call has answered is still emptied then; with the module loaded, a
+database that opens after the five seconds is not emptied.
 
 One chain of late workers is not covered yet. With three or more workers of 0.3.0 or later, one of
 them writing late, a worker that has already cleared can open a persisted cache, load the late

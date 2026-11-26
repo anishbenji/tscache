@@ -4,7 +4,7 @@
     "index:lazy": 19504,
     "index:lazy:nested": 6000,
     "worker": 21824,
-    "worker:lazy": 6368,
+    "worker:lazy": 6448,
     "engine": 16016,
     "fetcher": 656,
     "grid": 4240,

@@ -156,6 +156,26 @@ export function tracked(promise: Promise<void>): {
   return result;
 }
 
+/**
+ * A thrown or rejected value whose name and message cannot be read as
+ * usual: no prototype (no string form), a revoked proxy (every read
+ * throws), or a `message` getter that throws (security lane run 4, S4.1).
+ */
+export type Unreadable = "null prototype" | "revoked proxy" | "throwing getter";
+export function unreadable(kind: Unreadable): unknown {
+  if (kind === "null prototype") return Object.create(null);
+  if (kind === "revoked proxy") {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    return proxy;
+  }
+  return Object.defineProperty({}, "message", {
+    get() {
+      throw new Error("getter");
+    },
+  });
+}
+
 export function stateRecords(cache: CacheState): StoredCache {
   return recordsOf(
     {
