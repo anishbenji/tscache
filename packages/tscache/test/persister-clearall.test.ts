@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { CacheState } from "../src/engine/cache";
 import { Engine } from "../src/engine/engine";
 import { Persister } from "../src/persist/persister";
 import {
@@ -16,6 +17,7 @@ import {
   config,
   expectRecords,
   fixture,
+  type RestoreCache,
   rng,
   tracked,
 } from "./persist-test-helpers";
@@ -221,15 +223,28 @@ describe("clearAll is a writer barrier (§4.10.6 h2/i–n; rounds 5–6)", () =>
     const h = await opened();
     h.engine.cache(config({ id: "B" }));
     await h.persister.open("B");
+    // C's read starts before A's write, so A's held write does not delay it.
+    h.engine.cache(config({ id: "C" }));
+    const read = h.store.gate("read");
+    const openingC = h.persister.open("C");
+    await tick();
+    await read.entered;
     h.engine.put("persist", batch([0]));
     const running = h.store.gate("write");
     const flushing = h.persister.flush();
     await tick();
     await running.entered;
-    // B's failed load queues a cleanup while the writer is occupied by A.
-    h.engine.cache(config({ id: "C" }));
-    h.store.fail("read", 1);
-    await h.persister.open("C");
+    // C's failed restore queues a cleanup while the writer is occupied by A.
+    // A rejected read no longer cleans up (user decision 95); a restore
+    // failure still does.
+    vi.spyOn(
+      CacheState.prototype as RestoreCache,
+      "restore",
+    ).mockImplementationOnce(() => {
+      throw new RangeError("planted restore failure");
+    });
+    read.release();
+    await openingC;
     const clearing = clearAll(h);
     running.release();
     await flushing;
