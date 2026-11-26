@@ -474,3 +474,200 @@ Opus pre-review on 9c904f0a: no start-up P0 or P1 (the round 9 tests reproduced:
 | `site/how-it-works/tabs.md` shows the refused 0.2.0 page getting `code: 'fetcher-conflict'`                                                  | Valid (P2)  | A 0.2.0 client sees the message only; clients from 0.3.0 set the code.                                                                                                            |
 | The 0.3.0 gate note names the internal milestone; "a watermark change" is broader than what deletes records                                  | Valid (nit) | "0.3.0 is not released before step 150 merges"; "a watermark moved back".                                                                                                         |
 | This file did not record 9c904f0a                                                                                                            | Valid (nit) | Commit 9c904f0a shortened the N58 row (approved by the user), so the section 8 table is no longer re-padded: `docs/architecture.md` is back to 388.3 KB, as `docs/INDEX.md` says. |
+
+## Merge of main at 69d52c13 (step 132), 2026-11-26
+
+Main moved to 69d52c13 (#175, step 132). The merge (d2298764, a merge commit, the repository's noreply identity)
+conflicted in eight files, all of which step 135 had changed for its own work. Each `src/` hunk was resolved by taking
+one side or combining both sides' existing logic (marked below), with two lines outside the hunks that the merged tree
+needs to type-check. The merged tree fails five step-135 tests and two size budgets, and two interactions break N129;
+user decision #158 A (2026-11-26) settles how: Codex contract tests first, the two N129 guards (the one exception to
+#144 condition 3), the five test updates as consequences of 123 A and 95 B, a budget raise in its own commit, then
+bound 5, full ci, the Opus lane and one final Codex round 11 on the post-merge diff. So the merge commit itself is red
+on those tests and budgets; the commits after it make the branch green.
+
+### What the merge found
+
+#### A. Five step-135 tests fail because step 132 changed what they assume
+
+Targeted run, 32 files (every `persist*`, `persister*`, `rpc-persist`, `deploy-skew*`, `orchestrator-deploy-skew`,
+`generations`, `m3-memory-persistence`, `config-persist` test file): **30 files pass, 2 fail; 515 tests pass, 5 fail.**
+Every step-132 test passes, its event-order files at bound 3 included.
+
+1. `persist-deploy-skew.test.ts`, "M5 §6: shared hosting posts clearAll", test 8, four cases: `local` and `channel` ×
+   `chunk rejection` and `chunk deadline`. The test expects that a `clearAll` after the chunk failed clears memory only:
+   `store.records("persist")` equals the seeded records and `store.log` is empty. Step 132 (user decision 123 A) makes that
+   `clearAll` empty the whole store once through the store opener, so the merged code (correctly, by 123 A) deletes the
+   records. The clear-only hosting's cases of the same test pass. Fix needed: the test's expected records for the shared
+   hosting's chunk paths become `empty` and `store.log` one `clearAll`. That is a contract-test change.
+2. `persist-supersede-choices.test.ts`, "drops a queued cleanup: the stopped cache's records stay". Its setup gets a queued
+   cleanup by letting a load hit its deadline. Step 132 (user decision 95 B) removed that cleanup: a load stop now defers
+   it, and `durable()` settles at once, so the precondition `expect(waiting.done).toBe(false)` (line 40) fails before
+   the behaviour under test is reached. Fix needed: a setup whose stop still queues a cleanup at once (a quota refusal or
+   a flush past its deadline). Also a test change.
+
+#### B. Two merge interactions with no test on either side (new `src/` logic needed)
+
+Reproduced with a scratch test (deleted; not in the tree). Both break step 135's N129 rule, stated in the merged
+architecture §4.10.6 Superseding ("After `supersede()` the persister starts no write for any cache"), the merged
+checklist ("After `'superseded'`, a per-cache removal answers at once and leaves its records") and the merged guide
+("A deletion still waiting when the worker is superseded ... does not run, and those records stay too").
+
+1. **Persister.** A cache stopped by its load (step 132: read rejected, deadline, failed store opening) keeps
+   `deferred = true`. `supersede()` skips already-stopped caches and `#dropCleanups()` drops only queued jobs, so the flag
+   survives. The cache's first removal after `supersede()` (`#stoppedRemoval`) queues its cleanup, and the writer runs a
+   strict delete-all `write` for the cache: records that may be the newer generation's by now. Scratch reproduction:
+   seed, `store.fail("read")`, `open`, `supersede()`, `engine.invalidate("persist", { start: 0, end: 0 })`,
+   `tick(5000)`: `writes(h.store)` is one `{ deletePages: [-Infinity, Infinity], strict: true }` write, and the records are
+   gone.
+2. **Hosted, chunk failed.** After the chunk fails, `#settle` installs `#changed`, which starts a deferred cleanup through
+   the store opener for every cache in `#stopped`. `#changed` does not look at `#superseded`, so after `supersede()` (before
+   or after the failure) a removal of such a cache runs `store.write(cacheId, CLEANUP)`. Scratch reproduction: chunk
+   rejects, `open` stops `'unavailable'`, `supersede()`, `invalidate`: `store.log` holds that write and the records are
+   gone.
+
+Likely fixes, for the director to brief (not written): in `Persister.supersede()`, clear `deferred` (and `absorbable`) on
+every stopped cache; in `HostedPersistence.#changed`, return when `#superseded`. Each needs a failing test first (TDD,
+`persist/`), and the bound-5 event-order run after.
+
+#### C. Size budgets (not caused by the conflict hunks)
+
+`bun scripts/size.ts` on the merged build fails two entries outside the conflict; exact brotli bytes from
+`scripts/size-measure.ts` on three builds made from the same lockfile:
+
+| Entry               | main 69d52c13 | branch 58008ce0 | merged | Budget (merged file) | Verdict |
+| ------------------- | ------------: | --------------: | -----: | -------------------: | ------- |
+| `index`             |         5,858 |       **6,458** |  6,458 |                6,432 | over    |
+| `index:lazy`        |        18,409 |          18,954 | 18,954 |               19,504 | ok      |
+| `index:lazy:nested` |         5,997 |           5,851 |  6,085 |                6,000 | over    |
+| `worker`            |        20,118 |          21,310 | 21,722 |               21,824 | ok      |
+| `worker:lazy`       |         5,929 |           5,851 |  6,014 |                6,448 | ok      |
+
+- `index` is already over its budget on **58008ce0 itself** (6,458 > 6,432): the branch's own `bun run ci` fails at
+  `size.ts` before this merge. Not caused by the merge.
+- `index:lazy:nested` goes over only in the merge: both sides add to the in-process chunk's clear-only path.
+- By the repository rule (`budgetFor`), the merged build needs `index` 6,976 and `index:lazy:nested` 6,608. Not raised:
+  a budget raise is a reviewed edit; it belongs in its own commit with these numbers.
+
+### Resolution, hunk by hunk
+
+Files step 135 changed for its own work, of the eight conflicted: **all eight** (`docs/INDEX.md`,
+`docs/architecture.md`, `docs/review-checklist.md`, `packages/tscache/bench/budgets.json`,
+`packages/tscache/src/persist/hosted.ts`, `packages/tscache/src/persist/persister.ts`, `site/guides/persistence.md`,
+`site/how-it-works/package-map.md`).
+
+#### `packages/tscache/src/persist/hosted.ts` (3 hunks, plus one line outside them)
+
+1. Module doc comment: **combined**. Theirs' continuation of the "`'unavailable'`." paragraph (the deferred cleanup through
+   the store opener, user decision 113 A) comes first, then ours' "Deploy skew (§4.10.7, step 135)" paragraph, both
+   verbatim.
+2. Imports: **combined**, both lines kept: `import { type ClearPostOptions, ClearPosts } from "./clear-posts";` (ours) and
+   `import { type Failure, failureOf } from "./failure";` (theirs).
+3. Fields: **combined**, ours' `#superseded` and `#posts` then theirs' `#cleanups`, `#store` and `#clearing`, all verbatim.
+4. Outside the hunks, in theirs' auto-merged `clearAll` branch: `const pending = [...this.#pending];` became
+   `const pending = [...this.#pending.keys()];`. Ours made `#pending` a `Map<string, Promise<void>>` (a second open
+   joins the first); theirs spread it as a `Set<string>`. `.keys()` is the only change, needed for `tsc`
+   (TS2345 otherwise), and gives the same cache ids theirs iterated.
+
+Combined design: the two sides meet in `clearAll`, which auto-merged. After a chunk failure, theirs' whole-store clear
+(`#clearStore`, user decision 123 A) runs; ours' `#posts.begin(fromClearId)` posts after the memory clear and its
+`settled()` after `cleared`, so the second post now waits for that store clear. Both sides' order holds: memory, own
+post, disk, settled post. The interaction this leaves open is B2.
+
+#### `packages/tscache/src/persist/persister.ts` (4 hunks, plus one line outside them)
+
+1. `#failure` field: **combined**. Doc comment: ours' first two sentences (superseded, N131), then theirs' `cleanup`
+   sentence. Type: theirs' `{ reason; error; cleanup: Cleanup }`.
+2. `open` after a failure: **combined**. Comment from ours ("A failed opening or clearAll, or a superseded worker:
+   nothing loads or persists any more."); code from theirs:
+   `const { reason, error, cleanup } = this.#failure; this.#stop(cache, reason, error, cleanup);`. For a superseded
+   persister `cleanup` is `false` (4), which is ours' `false` argument.
+3. `#clearFailed` doc: **combined**. Theirs' text ("their cleanup, a deferred one included, ... Cleanups already queued
+   stay. Nothing persists any more (D27).") then ours' "After `supersede()` none is left running, so it stops nothing
+   more."
+4. `#clearFailed` body: **combined**. Resulting lines:
+
+   ```ts
+   // A superseded persister keeps that reason for later opens (N131).
+   if (this.#failure?.reason !== "superseded") {
+     this.#failure = { reason, error, cleanup: false };
+   }
+   ```
+
+   The comment and the `if` are ours; the assignment's `cleanup: false` is theirs.
+5. Outside the hunks, ours' auto-merged `supersede()`: `this.#failure = { reason: "superseded", error: undefined };`
+   gained `cleanup: false` (Biome then wrapped it over five lines). Needed by theirs' type; `false` keeps ours'
+   behaviour, a superseded open stopping without a cleanup.
+
+#### `packages/tscache/bench/budgets.json` (1 hunk)
+
+Both sides raised `worker` and `worker:lazy`. Originals: ours `worker` 21,824, `worker:lazy` 6,368; theirs `worker`
+20,640, `worker:lazy` 6,448 (base 19,888 and 5,824). The merged build measures `worker` 21,722 and `worker:lazy` 6,014
+brotli bytes. Taken: `worker` 21,824 (**ours**; theirs is too small for the merged worker) and `worker:lazy` 6,448
+(**theirs**, the larger of two that both fit). Neither is a new number. Section C covers the other entries.
+
+#### `docs/review-checklist.md` (1 hunk)
+
+Two adjacent checklist items. **Combined**: the removal item is ours (adds the `'superseded'` sentence, N129), and the
+`clearAll` item is theirs (113 A absorption, the whole-store clear after a chunk failure, 123 A). Neither side changed the
+other's line, and both texts are verbatim.
+
+#### `docs/architecture.md` (6 conflict hunks in git; `git merge-file --diff3` splits them into 7)
+
+Merged word by word against the base, both sides' edits applied; checked so that every sentence either side added is
+present unless the other side rewrote it on purpose (listed). Locked text is verbatim.
+
+1. §4.10.1 "When calls wait for the disk" and the next bullets: **combined**. Theirs' new sentence (a load that gave up
+   leaves its records unless removed first, user decisions 95 and 113 A) inserted where theirs put it; ours' rewrite of the
+   durability sentence ("What durable means, and the one stop that deletes nothing (`'superseded'`), are stated once, in
+   §4.10.6") kept, so theirs' tweak of the old sentence (`the deletion` → `any deletion`) has no sentence left to apply
+   to (§4.10.6 Durability of removals and Stopping carry it). Ours' "What can outlive a removal", "Version honesty" and
+   "One writer" edits are kept.
+2. §4.10.6 Open: **combined**. Ours' "After `supersede()` a new cache stops at once with `'superseded'`" and theirs'
+   opener throw note (R3-3), the deferred cleanup on a failed opening and on a rejected read.
+3. §4.10.6 Failures, Stopping: **combined**. Theirs' new "A lost connection" bullet first. In the Stopping bullet the
+   cleanup condition joins both: "when a store is open, the reason is not `'superseded'` and the stop did not end the
+   cache's load"; theirs' N58 clause and its deferred-cleanup paragraph, and ours' "apart from a `'superseded'` stop ...
+   until step 150" clause before "the one way a removal can outlive its call".
+4. §4.10.6 `clearAll`, during the barrier, success and failure: **combined** word by word (ours' `supersede()` path;
+   theirs' R3-2, R5-1 and R2-1 sentences).
+5. §4.10.6 Superseding (ours, new) and Close (theirs, rewritten): **combined**, both whole.
+6. §4.10.8 Lazy loading: **combined**. Theirs' rewritten chunk-failure bullet (123 A whole-store clear, arrival order,
+   R4-1, R3-1, S3.2), then ours' new `supersede()` bullet.
+7. §4.10.9 removals table: **combined**. Ours' re-padded table with its edits, plus theirs' new row "A removal after the
+   cache's load stopped" after "A cache changed while its load was pending", and the Quota row as "and one cleanup
+   deletes its records (not when the worker is superseded before that deletion ran, §4.10.6); when it fails, they stay
+   (§4.10.6 Stopping)": theirs' wording with ours' parenthesis.
+
+#### `site/guides/persistence.md` (3 hunks)
+
+1. The removal bullet: **combined**. "... or once persistence of the cache has stopped and any attempt to delete its
+   records has settled (what each stop does with the records, `'superseded'` included, is under [Failures](#failures)).
+   `clearAll()` empties the disk and resolves once that clear has settled: use it to remove data from the disk. Either
+   call takes at most about ten seconds on a failing disk." The `and any attempt to delete its records has settled` part
+   is theirs; the rest, and the removal list without `clearAll`, are ours.
+2. "A removal is not exposed to this": **ours** ("since its call waits for the disk as above"), which points at bullet 1,
+   where theirs' meaning now is.
+3. Logout section: **combined**. Ours' first paragraph (0.3.0 reach, the 0.1.0/0.2.0 limit), then theirs' new sentences
+   ("When the logout comes while the worker's persistence module is still loading ... is not emptied."), then ours' "One
+   chain of late workers is not covered yet" paragraph. Theirs' first sentence ("It does not reach the records a
+   still-running worker of another deploy writes back") is replaced by ours' rewrite of the same sentence.
+
+#### `docs/INDEX.md` (1 hunk: the whole table, re-padded by both)
+
+**Ours**, then four size cells recomputed from the merged files (KB = 1000 bytes, as the table uses): `architecture.md`
+396.0 KB (ours 389.1, theirs 339.2), `docs/decisions/` 241.9 KB, 149 files (ours 237.7, theirs 210.3),
+`review-checklist.md` 18.1 KB (ours 17.2, theirs 17.9), `site/` 303.5 KB of Markdown (ours 301.6, theirs 288.8). Theirs
+changed no other row.
+
+#### `site/how-it-works/package-map.md` (1 hunk, the generated table)
+
+**Ours**, then regenerated with `bun site/scripts/module-graph.ts`: the `./worker` row gains `failure` beside ours'
+`clear-posts`. `--check` passes.
+
+### Verified at the merge
+
+- `bunx tsc --noEmit -p packages/tscache`: no errors.
+- `bun site/scripts/module-graph.ts --check`: passes. `bunx biome check packages/tscache/src/persist`: clean.
+- Targeted Vitest, 32 files: 515 passed, 5 failed (section A).
+- `bun.lock` is unchanged by the merge; no install needed.
