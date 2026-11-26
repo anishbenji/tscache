@@ -1,5 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +25,28 @@ const OTHER = "someone@example.com";
 const ALLOWED_EMAIL = "anishbenji@users.noreply.github.com";
 const DEPENDABOT = "49699333+dependabot[bot]@users.noreply.github.com";
 const GITHUB = "noreply@github.com";
+
+/**
+ * The fixed advice after the offence rows (decision #154 A): the same for
+ * every offence, with no ref name and no per-ref command.
+ */
+const ADVICE = [
+  "",
+  "To fix, set your GitHub noreply address (github.com/settings/emails):",
+  "  git config user.email <you>@users.noreply.github.com",
+  "Rewrite the listed commits, or re-create the listed tags, with that address, then push again.",
+  "Never rewrite a commit or tag that is already pushed: others may have fetched it.",
+  'For the common case, a branch: docs/workflow.md, "One-time setup", item 4 (Git hooks).',
+].join("\n");
+
+/** Asserts that `text` ends in the fixed advice and names no ref or peel. */
+function expectFixedAdvice(text: string): void {
+  expect(text.endsWith(ADVICE)).toBe(true);
+  expect(text).not.toContain("^{}");
+  expect(text).not.toContain("refs/");
+  expect(text).not.toContain("git rebase");
+  expect(text).not.toContain("git tag");
+}
 
 /**
  * The environment for the throwaway repository: none of the GIT_* variables
@@ -253,22 +281,29 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     expect(text).toContain("an address ending in @users.noreply.github.com");
     expect(text).toContain(`or exactly ${GITHUB}`);
     expect(text).toContain("<you>@users.noreply.github.com");
-    expect(text).toContain("--reset-author");
+    expectFixedAdvice(text);
   });
 
-  it("advises a rebase of the offending branch that keeps authors by default", () => {
-    const text = format(
-      [{ sha: "a".repeat(40), field: "committer", email: OTHER }],
-      ["refs/heads/topic"],
-    );
-    const command = text.split("\n").find((row) => row.includes("git rebase"));
-    expect(command).toBe(
-      "  git rebase -r --exec 'git commit --amend --no-edit' <base> <branch>",
-    );
-    expect(command).not.toContain("--reset-author");
-    expect(text).toMatch(/<branch> the local branch that holds them: topic\b/);
-    expect(text).toContain(
-      "Use --reset-author only for author rows that are your own commits",
+  it("names every offending sha and field, then the same fixed advice", () => {
+    const text = format([
+      { sha: "a".repeat(40), field: "author", email: OTHER },
+      { sha: "a".repeat(40), field: "committer", email: GITHUB.slice(1) },
+      { sha: "c".repeat(40), field: "tagger", email: "", tag: "v1" },
+    ]);
+    const rows = text
+      .split("\n")
+      .filter((row) => row.startsWith("  ") && !row.includes("git config"));
+    expect(rows).toEqual([
+      `  aaaaaaaaaaaa author ${OTHER}`,
+      `  aaaaaaaaaaaa committer ${GITHUB.slice(1)}`,
+      "  cccccccccccc tagger  (tag v1)",
+    ]);
+    expectFixedAdvice(text);
+    const commitsOnly = format([
+      { sha: "a".repeat(40), field: "committer", email: OTHER },
+    ]);
+    expect(commitsOnly.slice(commitsOnly.indexOf("\n\n"))).toBe(
+      text.slice(text.indexOf("\n\n")),
     );
   });
 
@@ -308,6 +343,68 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     expect(() => run(`HEAD@{1 day ago} ${bad} refs/heads/main\n`)).toThrow(
       /malformed pre-push line/,
     );
+  });
+
+  it("parses a local ref holding U+2028, U+2029, U+00A0 and spaces", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const head = commit("b");
+    const ref = "refs/heads/a b c d e f";
+    expect(run(`${ref} ${head} refs/heads/main ${base}\n`)).toEqual([]);
+    const bad = commit("c", OTHER);
+    expect(run(`${ref} ${bad} refs/heads/main ${base}\n`)).toEqual([
+      { sha: bad, field: "author", email: OTHER },
+    ]);
+    expect(() => run(`${ref} ${head}\n`)).toThrow(/malformed pre-push line/);
+    expect(() => run(`${head} ${base}\n`)).toThrow(/malformed pre-push line/);
+  });
+
+  // Decision #154 A: NUL-framed git log, so no byte inside an address can
+  // shift the fields; Git cannot store a NUL in an address.
+  it("reads the committer even when the author address holds U+001F", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const author = "a@users.noreply.github.com\x1fb@users.noreply.github.com";
+    const bad = commit("b", author, OTHER);
+    expect(git(["log", "-1", "--format=%ae", bad])).toBe(author);
+    // The author address is not well formed, so it is refused too.
+    expect(run(line(bad, base))).toEqual([
+      { sha: bad, field: "author", email: author },
+      { sha: bad, field: "committer", email: OTHER },
+    ]);
+  });
+
+  it("refuses an author address with an interior space", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const author = "me@gmail.com x@users.noreply.github.com";
+    const bad = commit("b", author);
+    expect(git(["log", "-1", "--format=%ae", bad])).toBe(author);
+    expect(run(line(bad, base))).toEqual([
+      { sha: bad, field: "author", email: author },
+    ]);
+  });
+
+  it("refuses a tagger address with an interior space", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const tagger = "me@gmail.com x@users.noreply.github.com";
+    const v1 = tag("v1", base, tagger);
+    expect(run(line(v1, ZERO, "refs/tags/v1"))).toEqual([
+      { sha: v1, field: "tagger", email: tagger, tag: "v1" },
+    ]);
+  });
+
+  it("reads UTF-8 whatever i18n.logOutputEncoding says", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    git(["config", "i18n.logOutputEncoding", "UTF-16"]);
+    const head = commit("b");
+    expect(run(line(head, base))).toEqual([]);
+    const bad = commit("c", OTHER);
+    expect(run(line(bad, base))).toEqual([
+      { sha: bad, field: "author", email: OTHER },
+    ]);
   });
 
   it("passes a large clean history, beyond the default output buffer", () => {
@@ -351,7 +448,7 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     expect(refused.error).toBeUndefined();
     expect(refused.status).toBe(1);
     expect(refused.stderr).toContain(`${bad.slice(0, 12)} author ${OTHER}`);
-    expect(refused.stderr).toContain("the local branch that holds them: main.");
+    expectFixedAdvice(refused.stderr.trimEnd());
 
     const passed = spawnSync("bun", [SCRIPT], {
       cwd: dir,
@@ -441,15 +538,16 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     ]);
   });
 
-  it("advises re-creating a refused tag, and no rebase when only tags are refused", () => {
-    const text = format(
-      [{ sha: "b".repeat(40), field: "tagger", email: OTHER, tag: "v1" }],
-      ["refs/tags/v1"],
-    );
+  it("gives a refused tag the fixed advice, and no rebase or tag command", () => {
+    const text = format([
+      { sha: "b".repeat(40), field: "tagger", email: OTHER, tag: "v1" },
+    ]);
     expect(text).toContain(`bbbbbbbbbbbb tagger ${OTHER} (tag v1)`);
     expect(text).toContain("tagger");
-    expect(text).toContain("  git tag -f -a <tag> <tag>^{}");
-    expect(text).toContain("Never re-create a tag that is already pushed");
+    expectFixedAdvice(text);
+    expect(text).toContain(
+      "Never rewrite a commit or tag that is already pushed",
+    );
     expect(text).not.toContain("git rebase");
   });
 
@@ -482,7 +580,7 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     expect(result.stderr).toContain(
       `${v1.slice(0, 12)} tagger ${OTHER} (tag v1)`,
     );
-    expect(result.stderr).toContain("git tag -f -a <tag> <tag>^{}");
+    expectFixedAdvice(result.stderr.trimEnd());
   });
 
   it("exits 1 for a malformed row and for an unknown local SHA", () => {
@@ -523,6 +621,13 @@ describe("isAllowed", () => {
     "",
     "someone@gmail.com",
     OTHER,
+    "me@gmail.com x@users.noreply.github.com",
+    "a@users.noreply.github.com\x1fb@users.noreply.github.com",
+    "me@gmail.com\tx@users.noreply.github.com",
+    "<me@gmail.com>x@users.noreply.github.com",
+    "a@b@users.noreply.github.com",
+    "x@users.noreply.github.com\n",
+    "x\x7f@users.noreply.github.com",
   ])("refuses %j", (email) => {
     expect(isAllowed(email)).toBe(false);
   });
@@ -530,13 +635,13 @@ describe("isAllowed", () => {
 
 describe("lefthook.yml pre-push", () => {
   it("runs the check first, as a script job with stdin, under a piped hook", () => {
-    const env: NodeJS.ProcessEnv = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (!key.startsWith("GIT_")) env[key] = value;
-    }
+    // The tracked file alone, dumped in the throwaway repository: a developer's
+    // lefthook-local.yml in the checkout would otherwise be merged in.
+    copyFileSync(join(ROOT, "lefthook.yml"), join(dir, "lefthook.yml"));
+    const lefthook = join(ROOT, "node_modules", ".bin", "lefthook");
     const dump = JSON.parse(
-      execFileSync("bunx", ["lefthook", "dump", "--format", "json"], {
-        cwd: ROOT,
+      execFileSync(lefthook, ["dump", "--format", "json"], {
+        cwd: dir,
         env,
         encoding: "utf8",
       }),
