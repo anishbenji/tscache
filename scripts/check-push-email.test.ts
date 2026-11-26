@@ -51,12 +51,16 @@ function expectFixedAdvice(text: string): void {
 /**
  * The environment for the throwaway repository: none of the GIT_* variables
  * a surrounding hook sets (GIT_DIR would point every command at this
- * repository), no global or system config (signing, hooks), fixed dates.
+ * repository), none of the LEFTHOOK* variables a developer may export for
+ * another checkout (LEFTHOOK_CONFIG would replace the config under test), no
+ * global or system config (signing, hooks), fixed dates.
  */
 function repoEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (!key.startsWith("GIT_")) env[key] = value;
+    if (!key.startsWith("GIT_") && !key.startsWith("LEFTHOOK")) {
+      env[key] = value;
+    }
   }
   return {
     ...env,
@@ -408,9 +412,13 @@ describe("check-push-email", { timeout: 30_000 }, () => {
   });
 
   it("passes a large clean history, beyond the default output buffer", () => {
-    // About 10,000 commits print roughly 1.1 MB through the check's git log,
-    // above spawnSync's 1 MiB default. fast-import writes them in one process.
-    const count = 10_000;
+    // Both of the check's git reads must pass spawnSync's 1 MiB (1,048,576
+    // bytes) default buffer. `git log -z --format=%H` prints 41 bytes per
+    // SHA-1 commit (the sha and a NUL), so it needs more than 25,575 commits:
+    // 26,000 print 1,066,000 bytes. `git cat-file --batch` prints each raw
+    // commit with its header line, about 280 bytes each, so it passes the
+    // default far sooner. fast-import writes them in one process.
+    const count = 26_000;
     const ident = `A <${ALLOWED_EMAIL}> 1767225600 +0000`;
     const stream = Array.from({ length: count }, (_, i) =>
       [
@@ -810,7 +818,7 @@ describe("lefthook.yml pre-push", () => {
     const dump = JSON.parse(
       execFileSync(lefthook, ["dump", "--format", "json"], {
         cwd: dir,
-        env,
+        env: { ...env, LEFTHOOK_CONFIG: join(dir, "lefthook.yml") },
         encoding: "utf8",
       }),
     );
