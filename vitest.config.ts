@@ -1,3 +1,4 @@
+/// <reference path="packages/tscache/test/provided-context.d.ts" />
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
@@ -58,10 +59,11 @@ export default defineConfig({
     // passed at two call sites. Any other test needs the user's OK again,
     // with measurements; the exception does not extend by itself.
     //
-    // The 30 s is set here, as TSCACHE_TEST_TIMEOUT, and the two call sites
-    // read it; vitest.mutation.config.ts sets its own 60 s the same way.
-    // Vitest assigns test.env over the inherited environment in each worker,
-    // so a value exported in the caller's shell never reaches the tests.
-    env: { TSCACHE_TEST_TIMEOUT: "30000" },
+    // The 30 s is provided here as tscacheTestTimeout, and the two call
+    // sites read it with `inject`; vitest.mutation.config.ts provides its own
+    // 60 s the same way. A provided value comes only from a configuration,
+    // never from the shell. A run that loads neither configuration provides
+    // nothing, so the three tests get Vitest's default timeout.
+    provide: { tscacheTestTimeout: 30_000 },
   },
 });

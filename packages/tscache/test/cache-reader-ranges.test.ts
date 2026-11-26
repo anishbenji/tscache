@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, inject, it } from "vitest";
 import { includeRange } from "../src/engine/cache";
 import type { SlotRange } from "../src/grid";
 import { rng } from "./cache-model";
@@ -9,15 +9,14 @@ import { rng } from "./cache-model";
 // every range, so a call collecting n ranges cost O(n²). These tests pin
 // its result against that scan and count its work, never its time.
 
-const env = (globalThis as { process?: { env: Record<string, string> } })
-  .process?.env;
 /**
- * The O(log n) test's timeout, TSCACHE_TEST_TIMEOUT: 30 s from
+ * The O(log n) test's timeout, tscacheTestTimeout: 30 s provided by
  * vitest.config.ts (the test's comment gives the numbers), or the mutation
- * run's own 60 s from vitest.mutation.config.ts. Each configuration sets it
- * in `test.env`, which replaces any value exported in the caller's shell.
+ * run's own 60 s provided by vitest.mutation.config.ts (`test.provide`;
+ * never from the shell). With neither configuration it is undefined, and
+ * Vitest's default applies.
  */
-const scanTimeout = Number(env?.TSCACHE_TEST_TIMEOUT);
+const scanTimeout = inject("tscacheTestTimeout");
 
 /** The scan `includeRange` replaced, kept as the reference result. */
 function reference(list: SlotRange[], range: SlotRange): void {

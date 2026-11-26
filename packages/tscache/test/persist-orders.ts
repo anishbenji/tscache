@@ -30,7 +30,7 @@
  * log (`arrivalOrder`, round 4, R4-1).
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, inject, it, vi } from "vitest";
 import { Engine } from "../src/engine/engine";
 import { HostedPersistence, type LazyPersist } from "../src/persist/hosted";
 import * as lazy from "../src/persist/lazy";
@@ -1348,12 +1348,12 @@ const env = (globalThis as { process?: { env: Record<string, string> } })
  */
 const BOUND = Number(env?.TSCACHE_EVENT_ORDERS ?? 3);
 /**
- * The timeout at bound 3 or less, TSCACHE_TEST_TIMEOUT: 30 s from
- * vitest.config.ts, or the mutation run's own 60 s from
- * vitest.mutation.config.ts. Each configuration sets it in `test.env`,
- * which replaces any value exported in the caller's shell.
+ * The timeout at bound 3 or less, tscacheTestTimeout: 30 s provided by
+ * vitest.config.ts, or the mutation run's own 60 s provided by
+ * vitest.mutation.config.ts (`test.provide`; never from the shell). With
+ * neither configuration it is undefined, and Vitest's default applies.
  */
-const orderTimeout = Number(env?.TSCACHE_TEST_TIMEOUT);
+const orderTimeout = inject("tscacheTestTimeout");
 
 /** Declares one harness's order tests, one per first event. */
 export function orderTests(hosted: boolean): void {
