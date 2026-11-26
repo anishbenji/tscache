@@ -78,7 +78,7 @@ export function gridMismatch(
     alignmentOffset: number;
   },
 ): string | undefined {
-  const { format, interval, alignmentOffset } = stored;
+  const { format } = stored;
   const calendar = typeof own.interval !== "number";
   if (format !== 1 && format !== 2) {
     return `format must be 1 or 2, got ${kindOf(format)}`;
@@ -91,12 +91,13 @@ export function gridMismatch(
       ? undefined
       : "grid differs from the cache grid";
   }
-  if (interval !== own.interval) {
-    return `interval must be the cache grid's ${own.interval}, got ${kindOf(interval)}`;
+  for (const field of ["interval", "alignmentOffset"] as const) {
+    const got = stored[field];
+    if (got !== own[field]) {
+      return `${field} must be the cache grid's ${own[field]}, got ${kindOf(got)}`;
+    }
   }
-  return alignmentOffset === own.alignmentOffset
-    ? undefined
-    : `alignmentOffset must be the cache grid's ${own.alignmentOffset}, got ${kindOf(alignmentOffset)}`;
+  return undefined;
 }
 
 /** The payload must describe the cache's own grid, in the grid's format. */

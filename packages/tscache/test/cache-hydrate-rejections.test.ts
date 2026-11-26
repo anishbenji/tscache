@@ -800,4 +800,121 @@ describe("hydrate error text — step 148", () => {
       );
     },
   );
+
+  function throwingGetter(target: object, field: string) {
+    let reads = 0;
+    Object.defineProperty(target, field, {
+      enumerable: true,
+      get() {
+        reads++;
+        throw new RangeError(marker);
+      },
+    });
+    return () => reads;
+  }
+
+  describe.each(["envelope", "payload"])(
+    "grid validation on the %s",
+    (location) => {
+      it.each([
+        { id: "V22a", field: "interval" },
+        { id: "V22b", field: "alignmentOffset" },
+      ])(
+        "$id rejects an unknown format without reading $field",
+        ({ field }) => {
+          const { c } = receiver();
+          const before = observe(c);
+          const payload = snapshotPayload();
+          const input = { ...snapshotFixture(), segments: [payload] };
+          const isEnvelope = location === "envelope";
+          const target = isEnvelope ? input : payload;
+          Object.defineProperty(target, "format", { value: 3 });
+          const reads = throwingGetter(target, field);
+
+          const { message } = thrown(() => c.hydrate(input));
+
+          expect(message).toMatch(
+            isEnvelope
+              ? /^invalid snapshot: format must be 1 or 2\b/
+              : /^invalid segment payload: format must be 1 or 2\b/,
+          );
+          expect(message).not.toContain(marker);
+          expect(reads()).toBe(0);
+          expect(observe(c)).toEqual(before);
+        },
+      );
+
+      it("V22c rejects a mismatched interval without reading alignmentOffset", () => {
+        const { c } = receiver();
+        const payload = snapshotPayload();
+        const input = { ...snapshotFixture(), segments: [payload] };
+        const target = location === "envelope" ? input : payload;
+        Object.assign(target, { interval: 11 });
+        const reads = throwingGetter(target, "alignmentOffset");
+
+        const { message } = thrown(() => c.hydrate(input));
+
+        expect(message).toMatch(/\binterval\b/);
+        expect(message).toMatch(/\bgot a finite number\b/);
+        expect(reads()).toBe(0);
+      });
+
+      it("V22d applies a calendar snapshot without reading fixed-grid fields", () => {
+        const input = dailySnapshot();
+        const target = location === "envelope" ? input : input.segments[0];
+        if (target === undefined)
+          throw new Error("Missing calendar fixture segment");
+        const intervalReads = throwingGetter(target, "interval");
+        const offsetReads = throwingGetter(target, "alignmentOffset");
+        const reader = calendarEngine(dailyUtc);
+        const range = span(DAY);
+
+        expect(hydrate(reader, input)).toEqual({ applied: [range] });
+        expect(intervalReads()).toBe(0);
+        expect(offsetReads()).toBe(0);
+        expect(reader.get(ID, range)).toEqual({
+          timestamps: new Float64Array([DAY]),
+          fields: { value: new Float64Array([12]) },
+          coverage: [range],
+          misses: [],
+        });
+      });
+    },
+  );
+
+  it("V22e rejects a calendar snapshot on a fixed grid without reading interval", () => {
+    const input = dailySnapshot();
+    const reads = throwingGetter(input, "interval");
+    const reader = calendarEngine(10);
+
+    const { message } = thrown(() => hydrate(reader, input));
+
+    expect(message).toMatch(/format 2 names another kind of grid/);
+    expect(reads()).toBe(0);
+  });
+
+  it("V23 reads calendar payload format once and rejects a mismatched startSlot", () => {
+    const input = dailySnapshot();
+    const payload = input.segments[0];
+    if (payload === undefined || payload.format !== 2)
+      throw new Error("Missing calendar fixture segment");
+    payload.startSlot += 1;
+    let reads = 0;
+    Object.defineProperty(payload, "format", {
+      enumerable: true,
+      get: () => (reads++ === 0 ? 2 : 1),
+    });
+    const reader = calendarEngine(dailyUtc);
+
+    const { message } = thrown(() => hydrate(reader, input));
+
+    expect(message).toMatch(
+      /^invalid segment payload: startSlot must be the slot of start\b/,
+    );
+    expect(reads).toBe(1);
+    expect(reader.get(ID, span(DAY))).toMatchObject({
+      timestamps: new Float64Array(),
+      coverage: [],
+    });
+  });
 });
