@@ -40,7 +40,9 @@ const RENDERING = 'body > [id^="dmermaid-"]';
  * The text of the diagram Mermaid draws in place of one whose text, comments
  * stripped, is longer than its `maxTextSize` (50,000 characters by default):
  * an ordinary flowchart, drawn without an error, so no other check here sees
- * it.
+ * it. Mermaid's source is always `graph TB;a[<this text>];style a fill:#faa`,
+ * so the check matches that structure, not the text alone: a valid diagram
+ * may quote the message.
  */
 const SIZE_LIMIT = "Maximum text size in diagram exceeded";
 
@@ -124,8 +126,26 @@ for (const colorScheme of ["light", "dark"] as const) {
             drawn: [...document.querySelectorAll(diagram)].map(
               (box) => box.querySelector("svg") !== null,
             ),
-            sizeLimited: [...document.querySelectorAll(diagram)].filter((box) =>
-              box.textContent?.includes(sizeLimit),
+            // Mermaid's replacement diagram: a flowchart with one node and
+            // no edge, whose text is the message and whose shape is filled
+            // #faa. A diagram that only quotes the message is not one.
+            sizeLimited: [...document.querySelectorAll(diagram)].filter(
+              (box) => {
+                const svg = box.querySelector(
+                  'svg[aria-roledescription^="flowchart"]',
+                );
+                if (svg === null) return false;
+                const nodes = svg.querySelectorAll("g.node");
+                const node = nodes[0];
+                if (nodes.length !== 1 || node === undefined) return false;
+                if (svg.querySelectorAll(".edgePaths > *").length > 0)
+                  return false;
+                const shape = node.querySelector("rect, path, polygon");
+                return (
+                  node.textContent?.trim() === sizeLimit &&
+                  /fill:\s*#faa\b/i.test(shape?.getAttribute("style") ?? "")
+                );
+              },
             ).length,
             marksAdded: window.__docErrorMarks ?? 0,
             marksShown: document.querySelectorAll(marks).length,
