@@ -73,3 +73,4 @@ On head `04a59f6e`. No P0 or P1; predicted verdict: merge after fixes. Each find
 - After pre-review 1: `bunx vitest run` on the two order files and `packages/tscache/test/cache-reader-ranges.test.ts`: 3 files, 43 passed, 2.1 s (load about 4.7); the same with `-c vitest.mutation.config.ts`: 43 passed. `bunx tsc --noEmit -p packages/tscache` and `-p .`: clean. `bun scripts/test-clocks.ts`: 221 files clean.
 - `bun scripts/test-clocks.ts`: 221 files clean.
 - `bun run ci` on c037d8d8 under the heavy-job lock (`heavy-run.sh "154 child: ci"`), started at 5-minute load 3.7: exit 0; Vitest 3,517 of 3,517 passed, Playwright 202 passed.
+- After pre-review 1, `bun run ci` on c3ec3b97 under the heavy-job lock (`heavy-run.sh "154 child: ci fix"`), started at 5-minute load 3.95: exit 0 in about 12 minutes; Vitest 180 files, 3,517 of 3,517 passed (`cache-reader-ranges.test.ts` and both order files among them), Playwright 202 passed, test-clocks 221 files clean, bench smoke ok.
