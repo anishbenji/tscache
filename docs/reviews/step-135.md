@@ -690,3 +690,33 @@ changed no other row.
   `index (lazy, nested)` 6,000 → 6,608 (6,090 B measured; the guards add 5 B to the merged 6,085). Measured at
   `5eb1c288`, the branch before `58008ce0`, `index` was 6,414 B, within its budget: the merge of main at `9029423b`
   (#174, step 146) added the 44 B that put it over, which is why the branch's earlier `bun run ci` runs passed.
+
+### After merge lane 1: the third guard, the hosting release and the `clearAll` wording (user decisions #163 A, #165 A)
+
+- **[P1] A hosted cleanup started before `supersede()` still wrote after it: fixed, `02cf2101`.** The third guard: the
+  per-cache cleanup that `#changed` starts through `#bounded` re-checks `#superseded` once the store opener resolves and
+  writes nothing then, mirroring `persister.ts`, whose cleanup re-checks `this.#current === job` after its opening. The
+  re-check sits in that cleanup's `run`, not in `#bounded` itself: `#bounded` also carries the whole-store clear of a
+  `clearAll()` after a chunk failure (`#clearStore`), and a probe showed a re-check there skipping that clear, before or
+  during its opening, against property (o) ("a `clearAll()` still empties the store ..., and one pending at the call
+  runs to its end"). Two regression cases in `persist-deploy-skew.test.ts` cover it. The release (#165 A): each
+  `Cleanup` keeps a `release` resolver beside `settled`, which now settles when `run` does or when `release` is called;
+  `supersede()` calls every stored resolver, as the persister's `supersede()` releases its cleanups through
+  `#dropCleanups()` and `#cleaned`. A cleanup settling after `supersede()` resolves the same promise again, which does
+  nothing. `settled` resolves in the same step as `run`, as before: a first version that chained one more promise made
+  a removal's failure answer one step later, which the §4.10.8 arrival-order exploration of
+  `persist-hosted-event-orders` caught at bound 5 (bound 3 passed). Source lines: the guard 4 added and 1 removed (the call reflowed), the release 9 added and 1 removed, all in
+  `#changed`, `#cleanup`, the `Cleanup` interface and `supersede()`. Codex's four release cases (no write after a
+  release, one settlement when the opening resolves or rejects before or after the deadline) and its existing N129
+  cases pass. Sites checked: `#bounded` is the only place in `hosted.ts` where a store write follows an await (the
+  cleanup's `write` and `#clearStore`'s `clearAll`); every other `#superseded` check is synchronous with what it guards.
+- **[P2] The barrier sentence of §4.10.6 Durability of removals: reworded (#163 A).** In `Persister.supersede()`,
+  `#stop` returns at once for a cache already stopped, so only running caches are released there; a cache whose load
+  had stopped and whose release waits on the pending `clearAll` (`#stop` and `#stoppedRemoval` push that waiter) keeps
+  waiting for the clear, bounded by the clear job's deadline. Before: "A removal recorded during the barrier is
+  therefore answered when the job settles, or at once when the worker is superseded (Superseding, below): under one
+  deadline after the removal, since the job's deadline is `timeoutMs` after its call." After: "A removal recorded
+  during the barrier is therefore answered when the job settles: under one deadline after the removal, since the job's
+  deadline is `timeoutMs` after its call. Superseding the worker answers it at once (Superseding, below), except a
+  removal of a cache whose load had stopped (Stopping, below): the pending clear deletes that cache's records, so the
+  removal still waits for the clear, within the same deadline." Nothing else in the section changed.
