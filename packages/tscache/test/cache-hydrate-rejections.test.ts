@@ -647,6 +647,7 @@ describe("hydrate error text — step 148", () => {
       enumerable: true,
       get: () => (reads++ === 0 ? read() : valid),
     });
+    return () => reads;
   }
 
   it("V18 wraps a throwing first read of payload start without printing its value", () => {
@@ -917,4 +918,70 @@ describe("hydrate error text — step 148", () => {
       coverage: [],
     });
   });
+
+  it.each([
+    { location: "envelope", field: "interval" },
+    { location: "envelope", field: "alignmentOffset" },
+    { location: "payload", field: "interval" },
+    { location: "payload", field: "alignmentOffset" },
+    { location: "payload", field: "layout" },
+    { location: "payload", field: "start" },
+    { location: "payload", field: "count" },
+    { location: "field entry", field: "dtype" },
+    { location: "calendar payload", field: "startSlot" },
+  ] as const)(
+    "V24 describes a revoked proxy from $location $field as an object after one read",
+    ({ location, field }) => {
+      function expectRejection(
+        target: object,
+        apply: () => unknown,
+        observeCache: () => unknown,
+      ) {
+        const reads = onFirstRead(target, field, () => {
+          const { proxy, revoke } = Proxy.revocable({}, {});
+          revoke();
+          return proxy;
+        });
+        const before = observeCache();
+
+        const { message } = thrown(apply);
+
+        expect(message).toMatch(
+          new RegExp(`\\b${field}\\b.*\\bgot an object$`),
+        );
+        expect(reads()).toBe(1);
+        expect(observeCache()).toEqual(before);
+      }
+
+      if (location === "calendar payload") {
+        const input = dailySnapshot();
+        const payload = input.segments[0];
+        if (payload === undefined || payload.format !== 2)
+          throw new Error("Missing calendar fixture segment");
+        const reader = calendarEngine(dailyUtc);
+        reader.put(ID, { timestamps: [2 * DAY], fields: { value: [24] } });
+        const range = span(DAY, 2 * DAY);
+        expectRejection(
+          payload,
+          () => hydrate(reader, input),
+          () => reader.snapshot(ID, range),
+        );
+        return;
+      }
+
+      const { c } = receiver();
+      const payload = snapshotPayload();
+      const input = { ...snapshotFixture(), segments: [payload] };
+      const targets = {
+        envelope: input,
+        payload,
+        "field entry": payloadField(payload, "volume"),
+      };
+      expectRejection(
+        targets[location],
+        () => c.hydrate(input),
+        () => observe(c),
+      );
+    },
+  );
 });

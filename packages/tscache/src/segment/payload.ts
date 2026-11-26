@@ -35,8 +35,12 @@ export function kindOf(value: unknown): string {
     case "string":
       return value.length === 0 ? "an empty string" : "a string";
     case "object":
-      // Array.isArray throws on a revoked proxy, as show() does.
-      return Array.isArray(value) ? "an array" : "an object";
+      // Array.isArray throws on a revoked proxy; a diagnostic must not.
+      try {
+        return Array.isArray(value) ? "an array" : "an object";
+      } catch {
+        return "an object";
+      }
     default:
       return `a ${typeof value}`;
   }
