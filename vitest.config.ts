@@ -49,8 +49,9 @@ export default defineConfig({
     // time is measured under load and its own timeout, about twice the worst
     // case, is named and explained at the call site. Today that is the
     // event-order harness at bound 3 (test/persist-orders.ts) and the
-    // O(log n) test in test/cache-reader-ranges.test.ts, both 30 s (step
-    // 154, the parent's request under the user's standing grant; director
-    // decision #166 for the reader test; docs/testing.md, Waiting).
+    // O(log n) test in test/cache-reader-ranges.test.ts, both 30 s (user
+    // decision 2026-11-26, step 154, beside user decision 90; docs/testing.md,
+    // Waiting). These three tests only: any other test needs the user's OK
+    // again, with measurements; the exception does not extend by itself.
   },
 });

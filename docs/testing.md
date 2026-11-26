@@ -42,7 +42,7 @@ Never race an operation against a timer to prove it answers promptly. Await it: 
 
 Timeouts detect hangs. They are never an assertion of speed, and raising one never fixes a flake.
 
-The one exception is a deterministic, CPU-bound test whose cost is the work it checks, such as an exhaustive enumeration or a scan the test measures: its time is measured under load, and it sets its own timeout, about twice the worst case, at the call site with a comment giving the numbers. Today these are the event-order harness at bound 3 (`persist-orders.ts`) and the O(log n) test in `cache-reader-ranges.test.ts`, both 30 s (step 154, the parent's request under the user's standing grant, and director decision #166 for the reader test; `docs/reviews/step-154.md`). Any other test that crosses Vitest's 5 s default is a slowdown to investigate.
+The one exception is a deterministic, CPU-bound test whose cost is the work it checks, such as an exhaustive enumeration or a scan the test measures: its time is measured under load, and it sets its own timeout, about twice the worst case, at the call site with a comment giving the numbers. Today these are the event-order harness at bound 3 (`persist-orders.ts`) and the O(log n) test in `cache-reader-ranges.test.ts`, both 30 s (user decision 2026-11-26, step 154, beside user decision 90 for the mutation run; `docs/reviews/step-154.md`). The exception covers these three tests only (the two event-order files and the reader test): any other test needs the user's OK again, with measurements, and the rule does not open to new cases by itself. Any other test that crosses Vitest's 5 s default is a slowdown to investigate.
 
 ## Shared state
 
