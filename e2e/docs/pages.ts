@@ -14,10 +14,17 @@
 // naming the page: the `<Mermaid>` tag, `<component is="Mermaid">` in either
 // form and a raw `<div class="mermaid">` all render one, and neither check
 // reads it. (The syntax check's rejection of a `<Mermaid>` tag in the
-// Markdown is an earlier, friendlier message for the common form.) The
-// residual: a dynamic component given a class of its own renders no
-// `mermaid` class and is not detected; closing that would mean opening all
-// of the site's pages in the browser, not only those with diagrams.
+// Markdown is an earlier, friendlier message for the common form, and also
+// covers `<component is="Mermaid">`.) The residual: a component rendered only
+// in the browser, such as one inside `<ClientOnly>` or behind a `v-if` on
+// state set when the page mounts, is absent from the built HTML; so is the
+// `mermaid` class of a dynamic component given a class of its own. Neither is
+// detected here; closing that would mean opening all of the site's pages in
+// the browser, not only those with diagrams.
+//
+// Threat model: this is a docs render check for trusted authors (the
+// maintainer and agents). It catches mistakes, not a diagram written to evade
+// it.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -62,7 +69,10 @@ const DEFAULT_CLASS = "mermaid";
  */
 export function elementsWithClass(html: string, className: string): number {
   let count = 0;
-  for (const [, classes = ""] of html.matchAll(/\sclass="([^"]*)"/g)) {
+  for (const [, double, single, bare] of html.matchAll(
+    /\sclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g,
+  )) {
+    const classes = double ?? single ?? bare ?? "";
     if (classes.split(/\s+/).includes(className)) count++;
   }
   return count;
