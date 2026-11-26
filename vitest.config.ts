@@ -54,8 +54,14 @@ export default defineConfig({
     // and packages/tscache/test/persist-hosted-event-orders.test.ts (one
     // setting in packages/tscache/test/persist-orders.ts; Vitest runs each
     // file's test once per first event, six cases), and the O(log n) test
-    // in packages/tscache/test/cache-reader-ranges.test.ts, 30 s each, set
-    // at two call sites. Any other test needs the user's OK again, with
-    // measurements; the exception does not extend by itself.
+    // in packages/tscache/test/cache-reader-ranges.test.ts, 30 s each,
+    // passed at two call sites. Any other test needs the user's OK again,
+    // with measurements; the exception does not extend by itself.
+    //
+    // The 30 s is set here, as TSCACHE_TEST_TIMEOUT, and the two call sites
+    // read it; vitest.mutation.config.ts sets its own 60 s the same way.
+    // Vitest assigns test.env over the inherited environment in each worker,
+    // so a value exported in the caller's shell never reaches the tests.
+    env: { TSCACHE_TEST_TIMEOUT: "30000" },
   },
 });

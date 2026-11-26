@@ -1347,15 +1347,13 @@ const env = (globalThis as { process?: { env: Record<string, string> } })
  * lock (step 132, round 5).
  */
 const BOUND = Number(env?.TSCACHE_EVENT_ORDERS ?? 3);
-/** TSCACHE_TEST_TIMEOUT as a number; 0 when unset or not a finite number. */
-const fromEnv = Number(env?.TSCACHE_TEST_TIMEOUT ?? 0);
 /**
- * The timeout at bound 3 or less: 30 s, or the mutation run's own, higher
- * timeout (TSCACHE_TEST_TIMEOUT), which it must not undercut. A value that
- * is not a number (`60s`) is ignored: NaN would reach Vitest, which accepts
- * it and fails every order test at once.
+ * The timeout at bound 3 or less, TSCACHE_TEST_TIMEOUT: 30 s from
+ * vitest.config.ts, or the mutation run's own 60 s from
+ * vitest.mutation.config.ts. Each configuration sets it in `test.env`,
+ * which replaces any value exported in the caller's shell.
  */
-const orderTimeout = Math.max(30_000, Number.isFinite(fromEnv) ? fromEnv : 0);
+const orderTimeout = Number(env?.TSCACHE_TEST_TIMEOUT);
 
 /** Declares one harness's order tests, one per first event. */
 export function orderTests(hosted: boolean): void {
@@ -1379,8 +1377,8 @@ export function orderTests(hosted: boolean): void {
       // "starting with clearAll" (2,560 orders): 1.1 s in one full run at
       // load 6, 11.4 s and 15.0 s with a second full run beside it (load 34
       // and 68). 30 s is twice that worst case; it still catches a hang.
-      // The mutation run's configuration sets TSCACHE_TEST_TIMEOUT to its
-      // own, higher timeout, which this one must not undercut.
+      // The 30 s comes from vitest.config.ts (orderTimeout); the mutation
+      // run's configuration replaces it with its own 60 s.
       BOUND > 3 ? 900_000 : orderTimeout,
     );
   });

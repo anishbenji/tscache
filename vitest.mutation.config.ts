@@ -23,14 +23,16 @@ export default defineConfig({
     // hook, so for most mutants only Stryker's timeout applies. A test's own
     // timeout overrides testTimeout, so the three tests that set one at two
     // call sites (step 154: the event-order harness's bound-3 tests in
-    // persister-event-orders.test.ts and persist-hosted-event-orders.test.ts,
-    // set in persist-orders.ts, and the O(log n) test in
-    // cache-reader-ranges.test.ts) take the larger of their 30 s and
-    // TSCACHE_TEST_TIMEOUT, which this file sets to the same 60 s. The
-    // exception to Stryker's limit is a mutant whose covering tests take
-    // more than about 27.7 s together, such as a static mutant, which runs
-    // every test (about 165 s): an async hang there fails here at 60 s and counts as
-    // killed (docs/benchmarks/mutation.md). This is the user's exception
+    // packages/tscache/test/persister-event-orders.test.ts and
+    // packages/tscache/test/persist-hosted-event-orders.test.ts, set in
+    // packages/tscache/test/persist-orders.ts, and the O(log n) test in
+    // packages/tscache/test/cache-reader-ranges.test.ts) read
+    // TSCACHE_TEST_TIMEOUT, 30 s in the root configuration, which this file
+    // replaces with the same 60 s. The exception to Stryker's limit is a
+    // mutant whose covering tests take more than about 27.7 s together, such
+    // as a static mutant, which runs every test (about 165 s): an async hang
+    // there fails here at 60 s and counts as killed
+    // (docs/benchmarks/mutation.md). This is the user's exception
     // to the rule against raising timeouts (user decision 90, 2026-11-20),
     // scoped to this file: the root configuration, CI, the hooks and
     // `bun run test` keep Vitest's defaults (5 s per test, 10 s per hook).

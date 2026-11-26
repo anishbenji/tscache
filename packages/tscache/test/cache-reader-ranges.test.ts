@@ -11,16 +11,13 @@ import { rng } from "./cache-model";
 
 const env = (globalThis as { process?: { env: Record<string, string> } })
   .process?.env;
-/** TSCACHE_TEST_TIMEOUT as a number; 0 when unset or not a finite number. */
-const fromEnv = Number(env?.TSCACHE_TEST_TIMEOUT ?? 0);
 /**
- * The O(log n) test's timeout: 30 s (its comment gives the numbers), or the
- * mutation run's own, higher timeout, which vitest.mutation.config.ts sets
- * as TSCACHE_TEST_TIMEOUT and this one must not undercut. A value that is
- * not a number (`60s`) is ignored: NaN would reach Vitest, which accepts it
- * and never times the test out.
+ * The O(log n) test's timeout, TSCACHE_TEST_TIMEOUT: 30 s from
+ * vitest.config.ts (the test's comment gives the numbers), or the mutation
+ * run's own 60 s from vitest.mutation.config.ts. Each configuration sets it
+ * in `test.env`, which replaces any value exported in the caller's shell.
  */
-const scanTimeout = Math.max(30_000, Number.isFinite(fromEnv) ? fromEnv : 0);
+const scanTimeout = Number(env?.TSCACHE_TEST_TIMEOUT);
 
 /** The scan `includeRange` replaced, kept as the reference result. */
 function reference(list: SlotRange[], range: SlotRange): void {
