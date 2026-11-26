@@ -42,8 +42,9 @@ bun run docs:run     # runs the snippets against the mock backend and checks the
     `docs:build`): it opens each built page with a diagram, in the light and dark schemes, and fails
     when a diagram is not drawn, when Mermaid draws its error box, even briefly, or when the page logs
     an error. It serves the built site on 127.0.0.1 (`scripts/docs-server.ts`), so it needs
-    `bun run docs:build` first: a Playwright run runs it when the site is built or when `E2E_EXAMPLES`
-    names `docs`, which fails at once without a build.
+    `bun run docs:build` first: a Playwright run includes it when `E2E_EXAMPLES` is unset and the site
+    is built, or when `E2E_EXAMPLES` names `docs` (`E2E_EXAMPLES=docs bunx playwright test --project
+    docs`), which fails at once without a build.
   - It does not load the site's config (`srcExclude`, rewrites, extra pages) or run a dynamic route's
     paths loader, so it also reads excluded files. Rather than follow a link or model a route, it
     fails `docs:check` on any symbolic link under `site/` and on any Markdown file under `site/` with

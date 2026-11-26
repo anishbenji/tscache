@@ -108,6 +108,26 @@ Limits, as the lane gave them (threat model, P3 at most, not changed):
 
 After the fixes: `bunx vitest run site/scripts/check-mermaid.test.ts e2e/docs/pages.test.ts`, 2 files, 51 passed; `bun scripts/test-clocks.ts`, 219 files clean; `bun run docs:check`, exit 0, 249 anchors in 42 pages resolve and 12 diagrams in 105 pages parse; `bunx tsc -p e2e`, passes; `bun run ci` (through `heavy-run.sh`), exit 0.
 
+## Round 3 (Codex)
+
+Six findings (five P1, one P2), graded by the finding check (`check-3`) under the threat model above: every P1 needs a
+page or diagram written for the purpose, so each is P3 at most and recorded as a limit; the P2 is a docs fix. No
+scanner code changes (standing-grant decision #160: freeze the scanners and record limits rather than redesign).
+
+| #    | Codex                     | Grade | Disposition                                                                                                                                                                                                                                                                                                    |
+| ---- | ------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R3-1 | P1 size-limit detector    | P3    | Limit: the detector reads the box's text as one string, so an over-limit diagram that also sets `htmlLabels: false` (Mermaid then splits the message across SVG lines) passes, and a valid sequence note that quotes the message behind `nowrap:` fails; both need a diagram written for the purpose.          |
+| R3-2 | P1 component `is` parsing | P3    | Limit: the `component` check tests the whole tag's text for an `is` attribute, so `is=Mermaid` quoted inside another attribute's value rejects the page, and a string literal padded with spaces inside `:is` is not matched.                                                                                  |
+| R3-3 | P1 class text in scripts  | P3    | Limit: the class count reads the whole built file, head included; VitePress does not escape `'` in a page's title or description, so frontmatter holding ` class='mermaid'` in single quotes aborts discovery (Vue's SSR escaping holds for the body only). Codex's JSON-LD route does not exist on this site. |
+| R3-4 | P1 closing-tag prefix     | P3    | Limit: a raw-text element's close is matched by prefix, so `</textarea-example>` inside a `<textarea>` ends the skip early and a tag named after it is read as a component; this only rejects more than Vue would.                                                                                             |
+| R3-5 | P1 custom 404 page        | P3    | Limit: `404.html` is not opened. A custom `site/404.md` (the site has none) would be drawn only in the browser, at `/tscache/404`; its diagrams are parsed by `docs:check` but not rendered here. Extend the render check before adding one.                                                                   |
+| R3-6 | P2 README condition       | P2    | Fixed: `site/README.md` says the docs project is included when `E2E_EXAMPLES` is unset and the site is built, or when it names `docs`.                                                                                                                                                                         |
+
+The area has drawn findings every round. The finding check judged the hand-written tag scanner the wrong design but
+recommended freezing it now: the remaining findings are crafted forms the threat model grades as limits. A redesign
+(Vue's own template parser on the rendered template; about half a day, one or two rounds, and a dependency approval
+for `@vue/compiler-dom` in `site/scripts`) is the path if this code must change again for a reason outside that class.
+
 ## Decision concerns
 
 - The spec fails on any console error or uncaught error on a diagram page, not only one that Mermaid logs: a console error the page logs for another reason fails it too, naming the page and quoting the error. Today the 8 pages log none.
