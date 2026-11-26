@@ -51,7 +51,9 @@ bun run docs:run     # runs the snippets against the mock backend and checks the
     excluded files included; the site has neither. Replace a link with the files, rename a
     bracket-named file, or extend the check before adding either.
   - It reads `mermaid` fences only; a page with a hand-written `<Mermaid>` tag in its raw HTML fails,
-    naming the page. A `mermaid` fence that a `::: code-group` shows as code is still parsed, so write a
+    naming the page. That is an early message: the render check fails any built page with an element
+    of the plugin's default `mermaid` class, which also catches `<component is="Mermaid">` and a raw
+    `.mermaid` element (not a dynamic component given a class of its own). A `mermaid` fence that a `::: code-group` shows as code is still parsed, so write a
     deliberately broken example as an `mmd` fence or give it a title.
   - It parses with Mermaid's default options, not the site's, and does not apply the 50,000-character
     limit above which Mermaid draws its "Maximum text size in diagram exceeded" box instead of the

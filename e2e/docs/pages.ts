@@ -8,6 +8,16 @@
 // number of diagrams the page must draw: a diagram the browser never draws
 // fails the count rather than going unchecked, and so does a diagram element
 // with no fence behind it.
+//
+// The built HTML is the authority on hand-written diagrams. A page whose HTML
+// has an element with the class `mermaid`, the plugin's default, fails,
+// naming the page: the `<Mermaid>` tag, `<component is="Mermaid">` in either
+// form and a raw `<div class="mermaid">` all render one, and neither check
+// reads it. (The syntax check's rejection of a `<Mermaid>` tag in the
+// Markdown is an earlier, friendlier message for the common form.) The
+// residual: a dynamic component given a class of its own renders no
+// `mermaid` class and is not detected; closing that would mean opening all
+// of the site's pages in the browser, not only those with diagrams.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -36,13 +46,24 @@ export interface DiagramPage {
 }
 
 /**
- * How many elements of the built HTML have the diagram class: the elements
- * as server-rendered, before Mermaid draws into them.
+ * The class vitepress-plugin-mermaid's `<Mermaid>` component renders its
+ * wrapper with when it is not given one: the site's fences give it
+ * `MERMAID_CLASS`, so this class in the built HTML comes from a component
+ * written by hand (the tag, or `<component is="Mermaid">`) or from a raw
+ * `.mermaid` element, which Mermaid's own load pass draws.
  */
-function diagramElements(html: string): number {
+const DEFAULT_CLASS = "mermaid";
+
+/**
+ * How many elements of the built HTML have `className` among their classes:
+ * the elements as server-rendered, before Mermaid draws into them. The build
+ * escapes `<` and `"` in text and attribute values, so the class is matched
+ * only in a real `class` attribute.
+ */
+export function elementsWithClass(html: string, className: string): number {
   let count = 0;
   for (const [, classes = ""] of html.matchAll(/\sclass="([^"]*)"/g)) {
-    if (classes.split(/\s+/).includes(MERMAID_CLASS)) count++;
+    if (classes.split(/\s+/).includes(className)) count++;
   }
   return count;
 }
@@ -61,9 +82,11 @@ function servedPath(html: string): string {
 /**
  * Every page of the built site with a `mermaid` fence or a diagram element,
  * in path order.
- * Throws when the site is not built, or when a built page has no Markdown
- * page behind it, which a page from a dynamic route or a rewrite would be:
- * the list would then miss its diagrams.
+ * Throws when the site is not built, when a built page has no Markdown
+ * page behind it, which a page from a dynamic route or a rewrite would be
+ * (the list would then miss its diagrams), or when a built page has an
+ * element with the plugin's default class, which only a hand-written
+ * diagram renders.
  */
 export async function diagramPages(): Promise<DiagramPage[]> {
   if (!existsSync(join(DIST, "index.html"))) {
@@ -90,7 +113,13 @@ export async function diagramPages(): Promise<DiagramPage[]> {
       readFileSync(markdown, "utf8"),
       markdown,
     );
-    const elements = diagramElements(readFileSync(join(DIST, html), "utf8"));
+    const content = readFileSync(join(DIST, html), "utf8");
+    if (elementsWithClass(content, DEFAULT_CLASS) > 0) {
+      throw new Error(
+        `docs: ${html} (from ${source}) has an element with the class ${DEFAULT_CLASS}, which a hand-written <Mermaid> component or .mermaid element renders and neither the syntax check nor the render check reads; write the diagram as a mermaid fence`,
+      );
+    }
+    const elements = elementsWithClass(content, MERMAID_CLASS);
     if (diagrams.length > 0 || elements > 0) {
       pages.push({
         path: servedPath(html),
