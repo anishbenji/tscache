@@ -154,3 +154,13 @@ On head db660076, base c03fc545 (`reviews/step-149/security-3.md` in the directo
 Docs: the script's header, the refusal's first lines, `docs/workflow.md` ("One-time setup", item 4) and the `AGENTS.md` hook-staging line name the four checked identities (author, committer, a pushed tag's tagger, a merged signed tag's tagger) and the threat model. Accepted cost (#155 A): a header that is not valid UTF-8 is refused, including a signed tag message in another encoding embedded by a merge; this repository writes UTF-8 only.
 
 Test changes: six tests and one `isAllowed` row added (67 in all); no existing test or assertion was changed or removed. `knip.jsonc` is unchanged: the new tests call only `git` and `ssh-keygen`, already listed.
+
+## Security lane run 4 (Claude) — one P3, settled
+
+The lane reviewed `57b2edb4` against the threat model above (report: the director's `reviews/step-149/security-4.md`). Every accidental path tried through ordinary porcelain was refused (amend, rebase, cherry-pick, a merge of one's own signed tag, octopus merges of signed tags, notes, `--follow-tags`, tags of tags, a shallow clone, a stash pushed as a branch), every clean ordinary push passed, and the `cat-file --batch` framing held at 200,000 commits.
+
+| ID   | Sev | Finding                                            | Verdict  | Fix                                                                                                     |
+| ---- | --- | -------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| S4.1 | P3  | A `header` refusal gives advice that cannot fix it | accepted | `docs/workflow.md` item 4, which the refusal points to, explains a `header` row and its fix (docs only) |
+
+Limits recorded by the lane, not changed (threat model): a commit with no `author` line written by `hash-object --literally`; a bidi or zero-width character in a refused address is printed raw (the push is still refused); push certificates (GitHub accepts none); about 16 s for 1,000 annotated-tag rows. `git push --mirror` was not run: the agents' command guard blocks it.
