@@ -1369,9 +1369,12 @@ export function orderTests(hosted: boolean): void {
       // docs/reviews/step-154.md), the slowest of the six, hosted
       // "starting with clearAll" (2,560 orders): 1.1 s in one full run at
       // load 6, 11.4 s and 15.0 s with a second full run beside it (load 34
-      // and 68). 30 s is
-      // twice that worst case; it still catches a hang.
-      BOUND > 3 ? 900_000 : 30_000,
+      // and 68). 30 s is twice that worst case; it still catches a hang.
+      // The mutation run's configuration sets TSCACHE_TEST_TIMEOUT to its
+      // own, higher timeout, which this one must not undercut.
+      BOUND > 3
+        ? 900_000
+        : Math.max(30_000, Number(env?.TSCACHE_TEST_TIMEOUT ?? 0)),
     );
   });
 }
