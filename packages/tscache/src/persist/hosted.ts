@@ -69,6 +69,8 @@ interface Cleanup {
   removals: number;
   /** Until it settles: a later removal waits for nothing. */
   settled: Promise<void> | undefined;
+  /** Settles it now: supersede() stops waiting for its write (N129). */
+  release: () => void;
 }
 
 export class HostedPersistence implements Persistence {
@@ -236,6 +238,7 @@ export class HostedPersistence implements Persistence {
     if (this.#superseded) return;
     this.#superseded = true;
     this.#persister?.supersede();
+    for (const cleanup of this.#cleanups.values()) cleanup.release();
   }
 
   flush(): void {
@@ -374,7 +377,11 @@ export class HostedPersistence implements Persistence {
     this.#cleanup(
       cacheId,
       1,
-      this.#clearing ?? this.#bounded((store) => store.write(cacheId, CLEANUP)),
+      this.#clearing ??
+        this.#bounded((store) =>
+          // Superseded while the store opened: no write starts now (N129).
+          this.#superseded ? Promise.resolve() : store.write(cacheId, CLEANUP),
+        ),
     );
   }
 
@@ -392,11 +399,18 @@ export class HostedPersistence implements Persistence {
 
   /** Records a cache's one cleanup, `run`, with the removals counted so far. */
   #cleanup(cacheId: string, removals: number, run: Promise<void>): void {
+    let release = (): void => undefined;
     const cleanup: Cleanup = {
       removals,
-      settled: run.then(() => {
-        cleanup.settled = undefined;
+      // Settles in the same step as `run`, as before the release (§4.10.8).
+      settled: new Promise<void>((resolve) => {
+        release = resolve;
+        void run.then(() => {
+          cleanup.settled = undefined;
+          resolve();
+        });
       }),
+      release: () => release(),
     };
     this.#cleanups.set(cacheId, cleanup);
   }

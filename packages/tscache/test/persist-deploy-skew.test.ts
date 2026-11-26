@@ -181,6 +181,101 @@ describe("M5 §6: superseding a lazy SharedWorker persister", () => {
       });
     },
   );
+
+  it.each(
+    (["before", "after"] as const).flatMap((when) =>
+      (["opens", "rejects"] as const).map((outcome) => ({ when, outcome })),
+    ),
+  )(
+    "N129: supersede releases invalidate and skips cleanup when the store $outcome $when the deadline",
+    async ({ when, outcome }) => {
+      const store = new MemoryStore();
+      const records = fixture({}, [0, 4]);
+      store.seed("persist", records);
+      const engine = new Engine();
+      const chunk = deferred<typeof lazy>();
+      const opening = deferred<MemoryStore>();
+      const openStore = vi.fn(() => opening.promise);
+      const stops: Stop[] = [];
+      const persistence = new HostedPersistence(
+        engine,
+        () => chunk.promise,
+        openStore,
+        { timeoutMs, onStopped: (event) => stops.push(event) },
+      );
+      engine.cache(config());
+      const opened = persistence.open("persist");
+      chunk.reject(new Error("chunk unavailable"));
+      await opened;
+      expect(stops).toEqual([
+        expect.objectContaining({ cacheId: "persist", reason: "unavailable" }),
+      ]);
+      engine.put("persist", batch([0]));
+
+      const settled = vi.fn(() => undefined);
+      const removal = tracked(
+        Promise.resolve(
+          persistence.durably("persist", () =>
+            engine.invalidate("persist", span(0)),
+          ),
+        ).then(settled),
+      );
+      await tick();
+      expect(openStore.mock.calls).toEqual([[{ ifExists: true }]]);
+      expect(removal.done).toBe(false);
+      expect(store.log).toEqual([]);
+      expect(engine.coverage("persist", all)).toEqual([]);
+
+      persistence.supersede();
+      await tick();
+      // Keep the opener held to verify release independently of the delete.
+      expect.soft(removal.done, "invalidate answers at supersede").toBe(true);
+
+      if (when === "after") {
+        await tick(timeoutMs + 1);
+        expect(settled).toHaveBeenCalledTimes(1);
+      }
+      if (outcome === "opens") opening.resolve(store);
+      else opening.reject(new Error("store unavailable"));
+      await tick();
+      await removal.promise;
+      expect(settled).toHaveBeenCalledTimes(1);
+      expect({ log: store.log, records: store.records("persist") }).toEqual({
+        log: [],
+        records,
+      });
+    },
+  );
+
+  it.each(["before", "during"] as const)(
+    "N129 (o): a clearAll after a chunk failure still empties the store when supersede comes %s its opening",
+    async (when) => {
+      const store = new MemoryStore();
+      store.seed("persist", fixture());
+      const engine = new Engine();
+      const chunk = deferred<typeof lazy>();
+      const opening = deferred<MemoryStore>();
+      const persistence = new HostedPersistence(
+        engine,
+        () => chunk.promise,
+        () => opening.promise,
+        { timeoutMs },
+      );
+      engine.cache(config());
+      const opened = persistence.open("persist");
+      chunk.reject(new Error("chunk unavailable"));
+      await opened;
+
+      if (when === "before") persistence.supersede();
+      const clearing = callClear(persistence, () => engine.clearAll());
+      await tick();
+      if (when === "during") persistence.supersede();
+      opening.resolve(store);
+      await finish(clearing);
+      expect(store.log.map(({ kind }) => kind)).toEqual(["clearAll"]);
+      expect(store.records("persist")).toEqual(empty);
+    },
+  );
 });
 
 describe.each([
