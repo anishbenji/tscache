@@ -700,6 +700,33 @@ describe("check-push-email", { timeout: 30_000 }, () => {
     ]);
   });
 
+  // Neon lane, finding 1: the two tag refusals that no other test reaches.
+  it("refuses a pushed tag object with no tagger line (S2.1)", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const bare = literally(
+      "tag",
+      `object ${base}\ntype commit\ntag v1\n\nmsg\n`,
+    );
+    expect(run(line(bare, ZERO, "refs/tags/v1"))).toEqual([
+      { sha: bare, field: "tagger", email: "", tag: "v1" },
+    ]);
+  });
+
+  it("refuses a pushed tag whose header is not UTF-8", () => {
+    const base = commit("a");
+    onRemote("main", base);
+    const raw = Buffer.concat([
+      Buffer.from(`object ${base}\ntype commit\ntag v1\ntagger Ren`),
+      Buffer.from([0xe9]),
+      Buffer.from(` <${ALLOWED_EMAIL}> 1 +0000\n\nmsg\n`),
+    ]);
+    const bad = literally("tag", raw);
+    expect(run(line(bad, ZERO, "refs/tags/v1"))).toEqual([
+      { sha: bad, field: "header", email: "" },
+    ]);
+  });
+
   it("prints addresses and tag names with control characters escaped (S3.4)", () => {
     const base = commit("a");
     onRemote("main", base);
