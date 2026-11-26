@@ -137,5 +137,13 @@ describe("includeRange", () => {
       reference(scanned, { start: 3 * i, end: 3 * i });
     // The control: the scan reads every entry before the end, n(n-1)/2 in all.
     expect(reads).toBeGreaterThanOrEqual((n * (n - 1)) / 2);
-  });
+    // The control's quadratic scan through a Proxy is the cost this test
+    // checks, on the CPU with no waits, so its time grows with the machine's
+    // load and Vitest's default 5 s was crossed under load. Measured in a full
+    // Vitest run (step 154, docs/reviews/step-154.md): 2.3 s at load 6,
+    // 6.4 s to 9.0 s with a second full run beside it (load 34 and 68), and
+    // 6.4 s to 16.4 s in loaded pre-push runs on 2026-11-25. 30 s is about
+    // twice that worst case. The test is synchronous, so Vitest reports a
+    // timeout when it returns rather than interrupting it.
+  }, 30_000);
 });
