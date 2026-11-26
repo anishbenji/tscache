@@ -693,7 +693,7 @@ changed no other row.
 
 ### After merge lane 1: the third guard, the hosting release and the `clearAll` wording (user decisions #163 A, #165 A)
 
-- **[P1] A hosted cleanup started before `supersede()` still wrote after it: fixed, `02cf2101`.** The third guard: the
+- **[P1] A hosted cleanup started before `supersede()` still wrote after it: fixed, `f5f84b88`.** The third guard: the
   per-cache cleanup that `#changed` starts through `#bounded` re-checks `#superseded` once the store opener resolves and
   writes nothing then, mirroring `persister.ts`, whose cleanup re-checks `this.#current === job` after its opening. The
   re-check sits in that cleanup's `run`, not in `#bounded` itself: `#bounded` also carries the whole-store clear of a
@@ -705,7 +705,7 @@ changed no other row.
   `#dropCleanups()` and `#cleaned`. A cleanup settling after `supersede()` resolves the same promise again, which does
   nothing. `settled` resolves in the same step as `run`, as before: a first version that chained one more promise made
   a removal's failure answer one step later, which the §4.10.8 arrival-order exploration of
-  `persist-hosted-event-orders` caught at bound 5 (bound 3 passed). Source lines: the guard 4 added and 1 removed (the call reflowed), the release 9 added and 1 removed, all in
+  `persist-hosted-event-orders` caught at bound 5 (bound 3 passed). Source lines: the guard 4 added and 1 removed (the call reflowed), the release 10 added and 2 removed (code lines; merge lane run 2 count), all in
   `#changed`, `#cleanup`, the `Cleanup` interface and `supersede()`. Codex's four release cases (no write after a
   release, one settlement when the opening resolves or rejects before or after the deadline) and its existing N129
   cases pass. Sites checked: `#bounded` is the only place in `hosted.ts` where a store write follows an await (the
