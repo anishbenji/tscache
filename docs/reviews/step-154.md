@@ -55,4 +55,4 @@ Searched `~/code/tscache-reports/run/*.log` (including `ci-*.log` and `push-*.lo
 
 - `bunx vitest run packages/tscache/test/persister-event-orders.test.ts packages/tscache/test/persist-hosted-event-orders.test.ts`: 6 passed.
 - `bun scripts/test-clocks.ts`: 221 files clean.
-- `bun run ci` under the heavy-job lock: see the commit's report.
+- `bun run ci` on c037d8d8 under the heavy-job lock (`heavy-run.sh "154 child: ci"`), started at 5-minute load 3.7: exit 0; Vitest 3,517 of 3,517 passed, Playwright 202 passed.
