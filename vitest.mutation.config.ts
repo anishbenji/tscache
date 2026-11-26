@@ -21,13 +21,15 @@ export default defineConfig({
     // tests' time in the initial run + timeoutMS + overhead) and reports a
     // hang as Timeout. These limits sit far above any instrumented test or
     // hook, so for most mutants only Stryker's timeout applies. A test's own
-    // timeout overrides testTimeout, so the two tests that set one (the
-    // event-order tests at bound 3 and the reader-ranges O(log n) test,
-    // step 154) take the larger of their 30 s and TSCACHE_TEST_TIMEOUT,
-    // which this file sets to the same 60 s. The exception to Stryker's
-    // limit is a mutant whose covering tests take more than about
-    // 27.7 s together, such as a static mutant, which runs every test
-    // (about 165 s): an async hang there fails here at 60 s and counts as
+    // timeout overrides testTimeout, so the three tests that set one at two
+    // call sites (step 154: the event-order harness's bound-3 tests in
+    // persister-event-orders.test.ts and persist-hosted-event-orders.test.ts,
+    // set in persist-orders.ts, and the O(log n) test in
+    // cache-reader-ranges.test.ts) take the larger of their 30 s and
+    // TSCACHE_TEST_TIMEOUT, which this file sets to the same 60 s. The
+    // exception to Stryker's limit is a mutant whose covering tests take
+    // more than about 27.7 s together, such as a static mutant, which runs
+    // every test (about 165 s): an async hang there fails here at 60 s and counts as
     // killed (docs/benchmarks/mutation.md). This is the user's exception
     // to the rule against raising timeouts (user decision 90, 2026-11-20),
     // scoped to this file: the root configuration, CI, the hooks and

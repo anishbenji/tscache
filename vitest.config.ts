@@ -47,11 +47,15 @@ export default defineConfig({
     // exception is a deterministic, CPU-bound test whose cost is the work it
     // checks (an exhaustive enumeration, or a scan the test measures): its
     // time is measured under load and its own timeout, about twice the worst
-    // case, is named and explained at the call site. Today that is the
-    // event-order harness at bound 3 (test/persist-orders.ts) and the
-    // O(log n) test in test/cache-reader-ranges.test.ts, both 30 s (user
-    // decision 2026-11-26, step 154, beside user decision 90; docs/testing.md,
-    // Waiting). These three tests only: any other test needs the user's OK
-    // again, with measurements; the exception does not extend by itself.
+    // case, is named and explained at the call site. The exception covers
+    // three tests only (user decision 2026-11-26, step 154, beside user
+    // decision 90; docs/testing.md, Waiting): the event-order harness's
+    // bound-3 tests in packages/tscache/test/persister-event-orders.test.ts
+    // and packages/tscache/test/persist-hosted-event-orders.test.ts (one
+    // setting in packages/tscache/test/persist-orders.ts; Vitest runs each
+    // file's test once per first event, six cases), and the O(log n) test
+    // in packages/tscache/test/cache-reader-ranges.test.ts, 30 s each, set
+    // at two call sites. Any other test needs the user's OK again, with
+    // measurements; the exception does not extend by itself.
   },
 });
