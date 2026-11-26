@@ -1347,6 +1347,15 @@ const env = (globalThis as { process?: { env: Record<string, string> } })
  * lock (step 132, round 5).
  */
 const BOUND = Number(env?.TSCACHE_EVENT_ORDERS ?? 3);
+/** TSCACHE_TEST_TIMEOUT as a number; 0 when unset or not a finite number. */
+const fromEnv = Number(env?.TSCACHE_TEST_TIMEOUT ?? 0);
+/**
+ * The timeout at bound 3 or less: 30 s, or the mutation run's own, higher
+ * timeout (TSCACHE_TEST_TIMEOUT), which it must not undercut. A value that
+ * is not a number (`60s`) is ignored: NaN would reach Vitest, which accepts
+ * it and fails every order test at once.
+ */
+const orderTimeout = Math.max(30_000, Number.isFinite(fromEnv) ? fromEnv : 0);
 
 /** Declares one harness's order tests, one per first event. */
 export function orderTests(hosted: boolean): void {
@@ -1372,9 +1381,7 @@ export function orderTests(hosted: boolean): void {
       // and 68). 30 s is twice that worst case; it still catches a hang.
       // The mutation run's configuration sets TSCACHE_TEST_TIMEOUT to its
       // own, higher timeout, which this one must not undercut.
-      BOUND > 3
-        ? 900_000
-        : Math.max(30_000, Number(env?.TSCACHE_TEST_TIMEOUT ?? 0)),
+      BOUND > 3 ? 900_000 : orderTimeout,
     );
   });
 }
