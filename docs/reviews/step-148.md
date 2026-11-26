@@ -1,6 +1,6 @@
 # Step 148 — `hydrate`'s errors stop printing snapshot values
 
-Branch: `fix/148-hydrate-errors-no-input` · Reviewer: Codex (gate) · Rounds: 3 · Status: round 3 fixed, awaiting round 4
+Branch: `fix/148-hydrate-errors-no-input` · Reviewer: Codex (gate) · Rounds: 4 · Status: settled at round 4 (verdict merge)
 
 ## Scope
 
@@ -224,3 +224,23 @@ with the raw `TypeError`; with the fix all pass. No existing assertion was chang
 Size after the fix (`bun run build`, then the brotli bytes `bun run size` measures): `index (lazy)` 18 558
 bytes against a budget of 18 576, 12 bytes below the round's start; `worker` 19 800 of 19 888 and `engine`
 15 754 of 16 016. Every other entry is unchanged and within its budget.
+
+## Round 4 (Codex)
+
+Run at `9b451251`. Verdict: merge. The first attempt (23:11 to 23:14 IST) wrote no review: the provider
+flagged the content for possible cybersecurity risk and stopped the session; the retry (23:29 to 23:40 IST)
+ran normally. The reviewer found no new issues and repeated the open nit.
+
+| #    | Sev | Finding                                                                                                                                      | Decision                                                                                                                                                 | Resolution                                                      |
+| ---- | --- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| R4-1 | nit | R1-5, R2-3 and R3-2 again: `cc16f903` and `4f888ee7` fail `tsc --noEmit -p packages/tscache` because V15b reads `startSlot` before narrowing | valid, not fixed on the branch: the user folds `3c99b01e` into `cc16f903` before the push (user decision 2026-11-26, red commits are folded by the user) | None on the branch; the fold is the user's step before the push |
+
+The review settled at round 4: no P0 or P1 remains, and the only open row is the fold above.
+
+## Neon lane
+
+Run on head `9b451251` over the same diff (`~/code/tscache-reports/run/neon/step-148.1795716742.md`,
+outside the repo). It checked every `fail` site in `payload.ts` and `snapshot.ts`, the single-read and
+ordering guarantees, the tests V13 to V24 and the updated documentation. No findings; verdict clean.
+
+Neon: 0 findings
