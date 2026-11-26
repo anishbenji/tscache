@@ -248,5 +248,6 @@ describe("any mutation abandons a pending load (§4.10.5 rule 2, property h)", (
     expect(writes(h.store).map((c) => c.plan)).toEqual([
       { deletePages: allPages, putPages: [], putCache: null, strict: true },
     ]);
+    expect(h.store.records("persist")).toEqual({ cache: undefined, pages: [] });
   });
 });

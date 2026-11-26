@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { Engine } from "../src/engine/engine";
 import { createServer } from "../src/entries/worker";
-import type { PersisterOptions } from "../src/persist/persister";
+import { Persister, type PersisterOptions } from "../src/persist/persister";
 import type { PersistStore } from "../src/persist/store";
 import { PortClient } from "../src/rpc/port-client";
 import type { Evt, MessagePortLike } from "../src/rpc/protocol";
@@ -424,5 +424,83 @@ describe("persistence over RPC (§4.10.8)", () => {
     expect(store.log.at(-1)).toMatchObject({
       plan: { deletePages: allPages },
     });
+  });
+});
+
+// Step 132 close-out (user decision #145 A): two residuals carried to step 144
+// are unreachable in the shipped worker only through a guard; these tests pin
+// each guard (docs/reviews/step-132.md, Close-out).
+describe("guards of the step 132 residuals (§4.10.8)", () => {
+  // Residual 1: a stop callback that removed another waiting cache at once,
+  // during the hosting's drain, could answer before its deferred cleanup.
+  it("createServer takes no onStopped option", () => {
+    expectTypeOf<
+      NonNullable<Parameters<typeof createServer>[2]>
+    >().not.toHaveProperty("onStopped");
+  });
+
+  it("every stop reaches the ports through server.persistStopped, after the stop returns", async () => {
+    const smuggled = vi.fn();
+    const server = createServer(
+      undefined,
+      async () => {
+        throw new DOMException("denied", "SecurityError");
+      },
+      { onStopped: smuggled } as Omit<PersisterOptions, "onStopped">,
+    );
+    const a = await connect(server);
+    const post = server.persistStopped.bind(server);
+    // How many events the port had received when each stop was reported.
+    const delivered: number[] = [];
+    const reported = vi
+      .spyOn(server, "persistStopped")
+      .mockImplementation((payload) => {
+        delivered.push(a.events.length);
+        post(payload);
+        delivered.push(a.events.length);
+      });
+    await a.client.request("cache", config());
+    expect(smuggled).not.toHaveBeenCalled();
+    expect(reported).toHaveBeenCalledTimes(1);
+    expect(delivered).toEqual([0, 0]);
+    expect(a.events).toMatchObject([
+      {
+        event: "persistStopped",
+        payload: { cacheId: "persist", reason: "unavailable" },
+      },
+    ]);
+  });
+
+  // Residual 3: open() after close() returns a pending load's promise. No
+  // hosting closes its persister, through any op or the last disconnect.
+  it("no hosting calls Persister.close()", async () => {
+    const close = vi.spyOn(Persister.prototype, "close");
+    const flush = vi.spyOn(Persister.prototype, "flush");
+    try {
+      const { server, store } = persisting({ debounceMs: 1 });
+      const a = await connect(server);
+      await stored(a.client, store);
+      await a.client.request("invalidate", {
+        cacheId: "persist",
+        range: { start: 3, end: 3 },
+      });
+      await a.client.request("clear", { cacheId: "persist" });
+      await a.client.request("clearAll", {});
+      store.fail("write", 1, "QuotaExceededError", "quota exceeded");
+      await a.client.request("put", { cacheId: "persist", batch: batch([0]) });
+      await until(() =>
+        expect(a.events.map((e) => e.event)).toContain("persistStopped"),
+      );
+      // The last connection's detach reaches the persister: by a flush.
+      const calls = () => flush.mock.calls.length + close.mock.calls.length;
+      const before = calls();
+      server.detach(a.port);
+      await until(() => expect(calls()).toBeGreaterThan(before));
+      expect(close).not.toHaveBeenCalled();
+      expect(flush.mock.calls.length).toBeGreaterThan(before);
+    } finally {
+      close.mockRestore();
+      flush.mockRestore();
+    }
   });
 });
