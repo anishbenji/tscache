@@ -63,16 +63,17 @@ const DEFAULT_CLASS = "mermaid";
 
 /**
  * How many elements of the built HTML have `className` among their classes:
- * the elements as server-rendered, before Mermaid draws into them. The build
- * escapes `<` and `"` in text and attribute values, so the class is matched
- * only in a real `class` attribute.
+ * the elements as server-rendered, before Mermaid draws into them. Vue's SSR
+ * escapes `<`, `"` and `'` in text and attribute values, so a quoted class is
+ * matched only in a real `class` attribute. It does not escape `=`, so an
+ * unquoted value is not matched: prose such as `class=mermaid` would count.
  */
 export function elementsWithClass(html: string, className: string): number {
   let count = 0;
-  for (const [, double, single, bare] of html.matchAll(
-    /\sclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g,
+  for (const [, double, single] of html.matchAll(
+    /\sclass\s*=\s*(?:"([^"]*)"|'([^']*)')/g,
   )) {
-    const classes = double ?? single ?? bare ?? "";
+    const classes = double ?? single ?? "";
     if (classes.split(/\s+/).includes(className)) count++;
   }
   return count;

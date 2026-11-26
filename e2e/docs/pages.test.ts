@@ -15,14 +15,26 @@ describe("elementsWithClass", () => {
     ).toBe(2);
   });
 
-  it("counts single-quoted and unquoted class values", () => {
+  it("counts single-quoted class values", () => {
     expect(elementsWithClass("<div class='mermaid'></div>", "mermaid")).toBe(1);
     expect(elementsWithClass("<div class='a mermaid'></div>", "mermaid")).toBe(
       1,
     );
-    expect(elementsWithClass("<div class=mermaid></div>", "mermaid")).toBe(1);
-    expect(elementsWithClass("<div class = mermaid>", "mermaid")).toBe(1);
-    expect(elementsWithClass("<div class=mermaidx></div>", "mermaid")).toBe(0);
+  });
+
+  it("does not count an unquoted class=mermaid in prose, which the build leaves unescaped", () => {
+    expect(
+      elementsWithClass(
+        "<p>Give the wrapper class=mermaid and it draws.</p>",
+        "mermaid",
+      ),
+    ).toBe(0);
+    expect(
+      elementsWithClass(
+        "<p>Write <code>div class=mermaid</code>.</p>",
+        "mermaid",
+      ),
+    ).toBe(0);
   });
 
   it("does not count a class that only starts with the token", () => {
