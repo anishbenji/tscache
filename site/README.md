@@ -50,10 +50,14 @@ bun run docs:run     # runs the snippets against the mock backend and checks the
     a bracket name (VitePress's dynamic-route form, such as `[param].md`), whatever it holds and
     excluded files included; the site has neither. Replace a link with the files, rename a
     bracket-named file, or extend the check before adding either.
-  - It reads `mermaid` fences only; a page with a hand-written `<Mermaid>` tag in its raw HTML fails,
-    naming the page. That is an early message: the render check fails any built page with an element
-    of the plugin's default `mermaid` class, which also catches `<component is="Mermaid">` and a raw
-    `.mermaid` element (not a dynamic component given a class of its own). A `mermaid` fence that a `::: code-group` shows as code is still parsed, so write a
+  - It reads `mermaid` fences only; a page with a hand-written `<Mermaid>` tag or a `component` tag
+    whose static `is` names Mermaid in its raw HTML fails, naming the page, inside `<ClientOnly>`
+    too. That is an early message: the render check fails any built page with an element of the
+    plugin's default `mermaid` class, which also catches a raw `.mermaid` element. Neither check
+    sees a dynamic component given a class of its own, or a diagram rendered only in the browser
+    (inside `<ClientOnly>`, or behind a `v-if` on state set when the page mounts), which the built
+    HTML does not hold. Both checks are for trusted authors (the maintainer and agents): they catch
+    mistakes, not a diagram written to evade them. A `mermaid` fence that a `::: code-group` shows as code is still parsed, so write a
     deliberately broken example as an `mmd` fence or give it a title.
   - It parses with Mermaid's default options, not the site's, and does not apply the 50,000-character
     limit above which Mermaid draws its "Maximum text size in diagram exceeded" box instead of the

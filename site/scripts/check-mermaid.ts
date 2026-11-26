@@ -2,7 +2,12 @@
 //
 // The site renders each ```mermaid fence in the browser (vitepress-plugin-mermaid), so a syntax
 // error builds cleanly and only shows on the live page as Mermaid's error box. This check parses
-// those diagrams with the Mermaid the site pins, at build time. Its limits:
+// those diagrams with the Mermaid the site pins, at build time.
+//
+// Threat model: this is a docs render check for trusted authors (the maintainer and agents). It
+// catches mistakes, not a diagram written to evade it.
+//
+// Its limits:
 //
 //   - It is a syntax check, not a render. A diagram that parses but draws wrongly, or throws in
 //     Mermaid's renderer, passes.
@@ -14,11 +19,14 @@
 //     under `site/` that is a symbolic link, and on any Markdown file under `site/` with a
 //     bracket-named segment (VitePress's dynamic-route form), whatever it holds and excluded
 //     files included; a link or a dynamic route needs the check extended first.
-//   - It reads `mermaid` fences only. A page with a hand-written `<Mermaid>` tag in its raw HTML
-//     (outside a comment and a quoted attribute value) fails, naming the page, rather than go
-//     unchecked. That is an early, friendlier message: the authority is the render check's count
-//     of the plugin's default `mermaid` class in the built HTML (`e2e/docs/pages.ts`), which also
-//     catches `<component is="Mermaid">` and a raw `.mermaid` element. A `mermaid` fence that a
+//   - It reads `mermaid` fences only. A page with a hand-written `<Mermaid>` tag, or a `component`
+//     tag whose static `is` names Mermaid, in its raw HTML (outside a comment, a quoted attribute
+//     value and a raw-text element such as `textarea`) fails, naming the page, rather than go
+//     unchecked; inside `<ClientOnly>` too. That is an early, friendlier message: the authority is
+//     the render check's count of the plugin's default `mermaid` class in the built HTML
+//     (`e2e/docs/pages.ts`), which also catches a raw `.mermaid` element, but not a component
+//     rendered only in the browser (inside `<ClientOnly>`, or behind a `v-if` on state set when
+//     the page mounts), which the built HTML does not hold. A `mermaid` fence that a
 //     `::: code-group` shows as code is still parsed: write a deliberately broken example as an
 //     `mmd` fence or give it a title.
 //   - It parses with Mermaid's default options, not the site's (`securityLevel`, `sequence`),
@@ -137,8 +145,32 @@ export async function diagramReader(): Promise<FindDiagrams> {
   };
 }
 
-/** An HTML comment, which renders nothing, whatever tags its text names. */
-const COMMENT = /<!--[\s\S]*?-->/g;
+/**
+ * An HTML comment at the scan position, which renders nothing, whatever tags its text names. It
+ * ends where Vue's template parser ends it: at `<!-->` or `<!--->`, at the first `-->` or `--!>`,
+ * or at the end of the text when nothing closes it (matched in one pass, never rescanned).
+ */
+const COMMENT = /<!---?>|<!--[\s\S]*?(?:--!?>|$)/y;
+
+/**
+ * Elements whose content is text up to their closing tag (raw text and RCDATA): a tag written
+ * inside one renders as text, and a quote inside one opens no attribute value.
+ */
+const RAW_TEXT = new Set([
+  "textarea",
+  "title",
+  "script",
+  "style",
+  "iframe",
+  "noscript",
+  "xmp",
+]);
+
+/**
+ * A `component` tag's static `is` (or `:is` / `v-bind:is` with a string literal) naming Mermaid in
+ * any case: `<component is="Mermaid">`, which renders the same component as the tag.
+ */
+const IS_MERMAID = /\s(?:v-bind)?:?is\s*=\s*["']?["']?mermaid/i;
 
 /**
  * CommonMark's open tag (a name, then attributes, each value unquoted or quoted and consumed
@@ -150,20 +182,39 @@ const TAG =
 
 /**
  * Whether raw HTML holds a tag that opens or closes vitepress-plugin-mermaid's `<Mermaid>`
- * component, in any case. Comments are dropped first; the rest is scanned left to right, a tag at
- * a time, so text between tags (an apostrophe included) is read as text.
+ * component, in any case, or a `component` tag whose static `is` names it. The text is scanned
+ * left to right, a comment or a tag at a time, so text between tags (an apostrophe included) is
+ * read as text; the content of a raw-text element (`RAW_TEXT`) is skipped to its closing tag.
  */
-function hasMermaidTag(html: string): boolean {
-  const text = html.replace(COMMENT, "");
+function hasMermaidTag(text: string): boolean {
+  let lower: string | undefined;
   for (let at = text.indexOf("<"); at !== -1; at = text.indexOf("<", at)) {
+    COMMENT.lastIndex = at;
+    if (COMMENT.exec(text) !== null) {
+      at = COMMENT.lastIndex;
+      continue;
+    }
     TAG.lastIndex = at;
     const tag = TAG.exec(text);
     if (tag === null) {
       at++;
       continue;
     }
-    if ((tag[1] ?? tag[2])?.toLowerCase() === "mermaid") return true;
+    const name = (tag[1] ?? tag[2])?.toLowerCase();
+    if (name === "mermaid") return true;
+    if (tag[1] !== undefined && name === "component" && IS_MERMAID.test(tag[0]))
+      return true;
     at = TAG.lastIndex;
+    if (
+      tag[1] !== undefined &&
+      name !== undefined &&
+      RAW_TEXT.has(name) &&
+      !tag[0].endsWith("/>")
+    ) {
+      lower ??= text.toLowerCase();
+      const close = lower.indexOf(`</${name}`, at);
+      at = close === -1 ? text.length : close;
+    }
   }
   return false;
 }
@@ -176,18 +227,23 @@ interface HtmlToken {
 }
 
 /**
- * Whether a token, or an inline token's children, is raw HTML holding a `<Mermaid>` tag. The tag
- * in inline code or a fence is a code or fence token, so it is not matched. This is an early,
- * friendlier message: the render check's reading of the built HTML (`e2e/docs/pages.ts`) is the
- * authority on hand-written diagrams, and catches the forms this misses.
+ * Whether an HTML block, or an inline token's raw HTML, holds a `<Mermaid>` tag. markdown-it
+ * splits a paragraph's raw HTML into a token per tag, so an inline token's HTML children are
+ * scanned as one text, each other child read as a space: the page renders those as escaped text,
+ * which holds no tag. The tag in inline code or a fence is a code or fence token, so it is not
+ * matched. This is an early, friendlier message: the render check's reading of the built HTML
+ * (`e2e/docs/pages.ts`) is the authority on hand-written diagrams, and catches the forms this
+ * misses.
  */
 function holdsMermaidTag(token: HtmlToken): boolean {
-  if (
-    (token.type === "html_block" || token.type === "html_inline") &&
-    hasMermaidTag(token.content)
-  )
-    return true;
-  return token.children?.some(holdsMermaidTag) ?? false;
+  if (token.type === "html_block" || token.type === "html_inline")
+    return hasMermaidTag(token.content);
+  if (token.children === null) return false;
+  return hasMermaidTag(
+    token.children
+      .map((child) => (child.type === "html_inline" ? child.content : " "))
+      .join(""),
+  );
 }
 
 /**

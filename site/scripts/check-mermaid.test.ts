@@ -154,6 +154,43 @@ describe("check-mermaid: pages", () => {
     }
   });
 
+  it("rejects a dynamic component whose static is names Mermaid, inside ClientOnly too", async () => {
+    for (const page of [
+      '<ClientOnly><component is="Mermaid" id="m1" graph="x" /></ClientOnly>\n',
+      "<component :is=\"'Mermaid'\" />\n",
+      "# Page\n\nText <component is='mermaid' graph=\"x\" /> here.\n",
+      "<div><component v-bind:is=\"'MERMAID'\" /></div>\n",
+    ]) {
+      await expect(find("site/page.md", page)).rejects.toThrow(
+        /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+      );
+    }
+    expect(await lines('<component is="Badge" />\n')).toEqual([]);
+  });
+
+  it("rejects a Mermaid tag that a comment or a raw-text element only seems to hide", async () => {
+    for (const page of [
+      '<div title="<!--"></div><Mermaid id="a" class="x" graph="g"/><div title="-->"></div>\n',
+      '<!--> <Mermaid id="a" class="x" graph="graph TD;A-->B" />\n',
+      '<!---> <Mermaid id="a" class="x" graph="g" /> -->\n',
+      '<textarea><a x=\'</textarea><Mermaid id="a" class="x" graph="g"/><textarea>\'></textarea>\n',
+      '<div><title><a x=\'</title><Mermaid id="a" class="x" graph="g"/><title>\'></title></div>\n',
+    ]) {
+      await expect(find("site/page.md", page)).rejects.toThrow(
+        /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+      );
+    }
+  });
+
+  it("accepts a Mermaid tag inside a raw-text element, which renders it as text", async () => {
+    expect(await lines("<textarea><Mermaid/></textarea>\n")).toEqual([]);
+    expect(await lines("<TEXTAREA><Mermaid/></TextArea>\n")).toEqual([]);
+  });
+
+  it("reads 160 kB of unterminated comment openers in one pass (a quadratic scan would stall here)", async () => {
+    expect(await lines("<!--".repeat(40000))).toEqual([]);
+  });
+
   it("accepts a Mermaid tag shown as inline code or in a fence", async () => {
     const tag = '<Mermaid id="m1" graph="x" />';
     const page = `# Page\n\nWrite \`${tag}\` rarely.\n\n\`\`\`vue\n${tag}\n\`\`\`\n`;
