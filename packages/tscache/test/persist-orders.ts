@@ -1348,10 +1348,12 @@ const env = (globalThis as { process?: { env: Record<string, string> } })
  */
 const BOUND = Number(env?.TSCACHE_EVENT_ORDERS ?? 3);
 /**
- * The timeout at bound 3 or less, tscacheTestTimeout: 30 s provided by
+ * The timeout at bound 3 exactly, tscacheTestTimeout: 30 s provided by
  * vitest.config.ts, or the mutation run's own 60 s provided by
  * vitest.mutation.config.ts (`test.provide`; never from the shell). With
  * neither configuration it is undefined, and Vitest's default applies.
+ * Below bound 3 the tests pass no timeout, as before step 154, so the
+ * configured default applies: the user's exception covers bound 3 only.
  */
 const orderTimeout = inject("tscacheTestTimeout");
 
@@ -1378,8 +1380,9 @@ export function orderTests(hosted: boolean): void {
       // load 6, 11.4 s and 15.0 s with a second full run beside it (load 34
       // and 68). 30 s is twice that worst case; it still catches a hang.
       // The 30 s comes from vitest.config.ts (orderTimeout); the mutation
-      // run's configuration replaces it with its own 60 s.
-      BOUND > 3 ? 900_000 : orderTimeout,
+      // run's configuration replaces it with its own 60 s. Only bound 3
+      // gets it; a lower bound keeps the configured default.
+      BOUND > 3 ? 900_000 : BOUND === 3 ? orderTimeout : undefined,
     );
   });
 }

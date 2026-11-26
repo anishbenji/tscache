@@ -28,14 +28,15 @@ export default defineConfig({
     // packages/tscache/test/persist-orders.ts, and the O(log n) test in
     // packages/tscache/test/cache-reader-ranges.test.ts) read
     // tscacheTestTimeout with `inject`, provided as 30 s by the root
-    // configuration, which this file replaces with the same 60 s. The exception to Stryker's limit is a
-    // mutant whose covering tests take more than about 27.7 s together, such
-    // as a static mutant, which runs every test (about 165 s): an async hang
-    // there fails here at 60 s and counts as killed
-    // (docs/benchmarks/mutation.md). This is the user's exception
-    // to the rule against raising timeouts (user decision 90, 2026-11-20),
-    // scoped to this file: the root configuration, CI, the hooks and
-    // `bun run test` keep Vitest's defaults (5 s per test, 10 s per hook).
+    // configuration, which this file replaces with the same 60 s. The
+    // exception to Stryker's limit is a mutant whose covering tests take
+    // more than about 27.7 s together, such as a static mutant, which runs
+    // every test (about 165 s): an async hang there fails here at 60 s and
+    // counts as killed (docs/benchmarks/mutation.md). This is the user's
+    // exception to the rule against raising timeouts (user decision 90,
+    // 2026-11-20), scoped to this file: the root configuration, CI, the
+    // hooks and `bun run test` keep Vitest's defaults (5 s per test, 10 s
+    // per hook).
     provide: { ...base.test?.provide, tscacheTestTimeout: timeout },
     testTimeout: timeout,
     hookTimeout: timeout,
