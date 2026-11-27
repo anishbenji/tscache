@@ -30,7 +30,7 @@
  * log (`arrivalOrder`, round 4, R4-1).
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, inject, it, vi } from "vitest";
 import { Engine } from "../src/engine/engine";
 import { HostedPersistence, type LazyPersist } from "../src/persist/hosted";
 import * as lazy from "../src/persist/lazy";
@@ -1337,8 +1337,9 @@ function byRule(
 const env = (globalThis as { process?: { env: Record<string, string> } })
   .process?.env;
 /**
- * Events per order: 3 in the normal suite and in `bun run ci`, 7,442 orders
- * (4,577 persister, 2,865 hosted) in about a second. TSCACHE_EVENT_ORDERS=5
+ * Events per order: 3 in the normal suite and in `bun run ci`, 9,331 orders
+ * (4,577 persister, 4,754 hosted; step 154), about 4.5 s for the six tests
+ * together in one full suite run at load 6. TSCACHE_EVENT_ORDERS=5
  * runs every order that the round 1-3 reproductions fit (R3-2, the longest:
  * openA, clearAll, openB, invB, fail): 1,166,766 orders at round 4 (650,904
  * and 515,862); the hosted file has more since round 5's third loader
@@ -1346,6 +1347,15 @@ const env = (globalThis as { process?: { env: Record<string, string> } })
  * lock (step 132, round 5).
  */
 const BOUND = Number(env?.TSCACHE_EVENT_ORDERS ?? 3);
+/**
+ * The timeout at bound 3 exactly, tscacheTestTimeout: 30 s provided by
+ * vitest.config.ts, or the mutation run's own 60 s provided by
+ * vitest.mutation.config.ts (`test.provide`; never from the shell). With
+ * neither configuration it is undefined, and Vitest's default applies.
+ * Below bound 3 the tests pass no timeout, as before step 154, so the
+ * configured default applies: the user's exception covers bound 3 only.
+ */
+const orderTimeout = inject("tscacheTestTimeout");
 
 /** Declares one harness's order tests, one per first event. */
 export function orderTests(hosted: boolean): void {
@@ -1362,7 +1372,17 @@ export function orderTests(hosted: boolean): void {
           expect(result.open131).toBeGreaterThan(0);
         }
       },
-      BOUND > 3 ? 900_000 : undefined,
+      // Each test enumerates its orders on the CPU and waits on nothing else,
+      // so its time grows with the machine's load and Vitest's default 5 s
+      // was crossed under load. Measured in a full Vitest run (step 154,
+      // docs/reviews/step-154.md), the slowest of the six, hosted
+      // "starting with clearAll" (2,560 orders): 1.1 s in one full run at
+      // load 6, 11.4 s and 15.0 s with a second full run beside it (load 34
+      // and 68). 30 s is twice that worst case; it still catches a hang.
+      // The 30 s comes from vitest.config.ts (orderTimeout); the mutation
+      // run's configuration replaces it with its own 60 s. Only bound 3
+      // gets it; a lower bound keeps the configured default.
+      BOUND > 3 ? 900_000 : BOUND === 3 ? orderTimeout : undefined,
     );
   });
 }
