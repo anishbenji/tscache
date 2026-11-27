@@ -219,9 +219,10 @@ A superseded worker stays superseded: when the newer tabs close first, an old ta
 nothing until it is reloaded.
 
 `client.features.has('superseded')` says whether a tab can be told at all. It is true behind a
-SharedWorker, and false behind a dedicated worker, an in-process client and a worker script from before
-0.3.0. Where it is false, `client.superseded` stays `undefined` for good, which means "not known", not
-"current"; a `superseded` listener there is simply never called, and no warning is printed for it.
+SharedWorker that has opened its `BroadcastChannel`, and false behind a dedicated worker, an in-process
+client, a worker script from before 0.3.0 and a SharedWorker that could not open the channel. Where it
+is false, `client.superseded` stays `undefined` for good, which means "not known", not "current"; a
+`superseded` listener there is simply never called, and no warning is printed for it.
 
 ### One tscache application per origin
 

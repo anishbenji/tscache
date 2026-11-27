@@ -91,8 +91,9 @@ no longer persists, the tab keeps working from memory and its fetcher, and a rel
 worker
 ([Stale scripts after a deploy](/guides/workers#older-tabs-are-told-superseded)).
 
-Only a SharedWorker reports it. Where `client.features.has('superseded')` is false (a dedicated worker,
-in-process, an older worker script) the property stays `undefined`, which then means "not known".
+Only a SharedWorker that has opened its `BroadcastChannel` to the other workers reports it. Where
+`client.features.has('superseded')` is false (a dedicated worker, in-process, an older worker script, a
+SharedWorker without that channel) the property stays `undefined`, which then means "not known".
 
 <<< @/snippets/client.ts#superseded{ts}
 
