@@ -128,10 +128,10 @@ beforeEach(() => {
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-// Each test spawns about ten git processes, a few hundred milliseconds in
-// all on an idle machine but several seconds under a parallel Vitest run on
-// a loaded one; the limit only ends a hung test, no assertion reads time.
-describe("check-push-email", { timeout: 30_000 }, () => {
+// Each test spawns about ten git processes: the worst took about 1.2 s over
+// five parallel Vitest runs at load up to about 18 (2026-11-27), so the
+// default 5 s holds.
+describe("check-push-email", () => {
   it("passes an existing branch whose outgoing commits use the allowed address", () => {
     const base = commit("a");
     onRemote("main", base);
@@ -450,8 +450,9 @@ describe("check-push-email", { timeout: 30_000 }, () => {
       env,
       input: line(bad, base),
       encoding: "utf8",
-      // Only ends a hung child; no assertion depends on it.
-      timeout: 60_000,
+      // Only ends a hung child; no assertion depends on it. Below the test's
+      // 5 s, since Vitest's timer cannot interrupt a synchronous spawnSync.
+      timeout: 4_000,
     });
     expect(refused.error).toBeUndefined();
     expect(refused.status).toBe(1);
@@ -463,7 +464,7 @@ describe("check-push-email", { timeout: 30_000 }, () => {
       env,
       input: line(base, base),
       encoding: "utf8",
-      timeout: 60_000,
+      timeout: 4_000,
     });
     expect(passed.error).toBeUndefined();
     expect(passed.status).toBe(0);
@@ -761,7 +762,7 @@ describe("check-push-email", { timeout: 30_000 }, () => {
       input: stdin,
       encoding: "utf8",
       // Only ends a hung child; no assertion depends on it.
-      timeout: 60_000,
+      timeout: 4_000,
     });
     expect(result.error).toBeUndefined();
     return result;
