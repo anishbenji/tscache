@@ -181,8 +181,8 @@ Three rules follow for your setup:
 
 Until step 158, do not redirect versioned worker URLs to one changing URL (say `/worker-v1.js` and
 `/worker-v2.js`, both redirected to `/worker.js`; decision #172, 2026-11-27). The browser starts a
-worker for each URL a page passes, but both workers report the URL they were served from, so tscache
-takes them for one generation: neither is superseded and both persist until the older tabs close,
+worker for each URL a page passes, but both workers report the URL they were served from, so with
+the same tscache version and fetcher URL tscache takes them for one generation: neither is superseded and both persist until the older tabs close,
 though a logout's `clearAll` still reaches both. Serve each worker build at a URL of its own.
 
 Cache configs and `memoryBudget` are not in the key. A cache opened with another structure is still
