@@ -747,11 +747,13 @@ export class Persister {
   /**
    * The cleanups of caches that stopped before the worker was superseded.
    * A queued one never starts: a cleanup deletes every record of its cache,
-   * and those may be the current generation's by now. A running one has
-   * already issued that delete, before its first await, and the transaction
-   * may still commit: the persister only stops waiting for it. That costs
-   * coverage, the overlap of two writers §4.10.7 accepts. The `durable`
-   * waiters of both are released, as a settled cleanup releases them.
+   * and those may be the current generation's by now. A running one that is
+   * still opening the store never issues that delete; any other has already
+   * issued it, at once when a store was open or as soon as its store opened,
+   * and the transaction may still commit: the persister only stops waiting
+   * for it. That costs coverage, the overlap of two writers §4.10.7
+   * accepts. The `durable` waiters of both are released, as a settled
+   * cleanup releases them.
    */
   #dropCleanups(): void {
     const current = this.#current;
