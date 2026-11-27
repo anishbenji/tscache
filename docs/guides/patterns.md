@@ -155,12 +155,14 @@ const candles = await client.cache({
   Keep per-user or sensitive caches in memory; that is why `persist` is per cache.
 - **Logout.** One `client.clearAll()` from a tab of the SharedWorker empties every cache and the database,
   and resolves once the records are gone (or persistence has stopped). From 0.3.0 it also reaches every
-  other SharedWorker of the origin, another deploy's included: each clears its memory and the disk, and
-  the call does not wait for them (architecture §4.10.7, N135). A worker of 0.1.0 or 0.2.0 is not
-  reached and writes back what it holds. A client hosted in a dedicated worker or in-process persists
-  nothing, but its `clearAll` empties the database too and reaches the SharedWorkers in the same way,
-  so a logout from any page removes what a SharedWorker session stored. When the clear fails (IndexedDB unavailable or
-  refusing it for five seconds), the call still resolves, and the next `clearAll` tries again.
+  other SharedWorker of the origin of 0.3.0 or later, another deploy's included: each clears its memory
+  and the disk, and the call does not wait for them (architecture §4.10.7, N135). A worker of 0.1.0 or
+  0.2.0 is not reached and writes back what it holds. A client hosted in a dedicated worker or
+  in-process persists nothing, but its `clearAll` empties the database too and reaches the SharedWorkers
+  of 0.3.0 or later in the same way, so a logout from any page removes what those workers stored,
+  within the limits in `site/guides/persistence.md` (Sensitive data and logout). When the clear fails
+  (IndexedDB unavailable or refusing it for five seconds), the call still resolves, and the next
+  `clearAll` tries again.
 
 ## Known limits of 0.2.0
 
@@ -181,10 +183,11 @@ below where an application meets it.
   with `ConfigError` until the old tabs close. From 0.3.0 (in preparation) the SharedWorker is named by
   its generation (the tscache version and the fetcher module URL), so each such deploy has a worker of
   its own; the workers find each other, the older one stops persisting and tells its tabs with a
-  `superseded` event, and `clearAll` reaches every worker (architecture §2.7, Deploy skew;
-  `site/guides/workers.md`, Stale scripts after a deploy). What remains: a worker of 0.1.0 or 0.2.0
-  takes no part, a fetcher changed behind an unchanged URL is not seen, and a stale worker script still
-  rejects with `ProtocolMismatchError`.
+  `superseded` event, and `clearAll` reaches every worker of 0.3.0 or later (architecture §2.7, Deploy
+  skew; `site/guides/workers.md`, Stale scripts after a deploy). What remains: a worker of 0.1.0 or
+  0.2.0 takes no part, one chain of late workers is not covered by the `clearAll` relay until step 152,
+  a fetcher changed behind an unchanged URL is not seen, and a stale worker script still rejects with
+  `ProtocolMismatchError`.
 - **Change notifications reach one cache's readers only.** `cacheChanged` (architecture §2.7, N71–N84,
   step 114) tells every listening tab of a SharedWorker where the cache changed, and a view re-reads by
   the read rule (N84). With a dedicated worker or in-process, each tab has a cache of its own and hears

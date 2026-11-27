@@ -122,17 +122,18 @@ every cache and the database:
 
 <<< @/snippets/persistence.ts#logout{ts}
 
-From 0.3.0 it reaches every SharedWorker of the origin, an older deploy's that other tabs still use
-included: each clears its memory and the disk too, so none of them writes the data back. The promise
-resolves when the calling worker's own clear is done and does not wait for the others. A worker of
-tscache 0.1.0 or 0.2.0 is not reached and writes back what it still holds. If a `clearAll` cannot empty
-the disk within five seconds, every persisted cache stops, and that worker persists nothing more until
-it ends. When the logout comes while the worker's persistence module is still loading, as on the
-worker's first use of persistence or soon after a first `cache()`, the call waits for that loading
-first, so it can take up to ten seconds. When the module failed to load, `clearAll` still tries once to
-empty the database, within five seconds; when that fails as well, the records stay. In that case only, a
-database that opens after the call has answered is still emptied then; with the module loaded, a
-database that opens after the five seconds is not emptied.
+From 0.3.0 it reaches every SharedWorker of 0.3.0 or later in the origin, an older deploy's that other
+tabs still use included: each clears its memory and the disk too, so none of them writes the data back,
+apart from the chain of late workers below. The promise resolves when the calling worker's own clear
+is done and does not wait for the others. A worker of tscache 0.1.0 or 0.2.0 is not reached and writes
+back what it still holds. If a `clearAll` cannot empty the disk within five seconds, every persisted
+cache stops, and that worker persists nothing more until it ends. When the logout comes while the
+worker's persistence module is still loading, as on the worker's first use of persistence or soon after
+a first `cache()`, the call waits for that loading first, so it can take up to ten seconds. When the
+module failed to load, `clearAll` still tries once to empty the database, within five seconds; when that
+fails as well, the records stay. In that case only, a database that opens after the call has answered
+is still emptied then; with the module loaded, a database that opens after the five seconds is not
+emptied.
 
 One chain of late workers is not covered yet. With three or more workers of 0.3.0 or later, one of
 them writing late, a worker that has already cleared can open a persisted cache, load the late
@@ -142,10 +143,10 @@ hears a clear and keeps serving the pre-logout data until the next `clearAll`. S
 with a logout fence: 0.3.0 is not released before steps 150 and 152 merge.
 
 A client hosted in a dedicated worker or in-process persists nothing, but its `clearAll` empties the
-database too, so a logout from any page removes what a SharedWorker session stored. It loads the
-clearing code only then, and creates no database where there is none, except in a browser without
-`indexedDB.databases()` (Firefox before 126), where it cannot tell and leaves an empty database behind.
-From 0.3.0 its `clearAll` reaches the SharedWorkers that other tabs still use as well, which clear
-their memory and so write nothing back. When the clear fails (IndexedDB unavailable, or refusing the
-clear for five seconds), the call still resolves, nothing else changes, and the next `clearAll` tries
-again.
+database too, so a logout from any page removes what a SharedWorker session stored, within the limits
+above. It loads the clearing code only then, and creates no database where there is none, except in a
+browser without `indexedDB.databases()` (Firefox before 126), where it cannot tell and leaves an empty
+database behind. From 0.3.0 its `clearAll` reaches the SharedWorkers of 0.3.0 or later that other tabs
+still use as well, which clear their memory and so write nothing back. When the clear fails (IndexedDB
+unavailable, or refusing the clear for five seconds), the call still resolves, nothing else changes,
+and the next `clearAll` tries again.

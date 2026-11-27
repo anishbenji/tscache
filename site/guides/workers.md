@@ -242,8 +242,8 @@ every page.
   it keeps writing the database until its tabs have closed, a `clearAll` does not reach it, and its
   tabs are told nothing: the first upgrade from those releases behaves as they did.
 - A dedicated worker and an in-process client serve one tab each. They are never superseded and never
-  told; their `clearAll` still reaches every SharedWorker
-  ([Sensitive data and logout](/guides/persistence#sensitive-data-and-logout)).
+  told; their `clearAll` still reaches every SharedWorker of 0.3.0 or later, within the limits in
+  [Sensitive data and logout](/guides/persistence#sensitive-data-and-logout).
 - A browser without `BroadcastChannel` in workers detects nothing. Every browser with `SharedWorker` has
   it.
 

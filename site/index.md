@@ -62,7 +62,8 @@ The limits of 0.2.0 that an application has to design around:
   both write the origin's IndexedDB database; a deploy that changes only the fetcher is refused with
   `ConfigError` in every new tab until the old tabs close. From 0.3.0 (in preparation) each such deploy
   has a worker of its own, the older worker stops persisting and its tabs hear `superseded`, and a
-  logout's `clearAll` reaches every worker.
+  logout's `clearAll` reaches every worker of 0.3.0 or later, within the
+  [logout limits](/guides/persistence#sensitive-data-and-logout).
   [Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy) has the details.
 - **Change events reach other tabs only through a SharedWorker.** Since 0.2.0 `cacheChanged` tells a
   view where a read's result may have changed ([Change events](/concepts/events#change-events)). With a
