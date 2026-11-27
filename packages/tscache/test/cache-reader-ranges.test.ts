@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, inject, it } from "vitest";
 import { includeRange } from "../src/engine/cache";
 import type { SlotRange } from "../src/grid";
 import { rng } from "./cache-model";
@@ -8,6 +8,15 @@ import { rng } from "./cache-model";
 // ranges. Security lane S1.1 (step 114): it scanned from the front for
 // every range, so a call collecting n ranges cost O(n²). These tests pin
 // its result against that scan and count its work, never its time.
+
+/**
+ * The O(log n) test's timeout, tscacheTestTimeout: 30 s provided by
+ * vitest.config.ts (the test's comment gives the numbers), or the mutation
+ * run's own 60 s provided by vitest.mutation.config.ts (`test.provide`;
+ * never from the shell). With neither configuration it is undefined, and
+ * Vitest's default applies.
+ */
+const scanTimeout = inject("tscacheTestTimeout");
 
 /** The scan `includeRange` replaced, kept as the reference result. */
 function reference(list: SlotRange[], range: SlotRange): void {
@@ -113,29 +122,43 @@ describe("includeRange", () => {
     wellFormed(got);
   });
 
-  it("reads O(log n) list entries per range when collecting ascending ranges", () => {
-    const n = 4096;
-    let reads = 0;
-    const counted = (list: SlotRange[]) =>
-      new Proxy(list, {
-        get(target, key, receiver) {
-          if (typeof key === "string" && /^\d+$/.test(key)) reads++;
-          return Reflect.get(target, key, receiver);
-        },
-      });
-    const list = counted([]);
-    for (let i = 0; i < n; i++)
-      includeRange(list, { start: 3 * i, end: 3 * i });
-    expect(list).toHaveLength(n);
-    // log2(4096) = 12 probes, plus the look past the end: far below the
-    // n²/2 ≈ 8.4 million reads the scan took.
-    expect(reads).toBeLessThanOrEqual(n * 14);
+  it(
+    "reads O(log n) list entries per range when collecting ascending ranges",
+    () => {
+      const n = 4096;
+      let reads = 0;
+      const counted = (list: SlotRange[]) =>
+        new Proxy(list, {
+          get(target, key, receiver) {
+            if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+            return Reflect.get(target, key, receiver);
+          },
+        });
+      const list = counted([]);
+      for (let i = 0; i < n; i++)
+        includeRange(list, { start: 3 * i, end: 3 * i });
+      expect(list).toHaveLength(n);
+      // log2(4096) = 12 probes, plus the look past the end: far below the
+      // n²/2 ≈ 8.4 million reads the scan took.
+      expect(reads).toBeLessThanOrEqual(n * 14);
 
-    reads = 0;
-    const scanned = counted([]);
-    for (let i = 0; i < n; i++)
-      reference(scanned, { start: 3 * i, end: 3 * i });
-    // The control: the scan reads every entry before the end, n(n-1)/2 in all.
-    expect(reads).toBeGreaterThanOrEqual((n * (n - 1)) / 2);
-  });
+      reads = 0;
+      const scanned = counted([]);
+      for (let i = 0; i < n; i++)
+        reference(scanned, { start: 3 * i, end: 3 * i });
+      // The control: the scan reads every entry before the end, n(n-1)/2 in
+      // all.
+      expect(reads).toBeGreaterThanOrEqual((n * (n - 1)) / 2);
+      // The control's quadratic scan through a Proxy is the cost this test
+      // checks, on the CPU with no waits, so its time grows with the
+      // machine's load and Vitest's default 5 s was crossed under load.
+      // Measured in a full Vitest run (step 154, docs/reviews/step-154.md):
+      // 2.3 s at load 6, 6.4 s to 9.0 s with a second full run beside it
+      // (load 34 and 68), and 6.4 s to 16.4 s in loaded pre-push runs on
+      // 2026-11-25. 30 s is about twice that worst case. The test is
+      // synchronous, so Vitest reports a timeout when it returns rather than
+      // interrupting it.
+    },
+    scanTimeout,
+  );
 });
