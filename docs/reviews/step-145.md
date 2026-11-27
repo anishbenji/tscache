@@ -1,6 +1,6 @@
 # Step 145 — a Playwright check that the built docs site draws every Mermaid diagram
 
-Branch: `chore/145-mermaid-render-check` · Reviewer: the director's review ladder · Rounds: 2 · Status: security lane run 4 triaged · Verdict after triage: pending
+Branch: `chore/145-mermaid-render-check` · Reviewer: the director's review ladder · Rounds: 3 · Status: closed under decision #160 A (standing grant: scanners frozen, no round 4) · main merged 2026-11-27 (#176)
 
 ## Threat model
 
@@ -112,7 +112,8 @@ After the fixes: `bunx vitest run site/scripts/check-mermaid.test.ts e2e/docs/pa
 
 Six findings (five P1, one P2), graded by the finding check (`check-3`) under the threat model above: every P1 needs a
 page or diagram written for the purpose, so each is P3 at most and recorded as a limit; the P2 is a docs fix. No
-scanner code changes (standing-grant decision #160: freeze the scanners and record limits rather than redesign).
+scanner code changes (standing-grant decision #160 A: freeze the scanners and record limits rather than redesign),
+and no round 4.
 
 | #    | Codex                     | Grade | Disposition                                                                                                                                                                                                                                                                                                    |
 | ---- | ------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -127,6 +128,17 @@ The area has drawn findings every round. The finding check judged the hand-writt
 recommended freezing it now: the remaining findings are crafted forms the threat model grades as limits. A redesign
 (Vue's own template parser on the rendered template; about half a day, one or two rounds, and a dependency approval
 for `@vue/compiler-dom` in `site/scripts`) is the path if this code must change again for a reason outside that class.
+
+## Neon lane
+
+The Neon lane reviewed `1c7eceb4`, the head after round 3, over the step's whole diff
+(`~/code/tscache-reports/run/neon/step-145.1795705526.md`, outside the repo). Verdict: clean, with no P0, P1 or P2.
+
+| #      | Sev | Finding                                                                   | Disposition                                                                                                                                                                                                      |
+| ------ | --- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Neon-1 | P3  | `RAW_TEXT_CLOSE` matches a closing-tag prefix without a tag-name boundary | The recorded limit R3-4 (round 3): `</textarea-box>` inside a `<textarea>` ends the skip early. Not changed under decision #160 A; the lane's own grading calls the crafted form a limit under the threat model. |
+
+Neon: 1 finding (a recorded limit)
 
 ## Decision concerns
 
