@@ -97,8 +97,8 @@ export function readHydration(): Hydration {
 /**
  * What a warning says of `error`: its name, and a TscacheError's `code` when
  * it has one. Never its message, which can quote the snapshot it refused
- * (`decodeSnapshot` quotes one that is not an object, `JSON.parse` the text
- * it stopped at), and the snapshot carries the page's data.
+ * (`JSON.parse` quotes the text it stopped at, `hydrate` a payload field it
+ * refuses), and the snapshot carries the page's data.
  */
 function nameOf(error: unknown): string {
   if (!(error instanceof Error)) return typeof error;

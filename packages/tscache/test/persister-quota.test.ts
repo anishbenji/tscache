@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { durably } from "../src/persist/persister";
 import {
   clearAll,
   fakeTime,
@@ -132,6 +133,37 @@ describe("a quota error stops the cache at once (§4.10.6, N47)", () => {
     await durable.promise;
     expect(writes(h.store)).toHaveLength(2);
     expect(writes(h.store)[1]?.plan).toEqual(cleanupPlan);
+    expect(h.store.records("persist")).toEqual({ cache: undefined, pages: [] });
+  });
+
+  // Security lane 2 of step 132 (S2.2), from its reproduction: a removal
+  // made while the stop's cleanup runs answers once that cleanup settled.
+  it("a removal while the stop's cleanup is pending waits for that cleanup", async () => {
+    const h = await opened();
+    h.engine.put("persist", batch([0, 3]));
+    await finish(h.persister.flush());
+    const flush = h.store.gate("write");
+    const cleanup = h.store.gate("write");
+    h.engine.invalidate("persist", { start: 3, end: 3 });
+    await tick();
+    await flush.entered;
+    flush.reject(
+      Object.assign(new Error("full"), { name: "QuotaExceededError" }),
+    );
+    await tick();
+    expect(h.stopped.map((e) => e.reason)).toEqual(["quota-exceeded"]);
+    await cleanup.entered;
+    const answer = tracked(
+      Promise.resolve(
+        durably(h.persister, "persist", () =>
+          h.engine.invalidate("persist", { start: 0, end: 0 }),
+        ),
+      ).then(() => undefined),
+    );
+    await tick();
+    expect(answer.done).toBe(false);
+    cleanup.release();
+    await finish(answer.promise);
     expect(h.store.records("persist")).toEqual({ cache: undefined, pages: [] });
   });
 

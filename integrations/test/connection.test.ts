@@ -364,8 +364,8 @@ describe("connect, when a seed fails to apply", () => {
     expect(text).toContain(`"${config.id}"`);
   });
 
-  it("never quotes a snapshot whose error would quote it", async () => {
-    // decodeSnapshot quotes a snapshot that is not an object whole.
+  it("never quotes a snapshot that is not an object", async () => {
+    // decodeSnapshot names a non-object snapshot by its type only, step 146.
     const marker = "SECRETMARKER";
     const value = dehydrate(seed);
     const spoiled = `${JSON.stringify(value.snapshot)}${marker}`;
@@ -375,7 +375,8 @@ describe("connect, when a seed fails to apply", () => {
     } catch (error) {
       message = (error as Error).message;
     }
-    expect(message).toContain(marker);
+    expect(message).toMatch(/^invalid encoded snapshot/);
+    expect(message).not.toContain(marker);
 
     const read = rehydrate(config, {
       ...value,
@@ -392,6 +393,36 @@ describe("connect, when a seed fails to apply", () => {
     expect(text).toContain("(TscacheError)");
     expect(text).not.toContain(marker);
   });
+
+  it.each([
+    ["a TscacheError", (text: string) => new TscacheError(text)],
+    ["a TypeError", (text: string) => new TypeError(text)],
+  ])(
+    "never prints a seed failure's message: %s carrying snapshot text",
+    async (_, make) => {
+      // The failure is injected, so the test does not rest on any engine
+      // message quoting its input (step 146; user decision #142 makes more of
+      // them name the type only).
+      const marker = "SECRETMARKER-146";
+      const error = make(`invalid snapshot near "${marker}"`);
+      const { connection, connected } = lossyConnection([seed], {
+        options,
+        hydrate: () => () => Promise.reject(error),
+      });
+      await until(() => connected() !== null);
+      const handle = await connection.cache(
+        connected() as TscacheClient,
+        config,
+      );
+      const answer = await handle.get(seed.range);
+      expect(fetched).toEqual([seed.range]);
+      expect(Array.from(answer.fields.v ?? [])).toEqual([7, 7, 7]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const [text] = warn.mock.calls[0] ?? [];
+      expect(text).toContain(`(${error.name})`);
+      expect(text).not.toContain(marker);
+    },
+  );
 
   it("is silent in production, and still hands out the cache", async () => {
     vi.stubEnv("NODE_ENV", "production");
