@@ -26,7 +26,7 @@ Not changed: `scripts/ci.sh`, `.github/` and the root `package.json` scripts (ou
 
 ## Verification
 
-- `bunx vitest run scripts/check-push-email.test.ts` on head `08c59dc3` (main merged): 69 tests pass.
+- `bunx vitest run scripts/check-push-email.test.ts` on head `08c59dc3` (main merged): 69 tests pass; again on `77d4ca1a` (decision #170 B, below): 69 pass, and `bun run ci` exits 0 there.
 - The per-round checks (red checks, end-to-end Lefthook runs in scratch repositories, the repair commands tried by hand) are recorded with each round below.
 
 ## Decision concerns
@@ -204,7 +204,7 @@ The describe block's 30-second timeout predated step 154's rule in `docs/testing
 
 - Measurement: five full parallel Vitest runs on head `c0b0ab93`, each under the heavy-job lock, at a one-minute load average of up to 17.7 on a 10-core machine (`run/measure-149/results.md` in the director's reports). All 43 tests of the `check-push-email` describe passed in every run. The worst was 1174 ms ("passes a large clean history, beyond the default output buffer"); every other test took at most 655 ms. No test needs an exception.
 - Change: the describe block drops `{ timeout: 30_000 }`, so Vitest's 5 s default applies, and its comment states the measured worst case. The three `spawnSync` calls that run the script under Bun change `timeout: 60_000` to `timeout: 4_000`.
-- Why 4 s for `spawnSync`: Vitest's per-test timer cannot interrupt a synchronous `spawnSync`, so this option is what ends a hung `bun` child. At 4 s it ends one inside the test's own 5 s, and the test then fails on `ETIMEDOUT` in `result.error`. No assertion depends on the value.
-- Known limit: the test helpers' `execFileSync` calls (`git()`, `fast-import`, `ssh-keygen`, `lefthook dump`) have no timeout, so a hung `git` would block the Vitest worker rather than fail the test. This has never been seen; left as is.
+- Why 4 s for `spawnSync`: Vitest's per-test timer cannot interrupt a synchronous `spawnSync`, so this option is what ends a hung `bun` child. At 4 s it ends one before the test's own 5 s when the test's setup takes under a second (the slowest whole test took 1.2 s in the measured runs), and the test then fails on `ETIMEDOUT` in `result.error`; after a slower setup the test still fails on that error, past 5 s. No assertion depends on the value.
+- Known limit: the test helpers' `execFileSync` calls (`git()`, `fast-import`, `ssh-keygen`, `lefthook dump`) and the script's own `spawnSync` git calls (`scripts/check-push-email.ts`, about :148 and :221, which most tests run inside the Vitest worker) have no timeout, so a hung `git` would block the worker rather than fail the test. This has never been seen; left as is.
 
-Test changes: no assertion was changed or removed (69 tests). `bunx vitest run scripts/check-push-email.test.ts`: 69 passed.
+Test changes: no assertion was changed or removed (69 tests). `bunx vitest run scripts/check-push-email.test.ts` on `77d4ca1a`: 69 passed. Security lane run 5 (Opus, `reviews/step-149/security-5.md` in the director's reports): clean, three P3 wording points, fixed in this file.
