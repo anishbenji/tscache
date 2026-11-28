@@ -1,6 +1,6 @@
 # Step 160 — raise the worker size budget after merging steps 135 and 148
 
-Branch: `fix/160-worker-size-budget` · Reviewer: the director · Rounds: 0 · Status: urgent fix, main red
+Branch: `fix/160-worker-size-budget` · Reviewer: the director · Pre-review: 1 (Fable 5.2), not the gate · Rounds: 0 · Status: urgent fix, main red
 
 ## Scope
 
@@ -27,7 +27,16 @@ A budget is the measured size plus max(512 B, 3 %), rounded up to 16 bytes (`bud
 ## Verification
 
 - `bun scripts/size.ts` on this branch after `bun run build`: every row `ok`, `worker` 21.42 kB against 22.08 kB.
-- `bun run ci` through the heavy-job lock: result recorded in the director's report for this step.
+- `~/code/tscache-reports/bin/heavy-run.sh "160 budget ci" bun run ci` on head `58e96340`: exit 0. Vitest 193 files and 3,909 tests passed, Playwright 229 passed, and the bench smoke was `ok`.
+
+## Pre-review 1 (Fable 5.2), not the gate
+
+Run on head `fa644ef0`. Two documentation findings, both validated and accepted by the director.
+
+| #     | Sev | Finding                                                                                                                                                    | Decision | Resolution                                                                                                                                                                       |
+| ----- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR1-1 | P2  | The "Exact budgets" row of `docs/benchmarking.md` (line 28) still gives step 135's sizes from before its merge with step 148, `worker` 20.68 kB among them | accepted | Confirmed at line 28; the row gives the `b4ca1ac6` sizes from Measurements and keeps step 135's merged sizes as history, as `34f484af` did. Fixed in the commit after `fa644ef0` |
+| PR1-2 | nit | This file left the `bun run ci` result to the director's report instead of recording it                                                                    | accepted | Verification records the command, head, exit code and counts. Fixed in the commit after `fa644ef0`                                                                               |
 
 ## Contract-test changes
 
