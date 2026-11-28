@@ -2,7 +2,12 @@
 //
 // The site renders each ```mermaid fence in the browser (vitepress-plugin-mermaid), so a syntax
 // error builds cleanly and only shows on the live page as Mermaid's error box. This check parses
-// those diagrams with the Mermaid the site pins, at build time. Its limits:
+// those diagrams with the Mermaid the site pins, at build time.
+//
+// Threat model: this is a docs render check for trusted authors (the maintainer and agents). It
+// catches mistakes, not a diagram written to evade it.
+//
+// Its limits:
 //
 //   - It is a syntax check, not a render. A diagram that parses but draws wrongly, or throws in
 //     Mermaid's renderer, passes.
@@ -14,12 +19,20 @@
 //     under `site/` that is a symbolic link, and on any Markdown file under `site/` with a
 //     bracket-named segment (VitePress's dynamic-route form), whatever it holds and excluded
 //     files included; a link or a dynamic route needs the check extended first.
-//   - It reads `mermaid` fences only, not a hand-written `<Mermaid>` tag or raw HTML. A
-//     `mermaid` fence that a `::: code-group` shows as code is still parsed: write a deliberately
-//     broken example as an `mmd` fence or give it a title.
+//   - It reads `mermaid` fences only. A page with a hand-written `<Mermaid>` tag, or a `component`
+//     tag whose static `is` names Mermaid, in its raw HTML (outside a comment, a quoted attribute
+//     value and a raw-text element such as `textarea`) fails, naming the page, rather than go
+//     unchecked; inside `<ClientOnly>` too. That is an early, friendlier message: the authority is
+//     the render check's count of the plugin's default `mermaid` class in the built HTML
+//     (`e2e/docs/pages.ts`), which also catches a raw `.mermaid` element, but not a component
+//     rendered only in the browser (inside `<ClientOnly>`, or behind a `v-if` on state set when
+//     the page mounts), which the built HTML does not hold. A `mermaid` fence that a
+//     `::: code-group` shows as code is still parsed: write a deliberately broken example as an
+//     `mmd` fence or give it a title.
 //   - It parses with Mermaid's default options, not the site's (`securityLevel`, `sequence`),
-//     and does not apply the 50,000-character limit above which `mermaid.render` draws an error
-//     box instead of the diagram.
+//     and does not apply the 50,000-character limit above which `mermaid.render` draws its
+//     "Maximum text size in diagram exceeded" box instead of the diagram; the render check
+//     (`e2e/docs/mermaid.spec.ts`) fails on that box.
 //   - A `details` statement, whose parsing reads an element of the page, is parsed without it.
 //
 // How it reads and parses:
@@ -114,6 +127,11 @@ export async function diagramReader(): Promise<FindDiagrams> {
     const tokens = md.parse(src, env);
     const first = firstLine(src, env.content);
     const toPage = pageLines(markdown, src);
+    if (tokens.some(holdsMermaidTag)) {
+      throw new Error(
+        `mermaid: ${file} has a hand-written <Mermaid> tag, which neither the syntax check nor the render check reads; write the diagram as a mermaid fence`,
+      );
+    }
     return tokens.flatMap((token) => {
       if (token.type !== "fence" || token.info.trim() !== "mermaid") return [];
       const line = first + (token.map?.[0] ?? 0);
@@ -125,6 +143,121 @@ export async function diagramReader(): Promise<FindDiagrams> {
       ];
     });
   };
+}
+
+/**
+ * An HTML comment at the scan position, which renders nothing, whatever tags its text names. It
+ * ends at `<!-->` or `<!--->`, at the first `-->`, or at the end of the text when nothing closes
+ * it, as in Vue's template parser (matched in one pass, never rescanned). It also ends at `--!>`,
+ * where HTML ends it and Vue does not: the scan then reads more of the text as tags, so it can
+ * only reject more than Vue would.
+ */
+const COMMENT = /<!---?>|<!--[\s\S]*?(?:--!?>|$)/y;
+
+/**
+ * Elements whose content Vue's template parser reads as text up to their closing tag (raw text
+ * and RCDATA): a tag written inside one is not a component, and a quote inside one opens no
+ * attribute value. Vue does so only for these four names, only when the tag's name starts with a
+ * lower-case letter, and only outside `svg` and `math`; it parses `iframe`, `noscript` and `xmp`
+ * content, and `<Textarea>` or `<TITLE>` content, as elements.
+ */
+const RAW_TEXT = new Set(["textarea", "title", "script", "style"]);
+
+/** Each raw-text element's closing tag, in any case (a regex per name, moved with `lastIndex`). */
+const RAW_TEXT_CLOSE = new Map(
+  [...RAW_TEXT].map((name) => [name, new RegExp(`</${name}`, "gi")]),
+);
+
+/** Elements whose content Vue parses in a foreign (XML) namespace, where no element is raw text. */
+const FOREIGN = new Set(["svg", "math"]);
+
+/**
+ * A `component` tag's static `is` (or `:is` / `v-bind:is` with a string literal) naming Mermaid in
+ * any case: `<component is="Mermaid">`, which renders the same component as the tag.
+ */
+const IS_MERMAID = /\s(?:v-bind)?:?is\s*=\s*["']?["']?mermaid(?![\w$-])/i;
+
+/**
+ * CommonMark's open tag (a name, then attributes, each value unquoted or quoted and consumed
+ * whole, then an optional `/`) or closing tag, at the scan position: a tag named in a quoted
+ * value is part of the attribute, not a tag of its own. The name is group 1 or group 2.
+ */
+const TAG =
+  /<(?:([A-Za-z][A-Za-z0-9-]*)(?:\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|\/([A-Za-z][A-Za-z0-9-]*)\s*>)/y;
+
+/**
+ * Whether raw HTML holds a tag that opens or closes vitepress-plugin-mermaid's `<Mermaid>`
+ * component, in any case, or a `component` tag whose static `is` names it. The text is scanned
+ * left to right, a comment or a tag at a time, so text between tags (an apostrophe included) is
+ * read as text; the content of a raw-text element (`RAW_TEXT`) is skipped to its closing tag.
+ * Open `svg` and `math` tags are counted, and inside one no element is raw text. A
+ * `foreignObject` inside `svg`, which returns to HTML, is not modelled: a raw-text element
+ * inside one is read as elements, which can only reject more than Vue would.
+ */
+function hasMermaidTag(text: string): boolean {
+  let foreign = 0;
+  for (let at = text.indexOf("<"); at !== -1; at = text.indexOf("<", at)) {
+    COMMENT.lastIndex = at;
+    if (COMMENT.exec(text) !== null) {
+      at = COMMENT.lastIndex;
+      continue;
+    }
+    TAG.lastIndex = at;
+    const tag = TAG.exec(text);
+    if (tag === null) {
+      at++;
+      continue;
+    }
+    const name = (tag[1] ?? tag[2])?.toLowerCase();
+    if (name === "mermaid") return true;
+    if (tag[1] !== undefined && name === "component" && IS_MERMAID.test(tag[0]))
+      return true;
+    at = TAG.lastIndex;
+    if (name === undefined || tag[0].endsWith("/>")) continue;
+    if (FOREIGN.has(name)) {
+      if (tag[1] !== undefined) foreign++;
+      else if (foreign > 0) foreign--;
+      continue;
+    }
+    const close = RAW_TEXT_CLOSE.get(name);
+    if (
+      tag[1] !== undefined &&
+      close !== undefined &&
+      foreign === 0 &&
+      /^[a-z]/.test(tag[1])
+    ) {
+      close.lastIndex = at;
+      at = close.exec(text)?.index ?? text.length;
+    }
+  }
+  return false;
+}
+
+/** The parts of a markdown-it token the tag search reads. */
+interface HtmlToken {
+  type: string;
+  content: string;
+  children: HtmlToken[] | null;
+}
+
+/**
+ * Whether an HTML block, or an inline token's raw HTML, holds a `<Mermaid>` tag. markdown-it
+ * splits a paragraph's raw HTML into a token per tag, so an inline token's HTML children are
+ * scanned as one text, each other child read as a space: the page renders those as escaped text,
+ * which holds no tag. The tag in inline code or a fence is a code or fence token, so it is not
+ * matched. This is an early, friendlier message: the render check's reading of the built HTML
+ * (`e2e/docs/pages.ts`) is the authority on hand-written diagrams, and catches the forms this
+ * misses.
+ */
+function holdsMermaidTag(token: HtmlToken): boolean {
+  if (token.type === "html_block" || token.type === "html_inline")
+    return hasMermaidTag(token.content);
+  if (token.children === null) return false;
+  return hasMermaidTag(
+    token.children
+      .map((child) => (child.type === "html_inline" ? child.content : " "))
+      .join(""),
+  );
 }
 
 /**

@@ -76,11 +76,18 @@ catches syntax errors in the published Mermaid diagrams, outside a browser: it p
 fence on the tracked pages and the generated `site/api/` pages after their includes are expanded, and
 fails on a syntax error, which the browser would otherwise show only as an error box on the page. Today
 those pages are every page the site publishes. It is a syntax check, not a render, so a diagram
-that parses but draws wrongly passes. It does not load the site's config or run a dynamic route's
+that parses but draws wrongly passes; `bun run ci` also opens each built page with a diagram in
+Playwright (`e2e/docs/mermaid.spec.ts`) and fails when a diagram is not drawn or Mermaid draws its
+error box. It does not load the site's config or run a dynamic route's
 loader, and fails on any symbolic link under `site/` and on any Markdown file under `site/` with a
 bracket name (VitePress's dynamic-route form, such as `[param].md`), excluded files included: replace
-the link with the files or rename the file, or extend the check first. It does not read a
-hand-written `<Mermaid>` tag, and it parses a `mermaid` fence that a code group shows as code (use an
-`mmd` fence or a title for a deliberately broken example). It parses with Mermaid's default options,
-not the site's, without Mermaid's 50,000-character limit, and parses a `details` statement without
-the page's element.
+the link with the files or rename the file, or extend the check first. It fails on a page with a
+hand-written `<Mermaid>` tag or `<component is="Mermaid">`, inside `<ClientOnly>` too, rather than
+skip it (the render check also fails a built page with an element of the plugin's default `mermaid`
+class, as a raw `.mermaid` element renders); neither check sees a diagram rendered only in the
+browser, such as one inside `<ClientOnly>` that the Markdown check cannot name. The checks are for
+trusted authors (the maintainer and agents): they catch mistakes, not a diagram written to evade
+them. It parses a `mermaid` fence that a code group
+shows as code (use an `mmd` fence or a title for a deliberately broken example). It parses with
+Mermaid's default options, not the site's, without Mermaid's 50,000-character limit (the render check
+fails on its size-limit box), and parses a `details` statement without the page's element.

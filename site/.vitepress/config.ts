@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
 import { withMermaid } from "vitepress-plugin-mermaid";
 import apiSidebar from "../api/typedoc-sidebar.json" with { type: "json" };
+import { MERMAID_CLASS } from "./mermaid-class";
 
 /** Pages link to the repository's own files (the architecture document,
  *  the examples) on GitHub. */
@@ -168,8 +169,13 @@ const config = defineConfig({
 //   page, so a label's <p> grew past the box Mermaid measured at 1.5 lines
 //   and its last line was cut off (on 11.x too); the label keeps Mermaid's
 //   own line height instead.
+//
+// Each diagram's element has the class MERMAID_CLASS rather than the
+// plugin's default, `mermaid`, which Mermaid's own pass at page load would
+// render into while still empty (mermaid-class.ts).
 export default withMermaid({
   ...config,
+  mermaidPlugin: { class: MERMAID_CLASS },
   mermaid: {
     theme: "default",
     look: "classic",

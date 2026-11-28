@@ -123,6 +123,125 @@ describe("check-mermaid: pages", () => {
     }
   });
 
+  it("rejects a page with a hand-written Mermaid tag, naming the page", async () => {
+    const tag = '<Mermaid id="m1" graph="x" />';
+    for (const page of [
+      `# Page\n\n${tag}\n`,
+      `# Page\n\nA diagram: ${tag} here.\n`,
+      `::: details Diagram\n\n${tag}\n\n:::\n`,
+    ]) {
+      await expect(find("site/page.md", page)).rejects.toThrow(
+        /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+      );
+    }
+  });
+
+  it("rejects a Mermaid tag after quoted text in the same HTML block", async () => {
+    const page = "<p>don't</p> <Mermaid id='a' graph='x' />\n";
+    await expect(find("site/page.md", page)).rejects.toThrow(
+      /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+    );
+  });
+
+  it("accepts a Mermaid tag in a comment or in a quoted attribute value", async () => {
+    for (const page of [
+      "<!-- Example: <Mermaid /> -->\n",
+      "# Page\n\nText <!-- Example: <Mermaid /> --> here.\n",
+      '# Page\n\n<span aria-label="Example <Mermaid /> markup"></span>\n',
+      "# Page\n\nText <span title='<Mermaid id=\"a\" />'>x</span> here.\n",
+    ]) {
+      expect(await lines(page)).toEqual([]);
+    }
+  });
+
+  it("rejects a dynamic component whose static is names Mermaid, inside ClientOnly too", async () => {
+    for (const page of [
+      '<ClientOnly><component is="Mermaid" id="m1" graph="x" /></ClientOnly>\n',
+      "<component :is=\"'Mermaid'\" />\n",
+      "# Page\n\nText <component is='mermaid' graph=\"x\" /> here.\n",
+      "<div><component v-bind:is=\"'MERMAID'\" /></div>\n",
+    ]) {
+      await expect(find("site/page.md", page)).rejects.toThrow(
+        /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+      );
+    }
+    expect(await lines('<component is="Badge" />\n')).toEqual([]);
+  });
+
+  it("rejects an unquoted is=mermaid, and accepts an is that only starts with Mermaid", async () => {
+    await expect(
+      find("site/page.md", '<component is=mermaid graph="x" />\n'),
+    ).rejects.toThrow(
+      /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+    );
+    expect(await lines('<component is="MermaidLegend" />\n')).toEqual([]);
+    expect(await lines('<component :is="mermaidView" />\n')).toEqual([]);
+  });
+
+  it("rejects a Mermaid tag that a comment or a raw-text element only seems to hide", async () => {
+    for (const page of [
+      '<div title="<!--"></div><Mermaid id="a" class="x" graph="g"/><div title="-->"></div>\n',
+      '<!--> <Mermaid id="a" class="x" graph="graph TD;A-->B" />\n',
+      '<!---> <Mermaid id="a" class="x" graph="g" /> -->\n',
+      '<textarea><a x=\'</textarea><Mermaid id="a" class="x" graph="g"/><textarea>\'></textarea>\n',
+      '<div><title><a x=\'</title><Mermaid id="a" class="x" graph="g"/><title>\'></title></div>\n',
+    ]) {
+      await expect(find("site/page.md", page)).rejects.toThrow(
+        /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+      );
+    }
+  });
+
+  it("accepts a Mermaid tag inside a raw-text element, which renders it as text", async () => {
+    expect(await lines("<textarea><Mermaid/></textarea>\n")).toEqual([]);
+    expect(await lines("<textArea><Mermaid/></TEXTAREA>\n")).toEqual([]);
+    expect(await lines("<div><title><Mermaid/></title></div>\n")).toEqual([]);
+  });
+
+  it("rejects a Mermaid tag in an element Vue parses as elements: a capitalised raw-text name, xmp, or an svg title", async () => {
+    for (const page of [
+      "<TEXTAREA><Mermaid/></TextArea>\n",
+      "<Title><Mermaid/></Title>\n",
+      '<xmp><Mermaid class="x" graph="g"/></xmp>\n',
+      "<noscript><Mermaid/></noscript>\n",
+      "<svg><title><Mermaid/></title></svg>\n",
+      "<math><style><Mermaid/></style></math>\n",
+    ]) {
+      await expect(find("site/page.md", page)).rejects.toThrow(
+        /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+      );
+    }
+    expect(await lines("<svg></svg><textarea><Mermaid/></textarea>\n")).toEqual(
+      [],
+    );
+  });
+
+  it("finds a raw-text element's close in the page's own text when U+0130 lower-cases to two units", async () => {
+    await expect(
+      find(
+        "site/page.md",
+        `<div><textarea>${"\u0130".repeat(12)}</textarea><Mermaid id="a" class="x" graph="g"/></div>\n`,
+      ),
+    ).rejects.toThrow(
+      /^mermaid: site\/page\.md has a hand-written <Mermaid> tag/,
+    );
+    expect(
+      await lines(
+        `<div><textarea>${"\u0130".repeat(13)}</textarea><a title="<Mermaid>">x</a></div>\n`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("reads 160 kB of unterminated comment openers in one pass (a quadratic scan would stall here)", async () => {
+    expect(await lines("<!--".repeat(40000))).toEqual([]);
+  });
+
+  it("accepts a Mermaid tag shown as inline code or in a fence", async () => {
+    const tag = '<Mermaid id="m1" graph="x" />';
+    const page = `# Page\n\nWrite \`${tag}\` rarely.\n\n\`\`\`vue\n${tag}\n\`\`\`\n`;
+    expect(await lines(page)).toEqual([]);
+  });
+
   it("counts a fence that an include brings in on the expanded page", async () => {
     const dir = fixture({
       "part.txt": FLOWCHART,

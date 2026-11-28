@@ -33,6 +33,7 @@ export default defineConfig({
       "integrations/test/**/*.test.ts",
       "reference/*/test/**/*.test.ts",
       "e2e/examples/*.test.ts",
+      "e2e/docs/*.test.ts",
       "scripts/**/*.test.ts",
       "site/scripts/**/*.test.ts",
     ],

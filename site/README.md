@@ -25,28 +25,44 @@ bun run docs:run     # runs the snippets against the mock backend and checks the
   runs it with `--check` and fails when the page is out of date; regenerate with
   `bun site/scripts/module-graph.ts`.
 - `.vitepress/theme/` extends the default theme to load `diagrams.css`, the stylesheet of the How it works
-  SVGs, which draw with the theme's colour variables. `mermaid` code fences are rendered in the
-  browser by `vitepress-plugin-mermaid` (`withMermaid` in `.vitepress/config.ts`), with Mermaid's
+  SVGs, which draw with the theme's colour variables. `mermaid` code fences are rendered in the browser
+  by `vitepress-plugin-mermaid` (`withMermaid` in `.vitepress/config.ts`), with Mermaid's
   `securityLevel` set to `'strict'` and settings that keep Mermaid 11's diagram look under Mermaid 12
-  (explained in the comment there). A syntax error in a diagram still builds and shows only as an error
-  box on the page, so `docs:check` catches syntax errors in the published diagrams, outside a browser
-  (`scripts/check-mermaid.ts`): it parses the `mermaid` fences with the Mermaid this workspace pins,
+  (explained in the comment there). Each diagram's element has the class `mermaid-diagram`
+  (`.vitepress/mermaid-class.ts`) rather than the plugin's default, `mermaid`, which Mermaid's own pass
+  at page load would render into while still empty, drawing an error box until the plugin draws it.
+  A syntax error in a diagram still builds and shows only as an error box on the page, so `docs:check`
+  catches syntax errors in the published diagrams, outside a browser (`scripts/check-mermaid.ts`): it parses the `mermaid` fences with the Mermaid this workspace pins,
   through `mermaid.parse` and the parse step `mermaid.render` runs, and fails naming the page and the
   fence's line. It reads the regular Markdown files Git lists under `site/` and the generated `api/`
   pages, each after VitePress expands its `<!-- @include -->` directives; on this site today that is
   every published page. Its limits:
-  - It is a syntax check, not a render: a diagram that parses but draws wrongly passes.
+  - It is a syntax check, not a render: a diagram that parses but draws wrongly passes. A render check
+    in Playwright covers what parsing cannot (`e2e/docs/mermaid.spec.ts`, run by `bun run ci` after
+    `docs:build`): it opens each built page with a diagram, in the light and dark schemes, and fails
+    when a diagram is not drawn, when Mermaid draws its error box, even briefly, or when the page logs
+    an error. It serves the built site on 127.0.0.1 (`scripts/docs-server.ts`), so it needs
+    `bun run docs:build` first: a Playwright run includes it when `E2E_EXAMPLES` is unset and the site
+    is built, or when `E2E_EXAMPLES` names `docs` (`E2E_EXAMPLES=docs bunx playwright test --project
+    docs`), which fails at once without a build.
   - It does not load the site's config (`srcExclude`, rewrites, extra pages) or run a dynamic route's
     paths loader, so it also reads excluded files. Rather than follow a link or model a route, it
     fails `docs:check` on any symbolic link under `site/` and on any Markdown file under `site/` with
     a bracket name (VitePress's dynamic-route form, such as `[param].md`), whatever it holds and
     excluded files included; the site has neither. Replace a link with the files, rename a
     bracket-named file, or extend the check before adding either.
-  - It reads `mermaid` fences only, not a hand-written `<Mermaid>` tag or raw HTML. A `mermaid` fence
-    that a `::: code-group` shows as code is still parsed, so write a deliberately broken example as an
-    `mmd` fence or give it a title.
+  - It reads `mermaid` fences only; a page with a hand-written `<Mermaid>` tag or a `component` tag
+    whose static `is` names Mermaid in its raw HTML fails, naming the page, inside `<ClientOnly>`
+    too. That is an early message: the render check fails any built page with an element of the
+    plugin's default `mermaid` class, which also catches a raw `.mermaid` element. Neither check
+    sees a dynamic component given a class of its own, or a diagram rendered only in the browser
+    in a form the Markdown check cannot name (inside `<ClientOnly>`, or behind a `v-if` on state
+    set when the page mounts), which the built HTML does not hold. Both checks are for trusted authors (the maintainer and agents): they catch
+    mistakes, not a diagram written to evade them. A `mermaid` fence that a `::: code-group` shows as code is still parsed, so write a
+    deliberately broken example as an `mmd` fence or give it a title.
   - It parses with Mermaid's default options, not the site's, and does not apply the 50,000-character
-    limit above which Mermaid draws an error box instead of the diagram.
+    limit above which Mermaid draws its "Maximum text size in diagram exceeded" box instead of the
+    diagram; the render check fails on that box.
   - A `details` statement, whose parsing reads an element of the page, is parsed without it.
 - `api/` is generated by TypeDoc (`typedoc.json`) from the package's TSDoc and is not committed.
 - The build fails on a dead link between pages, a link to a repository file that does not exist
