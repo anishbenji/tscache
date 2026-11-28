@@ -63,11 +63,14 @@ the [roadmap](../roadmap.md).
 
 ## `clear` reaches every tab
 
-With a SharedWorker every same-origin tab reads the same caches. `cache.clear()` and `client.clearAll()`
-empty them for all tabs, and every tab hears `cacheCleared`. Use them for resets that should apply
-everywhere (a logout, a version change you detected yourself), not for one view's housekeeping; to
-refetch a range for one view, `invalidate` it. In a browser without SharedWorker (Samsung Internet, for
-example), each tab has its own dedicated worker and a clear stays in that tab.
+With a SharedWorker every tab of that worker reads the same caches. `cache.clear()` and
+`client.clearAll()` empty them for all its tabs, and every one of them hears `cacheCleared`. Use them
+for resets that should apply everywhere (a version change you detected yourself), not for one view's
+housekeeping; to refetch a range for one view, `invalidate` it. `cache.clear()` reaches its own worker
+only. For a logout, call `client.clearAll()`: it also reaches the other SharedWorkers of the origin of
+0.3.0 or later, with the limits in the persistence guide ("Sensitive data and logout",
+`site/guides/persistence.md`). In a browser without SharedWorker (Samsung Internet, for example), each
+tab has its own dedicated worker and a `cache.clear()` stays in that tab.
 
 ## Credentials
 
@@ -130,8 +133,9 @@ const candles = await client.cache({
 - **What is stored.** The covered ranges below the finalized watermark and the points inside them,
   written behind about a second after the last change (at most five seconds). The provisional tail is
   never stored, so a reload fetches it again. A removal (`invalidate`, `clear`, a watermark moved back, a
-  version change) is written at once, and its call resolves only once the removal is durable, or once
-  persistence of the cache has stopped and its records were deleted.
+  version change) is written at once, and its call waits for the disk as architecture §4.10.6
+  (Durability of removals) says; in a tab whose worker is superseded it answers at once, for now (below). `clearAll()` empties the
+  disk in every tab and resolves once that clear has settled: use it to remove data from the disk.
 - **Loading.** `cache()` of a persisted cache resolves once its records are loaded (at most five seconds),
   so the first `get` sees them. A range the records do not cover reads as uncached, never as a gap.
 - **Failures never reject.** When the disk refuses, persistence of that cache stops, its records are
@@ -140,25 +144,30 @@ const candles = await client.cache({
   during `cache()` comes before the handle exists, so listen with `client.on`.
 - **Restatements need a version, across sessions too.** A stored range is served in every later session
   without asking the backend. Set `version` when the dataset has one: records of another version are
-  never loaded. Without one, `invalidate` or `clear` on your own clock removes stored ranges as well.
+  never loaded. Without one, `invalidate` or `clear` on your own clock removes stored ranges as well,
+  except in a tab whose worker is superseded: there, until 0.3.0 is released (step 150), the records stay
+  and a later load can serve them as current, until a newer version, a watermark moved back, a rewrite
+  of that range or `clearAll()` removes them.
 - **Durable storage is your call.** Browsers evict best-effort storage under pressure, and a range whose
   record was evicted is simply fetched again. To keep the cache, call `navigator.storage.persist()` from
   the page; tscache never does, since some browsers prompt the user.
 - **Sensitive data.** The records are readable by every script of the origin and outlive the session.
   Keep per-user or sensitive caches in memory; that is why `persist` is per cache.
 - **Logout.** One `client.clearAll()` from a tab of the SharedWorker empties every cache and the database,
-  and resolves once the records are gone (or persistence has stopped). It does not reach the records of
-  another deploy's worker that is still running (the next clear or that worker's end removes them).
-  A client hosted in a dedicated worker or in-process persists nothing, but its `clearAll` empties the
-  database too, so a logout from any page removes what a SharedWorker session stored. It cannot reach
-  the memory of a SharedWorker other tabs still use, which writes back what it changes; to clear that
-  worker as well, call `clearAll` from one of its tabs. When the clear fails (IndexedDB unavailable or
-  refusing it for five seconds), the call still resolves, and the next `clearAll` tries again.
+  and resolves once the records are gone (or persistence has stopped). From 0.3.0 it also reaches every
+  other SharedWorker of the origin of 0.3.0 or later, another deploy's included: each clears its memory
+  and the disk, and the call does not wait for them (architecture §4.10.7, N135). A worker of 0.1.0 or
+  0.2.0 is not reached and writes back what it holds. A client hosted in a dedicated worker or
+  in-process persists nothing, but its `clearAll` empties the database too and reaches the SharedWorkers
+  of 0.3.0 or later in the same way, so a logout from any page removes what those workers stored,
+  within the limits in `site/guides/persistence.md` (Sensitive data and logout). When the clear fails
+  (IndexedDB unavailable or refusing it for five seconds), the call still resolves, and the next
+  `clearAll` tries again.
 
 ## Known limits of 0.2.0
 
-Change events shipped in 0.2.0. Memory bounds (finding M3) are built for 0.3.0 (in preparation); a
-deploy-skew recovery (finding M5) is proposed but not built. The documentation site states each limit
+Change events shipped in 0.2.0. Memory bounds (finding M3) and the handling of deploy skew (finding M5)
+are built for 0.3.0 (in preparation). The documentation site states each limit
 below where an application meets it.
 
 - **Memory is neither bounded nor reported.** In 0.2.0 no eviction, budget or size call exists; a
@@ -167,17 +176,18 @@ below where an application meets it.
   `clear()` frees a cache's points. From 0.3.0 (in preparation) an opt-in `memoryBudget` evicts the
   least recently used pages above it and `memoryStats()` reports what the caches hold; there is still
   no default budget (architecture §2.9; `site/guides/patterns.md`, Memory).
-- **Deploy skew has no recovery path.** A protocol mismatch rejects `createClient` with
-  `ProtocolMismatchError` and nothing more. With hashed worker URLs, two deploys that change the worker
-  run two SharedWorkers side by side, unreported, and both write the origin's IndexedDB database. A
-  deploy that changes only the fetcher keeps the worker URL, since the worker bundle names no fetcher
-  (`fetcherUrl()` emits it as a chunk of the page's build, `packages/tscache/src/vite/fetcher-url.ts`,
-  and the client sends its URL at `init`); new tabs then join the old worker, which refuses a second
-  fetcher module (`Orchestrator.load`, `packages/tscache/src/orchestrator/orchestrator.ts`), so
-  `createClient` rejects with `ConfigError` until the old tabs close. A fixed worker URL keeps one
-  worker but needs a fixed fetcher URL too, for the same reason (`site/guides/workers.md`, Stale
-  scripts after a deploy). The deploy-skew proposal (finding M5) designs the recovery; 0.2.0 does not
-  build it.
+- **Deploy skew has no recovery path.** In 0.2.0 a protocol mismatch rejects `createClient` with
+  `ProtocolMismatchError` and nothing more; two deploys that change a hashed worker URL run two
+  SharedWorkers side by side, unreported, both writing the origin's IndexedDB database; and a deploy
+  that changes only the fetcher keeps the worker URL, so new tabs join the old worker and are refused
+  with `ConfigError` until the old tabs close. From 0.3.0 (in preparation) the SharedWorker is named by
+  its generation (the tscache version and the fetcher module URL), so each such deploy has a worker of
+  its own; the workers find each other, the older one stops persisting and tells its tabs with a
+  `superseded` event, and `clearAll` reaches every worker of 0.3.0 or later (architecture §2.7, Deploy
+  skew; `site/guides/workers.md`, Stale scripts after a deploy). What remains: a worker of 0.1.0 or
+  0.2.0 takes no part, one chain of late workers is not covered by the `clearAll` relay until step 152,
+  a fetcher changed behind an unchanged URL is not seen, and a stale worker script still rejects with
+  `ProtocolMismatchError`.
 - **Change notifications reach one cache's readers only.** `cacheChanged` (architecture §2.7, N71–N84,
   step 114) tells every listening tab of a SharedWorker where the cache changed, and a view re-reads by
   the read rule (N84). With a dedicated worker or in-process, each tab has a cache of its own and hears

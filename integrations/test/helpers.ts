@@ -37,6 +37,9 @@ export async function lossy(options: ClientOptions = {}): Promise<Lossy> {
     get features() {
       return real.features;
     },
+    get superseded() {
+      return real.superseded;
+    },
     cache: (c) => live(() => real.cache(c)),
     clearAll: () => live(() => real.clearAll()),
     updateAuth: (context) => live(() => real.updateAuth(context)),

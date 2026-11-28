@@ -10,8 +10,10 @@ The engine runs in one of three hostings, tried in order from `mode` (default `'
    thread.
 3. **`'in-process'`**: an engine in the page itself, behind the same message protocol. No sharing.
 
-A `memoryBudget` ([Memory](/guides/patterns#memory)) bounds one engine: in a SharedWorker every tab's
-caches together, in a dedicated worker or in-process one tab's.
+A `memoryBudget` ([Memory](/guides/patterns#memory)) bounds one engine: in a SharedWorker the caches of
+every tab of that worker together, in a dedicated worker or in-process one tab's. While tabs of two
+deploys run two SharedWorkers ([Stale scripts after a deploy](#stale-scripts-after-a-deploy)), each
+worker has a budget of its own.
 
 A hosting **fails**, and the chain steps down with a `modeFallback` event, when its constructor throws
 (a browser without `SharedWorker`, see [Browser support](#browser-support)), when the worker fires `error` before the handshake (the script
@@ -139,76 +141,138 @@ see why.
 
 ## Stale scripts after a deploy
 
-The worker reports its protocol version on connect, and the client refuses a mismatch with
-`ProtocolMismatchError`, whose message names both versions (`worker speaks protocol 1, client speaks 2`,
-or the reverse when the worker refuses) and whose `clientProtocol` and `workerProtocol` fields hold them.
-This catches a stale worker script, cached or kept alive by a tab opened before an upgrade. Reloading the
-page fixes it once the old tabs are closed and the old worker has stopped: in Chromium a SharedWorker
-lingers about 30 seconds after its last tab, so a reload within that window can still reach it.
+A deploy reaches the tabs that are already open one at a time, so for a while tabs of two deploys run
+side by side. From 0.3.0, tscache gives every deploy that changes what the worker runs a worker of its
+own, tells the tabs of the older one, and leaves the origin's database with one writer.
 
-::: warning Known limit: deploy skew has no recovery path
-tscache 0.2.0 detects skew only when the worker refuses a connection, for a protocol mismatch or a
-second fetcher module, and offers nothing beyond the error: no retry, and no event that tells an old tab
-a newer worker exists. An application cannot close a user's other tabs. What happens depends on how the
-worker is served, and on what the deploy changed.
+### One SharedWorker per generation
 
-A hashed worker URL (the default with Vite and most bundlers) changes when the worker bundle changes: a
-new tscache version, another worker format, or different output from the build tool. It does not change
-when only the fetcher does. The worker bundle names no fetcher: Vite's `?fetcher` import emits the
-fetcher as a chunk of the page's build
-([`fetcher-url.ts`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/vite/fetcher-url.ts)),
-and the client sends its URL to the worker when it connects. Built twice with Vite 8.3.5, once with a
-changed fetcher, an example app got a new fetcher file name and a worker file identical byte for byte.
+A browser finds a SharedWorker by its URL and its name. tscache names its worker with the page's
+**generation key**: the tscache version and the fetcher module URL, exactly as you pass it in
+`fetcher.module`. The worker URL names the worker's build, so the URL and the key between them say what
+a worker runs:
 
-- **A hashed worker URL, and a deploy that changes the worker,** gives that deploy a SharedWorker of its
-  own. There is no protocol mismatch then, and nothing reports the skew. Tabs of the old deploy and
-  of the new one stop sharing the cache's memory, fetches in flight, `clear`, `clearAll` and
-  `authInvalid` until the old tabs close, which for a tab left open may be days. For persisted caches
-  both workers write the one IndexedDB database of the origin ([Persistence](/guides/persistence)).
-  Every record is checked on its own when it is loaded, but one worker can delete pages the other
-  stored, which then read as uncached and are fetched again, and it can write back a range the other
-  removed with `invalidate` or `clear` while it still holds that range. A dataset whose restatements
-  change its `version` is not exposed to that, since records of another version are never loaded. A
-  logout's `clearAll` in a new tab empties the disk and its own worker, but the old worker writes back
-  the pages it still holds ([Sensitive data and logout](/guides/persistence#sensitive-data-and-logout)).
-- **A hashed worker URL, and a deploy that changes only the fetcher,** keeps the worker URL, so a new
-  tab joins the old SharedWorker. That worker already runs the old fetcher module, and a worker runs
-  one: `createClient` in the new tab rejects with a `ConfigError`
-  (`this worker already runs fetcher <old URL>; cannot also load <new URL>`) and does not fall back.
-  Every new tab fails this way until the old tabs close and the old worker has stopped.
-- **A fixed worker URL** makes every tab of every deploy join one SharedWorker, so the origin keeps a
-  single writer. New tabs then run against the old worker's code until the old tabs close: the worker
-  reports its package version on connect, but the client does not check it, so a release that keeps the
-  protocol connects silently. A release that changes the protocol is refused with
-  `ProtocolMismatchError`. A new fetcher module URL is refused with the `ConfigError` above.
-  Vite's `?fetcher` import gives the module a hashed name, so a fixed worker URL needs a fetcher built
-  on its own at a fixed name too
-  ([A fetcher that needs `import()`](/guides/vite#a-fetcher-that-needs-import) shows the build). Serve
-  both files with revalidation.
+- Tabs that agree on the worker URL, the tscache version and the fetcher URL share one worker. A deploy
+  that changes only application code changes none of the three, and its tabs join the running worker,
+  as before.
+- A deploy that changes the fetcher's URL, the tscache version or the worker URL starts a worker of
+  its own. Its tabs are never refused by the old worker and never run the old worker's code. A worker
+  rebuilt behind a fixed URL, with the tscache version and the fetcher URL unchanged, is joined as it
+  runs: new tabs use the running worker's code until it ends. Until
+  0.2.0 a deploy that changed only the fetcher was refused with `ConfigError` in every new tab until
+  the old tabs had closed, and at a fixed worker URL new tabs ran against the old worker's code.
 
-What a page can do with a `ProtocolMismatchError` depends on which side is stale. A dedicated worker
-loads the script at the same URL, so `mode: 'dedicated'` helps only when the stale side is a running
-SharedWorker that old tabs keep alive: the page is then newer (the error's `clientProtocol` is larger
-than its `workerProtocol`), and creating the client again with `mode: 'dedicated'` gives that tab a
-cache of its own, shared with no other tab and persisting nothing, until it is reloaded after the old
-tabs have closed. When the page itself is stale (an old tab that creates its client again after
-`workerLost`, or HTML or script served from an old cache), or the worker script came from an old HTTP
-cache entry, the dedicated worker is refused the same way, and the chain does not step down on this
-error: the page has to reload.
+Three rules follow for your setup:
 
-The `ConfigError` for a second fetcher module allows the same step, again only when the page is the
-newer side. Recognise it by its message, which starts with `this worker already runs fetcher`, not by
-its class: the other `ConfigError`s of `createClient` report invalid options, and a retry on every
-`ConfigError` would hide an invalid `mode` behind `'dedicated'`. A dedicated worker is a new worker that
-loads the fetcher the page names, so for a page of the current deploy, creating the client again with
-`mode: 'dedicated'` works until the tab is reloaded after the old tabs have closed. A stale page (an old
-tab that creates its client again after `workerLost`, or HTML or script served from an old cache) meets
-a worker that already runs the newer fetcher, and its retry loads the old one: it fails with the
-fetcher-load `TscacheError` when the deploy removed that file, and otherwise runs the old fetcher without
-any error. A page that may itself be stale has to reload. Nothing else separates the deploys' workers
-today: tscache gives the SharedWorker no name a deploy id could go into, and a query added to a Vite
-worker URL loads the worker twice when its persistence chunk loads ([Vite](#vite)). A recovery path is planned.
-:::
+- **Give the fetcher a URL that changes with its contents.** Vite's `?fetcher` import does, with a
+  content hash; so does a versioned path, or a query such as `fetcher.js?v=3`. The key sees the URL, not
+  the file: a fetcher rebuilt behind an unchanged URL joins the running worker, which keeps the module
+  it loaded until it stops. Revalidation updates the file, not a module a worker has already imported.
+- **Pass the same `fetcher.module` string on every page.** Pages that name one module by two strings
+  (`./fetcher.js` and `/fetcher.js`), or a page without a fetcher beside pages with one, get a worker
+  each. Those workers share no cache and both persist, and no tab is told, since a reload would not
+  join them. A development build of the worker warns in the worker's console.
+- **Hashed or fixed, the worker URL works either way.** A hashed worker URL (the default with Vite and
+  most bundlers) changes only when the worker bundle does, not when the fetcher does: Vite's `?fetcher`
+  import emits the fetcher as a chunk of the page's build
+  ([`fetcher-url.ts`](https://github.com/anishbenji/tscache/blob/main/packages/tscache/src/vite/fetcher-url.ts)),
+  and the worker bundle names no fetcher. The key carries the fetcher for that reason, and the tscache
+  version for a worker served at a fixed URL.
+
+Until step 158, do not redirect versioned worker URLs to one changing URL (say `/worker-v1.js` and
+`/worker-v2.js`, both redirected to `/worker.js`; decision #172, 2026-11-27). The browser starts a
+worker for each URL a page passes, but both workers report the URL they were served from, so with
+the same tscache version and fetcher URL tscache takes them for one generation: neither is superseded and both persist until the older tabs close,
+though a logout's `clearAll` still reaches both. Serve each worker build at a URL of its own.
+
+Cache configs and `memoryBudget` are not in the key. A cache opened with another structure is still
+refused with `ConfigError`, and another budget is ignored until the worker restarts
+([Memory](/guides/patterns#memory)).
+
+### Older tabs are told: `superseded`
+
+The SharedWorkers of an origin find each other over a `BroadcastChannel`. Of two workers of different
+generations, the one with the higher tscache version is current; for one version, the one that started
+later. The other is **superseded**, for as long as it runs:
+
+- Its tabs hear the `superseded` event, with the newer worker's tscache version as `lib`, and
+  `client.superseded` holds that payload from then on, for code that runs later. When a tab connects
+  to a worker already superseded and the event reaches it during start-up, the property is set when
+  `createClient` resolves and the event follows on the next macrotask or with the worker's next
+  message, whichever comes first: attach the listener right after `await createClient()`, and it is
+  called. An event still on its way then (the worker was superseded, but its message had not reached
+  the tab) arrives live and sets the property when it does.
+- It stops persisting. Each persisted cache reports `persistStopped` with `reason: 'superseded'`, and
+  nothing is deleted: the records belong to the newer worker now. How its removals and `clearAll()`
+  answer then is under [Persistence](/guides/persistence#failures).
+- Everything else goes on. The tab reads and writes its worker's memory and fetches through its own
+  fetcher. A view there is no longer told of changes made through the newer deploy's tabs, which use
+  another worker. A reload joins the newer worker.
+
+Only the superseded worker's tabs are told; the current ones have nothing to do. Tell the user, and let
+them reload:
+
+<<< @/snippets/client.ts#superseded{ts}
+
+tscache never reloads a page: it may hold unsaved state. Be careful with an automatic reload of your
+own, for two reasons. A page served stale (an HTTP cache, a service worker's old shell) that starts
+later than the current one ranks newer within one tscache version, so the current tabs would be told
+to reload into the stale build. And after a rollback of tscache, the rolled-back worker ranks below the
+release it replaced, so its tabs are told to reload into the same build until the newer tabs have
+closed. A prompt shown once costs little in either case; a loop of reloads does not.
+
+A superseded worker stays superseded: when the newer tabs close first, an old tab left open persists
+nothing until it is reloaded.
+
+`client.features.has('superseded')` says whether a tab can be told at all. It is true behind a
+SharedWorker that has opened its `BroadcastChannel`, and false behind a dedicated worker, an in-process
+client, a worker script from before 0.3.0 and a SharedWorker that could not open the channel. Where it
+is false, `client.superseded` stays `undefined` for good, which means "not known", not "current"; a
+`superseded` listener there is simply never called, and no warning is printed for it.
+
+### One tscache application per origin
+
+The workers' channel belongs to the origin, as the `tscache` database does, and a worker on it cannot
+tell another application from another deploy of its own. Two applications under one origin (say
+`/charts/` and `/admin/`), each with its own worker script or fetcher, are two generations to tscache:
+the one that started earlier is superseded and stops persisting, its tabs are told to reload, and the
+reload starts a worker that supersedes the other application in turn. A `clearAll` in one clears the
+other, and both would write one database.
+
+Host one tscache application per origin. Serve a second application from an origin of its own (another
+subdomain), or build the two as one: the same tscache version, worker script URL and fetcher module on
+every page.
+
+### What takes no part
+
+- A worker of tscache 0.1.0 or 0.2.0 has no name and does not listen. Beside a worker of a later release
+  it keeps writing the database until its tabs have closed, a `clearAll` does not reach it, and its
+  tabs are told nothing: the first upgrade from those releases behaves as they did.
+- A dedicated worker and an in-process client serve one tab each. They are never superseded and never
+  told; their `clearAll` still reaches every SharedWorker of 0.3.0 or later, within the limits in
+  [Sensitive data and logout](/guides/persistence#sensitive-data-and-logout).
+- A browser without `BroadcastChannel` in workers detects nothing. Every browser with `SharedWorker` has
+  it.
+
+### A stale worker script
+
+With named workers, a running worker of an older deploy no longer makes `createClient` reject: the
+newer tab starts a worker of its own. What is left is a worker **script** that is not the page's build:
+one served from an old HTTP cache entry, or one replaced at a fixed URL under a page that is still open.
+
+- When its protocol version differs, `createClient` rejects with `ProtocolMismatchError`, whose message
+  names both versions (`worker speaks protocol 1, client speaks 2`, or the reverse when the worker
+  refuses) and whose `clientProtocol` and `workerProtocol` fields hold them. It never steps down: a
+  dedicated worker would load the same stale script. Reload the page with the HTTP cache revalidated,
+  and serve the worker script with revalidation (`Cache-Control: no-cache`) or under a hashed URL.
+- When only its tscache version differs, the client connects, and a development build warns once,
+  naming both versions.
+
+The refusal of a second fetcher module still exists, for a connection that arrives without the name:
+a page of 0.2.0 that loads a later release's worker script at a fixed URL. It is a `ConfigError`.
+Clients from 0.3.0 set its `code` to `'fetcher-conflict'`; recognise it by that code, not by its
+message, since every other `ConfigError` has no `code`. A 0.2.0 page, the one that meets it now, sees
+the same `ConfigError` with the message only.
 
 ## Losing the worker
 

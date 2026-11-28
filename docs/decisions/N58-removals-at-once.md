@@ -5,3 +5,15 @@ Row N58 of the decision table in `docs/architecture.md` §8, whose introduction 
 ## Resolution
 
 **Every removal (an `invalidate`, a `clear`, a `clearAll`, a watermark moved back or set first, a version-mismatch clear) is flushed at once with strict durability, and the call that made it answers only once it is durable, or once persistence of the cache stopped and the deletion of its records settled.** That includes a `put`, `hydrate` or orchestrated `get` whose data caused the removal. A debounced addition that is lost is harmless, but a lost removal is not: after a crash the next session would load what the app had withdrawn. Review round 1 (R1-3) made the call wait through retries rather than for the first attempt, and extended it to every call that causes a removal. Rejected: debouncing removals like puts (the sketch's "harmless" holds for additions only); answering after the first attempt (acknowledges a removal that may never land). Design, 2026-10-30; user-confirmed 2026-10-30. **Changed in substance after review round 2:** the wait is bounded by the writer's one deadline (N61) instead of a sum of per-call bounds: the removal's flush job is due at once, runs before jobs that carry no removal, and succeeds or stops the cache within `timeoutMs` of the removal, whatever it waited for; the cleanup after a stop has one more. About 10 s at most with the defaults, down from about 30 s, and no longer dependent on how many jobs or lock holders are ahead (round 2, R2-2). `durable(cacheId)` lost its `mark` parameter: it waits for every removal recorded so far. Redesign, 2026-10-30. **Changed 2026-10-31 (design round 6, R6-1):** a `clearAll` settles removals and keeps the bound of two deadlines. When it succeeds, every removal recorded until its job settled is durable, since the disk is then empty and the barrier lets nothing be written after the clear's transaction; when it fails, its stops release them. A removal recorded during the barrier is answered when the job settles, under one deadline after the removal; one whose flush job is queued or running at the `clearAll()` call is answered by that job's successful attempt or by the clear, within two deadlines of the removal. Rejected: answering a removal recorded during the barrier only after its own flush, which runs after the barrier (the bound would grow to the rest of the clear's deadline plus two deadlines, under 15 s, for a write that adds nothing to what the clear made durable).
+
+## Amendment, 2026-11-25
+
+As of 2026-11-25, N129 narrows N58 for superseded workers: per-cache removals are answered at once and records stay on disk. This is temporary: step 150 restores strict deletion for those removals (decision #146 B), and M5 is not released before it.
+
+- N129 is user decision 71, row F5 option (a), 2026-11-16.
+- The narrowing of N58 is user decision #143, 2026-11-25.
+- The fix is user decision #146 B, 2026-11-25.
+
+See [N129](N129-superseded-stops-persisting.md).
+
+`clearAll` is unaffected: on a superseded worker it still runs the job above and waits for its disk clear.

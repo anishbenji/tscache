@@ -399,7 +399,8 @@ export interface ClientOptions {
   /**
    * Upper bound, in bytes, on what the worker's caches hold (§2.9): a
    * positive safe integer, shared by every cache and, in a SharedWorker, by
-   * every tab. Above it the least recently used pages that nothing pins
+   * every tab of that worker (the tabs that pass the same worker URL,
+   * tscache version and fetcher module). Above it the least recently used pages that nothing pins
    * are evicted, with their coverage, so a later read fetches them again.
    * Default: none, and nothing is evicted. The first budget a worker
    * receives holds for its life, and a worker that already holds a cache
@@ -433,9 +434,17 @@ export type RequestId = string;
 
 /**
  * An optional feature a worker may offer, listed in its hello (N79) and
- * exposed as `TscacheClient.features`.
+ * exposed as `TscacheClient.features`. `'superseded'` (N132): the worker
+ * can report that a worker of a newer generation of the application runs.
+ * Only a SharedWorker that can find the other workers of its origin lists
+ * it: a dedicated worker and the in-process hosting never do, and neither
+ * does a worker script from before the feature.
  */
-export type WorkerFeature = "cacheChanged" | "memoryBudget" | "calendar-grid";
+export type WorkerFeature =
+  | "cacheChanged"
+  | "memoryBudget"
+  | "superseded"
+  | "calendar-grid";
 
 /** Three scopes, one channel (N5, §2.7). */
 export interface ClientEvents {
@@ -453,7 +462,31 @@ export interface ClientEvents {
    * a new worker). At most once per client; never after dispose().
    */
   workerLost: { reason: string };
-  /** A cache was cleared; in SharedWorker mode one tab's clear affects all. */
+  /**
+   * A worker of a newer generation of this application (another tscache
+   * version, fetcher module or worker build) is running in the origin
+   * (N132). This tab's worker no longer persists; the tab keeps working
+   * from memory and its fetcher. Reload the tab to join the newer worker:
+   * show the user a prompt, since the library never reloads a page. `lib`
+   * is the newer worker's tscache version. At most once per client;
+   * `client.superseded` holds the payload afterwards. When the event
+   * reached this tab before `createClient` resolved, `client.superseded` is
+   * set from the start and the event follows on the next macrotask or with
+   * the worker's next message, whichever comes first, so a listener
+   * attached in the same turn as `await createClient()` hears it. An event
+   * still on its way then (the worker was superseded, but its message had
+   * not reached this tab) arrives live and sets `client.superseded` when it
+   * does.
+   */
+  superseded: { lib: string };
+  /**
+   * A cache was cleared; in SharedWorker mode one tab's clear affects all,
+   * and a `clearAll` reaches the other SharedWorkers of the origin of 0.3.0
+   * or later too (N135), so one call can be heard more than once. A 0.1.0
+   * or 0.2.0 worker is not reached; the logout's limits are in the
+   * persistence guide, "Sensitive data and logout"
+   * (site/guides/persistence.md).
+   */
   cacheCleared: {
     cacheId: string;
     reason: "manual" | "clear-all" | "version-mismatch";
@@ -475,10 +508,14 @@ export interface ClientEvents {
    * never rejects a call; this event reports it. A stop while `cache()`
    * loads is emitted before the handle exists, so subscribe with
    * `client.on` to hear it.
+   *
+   * `'superseded'` (N131) is not a failure: a worker of a newer generation
+   * of the application runs in the origin and owns the stored records now.
+   * Nothing was deleted, and a reload joins that worker.
    */
   persistStopped: {
     cacheId: string;
-    reason: "quota-exceeded" | "unavailable" | "error";
+    reason: "quota-exceeded" | "unavailable" | "error" | "superseded";
     /** The underlying failure, when there is one. */
     error?: { name: string; message: string };
   };

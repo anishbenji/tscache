@@ -94,8 +94,10 @@ const client = await createClient({ workerUrl: "/vendor/tscache/worker.js" });
 
 `fetcher.module` is a URL too: the worker loads it with `import()` and uses
 its default export (`docs/architecture.md` §2.5). Serve it as an ES module
-from your origin, with that export intact. The worker resolves a relative
-URL against its own script, not the page, so pass an absolute URL or path.
+from your origin, with that export intact. A relative URL resolves against
+tscache's own file, not the page; that file sits beside the worker script
+unless you wrap the worker or re-chunk tscache's code. Pass an absolute URL
+or path.
 
 Bound how long each request may take, for example with
 `AbortSignal.timeout()` on the fetcher's `fetch`, and throw when the bound
@@ -208,8 +210,12 @@ The trade-offs:
   it in dev.
 - Your app's aliases, `define` values and plugins do not apply unless you
   repeat them in that build.
-- The file name carries no content hash, so serve it with revalidation
-  or put a version in its path.
+- The file name carries no content hash, so give its URL a version that
+  changes with its contents: a versioned path, or a query such as
+  `?v=3`. tscache starts a new SharedWorker for a new fetcher URL, while
+  a worker that is already running keeps the module it loaded from an
+  unchanged URL, whatever the file is replaced with
+  (`docs/architecture.md` §2.7, Deploy skew).
 - This path works with any bundler, or none, since the output is a plain
   ES module.
 

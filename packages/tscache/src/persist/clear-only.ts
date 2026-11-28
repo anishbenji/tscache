@@ -16,10 +16,14 @@
  * database in any case). A failed clear changes nothing else: this hosting
  * never reads or writes the disk, so there is nothing in it to turn off,
  * and the next `clearAll` tries again.
+ *
+ * Since step 135 the clear is posted to the SharedWorkers of the origin
+ * through the injected `post`, at its start and at its settling (N135).
  */
 
 import type { Engine } from "../engine/engine";
 import type { Persistence } from "../rpc/server";
+import { type ClearPostOptions, ClearPosts } from "./clear-posts";
 import type { OpenStore } from "./hosted";
 import type { clearDisk, openIdbStore } from "./lazy";
 
@@ -34,22 +38,33 @@ export class ClearOnlyPersistence implements Persistence {
   readonly #openStore: OpenStore;
   readonly #options: { debounceMs?: number; timeoutMs?: number };
   readonly #timeoutMs: number;
+  readonly #posts: ClearPosts;
 
   /**
    * `load` imports the chunk, at each `clearAll` (the module system keeps
-   * it once loaded). `timeoutMs` bounds the import and the clear together.
+   * it once loaded). `timeoutMs` bounds the import and the clear together;
+   * `post` and `nextClearId` carry the clear to the SharedWorkers of the
+   * origin (N135).
    */
   constructor(
     engine: Engine,
     load: () => Promise<ClearChunk>,
     openStore: OpenStore,
-    options: { debounceMs?: number; timeoutMs?: number } = {},
+    options: {
+      debounceMs?: number;
+      timeoutMs?: number;
+    } & ClearPostOptions = {},
   ) {
+    const { post, nextClearId, ...clear } = options;
     this.#engine = engine;
     this.#load = load;
     this.#openStore = openStore;
-    this.#options = options;
+    this.#options = clear;
     this.#timeoutMs = options.timeoutMs ?? 5000;
+    this.#posts = new ClearPosts({
+      ...(post === undefined ? {} : { post }),
+      ...(nextClearId === undefined ? {} : { nextClearId }),
+    });
   }
 
   /** Nothing loads: `persist: true` does nothing in this hosting (N45). */
@@ -66,10 +81,14 @@ export class ClearOnlyPersistence implements Persistence {
    * Empties every cache in this call (N22), then the disk; answers once the
    * clear settled, at most `timeoutMs` after the call. A listener error of
    * the engine's clear is rethrown then. `clearMemory` empties the caches
-   * (default `Engine.clearAll`).
+   * (default `Engine.clearAll`). The clear is posted right after the memory
+   * clear and again when the disk clear has settled (N135); with
+   * `fromClearId`, the clear id of a channel message it runs for, it is
+   * relayed once, at its settling.
    */
   clearAll(
     clearMemory: () => void = () => this.#engine.clearAll(),
+    fromClearId?: string,
   ): Promise<void> {
     let failure: { error: unknown } | undefined;
     try {
@@ -78,6 +97,7 @@ export class ClearOnlyPersistence implements Persistence {
       // Every cache was cleared anyway (N22); the disk must follow.
       failure = { error };
     }
+    const settled = this.#posts.begin(fromClearId);
     const startedAt = performance.now();
     // One owner of the deadline at a time. Until the chunk arrives, the
     // import timer owns it; no connection can exist yet, so answering at it
@@ -107,6 +127,7 @@ export class ClearOnlyPersistence implements Persistence {
         .then(resolve, resolve);
     });
     return cleared.then(() => {
+      settled();
       if (failure !== undefined) throw failure.error;
     });
   }

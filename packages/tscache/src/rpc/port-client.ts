@@ -113,6 +113,11 @@ export class PortClient {
   readonly lock: string | undefined;
   /** hello.features this client knows (N79); empty for an older worker. */
   readonly features: ReadonlySet<WorkerFeature>;
+  /**
+   * hello.lib, the worker script's library version, when it is a string
+   * (N136). The handshake never acts on it.
+   */
+  readonly lib: string | undefined;
   readonly #port: MessagePortLike;
   readonly #pending = new Map<number, Pending>();
   readonly #listeners = new Set<(evt: Evt) => void>();
@@ -121,17 +126,23 @@ export class PortClient {
   #seq = 0;
   /** Why requests reject from now on; set once by dispose or a loss. */
   #ended: string | undefined;
+  /** Events received before `takeKept`, in port order; undefined after it. */
+  #kept: Evt[] | undefined = [];
+  /** Runs once, before the next res or evt received (see `takeKept`). */
+  #beforeNext: (() => void) | undefined;
 
   private constructor(
     port: MessagePortLike,
     clientId: string,
     lock: string | undefined,
     features: ReadonlySet<WorkerFeature>,
+    lib: string | undefined,
   ) {
     this.#port = port;
     this.clientId = clientId;
     this.lock = lock;
     this.features = features;
+    this.lib = lib;
     this.#unlisten = listen(port, {
       onMessage: (data) => this.#receive(data),
       // The other side went away (worker died, server detached): nothing
@@ -160,6 +171,7 @@ export class PortClient {
       let clientId = "";
       let lock: string | undefined;
       let features: ReadonlySet<WorkerFeature> = new Set();
+      let lib: string | undefined;
       let unlisten = () => {};
       // Cancelled by the caller (handshake timeout, worker error): stop
       // listening and close this side's port, so a late hello completes
@@ -186,6 +198,8 @@ export class PortClient {
         // Only a name can be queued on; anything else watches nothing.
         lock = typeof message.lock === "string" ? message.lock : undefined;
         features = featuresOf(message.features);
+        // Kept for a development warning (N136); no value of it is refused.
+        lib = typeof message.lib === "string" ? message.lib : undefined;
         stage = "init";
         afterHello?.(lock);
         try {
@@ -200,7 +214,7 @@ export class PortClient {
         ok: () => {
           signal?.removeEventListener("abort", onAbort);
           unlisten();
-          resolve(new PortClient(port, clientId, lock, features));
+          resolve(new PortClient(port, clientId, lock, features, lib));
         },
         fail: finish,
       };
@@ -209,6 +223,26 @@ export class PortClient {
         onClose: () => finish(new TscacheError("port closed during handshake")),
       });
     });
+  }
+
+  /**
+   * Every event the worker sent on this port before this call, in port
+   * order, as `features` is kept from the hello; keeping ends here. Events
+   * arrive between `init-ok` and the client's construction (a `superseded`
+   * event right after `init-ok` (N132), an `authInvalid` or `cacheCleared`
+   * any tab caused), before anything listens: the client takes them when
+   * it is built and delivers them (step 135, gate rounds 6 and 7). Keeping
+   * also ends at the first `on` listener, so a port that is never taken
+   * over holds nothing for long; later events reach only the listeners.
+   * `beforeNext` runs once, when the next response or event arrives and
+   * before it is handled (never for a bye), so the caller can deliver what
+   * it took first and the port's order holds.
+   */
+  takeKept(beforeNext: () => void): Evt[] {
+    const kept = this.#kept ?? [];
+    this.#kept = undefined;
+    this.#beforeNext = beforeNext;
+    return kept;
   }
 
   /** Requests awaiting a response (for tests and diagnostics). */
@@ -249,6 +283,7 @@ export class PortClient {
 
   /** Receives every evt message as sent; returns the unsubscribe. */
   on(fn: (evt: Evt) => void): () => void {
+    this.#kept = undefined;
     this.#listeners.add(fn);
     return () => this.#listeners.delete(fn);
   }
@@ -301,9 +336,22 @@ export class PortClient {
     for (const fn of [...this.#lostListeners]) fn(error);
   }
 
+  /** Keeps the event until the client takes over, then tells the listeners. */
+  #event(evt: Evt): void {
+    this.#kept?.push(evt);
+    for (const fn of [...this.#listeners]) fn(evt);
+  }
+
   #receive(data: unknown): void {
     if (!isObject(data)) return;
     const message = data as ToClient;
+    if (message.t === "res" || message.t === "evt") {
+      const before = this.#beforeNext;
+      this.#beforeNext = undefined;
+      before?.();
+      // A listener there may have disposed the client: handle nothing more.
+      if (this.#ended !== undefined) return;
+    }
     if (message.t === "res") {
       const pending = this.#pending.get(message.id);
       if (pending === undefined) return;
@@ -311,7 +359,7 @@ export class PortClient {
       if (message.ok) pending.resolve(message.result);
       else pending.reject(rebuild(message.error));
     } else if (message.t === "evt") {
-      for (const fn of [...this.#listeners]) fn(message);
+      this.#event(message);
     } else if (message.t === "bye") {
       // Controlled detach on the other side (no close event in browsers).
       this.#shutDown(new TscacheError("port closed"), true);

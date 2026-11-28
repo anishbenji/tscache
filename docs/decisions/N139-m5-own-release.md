@@ -1,0 +1,11 @@
+# N139: Which release carries the deploy-skew design
+
+Row N139 of the decision table in `docs/architecture.md` §8, whose introduction says how its rows were taken. Recorded in step 135 from the M5 design proposal (`docs/design/m5-deploy-skew.md`), which keeps the alternatives in full. Decisions are locked (`AGENTS.md`); the architecture section lists every decision with a one-line summary.
+
+## Resolution
+
+**Its own minor release, once its contract tests pass.** It is independent of the change events and the memory budget. Which number that release takes is the user's call when it is cut. Rejected: one release together with M7 and M3 (waits for the largest of the three). User decision 71, row F15 option (a), 2026-11-16 (step 135)
+
+## Amendment, 2026-11-21
+
+User decision 2026-11-21 (#116 A): ships in 0.3.0. The deploy-skew design is released in 0.3.0 together with the memory budgets (M3) and the calendar grid (M4), not in a minor release of its own; `docs/releases/0.3.0.md` lists it. The rest of the resolution, its independence from the other designs, stands.

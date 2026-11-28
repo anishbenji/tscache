@@ -39,8 +39,13 @@ export default defineConfig({
     ],
     passWithNoTests: true,
     // CacheState.restore's implementation, which the persister installs in
-    // production (packages/tscache/test/setup-restore.ts).
-    setupFiles: ["packages/tscache/test/setup-restore.ts"],
+    // production (packages/tscache/test/setup-restore.ts); and no real
+    // BroadcastChannel, which in Node would join every test file of the
+    // process to one workers' channel (packages/tscache/test/setup-channel.ts).
+    setupFiles: [
+      "packages/tscache/test/setup-restore.ts",
+      "packages/tscache/test/setup-channel.ts",
+    ],
     // Vitest's default 5 s test timeout, which only catches a hang. Chore 19
     // raised it to 20 s after two runs at load 20-28 crossed 5 s; with
     // every core busy the slowest test now takes 1.6 s (chore 28), and

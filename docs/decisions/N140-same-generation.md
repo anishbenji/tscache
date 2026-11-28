@@ -1,0 +1,7 @@
+# N140: What happens when pages of one deploy pass different keys
+
+Row N140 of the decision table in `docs/architecture.md` §8, whose introduction says how its rows were taken. Recorded in step 135 from the M5 design proposal (`docs/design/m5-deploy-skew.md`), which keeps the alternatives in full. Decisions are locked (`AGENTS.md`); the architecture section lists every decision with a one-line summary.
+
+## Resolution
+
+**They are one generation: neither supersedes the other.** Two workers are of one generation when their `url` and `lib` are equal and their fetchers are equal or one of them is absent; fetcher strings are compared after resolving them against the worker's URL. That covers a closing worker and its successor, a page without a fetcher beside pages with one, and two strings for one module. No event is sent, since a reload cannot join them; each worker warns once in a development build when the other's key differs; the guide says to pass the same fetcher on every page. Cost accepted: two workers within one deploy share nothing and both write the database (N52's overlap, with one structure and version, so records interoperate), a regression for an application that mixes the two kinds of page. Rejected: ranking them like any skew (the prompt would recur after every reload); keeping the fetcher out of the key (keeps the fetcher-only `ConfigError`). User decision 71, row F16 option (a), 2026-11-16 (§4.7, step 135)

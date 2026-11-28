@@ -8,8 +8,9 @@ with `import()`, and calls its default export's `fetch` for every range a `get` 
 ## The module
 
 - **An ES module, served from your origin, with its default export intact.** With Vite, use
-  [`?fetcher`](/guides/vite); `?worker&url` drops the exports. The worker resolves a relative URL
-  against its own script, not the page, so pass an absolute URL or path.
+  [`?fetcher`](/guides/vite); `?worker&url` drops the exports. A relative URL resolves against
+  tscache's own file, not the page; that file sits beside the worker script unless you wrap the worker
+  or re-chunk tscache's code. Pass an absolute URL or path.
 - **Self-contained.** It closes over nothing on the page. What it needs (a token, an API origin) arrives
   as `context`, a structured-cloneable value from `createClient` or `updateAuth`; each fetch gets a copy
   of the latest.

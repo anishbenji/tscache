@@ -18,9 +18,15 @@ handshake passed. Create one per page, at startup, and keep it for the page's li
 
 Without `fetcher`, the cache holds only what you `put`.
 
-`createClient` rejects with `ProtocolMismatchError` when the worker speaks another protocol version (a
-stale cached script, or two package versions), which never falls back, and with `TscacheError` when the
-fetcher module fails to load or has no default export with a `fetch` function.
+`createClient` rejects with `ProtocolMismatchError` when the worker script speaks another protocol
+version (a stale cached script, [after a deploy](/guides/workers#a-stale-worker-script)), which never
+falls back, and with `TscacheError` when the fetcher module fails to load or has no default export with
+a `fetch` function.
+
+The fetcher module's URL and the tscache version name the SharedWorker: tabs that agree on both, and on
+the worker URL, share one worker, and a deploy that changes any of them starts a worker of its own
+([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)). Pass the same
+`fetcher.module` string on every page.
 
 ## client.mode
 
@@ -52,19 +58,44 @@ Empties every cache, keeping their configs ([Invalidation and clearing](/concept
 the browser has IndexedDB it also empties the [persisted](/guides/persistence) records, from a client of
 any hosting, and resolves once they are gone or the clear gave up; it never rejects for a disk failure.
 
+From 0.3.0 it also reaches every other SharedWorker of the origin of 0.3.0 or later, such as an older
+deploy's that tabs left open still use: each clears its caches and the disk too, so none of their tabs
+keeps the data. A 0.1.0 or 0.2.0 worker is not reached
+([Sensitive data and logout](/guides/persistence#sensitive-data-and-logout)). The promise does not wait
+for those workers, and their tabs can hear `cacheCleared` more than once for one call.
+
 <<< @/snippets/client.ts#clear-all{ts}
 
 ## client.memoryStats()
 
 Resolves with what the worker's caches hold now: the budget in force (absent without one), the bytes the
 cached points hold, the part pinned by pending reads and provisional bars, the pages evicted so far, and
-one row per cache, ascending by id. In a SharedWorker it covers every tab's caches. It rejects with
+one row per cache, ascending by id. In a SharedWorker it covers the caches of every tab of that worker, not those of another deploy's worker. It rejects with
 `TscacheError` against a worker script from before memory budgets
 (`client.features.has('memoryBudget')` is then false).
 
 ```ts
 const { budget, bytes, evictedPages } = await client.memoryStats();
 ```
+
+## client.superseded
+
+`undefined`, until a worker of a newer generation of the application (another tscache version, fetcher
+module or worker build) runs in the origin; then `{ lib }`, with that worker's tscache version. The
+`superseded` event fires when it is set. When the event reached the tab before `createClient`
+resolved, the property is set from the start and the event follows on the next macrotask or with the
+worker's next message, whichever comes first, so a listener attached right after
+`await createClient()` hears it. An event still on its way then (the worker was superseded, but its
+message had not reached the tab) arrives live and sets the property when it does. This tab's worker
+no longer persists, the tab keeps working from memory and its fetcher, and a reload joins the newer
+worker
+([Stale scripts after a deploy](/guides/workers#older-tabs-are-told-superseded)).
+
+Only a SharedWorker that has opened its `BroadcastChannel` to the other workers reports it. Where
+`client.features.has('superseded')` is false (a dedicated worker, in-process, an older worker script, a
+SharedWorker without that channel) the property stays `undefined`, which then means "not known".
+
+<<< @/snippets/client.ts#superseded{ts}
 
 ## client.on(event, fn) and client.off(event, fn)
 

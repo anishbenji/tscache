@@ -44,8 +44,11 @@ backend at its own interval. Put the interval in the id (`candles/ACME/1m`) so t
 
 ## A clear reaches every tab
 
-`clear()` and `clearAll()` empty the shared cache for every tab ([Invalidation and
-clearing](/concepts/invalidation)). For one view's housekeeping, `invalidate` instead.
+`clear()` and `clearAll()` empty the shared cache for every tab of the worker ([Invalidation and
+clearing](/concepts/invalidation)). For one view's housekeeping, `invalidate` instead. `clear()`
+reaches its own worker only; for a logout across workers, call `clearAll()`, which also reaches the
+other SharedWorkers of the origin of 0.3.0 or later, within its
+[documented limits](/guides/persistence#sensitive-data-and-logout).
 
 ## Memory
 
@@ -68,7 +71,7 @@ memory when it opens ([Persistence](/guides/persistence)), so persistence does n
 const client = await createClient({
   workerUrl,
   fetcher: { module: fetcherUrl },
-  // 200 MB for every cache of the worker; in a SharedWorker, for every tab.
+  // 200 MB for every cache of the worker; in a SharedWorker, for all its tabs.
   memoryBudget: 200_000_000,
 });
 ```
@@ -91,9 +94,14 @@ somewhat larger: object overhead, a read's result until it reaches the page, and
 they are applied are not counted. `client.memoryStats()` reports the budget in force, the bytes held, the
 part pinned now, the pages evicted so far and one row per cache; it is a call, so poll it on your own
 clock if you want to watch memory. In a SharedWorker the first budget the worker receives holds until
-it restarts: a tab with another value (an older or newer deploy) joins without error and is told, in a
-development build, which budget is in force. A budget set after a cache already exists in the worker is
-not applied. Each dedicated worker or in-process client has its own engine and its own budget.
+it restarts: a tab that joins it with another value joins without error and is told, in a development
+build, which budget is in force. A budget set after a cache already exists in the worker is not applied.
+A deploy that changes the fetcher's URL or the tscache version starts a worker of its own
+([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)), which takes the budget
+its own tabs pass; a deploy that changes only the budget joins the running worker, and its value waits
+for that worker to stop. Each worker has its own budget, so while tabs of two deploys are open the
+origin can hold the sum of the two. Each dedicated worker or in-process client has its own engine and
+its own budget.
 
 Without a budget, pick the smallest dtype that holds each field (`f32` halves a field), and call
 `clear()` on a cache the application no longer shows; it frees the cache's points for every tab

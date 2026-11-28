@@ -40,7 +40,16 @@ interface BackendState {
   hold: Record<Gate, number>;
   /** Resolvers of the requests currently held. */
   held: Record<Gate, Array<() => void>>;
+  /** Which contents /backend/<ns>/fetcher.js serves now. */
+  fetcher: FetcherVariant;
 }
+
+/**
+ * The contents of the namespace's swappable fetcher module: the fixture
+ * fetcher as it is, or one that marks every answer with volume -1, so a
+ * test can tell which contents a worker loaded.
+ */
+export type FetcherVariant = "plain" | "marked";
 
 /** GET /backend/<ns>/state. */
 export interface BackendSnapshot {
@@ -65,6 +74,8 @@ export interface BackendControl {
   hold?: Partial<Record<Gate, number>>;
   /** Answers every request held at that gate. */
   release?: Gate;
+  /** Swaps the contents served at /backend/<ns>/fetcher.js. */
+  fetcher?: FetcherVariant;
 }
 
 const states = new Map<string, BackendState>();
@@ -84,6 +95,7 @@ function stateOf(ns: string): BackendState {
       reused: 0,
       hold: { candles: 0, refresh: 0 },
       held: { candles: [], refresh: [] },
+      fetcher: "plain",
     };
     states.set(ns, state);
   }
@@ -186,7 +198,35 @@ async function control(
   if (body.release !== undefined) {
     for (const resolve of state.held[body.release].splice(0)) resolve();
   }
+  if (body.fetcher !== undefined) state.fetcher = body.fetcher;
   return new Response(null, { status: 204 });
+}
+
+const FETCHER_MODULES: Record<FetcherVariant, string> = {
+  plain: 'export { default } from "/fetcher.js";\n',
+  marked: `import base from "/fetcher.js";
+export default {
+  async fetch(request) {
+    const result = await base.fetch(request);
+    const volume = new Int16Array(result.timestamps.length).fill(-1);
+    return { ...result, fields: { ...result.fields, volume } };
+  },
+};
+`,
+};
+
+/**
+ * A fetcher module whose contents change behind one URL (the fixed-name
+ * fetcher of a deploy): never cached, so a worker that imports it gets the
+ * contents of that moment, and one that has imported it keeps them.
+ */
+async function fetcherModule(state: BackendState): Promise<Response> {
+  return new Response(FETCHER_MODULES[state.fetcher], {
+    headers: {
+      "content-type": "text/javascript; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
 }
 
 function snapshot(state: BackendState): BackendSnapshot {
@@ -212,6 +252,7 @@ const routes: Record<
   "POST refresh": refresh,
   "POST control": control,
   "GET state": async (state) => Response.json(snapshot(state)),
+  "GET fetcher.js": fetcherModule,
 };
 
 /**

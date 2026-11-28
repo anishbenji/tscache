@@ -30,16 +30,17 @@ resolves, to the listeners attached by then. Check `client.mode` if persistence 
   ([Versions and watermarks](/concepts/freshness)) is never stored, so a reload fetches it again.
 - Additions are written behind: about a second after the last change, and at most five seconds after the
   first. A live tail that only rewrites provisional points writes nothing.
-- A removal (`invalidate`, `clear`, a watermark moved back, a version change, `clearAll`) is written at
-  once, and the call that made it resolves only once it is durable, or once persistence of the cache has
-  stopped and any attempt to delete its records has settled. Such a call takes at most about ten
-  seconds on a failing disk.
+- A removal (`invalidate`, `clear`, a watermark moved back, a version change) is written at once, and the
+  call that made it resolves only once it is durable, or once persistence of the cache has stopped and
+  any attempt to delete its records has settled (what each stop does with the records, `'superseded'`
+  included, is under [Failures](#failures)). `clearAll()` empties the disk and resolves once that clear
+  has settled: use it to remove data from the disk. Either call takes at most about ten seconds on a
+  failing disk.
 - When the last tab closes, the worker writes what was still waiting. Where the browser supports it
   (Chromium), tscache creates the worker with `extendedLifetime`, which keeps it running about 30 seconds
   after its last tab so that write can land. Elsewhere the option is ignored, and a worker that ends
   first loses the additions still waiting, at most five seconds of them; the disk keeps the earlier state.
-  A removal is not exposed to this, since its call resolves only once it is durable or its cache's
-  persistence has stopped.
+  A removal is not exposed to this, since its call waits for the disk as above.
 
 ## Loading
 
@@ -85,12 +86,25 @@ exists, so listen on the client:
 
 <<< @/snippets/persistence.ts#stopped{ts}
 
+A fourth reason, `'superseded'`, is not a failure: a newer deploy's worker is running in the origin and
+owns the records now ([Stale scripts after a deploy](/guides/workers#older-tabs-are-told-superseded)).
+The older worker stops writing, for every persisted cache at once, and deletes nothing of its own
+accord; a cache it opens later loads nothing. Its `invalidate`, `clear` and other removals resolve at
+once and do not currently reach the disk; their deletion is restored before 0.3.0 is released. Until
+then a later load, the newer worker's or a later session's, can serve those records as current, until
+a newer dataset version, a watermark moved back, a rewrite of that range or `clearAll()` clears them.
+`clearAll()` still empties the disk and resolves once that clear has settled. A deletion still waiting when the worker is superseded, for a cache that stopped earlier for
+one of the reasons above, does not run, and those records stay too. The older worker's tabs keep
+working from memory until they are reloaded.
+
 ## Versions across sessions
 
 A stored range is served in every later session without asking the backend, so a restatement the backend
 does not announce lasts across reloads too. Set `version` when the dataset has one: records of another
 version are never loaded. Without one, `invalidate` or `clear` on your own clock removes stored ranges as
-well ([Expiry and other patterns](/guides/patterns)).
+well ([Expiry and other patterns](/guides/patterns)), except in a tab whose worker is superseded
+([Failures](#failures)): there, until 0.3.0 is released, the records stay and a later load can serve
+them, and `clearAll()` removes them.
 
 ## Keeping the storage
 
@@ -108,21 +122,31 @@ every cache and the database:
 
 <<< @/snippets/persistence.ts#logout{ts}
 
-It does not reach the records a still-running worker of another deploy writes back. If a `clearAll` cannot
-empty the disk within five seconds, every persisted cache stops, and that worker persists nothing more
-until it ends. When the logout comes while the worker's persistence module is still loading, as on the
-worker's first use of persistence or soon after a first `cache()`, the call waits for that loading
-first, so it can take up to ten seconds. When the module failed to load, `clearAll` still tries once to
-empty the database, within five seconds; when that fails as well, the records stay. In that case only, a
-database that opens after the call has answered is still emptied then; with the module loaded, a
-database that opens after the five seconds is not emptied.
+From 0.3.0 it reaches every SharedWorker of 0.3.0 or later in the origin, an older deploy's that other
+tabs still use included: each clears its memory and the disk too, so none of them writes the data back,
+apart from the chain of late workers below. The promise resolves when the calling worker's own clear
+is done and does not wait for the others. A worker of tscache 0.1.0 or 0.2.0 is not reached and writes
+back what it still holds. If a `clearAll` cannot empty the disk within five seconds, every persisted
+cache stops, and that worker persists nothing more until it ends. When the logout comes while the
+worker's persistence module is still loading, as on the worker's first use of persistence or soon after
+a first `cache()`, the call waits for that loading first, so it can take up to ten seconds. When the
+module failed to load, `clearAll` still tries once to empty the database, within five seconds; when that
+fails as well, the records stay. In that case only, a database that opens after the call has answered
+is still emptied then; with the module loaded, a database that opens after the five seconds is not
+emptied.
+
+One chain of late workers is not covered yet. With three or more workers of 0.3.0 or later, one of
+them writing late, a worker that has already cleared can open a persisted cache, load the late
+writer's records and write the page back after the late writer's own clear. That worker's next clear
+posts nothing more for the same logout, so a newer worker that loaded the written-back page never
+hears a clear and keeps serving the pre-logout data until the next `clearAll`. Step 152 closes this
+with a logout fence: 0.3.0 is not released before steps 150 and 152 merge.
 
 A client hosted in a dedicated worker or in-process persists nothing, but its `clearAll` empties the
-database too, so a logout from any page removes what a SharedWorker session stored. It loads the
-clearing code only then, and creates no database where there is none, except in a browser without
-`indexedDB.databases()` (Firefox before 126), where it cannot tell and leaves an empty database behind.
-It cannot reach the memory of
-a SharedWorker that other tabs still use: that worker writes back what it changes, so to clear it as
-well, call `clearAll` from one of its tabs. When the clear fails (IndexedDB unavailable, or refusing the
-clear for five seconds), the call still resolves, nothing else changes, and the next `clearAll` tries
-again.
+database too, so a logout from any page removes what a SharedWorker session stored, within the limits
+above. It loads the clearing code only then, and creates no database where there is none, except in a
+browser without `indexedDB.databases()` (Firefox before 126), where it cannot tell and leaves an empty
+database behind. From 0.3.0 its `clearAll` reaches the SharedWorkers of 0.3.0 or later that other tabs
+still use as well, which clear their memory and so write nothing back. When the clear fails (IndexedDB
+unavailable, or refusing the clear for five seconds), the call still resolves, nothing else changes,
+and the next `clearAll` tries again.

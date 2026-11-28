@@ -59,8 +59,8 @@ What to notice:
   emitted as `modeFallback` on the next macrotask, once the caller has had a chance to subscribe.
 - `handshake` arms its timer only until `hello` arrives; loading the fetcher module, which happens
   before `init-ok`, has no timeout. A worker `error` event before then aborts the handshake.
-- `openShared` creates the SharedWorker with `type: 'module'` and `extendedLifetime: true`, and on
-  `hello` queues on the worker's lifetime lock. A grant before `init-ok` fails the hosting; a grant
+- `openShared` creates the SharedWorker with `type: 'module'`, `extendedLifetime: true` and the
+  generation key as its `name`, and on `hello` queues on the worker's lifetime lock. A grant before `init-ok` fails the hosting; a grant
   afterwards aborts the connected port client, which `Client.#lose` turns into one `workerLost` event.
   `openDedicated` learns of its worker's failure from the worker's `error` event instead.
 - `openInProcess` loads `client/in-process.ts` with `import()`, so a page served by a worker never
@@ -319,7 +319,8 @@ What to notice:
   memory alone (`Persister.#plan`) without reading the disk.
 - `durably` holds an op's answer until a removal it, or another op meanwhile, recorded is on disk or
   the cache's persistence has stopped, so an `invalidate` or a `clear` is not answered while the disk
-  still holds what it removed.
+  still holds what it removed; a superseded worker is the exception
+  ([Failures](/guides/persistence#failures)).
 - A `QuotaExceededError` stops the cache's persistence at once rather than retrying
   (`Persister.#rejected`); the stop reaches every tab as `persistStopped`.
 - `openIdbStore` opens one database per origin, `tscache` at version 1, with a `caches` and a `pages`

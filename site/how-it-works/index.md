@@ -72,11 +72,11 @@ starting from `options.mode` (default `shared`). A hosting that cannot start thr
 the client steps down to the next one and reports the step as a `modeFallback` event. Any other error,
 such as a protocol mismatch, rejects `createClient`. `client.mode` tells which hosting won.
 
-| Hosting      | Where the engine runs                                                                                                       | Persistence                                                   |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `shared`     | a SharedWorker, created with `type: 'module'` and `extendedLifetime: true`; one engine serves every tab that connects       | caches with `persist: true` are kept in IndexedDB             |
-| `dedicated`  | a dedicated `Worker` per client; the worker's global scope is the port                                                      | none; where IndexedDB exists, `clearAll` empties the database |
-| `in-process` | the page itself, over a `MessageChannel`; its code is a chunk the page loads with `import()` only when the chain reaches it | none; where IndexedDB exists, `clearAll` empties the database |
+| Hosting      | Where the engine runs                                                                                                                               | Persistence                                                   |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `shared`     | a SharedWorker, created with `type: 'module'`, `extendedLifetime: true` and its generation key as `name`; one engine serves every tab that connects | caches with `persist: true` are kept in IndexedDB             |
+| `dedicated`  | a dedicated `Worker` per client; the worker's global scope is the port                                                                              | none; where IndexedDB exists, `clearAll` empties the database |
+| `in-process` | the page itself, over a `MessageChannel`; its code is a chunk the page loads with `import()` only when the chain reaches it                         | none; where IndexedDB exists, `clearAll` empties the database |
 
 All three run the same server: each builds an `RpcServer` around a new `Engine`, and the server builds
 its own `Orchestrator`. The fetcher module is therefore loaded wherever the engine runs, in the page

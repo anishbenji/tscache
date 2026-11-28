@@ -24,12 +24,17 @@
  * 113 A, N59). In the worker the opener imports the same chunk: when the
  * import fails again, the cleanup fails, its failure is ignored and the
  * records stay, as for any cleanup.
+ *
+ * Deploy skew (§4.10.7, step 135): `supersede()` stops the persister, or is
+ * remembered until the chunk has loaded (N129), and `clearAll` is posted to
+ * the other workers of the origin through the injected `post` (N135).
  */
 
 import type { CacheChange } from "../engine/cache";
 import { type Engine, observeCaches } from "../engine/engine";
 import type { Persistence } from "../rpc/server";
 import type { ClientEvents } from "../types";
+import { type ClearPostOptions, ClearPosts } from "./clear-posts";
 import { type Failure, failureOf } from "./failure";
 import type { durably, Persister, PersisterOptions } from "./persister";
 import type { PersistStore, WritePlan } from "./store";
@@ -64,6 +69,8 @@ interface Cleanup {
   removals: number;
   /** Until it settles: a later removal waits for nothing. */
   settled: Promise<void> | undefined;
+  /** Settles it now: supersede() stops waiting for its write (N129). */
+  release: () => void;
 }
 
 export class HostedPersistence implements Persistence {
@@ -79,12 +86,15 @@ export class HostedPersistence implements Persistence {
   #failure: Failure | undefined;
   /** Calls waiting for the chunk, in arrival order. */
   readonly #waiting: ((persister: Persister | undefined) => void)[] = [];
-  /** Caches whose open waits for the chunk. */
-  readonly #pending = new Set<string>();
+  /** The opens that wait for the chunk, by cache: a second open joins the first. */
+  readonly #pending = new Map<string, Promise<void>>();
   /** Ops and clears among the waiting calls. */
   #held = 0;
-  /** Caches stopped because the chunk did not load: each is reported once. */
+  /** Caches stopped without a persister: each is reported once (N59). */
   readonly #stopped = new Set<string>();
+  /** The worker was superseded (N129); kept for its life. */
+  #superseded = false;
+  readonly #posts: ClearPosts;
   /**
    * Their cleanups, from the first later removal on (user decision 113 A):
    * at most one per opened cache.
@@ -100,20 +110,26 @@ export class HostedPersistence implements Persistence {
 
   /**
    * `load` imports the chunk; it is called once, at the first open or
-   * clearAll. `options` are the persister's; `timeoutMs` also bounds the
-   * import.
+   * clearAll. `options` are the persister's, and `timeoutMs` also bounds
+   * the import; `post` and `nextClearId` carry `clearAll` to the other
+   * workers of the origin (N135).
    */
   constructor(
     engine: Engine,
     load: () => Promise<LazyPersist>,
     openStore: OpenStore,
-    options: PersisterOptions = {},
+    options: PersisterOptions & ClearPostOptions = {},
   ) {
+    const { post, nextClearId, ...persister } = options;
     this.#engine = engine;
     this.#load = load;
     this.#openStore = openStore;
-    this.#options = options;
+    this.#options = persister;
     this.#timeoutMs = options.timeoutMs ?? 5000;
+    this.#posts = new ClearPosts({
+      ...(post === undefined ? {} : { post }),
+      ...(nextClearId === undefined ? {} : { nextClearId }),
+    });
   }
 
   /** The persister once its chunk has loaded (for tests and diagnostics). */
@@ -122,19 +138,28 @@ export class HostedPersistence implements Persistence {
   }
 
   open(cacheId: string): Promise<void> {
+    // Stopped without a persister, for the worker's life: reported once.
+    if (this.#stopped.has(cacheId)) return Promise.resolve();
     const persister = this.#persister;
     if (persister !== undefined) return persister.open(cacheId);
-    if (this.#state === "failed") {
+    // Already waiting for the chunk: that open settles this one too, and
+    // reports the cache when it stops, once (N59), also when the worker was
+    // superseded meanwhile.
+    const waiting = this.#pending.get(cacheId);
+    if (waiting !== undefined) return waiting;
+    // Nothing would be read: no reason to import the chunk, or to wait for it.
+    if (this.#superseded || this.#state === "failed") {
       this.#stopUnloaded(cacheId);
       return Promise.resolve();
     }
     const startedAt = performance.now();
-    this.#pending.add(cacheId);
-    return this.#later((loaded) => {
+    const opened = this.#later((loaded) => {
       if (loaded !== undefined) return loaded.open(cacheId, startedAt);
       this.#stopUnloaded(cacheId);
       return undefined;
     });
+    this.#pending.set(cacheId, opened);
+    return opened;
   }
 
   durably(cacheId: string, op: () => unknown): unknown {
@@ -149,10 +174,19 @@ export class HostedPersistence implements Persistence {
     return this.#later(() => this.durably(cacheId, op));
   }
 
-  clearAll(clearMemory: () => void = () => this.#engine.clearAll()): unknown {
+  /**
+   * `fromClearId`: the clear id of the channel message this clear runs for
+   * (N135); without it the clear is this worker's own. An own clear is
+   * posted when it runs, right after its memory clear, and again when its
+   * disk clear has settled; a clear for a message is relayed once, then.
+   */
+  clearAll(
+    clearMemory: () => void = () => this.#engine.clearAll(),
+    fromClearId?: string,
+  ): unknown {
     if (this.#state === "loading" && this.#held > 0) {
       this.#held++;
-      return this.#later(() => this.clearAll(clearMemory));
+      return this.#later(() => this.clearAll(clearMemory, fromClearId));
     }
     // After a chunk failure the whole store is emptied once, through the
     // store opener (user decision 123 A); the cleanups the engine's clear
@@ -168,6 +202,7 @@ export class HostedPersistence implements Persistence {
     } finally {
       this.#clearing = undefined;
     }
+    const settled = this.#posts.begin(fromClearId);
     const persister = this.#persister;
     let cleared: Promise<unknown>;
     if (persister !== undefined) cleared = persister.clearAll();
@@ -177,7 +212,7 @@ export class HostedPersistence implements Persistence {
     else {
       // Should the chunk fail, that clear is also the cleanup of the caches
       // whose open waits, which the engine's clear just removed from (R3-1).
-      const pending = [...this.#pending];
+      const pending = [...this.#pending.keys()];
       cleared = this.#later((loaded) => {
         if (loaded !== undefined) return loaded.clearAll();
         const store = this.#clearStore();
@@ -188,8 +223,22 @@ export class HostedPersistence implements Persistence {
       });
     }
     return cleared.then(() => {
+      settled();
       if (failure !== undefined) throw failure.error;
     });
+  }
+
+  /**
+   * The worker is superseded (N129): the persister stops for its life, now
+   * or as soon as its chunk has loaded. Before that, a persisted cache
+   * opened later stops at once without the import, and one whose open waits
+   * for the chunk stops when it arrives. Idempotent.
+   */
+  supersede(): void {
+    if (this.#superseded) return;
+    this.#superseded = true;
+    this.#persister?.supersede();
+    for (const cleanup of this.#cleanups.values()) cleanup.release();
   }
 
   flush(): void {
@@ -247,6 +296,8 @@ export class HostedPersistence implements Persistence {
           this.#options,
         );
         this.#durably = chunk.durably;
+        // Before any waiting open reaches it: that open reads nothing.
+        if (this.#superseded) this.#persister.supersede();
       } catch (thrown) {
         failure = failureOf(thrown);
       }
@@ -266,15 +317,19 @@ export class HostedPersistence implements Persistence {
     for (const run of this.#waiting.splice(0)) run(this.#persister);
   }
 
-  /** A persisted cache opened without the chunk: its persistence stops. */
+  /**
+   * A persisted cache opened without a persister: its persistence stops,
+   * with 'superseded' once the worker is (N131), else because the chunk did
+   * not load.
+   */
   #stopUnloaded(cacheId: string): void {
     if (this.#stopped.has(cacheId)) return;
     this.#stopped.add(cacheId);
     const error = this.#failure;
-    const event: StopEvent =
-      error === undefined
-        ? { cacheId, reason: "unavailable" }
-        : { cacheId, reason: "unavailable", error };
+    let event: StopEvent;
+    if (this.#superseded) event = { cacheId, reason: "superseded" };
+    else if (error === undefined) event = { cacheId, reason: "unavailable" };
+    else event = { cacheId, reason: "unavailable", error };
     this.#options.onStopped?.(event);
   }
 
@@ -310,6 +365,8 @@ export class HostedPersistence implements Persistence {
 
   /** A change after the chunk failed: a removal starts a deferred cleanup. */
   #changed(cacheId: string, change: CacheChange): void {
+    // Superseded: a removal answers at once and starts no write (N129).
+    if (this.#superseded) return;
     if (change.kind !== "remove" && change.kind !== "clear") return;
     const started = this.#cleanups.get(cacheId);
     if (started !== undefined) {
@@ -320,7 +377,11 @@ export class HostedPersistence implements Persistence {
     this.#cleanup(
       cacheId,
       1,
-      this.#clearing ?? this.#bounded((store) => store.write(cacheId, CLEANUP)),
+      this.#clearing ??
+        this.#bounded((store) =>
+          // Superseded while the store opened: no write starts now (N129).
+          this.#superseded ? Promise.resolve() : store.write(cacheId, CLEANUP),
+        ),
     );
   }
 
@@ -338,11 +399,18 @@ export class HostedPersistence implements Persistence {
 
   /** Records a cache's one cleanup, `run`, with the removals counted so far. */
   #cleanup(cacheId: string, removals: number, run: Promise<void>): void {
+    let release = (): void => undefined;
     const cleanup: Cleanup = {
       removals,
-      settled: run.then(() => {
-        cleanup.settled = undefined;
+      // Settles in the same step as `run`, as before the release (§4.10.8).
+      settled: new Promise<void>((resolve) => {
+        release = resolve;
+        void run.then(() => {
+          cleanup.settled = undefined;
+          resolve();
+        });
       }),
+      release: () => release(),
     };
     this.#cleanups.set(cacheId, cleanup);
   }

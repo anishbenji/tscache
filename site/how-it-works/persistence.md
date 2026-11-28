@@ -56,6 +56,8 @@ sequenceDiagram
 
 ## Write-back
 
+The diagram shows a cache whose persistence is active. A superseded worker is the exception (step 3).
+
 ```mermaid
 sequenceDiagram
   participant S as RpcServer
@@ -67,7 +69,7 @@ sequenceDiagram
   Note over R,D: pages marked dirty, the flush waits for a quiet spell
   S->>E: invalidate, clear, or a watermark moved back
   E->>R: onChange (remove or clear): the flush is due now
-  Note over S,R: the call that made the removal answers only once it is durable
+  Note over S,R: while persisting, the call that made the removal answers once it is durable
   R->>D: write(cacheId, plan): one transaction, strict when it carries a removal
   D-->>R: done
   R-->>S: the removal is durable, the call answers
@@ -85,7 +87,8 @@ sequenceDiagram
 3. **Removals are due at once.** A `remove` or `clear` change makes the flush due immediately. The
    server runs every op that names a cache through the persistence: when the op recorded a removal, its
    answer, success or failure, waits until that removal is durable or the cache's persistence has
-   stopped.
+   stopped. A superseded worker has stopped every cache already: what that means for its removals and
+   its `clearAll` is under [Failures](/guides/persistence#failures).
 4. **One writer.** The persister runs one job at a time, removal-carrying jobs first. A flush builds its
    plan from memory alone, without reading the disk: the dirty pages' records (or every record after a
    clear or a version change) and the cache record. The store writes the plan in one transaction, with

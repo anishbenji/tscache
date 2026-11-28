@@ -16,29 +16,36 @@ stopped running during the handshake"); `modeFallback` says which.
 
 ## `createClient` rejects with `ProtocolMismatchError`
 
-The worker script is from another version of tscache: a cached script after a deploy, or a SharedWorker
-kept alive by a tab opened before the upgrade. Close the old tabs and reload. A page cannot close the
-user's other tabs. When the stale side is an old SharedWorker those tabs keep alive (the
-page is newer: `error.clientProtocol` is larger than `error.workerProtocol`), the page can create its
-client again with `mode: 'dedicated'` until they close, a cache of its own that persists nothing. When
-the page or the worker script came from an old cache, a dedicated worker fails the same way: reload
-([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
+The worker script at your worker URL is from another version of tscache than the page: one served from
+an old HTTP cache entry, or one replaced at a fixed URL under a page that is still open. Reload the
+page with the HTTP cache revalidated, and serve the worker script with revalidation or under a hashed
+URL. Retrying with `mode: 'dedicated'` does not help: a dedicated worker loads the same script. A
+running worker of an older deploy no longer causes this, since from 0.3.0 a newer tab starts a worker
+of its own ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
 
 ## `createClient` rejects with `this worker already runs fetcher`
 
-The running SharedWorker loaded another fetcher module URL, usually for a tab of an earlier deploy. A
-worker runs one fetcher module. With Vite's hashed names, any deploy that changes the fetcher but not
-the worker does this: the worker file keeps its name, so new tabs join the old worker until the old tabs
-close. A fixed worker URL with a hashed fetcher does it on every fetcher change. Until the old tabs
-close, a page of the current deploy can create its client again with `mode: 'dedicated'`, a cache of its
-own that persists nothing; a page that may itself be stale, served from an old cache, has to reload
-([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)).
+A `ConfigError`: the worker already runs another fetcher module, and a worker runs one. From 0.3.0 a
+deploy that changes the fetcher's URL no longer does this, because the fetcher URL is part of the SharedWorker's name and the newer tab gets a worker of its own. It
+remains for a page of 0.2.0 that reaches a later release's worker script at a fixed URL: reload that
+page ([A stale worker script](/guides/workers#a-stale-worker-script)). Clients from 0.3.0 set the
+error's `code` to `'fetcher-conflict'`; recognise it by that code, not by its message. A 0.2.0 page,
+the one that meets it now, sees the same `ConfigError` with the message only.
+
+## A tab hears `superseded`, or `persistStopped` with `'superseded'`
+
+A newer deploy's tab is open in the same browser, and its worker has taken over the database. The tab
+that heard the event keeps working from memory and its own fetcher, and persists nothing more. Prompt
+the user to reload ([Stale scripts after a deploy](/guides/workers#older-tabs-are-told-superseded)).
+If it recurs after every reload, pages of your deploy pass different fetcher URLs for different
+modules, or a stale page is being served: check that every page passes the same `fetcher.module`.
 
 ## `createClient` rejects naming the fetcher module
 
 The worker could not `import()` it, or its default export has no `fetch` function. With Vite, import it
-with `?fetcher`, not `?worker&url`, which drops the exports. A relative URL resolves against the worker
-script, not the page: pass an absolute path.
+with `?fetcher`, not `?worker&url`, which drops the exports. A relative URL resolves against tscache's own
+file, not the page; that file sits beside the worker script unless you wrap the worker or re-chunk tscache's
+code. Pass an absolute path.
 If the message says `Cannot find module` and your build is not Vite, a bundler rewrote the import:
 check that nothing strips the `/* webpackIgnore: true */` comment from tscache's code (see
 [webpack 5 and Rspack](/guides/workers#webpack-5-and-rspack)).

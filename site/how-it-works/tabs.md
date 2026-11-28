@@ -17,7 +17,7 @@ sequenceDiagram
   T1->>L: queue on the lock (shared)
   T1->>W: init (fetcher)
   W-->>T1: init-ok after the fetcher module loads
-  T2->>W: new SharedWorker(same url, same options): the browser connects to the running worker
+  T2->>W: new SharedWorker(same url, options and name): the browser connects to the running worker
   W->>T2: hello (clientId c2, the same lock)
   T2->>L: queue on the lock (shared)
   T2->>W: init (fetcher)
@@ -41,22 +41,29 @@ sequenceDiagram
 
 ## The first tab
 
-The first tab's `new SharedWorker(url, { type: 'module', extendedLifetime: true })` makes the browser
-start the worker. The worker takes an exclusive Web Lock under a fresh name, `tscache-worker:<uuid>`,
+The first tab's `new SharedWorker(url, { type: 'module', extendedLifetime: true, name })` makes the
+browser start the worker. `name` is the tab's generation key, `tscache:<version>:<fetcher module>`: a
+browser finds a SharedWorker by its URL and its name, so only tabs that would run the same worker code
+reach one worker ([Stale scripts after a deploy](/guides/workers#stale-scripts-after-a-deploy)). The worker takes an exclusive Web Lock under a fresh name, `tscache-worker:<uuid>`,
 and holds it until its global scope goes away. It then builds its server and greets the tab with a
 `hello` that names the lock. The handshake is described in [Startup and fallback](./startup#the-handshake).
 
 ## Later tabs
 
-A later tab constructs a SharedWorker with the same URL and the same options, and the browser connects
-it to the running worker. Its port is attached to the same `RpcServer`, which gives it the next client
+A later tab constructs a SharedWorker with the same URL, the same options and the same name, and the
+browser connects it to the running worker. A tab of a deploy that changed the fetcher's URL or the
+tscache version has another name, so the browser starts another worker for it; the two workers then
+find each other over a `BroadcastChannel`, and the older one stops persisting and tells its tabs with
+`superseded`. Its port is attached to the same `RpcServer`, which gives it the next client
 id. If its `init` names the module the worker already runs, it shares that load. If it carries a
 context that is not the identical value (`Object.is`) the worker holds, the context takes the
 `updateAuth` path, so the fetcher's hook hears it. A context that is the same
 material (`sameMaterial`: equal primitives, or plain arrays and objects equal member by member) as the
 one the last refusal named changes nothing, whatever the auth state: auth stays invalid until the next
 `updateAuth`, or a joining tab with other material, and a refresh that took effect first stays in place ([Auth refresh](./auth)). If it names another module, its `init` is refused
-with a `ConfigError` and its `createClient` rejects.
+with a `ConfigError` and its `createClient` rejects; with the fetcher in the worker's name, only a
+connection made without that name gets this far, which is a 0.2.0 page, and a 0.2.0 client sees the
+message only (clients from 0.3.0 set `code: 'fetcher-conflict'`).
 
 From then on the tabs share everything the engine holds: data, coverage, versions, watermarks, the
 fetches in flight (a read in one tab can join a fetch started for another,

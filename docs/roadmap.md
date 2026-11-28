@@ -150,17 +150,19 @@ evicted page stays on disk and is loaded again on demand, which needs the lazy l
 
 ## Design sketch: deploy skew
 
-**Proposed in detail in [`docs/design/m5-deploy-skew.md`](design/m5-deploy-skew.md) (step 100,
-finding M5), with its open choices as decision rows for the user.** It names each SharedWorker by its
+**Specified in `docs/architecture.md` §2.7, §4.7–§4.8 and §4.10.6–§4.10.8 (decisions N125–N141, user
+decision 71 of 2026-11-16) and built in step 135; where this sketch and the architecture differ, the
+architecture governs.** The proposal [`docs/design/m5-deploy-skew.md`](design/m5-deploy-skew.md) (step
+100, finding M5) records the alternatives. It names each SharedWorker by its
 generation (the tscache version and the fetcher module), so a deploy that changes what the worker
 runs starts a worker of its own instead of being refused by the running one; lets the workers of
 different generations find each other over a `BroadcastChannel`; has the older one stop writing the
 database and tell its tabs with a `superseded` event; and lets a `clearAll` reach every worker. It adds
 no message to the handshake and keeps the protocol at version 1.
 
-Today a protocol mismatch rejects `createClient`, a fetcher whose URL changed is refused by the running
-worker, and a worker whose URL changed runs beside the old one, unreported, both writing the origin's
-database (architecture §4.10.7, N52).
+Before step 135 a protocol mismatch rejected `createClient`, a fetcher whose URL changed was refused by
+the running worker, and a worker whose URL changed ran beside the old one, unreported, both writing the
+origin's database (architecture §4.10.7, N52).
 
 ## Design sketch: calendar grid
 

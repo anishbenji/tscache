@@ -1,0 +1,11 @@
+# N129: What a superseded worker does with the database
+
+Row N129 of the decision table in `docs/architecture.md` §8, whose introduction says how its rows were taken. Recorded in step 135 from the M5 design proposal (`docs/design/m5-deploy-skew.md`), which keeps the alternatives in full. Decisions are locked (`AGENTS.md`); the architecture section lists every decision with a one-line summary.
+
+## Resolution
+
+**It stops persisting for its life; `clearAll` still empties the disk.** Every tracked cache stops with `persistStopped { reason: 'superseded' }` and without the cleanup deletion, since the records belong to the current generation; dirty state and queued jobs are dropped, and an attempt already running is abandoned. A persisted cache opened later stops at once with the same reason and reads nothing. A removal waiting for durability is released. `clearAll` still empties the disk, so a logout from an old tab leaves no record behind. Nothing in the engine changes: no cache loses a point or coverage, no `cacheCleared` or `cacheChanged` is sent, and the memory budget, the use order and the pins stay; an eviction after the stop writes nothing. From that moment the database has one writer again. This narrows the overlap N52 accepts, without a lock or a disk read; the user approved the amendment of N52 and §4.10.7 explicitly. Rejected: read-only (loading without writing breaks N57 for what it loaded); nothing, as before (the two writers rewrite each other's records); a Web Lock handed over with `steal` (a successor of the same generation would steal it from a closing worker and drop its final flush); an owner record in the database (a layout change and a disk read). User decision 71, row F5 option (a), 2026-11-16 (§4.10.6, §4.10.7, step 135)
+
+## Amendment, 2026-11-25
+
+N129 narrows [N58](N58-removals-at-once.md) for superseded workers (user decision #143): a superseded worker's per-cache removals are answered at once and leave the records. Temporary: step 150 makes such a worker still delete what its per-cache removals withdraw, strictly, writing no data (user decision #146 B); M5 is not released before it.

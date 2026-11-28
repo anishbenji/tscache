@@ -7,7 +7,7 @@ import {
   ProtocolMismatchError,
   TscacheError,
 } from "../src/errors";
-import type { MessagePortLike } from "../src/rpc/protocol";
+import { LIB_VERSION, type MessagePortLike } from "../src/rpc/protocol";
 import { RpcServer } from "../src/rpc/server";
 import type { ClientEvents, GetResult, PutBatch, Range } from "../src/types";
 import { installFakeLocks } from "./lock-test-helpers";
@@ -226,7 +226,7 @@ describe("fallback chain", () => {
     });
   });
 
-  it("creates the SharedWorker as a module with extendedLifetime, with the same options in every tab (§4.10.8)", async () => {
+  it("creates the SharedWorker as a module with extendedLifetime and its generation name, with the same options in every tab (§4.10.8, N125)", async () => {
     const server = new RpcServer(new Engine(), "0.0.0");
     const created: { url: string; options: unknown }[] = [];
     vi.stubGlobal(
@@ -246,9 +246,14 @@ describe("fallback chain", () => {
     const a = await make({ workerUrl: url });
     const b = await make({ workerUrl: url });
     expect([a.mode, b.mode]).toEqual(["shared", "shared"]);
+    const options = {
+      type: "module",
+      extendedLifetime: true,
+      name: `tscache:${LIB_VERSION}:`,
+    };
     expect(created).toEqual([
-      { url, options: { type: "module", extendedLifetime: true } },
-      { url, options: { type: "module", extendedLifetime: true } },
+      { url, options },
+      { url, options },
     ]);
   });
 

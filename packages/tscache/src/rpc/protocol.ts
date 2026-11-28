@@ -8,6 +8,7 @@
 import {
   AuthInvalidError,
   ConfigError,
+  type ConfigErrorCode,
   InvalidRangeError,
   ProtocolMismatchError,
   PutError,
@@ -45,10 +46,14 @@ export type Op =
   | "memoryBudget"
   | "memoryStats";
 
-/** The optional features this package's worker offers, sent in hello (N79). */
+/**
+ * The optional worker features this package's client knows (N79): it keeps
+ * these names of a hello's `features` and ignores any other.
+ */
 export const WORKER_FEATURES: readonly WorkerFeature[] = [
   "cacheChanged",
   "memoryBudget",
+  "superseded",
   // Calendar intervals in a cache config (§2.2, N119).
   "calendar-grid",
 ];
@@ -251,11 +256,22 @@ function rebuildProtocolError(wire: WireError): ProtocolMismatchError {
   });
 }
 
+/** The ConfigError codes this client knows (N141); any other stays unset. */
+const CONFIG_CODES: ReadonlySet<string> = new Set<ConfigErrorCode>([
+  "fetcher-conflict",
+]);
+
+function rebuildConfigError(wire: WireError): ConfigError {
+  return wire.code !== undefined && CONFIG_CODES.has(wire.code)
+    ? new ConfigError(wire.message, wire.code as ConfigErrorCode)
+    : new ConfigError(wire.message);
+}
+
 /** Rebuilders by wire name; the message-only classes share one shape. */
 const REBUILDERS: Record<string, (wire: WireError) => TscacheError> = {
   PutError: rebuildPutError,
   ProtocolMismatchError: rebuildProtocolError,
-  ConfigError: (w) => new ConfigError(w.message),
+  ConfigError: rebuildConfigError,
   InvalidRangeError: (w) => new InvalidRangeError(w.message),
   UnknownCacheError: (w) => new UnknownCacheError(w.message),
   AuthInvalidError: (w) => new AuthInvalidError(w.message),

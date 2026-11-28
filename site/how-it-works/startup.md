@@ -35,7 +35,10 @@ each hosting in turn.
 
 The `modeFallback` events are emitted on the next macrotask after `createClient` resolves, so a listener
 added right after `await createClient(...)` still receives them. `client.mode` names the hosting that
-won.
+won. Any event the worker sends while `createClient` is still waiting for its last answer (a
+`superseded` event, an `authInvalid` that another tab's refused fetch caused, a `cacheCleared`) is
+kept and delivered on that same macrotask, once, after the `modeFallback` events and in the order the
+worker sent it.
 
 Drawn from:
 
@@ -62,7 +65,7 @@ sequenceDiagram
   participant L as Web Locks
   participant W as SharedWorker
   participant O as Orchestrator
-  P->>W: new SharedWorker(url, type module, extendedLifetime)
+  P->>W: new SharedWorker(url, type module, extendedLifetime, name)
   Note over P,L: handshake timer starts (handshakeTimeoutMs, default 5000 ms)
   W->>L: holdLifetimeLock: exclusive lock tscache-worker:uuid, held for the worker's life
   Note over W,O: ports that connect meanwhile wait for the lock
@@ -88,8 +91,9 @@ sequenceDiagram
   end
 ```
 
-1. **The worker starts.** The page creates the SharedWorker with `type: 'module'` and
-   `extendedLifetime: true`. The worker script (`./worker`) listens for `connect` at once, but attaches
+1. **The worker starts.** The page creates the SharedWorker with `type: 'module'`,
+   `extendedLifetime: true` and a `name`, its generation key (the tscache version and the fetcher
+   module URL), so a tab reaches a running worker only when both would run the same code. The worker script (`./worker`) listens for `connect` at once, but attaches
    each port only after it holds its lifetime lock, so every `hello` can name the lock. Without Web
    Locks the lock is `undefined` and `hello` names none.
 2. **`hello` and the timer.** The server greets each port with its protocol version, the package version

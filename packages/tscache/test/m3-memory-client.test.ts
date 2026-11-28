@@ -3,6 +3,7 @@ import { createClient, type TscacheClient } from "../src/client/client";
 import { Engine } from "../src/engine/engine";
 import { ConfigError, TscacheError } from "../src/errors";
 import {
+  LIB_VERSION,
   type MessagePortLike,
   PROTOCOL_VERSION,
   type Req,
@@ -143,7 +144,7 @@ function installWatchedDedicatedWorkers(hold?: Req["op"], fail?: Req["op"]) {
     const watch = watched(channel.port1, hold, fail);
     watches.push(watch);
     first.resolve(watch);
-    new RpcServer(engine, "0.0.0").attach(watch.wrapped);
+    new RpcServer(engine, LIB_VERSION).attach(watch.wrapped);
     const port = channel.port2;
     return {
       postMessage: (m: unknown, t?: Transferable[]) =>
@@ -228,7 +229,7 @@ describe("M3 client and ops (design §5 test 16)", () => {
   it("createClient resolves only after the worker answered the budget", async () => {
     const engine = new Engine();
     const { first } = installSharedWorker(
-      new RpcServer(engine, "0.0.0"),
+      new RpcServer(engine, LIB_VERSION),
       "memoryBudget",
     );
     const pending = tracked(
@@ -248,7 +249,7 @@ describe("M3 client and ops (design §5 test 16)", () => {
 
   it("the first budget holds; a second client is told the one in force, warns once, and both see every cache", async () => {
     const engine = new Engine();
-    installSharedWorker(new RpcServer(engine, "0.0.0"));
+    installSharedWorker(new RpcServer(engine, LIB_VERSION));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const a = await client({ workerUrl: url, memoryBudget: 4096 });
     expect(engine.memoryStats().budget).toBe(4096);
@@ -273,7 +274,7 @@ describe("M3 client and ops (design §5 test 16)", () => {
   it("a budget that reaches a worker already holding a cache is not applied and warns", async () => {
     const engine = new Engine();
     engine.cache(config("early"));
-    installSharedWorker(new RpcServer(engine, "0.0.0"));
+    installSharedWorker(new RpcServer(engine, LIB_VERSION));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const c = await client({ workerUrl: url, memoryBudget: 4096 });
     expect(warn).toHaveBeenCalledTimes(1);
@@ -296,7 +297,7 @@ describe("M3 client and ops (design §5 test 16)", () => {
 
   it("without the option nothing about memory is sent, and memoryStats still answers", async () => {
     const engine = new Engine();
-    const { watches } = installSharedWorker(new RpcServer(engine, "0.0.0"));
+    const { watches } = installSharedWorker(new RpcServer(engine, LIB_VERSION));
     const c = await client({ workerUrl: url });
     await c.cache(config("x"));
     expect(watches[0]?.received.map((r) => r.op)).toEqual(["cache"]);

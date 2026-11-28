@@ -52,6 +52,8 @@ Each app of the examples project has one mock backend and one server process for
 
 Playwright's web servers listen on fixed ports and, outside CI, reuse a server already running. Two checkouts must not run Playwright at the same time.
 
+Node has a real `BroadcastChannel`, and it spans every thread of the process. The worker entry and the hostings that post a `clearAll` open the workers' channel when the realm has one (architecture §4.7, §4.10.7), so with the real one a `clearAll` in one test file could clear the engine of another, and a worker under test could be superseded by another file's. `packages/tscache/test/setup-channel.ts` removes it before each test file of the package: a hosting under test behaves as in a realm without `BroadcastChannel`, and a test of the channel installs the fake of `packages/tscache/test/workers-channel.ts`, whose delivery is synchronous or held by the test.
+
 ## Retries
 
 Playwright retries stay at 0 and Vitest has none, so a flake fails the run it happens in. A retry turns a flake into a pass that hides it.

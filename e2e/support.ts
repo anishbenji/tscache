@@ -30,6 +30,21 @@ import type {
 
 export const workerUrl = "/dist/worker.js";
 
+/**
+ * The fixture fetcher under a second URL (scripts/e2e-server.ts): another
+ * generation key, so a SharedWorker of its own (architecture §2.7, N126).
+ */
+export const secondFetcher = "/fetcher-b.js";
+
+/**
+ * The built package as a later library version (scripts/e2e-server.ts): a
+ * page opened with `openNext` loads its client from there, and this is its
+ * worker.
+ */
+export const nextWorkerUrl = "/dist-next/worker.js";
+/** The `LIB_VERSION` the later library reports. */
+export const nextLibrary = "99.0.0";
+
 /** What the fixture fetcher (pages/fetcher.js) expects as its context. */
 interface FetcherContext {
   ns: string;
@@ -150,14 +165,33 @@ export async function open(
   return page;
 }
 
-/** Creates the page's client and starts logging its events. */
+/**
+ * A new page of the context whose client is the later library version's
+ * (`nextLibrary`); connect it with `nextWorkerUrl`.
+ */
+export async function openNext(context: BrowserContext): Promise<Page> {
+  const page = await context.newPage();
+  await page.goto("/next/");
+  await page.waitForFunction(() => (window as unknown as E2EWindow).ready);
+  return page;
+}
+
+/**
+ * Creates the page's client and starts logging its events. `superseded` is
+ * `client.superseded` as it was when `createClient` resolved.
+ */
 export async function connect(
   page: Page,
   options: ClientOptions,
-): Promise<{ mode: HostingMode; fallbacks: unknown[] }> {
+): Promise<{
+  mode: HostingMode;
+  fallbacks: unknown[];
+  superseded: ClientEvents["superseded"] | undefined;
+}> {
   return page.evaluate(async (opts) => {
     const w = window as unknown as E2EWindow;
     w.client = await w.tscache.createClient(opts);
+    const superseded = w.client.superseded;
     w.log = [];
     w.gets = new Map();
     const events = [
@@ -167,6 +201,7 @@ export async function connect(
       "mergeWarning",
       "workerLost",
       "persistStopped",
+      "superseded",
     ] as const;
     for (const event of events) {
       w.client.on(event, (payload) => w.log.push({ event, payload }));
@@ -176,8 +211,41 @@ export async function connect(
     // clock-ok: zero timers run in the order queued; this waits for no time.
     await new Promise((resolve) => setTimeout(resolve, 0));
     const fallbacks = w.log.filter((e) => e.event === "modeFallback");
-    return { mode: w.client.mode, fallbacks: fallbacks.map((e) => e.payload) };
+    return {
+      mode: w.client.mode,
+      fallbacks: fallbacks.map((e) => e.payload),
+      superseded,
+    };
   }, options);
+}
+
+/** `client.superseded` of the page's client, now. */
+export function supersededOf(
+  page: Page,
+): Promise<ClientEvents["superseded"] | undefined> {
+  return page.evaluate(
+    () => (window as unknown as E2EWindow).client.superseded,
+  );
+}
+
+/** The features the page's client reports of its worker, sorted. */
+export function featuresOf(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...(window as unknown as E2EWindow).client.features].sort(),
+  );
+}
+
+/**
+ * A round trip to the page's worker: port messages are ordered, so after
+ * it every event the worker sent before has been delivered.
+ */
+export async function roundTrip(
+  page: Page,
+  config: CacheConfig,
+): Promise<void> {
+  await page.evaluate(async (cfg) => {
+    await (window as unknown as E2EWindow).client.cache(cfg);
+  }, config);
 }
 
 /** Puts points with price = volume = t. */
@@ -472,6 +540,39 @@ export function stored(
 }
 
 /**
+ * The page numbers of the cache's page records in the origin's database,
+ * ascending; undefined when there is no database (as `stored`).
+ */
+export function storedPages(
+  page: Page,
+  cacheId: string,
+): Promise<number[] | undefined> {
+  return page.evaluate(async (id) => {
+    const listed = await indexedDB.databases();
+    if (!listed.some((info) => info.name === "tscache")) return undefined;
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("tscache");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const range = IDBKeyRange.bound([id, -Infinity], [id, Infinity]);
+      const request = db
+        .transaction("pages")
+        .objectStore("pages")
+        .getAllKeys(range);
+      const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      return keys.map((key) => (key as [string, number])[1]);
+    } finally {
+      db.close();
+    }
+  }, cacheId);
+}
+
+/**
  * Whether the browser reads the `extendedLifetime` member of SharedWorker
  * options: a getter on the options object is called only by a browser that
  * knows the member. The probe worker is a new one, under its own URL.
@@ -667,10 +768,24 @@ class Backend {
     this.#request = request;
   }
 
-  /** Client options whose fetcher asks this backend with `token`. */
-  clientOptions(token = initialTokens.access): ClientOptions {
+  /**
+   * Client options whose fetcher asks this backend with `token`. `module`
+   * is the fetcher's URL: another one is another generation key (N126).
+   */
+  clientOptions(
+    token = initialTokens.access,
+    module = "/fetcher.js",
+  ): ClientOptions {
     const context: FetcherContext = { ns: this.ns, token };
-    return { workerUrl, fetcher: { module: "/fetcher.js", context } };
+    return { workerUrl, fetcher: { module, context } };
+  }
+
+  /**
+   * The URL of this backend's swappable fetcher module, whose contents
+   * `control({ fetcher })` changes behind it (scripts/e2e-backend.ts).
+   */
+  get swappableFetcher(): string {
+    return `/backend/${this.ns}/fetcher.js`;
   }
 
   async control(body: BackendControl): Promise<void> {

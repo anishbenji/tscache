@@ -21,7 +21,7 @@ export function harness(
   persister: Persister;
   stopped: {
     cacheId: string;
-    reason: "quota-exceeded" | "unavailable" | "error";
+    reason: "quota-exceeded" | "unavailable" | "error" | "superseded";
     error?: { name: string; message: string };
   }[];
   openStore: ReturnType<typeof vi.fn>;
@@ -29,7 +29,7 @@ export function harness(
   const engine = new Engine();
   const stopped: {
     cacheId: string;
-    reason: "quota-exceeded" | "unavailable" | "error";
+    reason: "quota-exceeded" | "unavailable" | "error" | "superseded";
     error?: { name: string; message: string };
   }[] = [];
   const openStore = vi.fn(async () => store);

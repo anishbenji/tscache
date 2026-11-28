@@ -6,7 +6,7 @@
 
 import { ConfigError, TscacheError } from "../errors";
 import type { PortClient } from "../rpc/port-client";
-import type { Evt, FetcherConfig } from "../rpc/protocol";
+import { type Evt, type FetcherConfig, LIB_VERSION } from "../rpc/protocol";
 import type {
   CacheConfig,
   ClientEvents,
@@ -18,7 +18,7 @@ import type {
 } from "../types";
 import { CacheHandle } from "./cache";
 import { ChangeSubscriptions } from "./changes";
-import { warnBudget, warnMerges } from "./dev";
+import { noteSuperseded, warnBudget, warnMerges, warnWorkerLib } from "./dev";
 import { ClientEmitter } from "./events";
 import {
   type Hosting,
@@ -35,11 +35,23 @@ interface PageHide {
   persisted?: boolean;
 }
 
-/** Surfaces a listener error that no caller can catch. */
+/** A `superseded` event (N132). */
+function isSuperseded(evt: Evt): boolean {
+  return evt.scope === "client" && evt.event === "superseded";
+}
+
+/**
+ * Surfaces a listener error that no caller can catch. Without the page's
+ * reporter it is thrown from a microtask, never at the caller: the startup
+ * delivery runs inside the port's message handling, which must go on.
+ */
 function report(error: unknown): void {
   const page = globalThis as { reportError?: (e: unknown) => void };
   if (typeof page.reportError === "function") page.reportError(error);
-  else throw error;
+  else
+    queueMicrotask(() => {
+      throw error;
+    });
 }
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5000;
 
@@ -54,6 +66,24 @@ export interface TscacheClient {
    */
   readonly features: ReadonlySet<WorkerFeature>;
   /**
+   * Set once a worker of a newer generation of this application (another
+   * tscache version, fetcher module or worker build) is running in the
+   * origin (N132): `lib` is that worker's tscache version. This tab's worker
+   * no longer persists; the tab keeps working from memory and its fetcher,
+   * and a reload joins the newer worker. Undefined until then. When the
+   * `superseded` event reached this tab before `createClient` resolved, this
+   * is set from the start and the event follows on the next macrotask or
+   * with the worker's next message, whichever comes first, so a listener
+   * attached in the same turn as `await createClient()` hears it. An event still on its way then (the
+   * worker was superseded, but its message had not reached this tab)
+   * arrives live and sets this when it does. Read this in code that may run
+   * after the event. Only a worker that lists the feature can report
+   * it: where `client.features.has('superseded')` is false (a dedicated
+   * worker, the in-process hosting, an older worker script), this stays
+   * undefined for good and means "not known", not "current".
+   */
+  readonly superseded: ClientEvents["superseded"] | undefined;
+  /**
    * Get-or-create (N4). Rejects with `ConfigError`, before anything is
    * sent, for a calendar `interval` when the worker does not list
    * `'calendar-grid'` in `features` (N119).
@@ -64,6 +94,15 @@ export interface TscacheClient {
    * the browser has IndexedDB it also empties the persisted records, from
    * any hosting (N54, N66), and resolves once the disk is empty or the
    * clear gave up at its deadline; it never rejects for a disk failure.
+   * So it does in a tab whose worker is superseded, where, until step 150,
+   * a cache's own removals (`invalidate`, `clear`) answer at once and leave
+   * its records on disk, which a later load can serve. It also reaches the
+   * other SharedWorkers of the origin of 0.3.0 or later (N135), which clear
+   * their caches and the disk too; a 0.1.0 or 0.2.0 worker is not reached,
+   * and the promise does not wait for them. Their tabs hear `cacheCleared`,
+   * possibly more than once. The logout's limits, one chain of late workers
+   * until step 152 among them, are in the persistence guide, "Sensitive data
+   * and logout" (site/guides/persistence.md).
    */
   clearAll(): Promise<void>;
   /** Delivers new auth material to the fetcher (step ⑪). */
@@ -71,8 +110,8 @@ export interface TscacheClient {
   /**
    * What the worker's caches hold now (§2.9): the budget in force, the
    * bytes the cached points hold, the pinned part, the pages evicted so far
-   * and one entry per cache. In a SharedWorker it covers every tab's
-   * caches. Rejects with TscacheError against a worker that does not offer
+   * and one entry per cache. In a SharedWorker it covers the caches of
+   * every tab of that worker, never another deploy's worker. Rejects with TscacheError against a worker that does not offer
    * memory budgets (`client.features.has('memoryBudget')` is false).
    */
   memoryStats(): Promise<MemoryStats>;
@@ -200,6 +239,14 @@ class Client implements TscacheClient {
   >();
   /** Why calls reject from now on: disposed, or the worker was lost. */
   #ended: string | undefined;
+  #superseded: ClientEvents["superseded"] | undefined;
+  /** The superseded listeners have been called (at most once). */
+  #supersededHeard = false;
+  /**
+   * The startup delivery (see the constructor), until it has run once.
+   * Undefined when there was nothing to deliver.
+   */
+  #startup: (() => void) | undefined;
 
   constructor(hosting: Hosting, fallbacks: ClientEvents["modeFallback"][]) {
     this.#hosting = hosting;
@@ -207,29 +254,50 @@ class Client implements TscacheClient {
     this.mode = hosting.mode;
     this.features = this.#port.features;
     this.#changes = new ChangeSubscriptions(this.#port);
-    this.#port.on((evt) => {
-      this.#warnFetched(evt);
-      this.#events.receive(evt);
-    });
+    // A worker script of another library version (N136): development only.
+    warnWorkerLib(LIB_VERSION, this.#port.lib);
+    // Every event that reached the port before this client existed (step
+    // 135, gate rounds 6 and 7): a superseded one sets the property from
+    // the start (N132), and all of them are delivered by the startup
+    // delivery below. Events after this point are dispatched as they come.
+    const kept = this.#port.takeKept(() => this.#deliverStartup());
+    for (const evt of kept) if (isSuperseded(evt)) this.#markSuperseded(evt);
+    this.#port.on((evt) => this.#arrive(evt));
     this.#port.onLost((error) => this.#lose(error));
-    // The chain ran before anyone could subscribe: deliver its steps on the
-    // next macrotask, after the awaiting caller has had its turn. Every
-    // step is delivered even if a listener throws; the first error surfaces
-    // afterwards.
-    if (fallbacks.length > 0) {
-      setTimeout(() => {
+    // What happened before anyone could subscribe is delivered once, after
+    // the awaiting caller has had its turn: on the next macrotask (the
+    // timer), or when the port's next response or event arrives, before it
+    // is handled, if that comes first. So the port's order holds against
+    // every later message. The chain's steps come first, every one even if
+    // a listener throws, and their first error is reported; then the kept
+    // events in port order, each reporting its own first error (§2.7).
+    // No later step or event is delivered once the client has ended (§2.7;
+    // the listeners of the one being emitted all run): the worker was lost or
+    // the client disposed first, or a listener of an earlier step disposed it.
+    if (fallbacks.length > 0 || kept.length > 0) {
+      this.#startup = () => {
         let failure: { error: unknown } | undefined;
         for (const step of fallbacks) {
+          if (this.#ended !== undefined) break;
           try {
             this.#events.emit("modeFallback", step);
           } catch (error) {
             failure ??= { error };
           }
         }
-        // Nobody awaits this macrotask: hand the error to the page's
+        // Nobody awaits this delivery: hand the error to the page's
         // reporter (window.reportError) rather than throwing into the void.
         if (failure !== undefined) report(failure.error);
-      }, 0);
+        for (const evt of kept) {
+          if (this.#ended !== undefined) return;
+          try {
+            this.#dispatch(evt);
+          } catch (error) {
+            report(error);
+          }
+        }
+      };
+      setTimeout(() => this.#deliverStartup(), 0);
     }
     // A tab that closes or navigates away tells the worker (browsers fire
     // no port-close event a SharedWorker could rely on); best effort. A page
@@ -244,6 +312,51 @@ class Client implements TscacheClient {
         page.removeEventListener?.("pagehide", this.#onPageHide);
       page.addEventListener("pagehide", this.#onPageHide);
     }
+  }
+
+  get superseded(): ClientEvents["superseded"] | undefined {
+    return this.#superseded;
+  }
+
+  /** Runs the startup delivery the first time only. */
+  #deliverStartup(): void {
+    const startup = this.#startup;
+    this.#startup = undefined;
+    startup?.();
+  }
+
+  /**
+   * An event from the port, delivered now: the port has run the startup
+   * delivery before it (`takeKept`). A superseded event sets the property.
+   */
+  #arrive(evt: Evt): void {
+    if (isSuperseded(evt)) this.#markSuperseded(evt);
+    this.#dispatch(evt);
+  }
+
+  /**
+   * Calls the listeners of one event. The superseded listeners are called
+   * once, for the first event, with the property already set (N132).
+   */
+  #dispatch(evt: Evt): void {
+    this.#warnFetched(evt);
+    if (!isSuperseded(evt)) {
+      this.#events.receive(evt);
+      return;
+    }
+    const superseded = this.#superseded;
+    if (this.#supersededHeard || superseded === undefined) return;
+    this.#supersededHeard = true;
+    this.#events.emit("superseded", superseded);
+  }
+
+  /** The worker is superseded (N132): only the first event sets the property. */
+  #markSuperseded(evt: Evt): void {
+    if (this.#superseded !== undefined) return;
+    const payload = evt.payload as Partial<ClientEvents["superseded"]> | null;
+    const lib = typeof payload?.lib === "string" ? payload.lib : "";
+    this.#superseded = { lib };
+    noteSuperseded(lib, this.#port.lib);
   }
 
   readonly #onPageHide = (event: PageHide) => {
@@ -391,11 +504,32 @@ async function applyBudget(port: PortClient, bytes: number): Promise<void> {
 }
 
 /**
+ * Without a budget, waits for one answer from a worker that can report
+ * being superseded (N132, DC4 option (a)): an already superseded worker
+ * posts the event right after `init-ok`, and the port keeps order, so every
+ * event sent before the answer has been kept once it arrives. The request
+ * is `unsubscribe { all: true }`, a no-op of constant cost on a fresh
+ * connection, which holds no subscription (gate round 6 of step 135: the
+ * earlier `memoryStats` walked every cache). Such a worker always answers
+ * it, so a rejection means the port went: it fails `createClient` as a
+ * failed budget op does.
+ */
+async function awaitSuperseded(port: PortClient): Promise<void> {
+  if (port.features.has("superseded")) {
+    await port.request("unsubscribe", { all: true });
+  }
+}
+
+/**
  * §2.1. Resolves once a hosting completed the handshake and, with a
- * `memoryBudget`, once the worker answered it (§2.9). The budget goes out
- * on the port before the client exists: the client queues the fallback
- * steps on a timer when it is built, which must run after the caller holds
- * it. A failed budget op releases the port and the hosting, and rethrows.
+ * `memoryBudget`, once the worker answered it (§2.9); without one, once a
+ * worker with the `superseded` feature answered one request. Both go out
+ * on the port before the client exists: the client delivers the fallback
+ * steps once it is built, after the caller holds it. Every event that
+ * arrives meanwhile is kept by the port client and delivered with them, in
+ * port order, before anything the port receives later (N132; gate rounds 6
+ * and 7 of step 135). A failed budget op or answer releases the port and
+ * the hosting, and rethrows.
  */
 export async function createClient(
   options: ClientOptions = {},
@@ -403,14 +537,13 @@ export async function createClient(
   const r = resolve(options);
   const fallbacks: ClientEvents["modeFallback"][] = [];
   const hosting = await connect(r, fallbacks);
-  if (r.memoryBudget !== undefined) {
-    try {
-      await applyBudget(hosting.client, r.memoryBudget);
-    } catch (error) {
-      hosting.client.dispose();
-      hosting.terminate();
-      throw error;
-    }
+  try {
+    if (r.memoryBudget === undefined) await awaitSuperseded(hosting.client);
+    else await applyBudget(hosting.client, r.memoryBudget);
+  } catch (error) {
+    hosting.client.dispose();
+    hosting.terminate();
+    throw error;
   }
   return new Client(hosting, fallbacks);
 }
