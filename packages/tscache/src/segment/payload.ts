@@ -4,9 +4,13 @@
  * field is checked against the cache's own config before any byte is used.
  */
 
-import { show, TscacheError } from "../errors";
+import { TscacheError } from "../errors";
 import { inDomain, sameCalendar, slotOf } from "../grid";
-import type { FieldArray, ResolvedCalendarInterval } from "../types";
+import type {
+  CalendarSegmentPayload,
+  FieldArray,
+  ResolvedCalendarInterval,
+} from "../types";
 import { DenseSegment } from "./dense";
 import { FIELD_ARRAYS } from "./dtype";
 import { setOwn } from "./own";
@@ -16,6 +20,31 @@ import type {
   Segment,
   SegmentOptions,
 } from "./types";
+
+/**
+ * The kind of a value a payload, snapshot or record supplied, for an error
+ * message: its type only, never its text or digits (user decision #142 A).
+ * A number is named finite or not but never printed: an identifier or a
+ * timestamp in its place would be data an app that logs the message logs.
+ */
+export function kindOf(value: unknown): string {
+  if (value === null || value === undefined) return String(value);
+  switch (typeof value) {
+    case "number":
+      return Number.isFinite(value) ? "a finite number" : "a non-finite number";
+    case "string":
+      return value.length === 0 ? "an empty string" : "a string";
+    case "object":
+      // Array.isArray throws on a revoked proxy; a diagnostic must not.
+      try {
+        return Array.isArray(value) ? "an array" : "an object";
+      } catch {
+        return "an object";
+      }
+    default:
+      return `a ${typeof value}`;
+  }
+}
 
 function fail(message: string): never {
   throw new TscacheError(`invalid segment payload: ${message}`);
@@ -55,7 +84,9 @@ export function gridMismatch(
 ): string | undefined {
   const { format } = stored;
   const calendar = typeof own.interval !== "number";
-  if (format !== 1 && format !== 2) return `unsupported format ${show(format)}`;
+  if (format !== 1 && format !== 2) {
+    return `format must be 1 or 2, got ${kindOf(format)}`;
+  }
   if (format !== (calendar ? 2 : 1)) {
     return `format ${format} names another kind of grid than the cache's`;
   }
@@ -64,50 +95,69 @@ export function gridMismatch(
       ? undefined
       : "grid differs from the cache grid";
   }
-  if (stored.interval !== own.interval) {
-    return `interval ${show(stored.interval)} differs from the cache grid`;
+  for (const field of ["interval", "alignmentOffset"] as const) {
+    const got = stored[field];
+    if (got !== own[field]) {
+      return `${field} must be the cache grid's ${own[field]}, got ${kindOf(got)}`;
+    }
   }
-  return stored.alignmentOffset === own.alignmentOffset
-    ? undefined
-    : `alignmentOffset ${show(stored.alignmentOffset)} differs from the cache grid`;
+  return undefined;
 }
 
 /** The payload must describe the cache's own grid, in the grid's format. */
 function checkGrid(p: DenseSegmentPayload, options: SegmentOptions): void {
   const mismatch = gridMismatch(p, options.grid);
   if (mismatch !== undefined) fail(mismatch);
-  if (p.layout !== "dense") fail(`unsupported layout ${show(p.layout)}`);
+  const { layout } = p;
+  if (layout !== "dense") {
+    fail(`layout must be "dense", got ${kindOf(layout)}`);
+  }
 }
 
 /**
- * Checks start and count; returns the slot of the payload's first entry.
- * `start` is converted once: an anchor costs one conversion (N113).
+ * Checks start and count; returns the slot of the payload's first entry and
+ * the count. Each is read and converted once, and every later check uses
+ * the returned values: an anchor costs one conversion (N113), and the
+ * messages print the values that were checked. Each payload field is read
+ * once; a buffer an accessor detaches or resizes after its check is not
+ * re-checked (an in-process caller only; structured clone carries no
+ * accessors).
  */
-function checkSpan(p: DenseSegmentPayload, options: SegmentOptions): number {
+function checkSpan(
+  p: DenseSegmentPayload,
+  options: SegmentOptions,
+): [first: number, count: number] {
   const { grid, slotCap } = options;
+  let start: number | undefined;
   let first: number;
   try {
-    first = slotOf(p.start, grid);
+    start = p.start;
+    first = slotOf(start, grid);
   } catch {
     return fail(
-      `start ${show(p.start)} is not an aligned safe-integer timestamp`,
+      `start must be an aligned safe-integer timestamp, got ${kindOf(start)}`,
     );
   }
-  if (!Number.isSafeInteger(p.count) || p.count < 1) {
-    fail(`count must be a positive integer, got ${show(p.count)}`);
+  const { count } = p;
+  if (!Number.isSafeInteger(count) || count < 1) {
+    fail(`count must be a positive integer, got ${kindOf(count)}`);
   }
-  if (p.count > slotCap) {
-    fail(`count ${p.count} exceeds the slot cap ${slotCap}`);
+  if (count > slotCap) {
+    fail(`count exceeds the slot cap ${slotCap}`);
   }
-  // A format 2 payload also says which slot its writer gave `start`: zone
-  // data that places the instant in another slot refuses it (§4.5).
-  if (p.format === 2 && p.startSlot !== first) {
-    fail(
-      `startSlot ${show(p.startSlot)} is not the slot of start ${p.start} here`,
-    );
+  // A calendar payload, format 2 as checkGrid found, also says which slot
+  // its writer gave `start`: zone data that places the instant in another
+  // slot refuses it (§4.5).
+  if (grid.calendar !== undefined) {
+    const { startSlot } = p as CalendarSegmentPayload;
+    if (startSlot !== first) {
+      fail(
+        `startSlot must be the slot of start ${start} here, got ${kindOf(startSlot)}`,
+      );
+    }
   }
   // (count - 1) first: `first + count` can round before the subtraction.
-  const last = first + (p.count - 1);
+  const last = first + (count - 1);
   if (!inDomain(last, grid)) {
     fail(
       grid.calendar === undefined
@@ -115,32 +165,39 @@ function checkSpan(p: DenseSegmentPayload, options: SegmentOptions): number {
         : "count extends beyond the calendar's domain",
     );
   }
-  return first;
+  return [first, count];
 }
 
-function checkMask(p: DenseSegmentPayload): void {
-  const bytes = Math.ceil(p.count / 8);
-  if (!(p.mask instanceof Uint8Array) || p.mask.length !== bytes) {
+/** Checks the mask for `count` slots; returns it, read once. */
+function checkMask(p: DenseSegmentPayload, count: number): Uint8Array {
+  const { mask } = p;
+  const bytes = Math.ceil(count / 8);
+  if (!(mask instanceof Uint8Array) || mask.length !== bytes) {
     fail(`mask must be a Uint8Array of ${bytes} bytes`);
   }
-  const used = p.count % 8;
-  if (used !== 0 && (p.mask[bytes - 1] as number) >> used !== 0) {
+  const used = count % 8;
+  if (used !== 0 && (mask[bytes - 1] as number) >> used !== 0) {
     fail("mask has trailing bits set beyond count");
   }
+  return mask;
 }
 
 type FieldEntry = DenseSegmentPayload["fields"][number];
 
-/** Payload field entries by name; rejects a malformed or duplicated list. */
+/**
+ * Payload field entries by name; rejects a malformed or duplicated list.
+ * The list is read once; each entry is checked and kept as read.
+ */
 function entriesByName(
   p: DenseSegmentPayload,
   expected: number,
 ): Map<string, FieldEntry> {
-  if (!Array.isArray(p.fields) || p.fields.length !== expected) {
+  const { fields } = p;
+  if (!Array.isArray(fields) || fields.length !== expected) {
     fail("fields do not match the schema");
   }
   const byName = new Map<string, FieldEntry>();
-  for (const entry of p.fields) {
+  for (const entry of fields) {
     if (typeof entry !== "object" || entry === null) {
       fail("fields do not match the schema");
     }
@@ -152,11 +209,13 @@ function entriesByName(
 }
 
 /**
- * Field data by name, checked against the schema. Entries may come in any
- * order: a schema declared in a different key order names the same fields.
+ * Field data by name, checked against the schema for `count` slots. Entries
+ * may come in any order: a schema declared in a different key order names
+ * the same fields.
  */
 function checkFields(
   p: DenseSegmentPayload,
+  count: number,
   options: SegmentOptions,
 ): Map<string, ArrayBuffer> {
   const schema = Object.entries(options.fields);
@@ -165,33 +224,33 @@ function checkFields(
   for (const [name, dtype] of schema) {
     const entry = entries.get(name);
     if (entry === undefined) fail(`field "${name}" is missing`);
-    if (entry.dtype !== dtype) {
+    const got: unknown = entry.dtype;
+    if (got !== dtype) {
       fail(
-        `field "${name}" has dtype ${show(entry.dtype)}, the schema says ${dtype}`,
+        `field "${name}" dtype must be ${dtype} as the schema says, got ${kindOf(got)}`,
       );
     }
-    const bytes = p.count * FIELD_ARRAYS[dtype].BYTES_PER_ELEMENT;
-    if (
-      !(entry.data instanceof ArrayBuffer) ||
-      entry.data.byteLength !== bytes
-    ) {
+    const bytes = count * FIELD_ARRAYS[dtype].BYTES_PER_ELEMENT;
+    const buffer: unknown = entry.data;
+    if (!(buffer instanceof ArrayBuffer) || buffer.byteLength !== bytes) {
       fail(`field "${name}" data must be an ArrayBuffer of ${bytes} bytes`);
     }
-    data.set(name, entry.data);
+    data.set(name, buffer);
   }
   return data;
 }
 
 /** The payload's present points; absent slots' values are ignored. */
 function presentPoints(
-  p: DenseSegmentPayload,
+  mask: Uint8Array,
   first: number,
+  count: number,
   data: Map<string, ArrayBuffer>,
   options: SegmentOptions,
 ): Columns {
   const indices: number[] = [];
-  for (let i = 0; i < p.count; i++) {
-    if ((((p.mask[i >> 3] as number) >> (i & 7)) & 1) === 1) indices.push(i);
+  for (let i = 0; i < count; i++) {
+    if ((((mask[i >> 3] as number) >> (i & 7)) & 1) === 1) indices.push(i);
   }
   const fields: Record<string, FieldArray> = {};
   for (const [name, dtype] of Object.entries(options.fields)) {
@@ -225,10 +284,10 @@ export function segmentFromPayload(
     fail("payload must be an object");
   }
   checkGrid(payload, options);
-  const first = checkSpan(payload, options);
-  checkMask(payload);
-  const data = checkFields(payload, options);
+  const [first, count] = checkSpan(payload, options);
+  const mask = checkMask(payload, count);
+  const data = checkFields(payload, count, options);
   const segment = new DenseSegment(options);
-  segment.mergeFrom(presentPoints(payload, first, data, options));
+  segment.mergeFrom(presentPoints(mask, first, count, data, options));
   return segment;
 }
